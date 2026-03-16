@@ -68,6 +68,12 @@ export type TechnicalJobEntry = {
   // index signature for round fields
 };
 
+const ROUND_DATE_KEYS: (keyof TechnicalJobEntry)[] = [
+  "first_round_date",
+  "second_round_date",
+  "third_round_date",
+];
+
 export function TechnicalJobTable() {
   const [jobs, setJobs] = useState<TechnicalJobEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -344,11 +350,7 @@ export function TechnicalJobTable() {
                     <input
                       type="date"
                       value={
-                        job[
-                          `${
-                            ["first", "second", "third"][round - 1]
-                          }_round_date`
-                        ] || ""
+                        (job[ROUND_DATE_KEYS[round - 1]] as string | undefined) ?? ""
                       }
                       onChange={(e) =>
                         updateRound(
