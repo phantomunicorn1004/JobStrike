@@ -78,7 +78,7 @@ Return a JSON object with:
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto py-8 px-4">
+    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto py-8 px-4">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Resume Tailor Settings</h1>
         <Button variant="ghost" size="icon" onClick={onClose}>

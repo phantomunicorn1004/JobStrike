@@ -25,7 +25,7 @@ export default function JobsLayout({
 
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen">
+      <div className="flex min-h-screen w-full min-w-0">
         <Sidebar className="w-[220px]">
           <div
             className="flex items-center justify-between bg-background px-3 shadow-lg"
@@ -78,7 +78,7 @@ export default function JobsLayout({
           </SidebarFooter>
         </Sidebar>
 
-        <main className="flex-1 bg-background p-4">{children}</main>
+        <main className="min-w-0 flex-1 bg-background p-4">{children}</main>
       </div>
     </SidebarProvider>
   );

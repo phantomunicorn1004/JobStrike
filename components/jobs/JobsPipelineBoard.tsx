@@ -416,7 +416,7 @@ export function JobsPipelineBoard() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col gap-4">
+    <div className="flex min-h-0 w-full flex-1 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Job Pipeline</h1>
         <Dialog open={manageStagesOpen} onOpenChange={setManageStagesOpen}>
@@ -505,8 +505,8 @@ export function JobsPipelineBoard() {
       </div>
 
       <div
-        className="grid flex-1 gap-4"
-        style={{ gridTemplateColumns: `repeat(${displayStages.length}, minmax(240px, 1fr))` }}
+        className="grid min-h-0 w-full flex-1 gap-4"
+        style={{ gridTemplateColumns: `repeat(${displayStages.length}, minmax(0, 1fr))` }}
       >
         {displayStages.map((stage) => {
           const stageId = stage.id;

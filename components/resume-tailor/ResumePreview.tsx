@@ -22,7 +22,7 @@ export function ResumePreview({
   isGenerating = false,
 }: ResumePreviewProps) {
   return (
-    <div className="w-full max-w-4xl mx-auto py-8 px-4 space-y-6">
+    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto py-8 px-4 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Final Resume Preview</h1>
