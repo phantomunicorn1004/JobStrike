@@ -116,13 +116,21 @@ export function structureToContent(structure: ResumeStructure): {
   education?: string[];
   certifications?: string[];
 } {
-  const result = {
+  const result: {
+    profileTitle: string;
+    contactInfo?: string;
+    professionalSummary?: string;
+    experience: Array<{ jobTitle: string; company: string; bullets: string[] }>;
+    skills: string[];
+    education: string[];
+    certifications: string[];
+  } = {
     profileTitle: structure.header.title || "",
     contactInfo: structure.header.contactInfo?.join("\n"),
-    experience: [] as Array<{ jobTitle: string; company: string; bullets: string[] }>,
-    skills: [] as string[],
-    education: [] as string[],
-    certifications: [] as string[],
+    experience: [],
+    skills: [],
+    education: [],
+    certifications: [],
   };
 
   // Process sections

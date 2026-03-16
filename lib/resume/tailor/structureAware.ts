@@ -12,10 +12,15 @@ export function mapTailoredToStructure(
   originalContent: ResumeContent
 ): ResumeContent {
   // Use tailored content, but preserve structure order
+  const experienceFromTailored = tailoredResponse.tailored_experience?.map((e) => ({
+    jobTitle: e.job_title,
+    company: e.company,
+    bullets: e.bullets,
+  }));
   const tailoredContent: ResumeContent = {
     profileTitle: tailoredResponse.profile_title || originalContent.profileTitle,
-    professionalSummary: tailoredResponse.professional_summary || originalContent.professionalSummary,
-    experience: tailoredResponse.tailored_experience || originalContent.experience,
+    professionalSummary: tailoredResponse.professional_summary ?? originalContent.professionalSummary ?? "",
+    experience: experienceFromTailored ?? originalContent.experience,
     contactInfo: originalContent.contactInfo,
     skills: originalContent.skills,
     education: originalContent.education,
