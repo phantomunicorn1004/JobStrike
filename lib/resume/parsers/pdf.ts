@@ -23,7 +23,7 @@ export async function parsePDF(buffer: ArrayBuffer | Buffer): Promise<PDFParseRe
     // pdf-parse requires a Buffer
     const nodeBuffer = buffer instanceof Buffer 
       ? buffer 
-      : Buffer.from(buffer);
+      : Buffer.from(new Uint8Array(buffer));
     
     if (nodeBuffer.length === 0) {
       throw new Error("Buffer conversion resulted in empty buffer");

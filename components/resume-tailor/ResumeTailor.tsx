@@ -70,11 +70,6 @@ type TailorData = {
       mimeType: string;
     };
   };
-  uploadedToDrive: boolean;
-  googleDriveMetadata?: {
-    fileId: string;
-    fileUrl: string;
-  };
 };
 
 type ProgressStage = "analyzing" | "tailoring" | "ats-checking" | "generating";
@@ -98,7 +93,6 @@ export function ResumeTailor() {
     matchedKeywords: [],
     missingKeywords: [],
     recommendations: [],
-    uploadedToDrive: false,
   });
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);

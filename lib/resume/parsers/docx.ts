@@ -22,7 +22,7 @@ export async function parseDOCX(buffer: ArrayBuffer | Buffer): Promise<DOCXParse
     // Mammoth requires Buffer for Node.js server-side parsing
     const nodeBuffer = buffer instanceof Buffer 
       ? buffer 
-      : Buffer.from(buffer);
+      : Buffer.from(new Uint8Array(buffer));
     
     if (nodeBuffer.length === 0) {
       throw new Error("Buffer conversion resulted in empty buffer");

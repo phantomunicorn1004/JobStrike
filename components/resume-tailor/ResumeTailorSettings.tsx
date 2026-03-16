@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { X, Upload, Trash2, FileText } from "lucide-react";
 import { toast } from "sonner";
@@ -17,7 +16,6 @@ type ResumeTailorSettingsProps = {
 
 export function ResumeTailorSettings({ onClose, onSave }: ResumeTailorSettingsProps) {
   const [prompt, setPrompt] = useState("");
-  const [googleDriveEnabled, setGoogleDriveEnabled] = useState(false);
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; file: File | null }>>([]);
 
   useEffect(() => {
@@ -50,37 +48,11 @@ Return a JSON object with:
 - ats_keywords: Object with technical_skills, tools_and_technologies, job_responsibilities, industry_terms arrays`);
     }
 
-    const savedGoogleDrive = localStorage.getItem("googleDriveEnabled");
-    setGoogleDriveEnabled(savedGoogleDrive === "true");
   }, []);
 
   const handleSavePrompt = () => {
     localStorage.setItem("resumeTailorPrompt", prompt);
     toast.success("Prompt saved");
-  };
-
-  const handleToggleGoogleDrive = async (enabled: boolean) => {
-    setGoogleDriveEnabled(enabled);
-    localStorage.setItem("googleDriveEnabled", enabled.toString());
-
-    if (enabled) {
-      try {
-        const response = await fetch("/api/google-drive/check-auth");
-        const data = await response.json();
-
-        if (!data.authenticated) {
-          const authResponse = await fetch("/api/google-drive/auth");
-          const authData = await authResponse.json();
-          window.location.href = authData.url;
-          return;
-        }
-
-        toast.success("Google Drive connected");
-      } catch (error) {
-        console.error("Error checking Google Drive auth:", error);
-        toast.error("Failed to connect Google Drive");
-      }
-    }
   };
 
   const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -188,30 +160,6 @@ Return a JSON object with:
                 ))}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Google Drive Integration</CardTitle>
-            <p className="text-sm text-muted-foreground mt-2">
-              Enable automatic upload of tailored resumes to Google Drive
-            </p>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div>
-                <Label htmlFor="google-drive-toggle">Enable Google Drive Upload</Label>
-                <p className="text-sm text-muted-foreground mt-1">
-                  When enabled, tailored resumes will be automatically uploaded to Google Drive
-                </p>
-              </div>
-              <Switch
-                id="google-drive-toggle"
-                checked={googleDriveEnabled}
-                onCheckedChange={handleToggleGoogleDrive}
-              />
-            </div>
           </CardContent>
         </Card>
 

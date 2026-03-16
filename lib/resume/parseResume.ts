@@ -38,15 +38,20 @@ export function detectFileType(
   return null;
 }
 
+/** File-like value accepted by validateFile and parseResume */
+export type FileLike =
+  | File
+  | { name: string; size?: number; type?: string; arrayBuffer?: () => Promise<ArrayBuffer> };
+
 /**
  * Validate file before parsing
  */
 export function validateFile(
-  file: File | { name: string; size: number; type?: string },
+  file: FileLike,
   options: ResumeParseOptions = {}
 ): { valid: boolean; error?: string } {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const fileType = detectFileType(file.name, file.type);
+  const fileType = detectFileType(file.name, "type" in file ? file.type : undefined);
 
   if (!fileType) {
     return {
@@ -62,7 +67,8 @@ export function validateFile(
     };
   }
 
-  if (file.size > opts.maxFileSize) {
+  const size = "size" in file ? file.size : undefined;
+  if (size != null && size > opts.maxFileSize) {
     const maxSizeMB = (opts.maxFileSize / (1024 * 1024)).toFixed(1);
     return {
       valid: false,
@@ -70,7 +76,7 @@ export function validateFile(
     };
   }
 
-  if (file.size === 0) {
+  if (size != null && size === 0) {
     return {
       valid: false,
       error: "File is empty.",
@@ -90,7 +96,7 @@ export async function parseResume(
 ): Promise<{ text: string; fileType: SupportedFileType }> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
 
-  const validation = validateFile(file, opts);
+  const validation = validateFile(file as FileLike, opts);
   if (!validation.valid) {
     throw new Error(validation.error || "File validation failed");
   }
