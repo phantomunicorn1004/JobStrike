@@ -1,6 +1,6 @@
 "use client";
 
-import type React from "react";
+/// <reference types="react" />
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import {
@@ -305,7 +305,7 @@ export function TechnicalJobTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {jobs.map((job) => (
+            {jobs.map((job: TechnicalJobEntry) => (
               <TableRow key={job.id}>
                 <TableCell className="text-center align-middle">
                   {job.id}
@@ -339,16 +339,15 @@ export function TechnicalJobTable() {
                 <TableCell className="text-center align-middle">
                   {job.recruiter_contact}
                 </TableCell>
-                {[1, 2, 3].map((round) => (
+                {([1, 2, 3] as const).map((round) => {
+                  const dateKeys = ["first_round_date", "second_round_date", "third_round_date"] as const;
+                  const dateKey = dateKeys[round - 1];
+                  return (
                   <TableCell key={round}>
                     <input
                       type="date"
                       value={
-                        job[
-                          `${
-                            ["first", "second", "third"][round - 1]
-                          }_round_date`
-                        ] || ""
+                        (job[dateKey] as string | undefined) ?? ""
                       }
                       onChange={(e) =>
                         updateRound(
@@ -361,7 +360,8 @@ export function TechnicalJobTable() {
                       style={{ width: "110px" }}
                     />
                   </TableCell>
-                ))}
+                  );
+                })}
                 <TableCell />
                 <TableCell className="text-center align-middle">
                   <StatusIcon result={job.status || undefined} />
