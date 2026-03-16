@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, Workflow, CheckCircle, FileEdit } from "lucide-react";
+import { ClipboardList, FileEdit } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -43,38 +43,12 @@ export default function JobsLayout({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  isActive={pathname.startsWith("/jobs-applied")}
+                  isActive={pathname === "/jobs"}
                   className="rounded-lg text-lg font-medium py-3 px-4 text-foreground hover:bg-muted transition-colors flex items-center gap-3"
                 >
-                  <Link href="/jobs-applied">
+                  <Link href="/jobs">
                     <ClipboardList className="h-5 w-5" />
-                    <span>Applied Jobs</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <Separator className="my-2" />
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/jobs-technical")}
-                  className="rounded-lg text-lg font-medium py-3 px-4 text-foreground hover:bg-muted transition-colors flex items-center gap-3"
-                >
-                  <Link href="/jobs-technical">
-                    <Workflow className="h-5 w-5" />
-                    <span>Technical Stage</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <Separator className="my-2" />
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/jobs-final")}
-                  className="rounded-lg text-lg font-medium py-3 px-4 text-foreground hover:bg-muted transition-colors flex items-center gap-3"
-                >
-                  <Link href="/jobs-final">
-                    <CheckCircle className="h-5 w-5" />
-                    <span>Final Stage</span>
+                    <span>Job Pipeline</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
