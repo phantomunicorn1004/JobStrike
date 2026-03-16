@@ -14,46 +14,112 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { JobPipelineCard, type PipelineStage, type AppliedJob, type TechnicalJob, type PipelineCardJob } from "./JobPipelineCard";
+import {
+  JobPipelineCard,
+  type PipelineStageId,
+  type AppliedJob,
+  type TechnicalJob,
+  type PipelineCardJob,
+} from "./JobPipelineCard";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { ClipboardList, Workflow, CheckCircle, Loader2, Plus } from "lucide-react";
+import {
+  ClipboardList,
+  Workflow,
+  CheckCircle,
+  Loader2,
+  Plus,
+  Settings2,
+  Trash2,
+  Pencil,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const STAGES: { id: PipelineStage; label: string; icon: React.ReactNode }[] = [
-  { id: "applied", label: "Applied", icon: <ClipboardList className="h-5 w-5" /> },
-  { id: "technical", label: "Technical", icon: <Workflow className="h-5 w-5" /> },
-  { id: "final", label: "Final", icon: <CheckCircle className="h-5 w-5" /> },
+export type StageConfig = { id: string; name: string; sort_order: number };
+
+const DEFAULT_STAGES: StageConfig[] = [
+  { id: "applied", name: "Applied", sort_order: 0 },
+  { id: "technical", name: "Technical", sort_order: 1 },
+  { id: "final", name: "Final", sort_order: 2 },
 ];
 
-type DragPayload = { source: "jobs" | "technical_jobs"; id: number; stage: PipelineStage };
+type DragPayload = {
+  source: "jobs" | "technical_jobs";
+  id: number;
+  stageId: string;
+  stage_id?: string | null;
+};
+
+function slug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+}
+
+type ProfileOption = { id: number; full_name: string };
 
 export function JobsPipelineBoard() {
+  const [stages, setStages] = useState<StageConfig[]>([]);
   const [applied, setApplied] = useState<AppliedJob[]>([]);
-  const [technical, setTechnical] = useState<TechnicalJob[]>([]);
-  const [final, setFinal] = useState<TechnicalJob[]>([]);
+  const [jobsByStage, setJobsByStage] = useState<Record<string, TechnicalJob[]>>({});
+  const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [movingId, setMovingId] = useState<{ source: string; id: number } | null>(null);
-  const [dragOverColumn, setDragOverColumn] = useState<PipelineStage | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [addJobOpen, setAddJobOpen] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
   const [newJob, setNewJob] = useState({
-    name: "",
     title: "",
     company_name: "",
+    job_description: "",
     job_link: "",
-    resume_link: "",
     note: "",
   });
   const [isAdding, setIsAdding] = useState(false);
+  const [manageStagesOpen, setManageStagesOpen] = useState(false);
+  const [newStageName, setNewStageName] = useState("");
+  const [editingStageId, setEditingStageId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
   const supabase = getSupabaseBrowserClient();
+
+  const fetchStages = useCallback(async (): Promise<StageConfig[]> => {
+    const { data, error } = await supabase
+      .from("pipeline_stages")
+      .select("id, name, sort_order")
+      .order("sort_order", { ascending: true });
+    if (error) {
+      console.error("Fetch stages error:", error);
+      setStages(DEFAULT_STAGES);
+      return DEFAULT_STAGES;
+    }
+    if (!data || data.length === 0) {
+      await supabase.from("pipeline_stages").insert(DEFAULT_STAGES);
+      setStages(DEFAULT_STAGES);
+      return DEFAULT_STAGES;
+    }
+    const list = data as StageConfig[];
+    setStages(list);
+    return list;
+  }, [supabase]);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [jobsRes, techRes] = await Promise.all([
+      const stageList = await fetchStages();
+      const [jobsRes, techRes, profilesRes] = await Promise.all([
         supabase.from("jobs").select("*").order("id", { ascending: false }),
         supabase.from("technical_jobs").select("*").order("id", { ascending: false }),
+        supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true }),
       ]);
       if (jobsRes.error) throw jobsRes.error;
       if (techRes.error) throw techRes.error;
+      if (!profilesRes.error && profilesRes.data) {
+        setProfiles(
+          (profilesRes.data as { id: number; full_name: string }[]).map((p) => ({
+            id: p.id,
+            full_name: p.full_name,
+          })),
+        );
+      }
 
       const appliedRows: AppliedJob[] = (jobsRes.data || []).map((row: Record<string, unknown>) => ({
         id: row.id as number,
@@ -66,9 +132,11 @@ export function JobsPipelineBoard() {
         note: (row.note as string) ?? "",
         created_at: row.created_at as string,
       }));
+
       const techRows: TechnicalJob[] = (techRes.data || []).map((row: Record<string, unknown>) => ({
         id: row.id as number,
         source: "technical_jobs",
+        stage_id: (row.stage_id as string | null) ?? null,
         name: row.name as string,
         company_name: row.company_name as string,
         title: row.title as string,
@@ -86,34 +154,56 @@ export function JobsPipelineBoard() {
       }));
 
       setApplied(appliedRows);
-      setTechnical(techRows.filter((j) => j.status !== "success"));
-      setFinal(techRows.filter((j) => j.status === "success"));
+
+      const byStage: Record<string, TechnicalJob[]> = {};
+      const stageIds = new Set(stageList.map((s) => s.id).filter((id) => id !== "applied"));
+      stageIds.forEach((id) => {
+        byStage[id] = [];
+      });
+      techRows.forEach((j) => {
+        const sid = j.stage_id ?? (j.status === "success" ? "final" : "technical");
+        if (!byStage[sid]) byStage[sid] = [];
+        byStage[sid].push(j);
+      });
+      setJobsByStage(byStage);
     } catch (e) {
       console.error("Error fetching pipeline:", e);
     } finally {
       setIsLoading(false);
     }
-  }, [supabase]);
+  }, [supabase, fetchStages]);
 
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
 
+  const getJobsForStage = useCallback(
+    (stageId: string): PipelineCardJob[] => {
+      if (stageId === "applied") return applied;
+      return jobsByStage[stageId] ?? [];
+    },
+    [applied, jobsByStage]
+  );
+
   const handleAddJob = useCallback(async () => {
-    if (!newJob.name.trim() || !newJob.title.trim() || !newJob.company_name.trim() || !newJob.job_link.trim() || !newJob.resume_link.trim()) {
-      return;
-    }
+    const profile = profiles.find((p) => p.id === Number(selectedProfileId));
+    if (!profile) return;
+    if (!newJob.title.trim() || !newJob.company_name.trim()) return;
     setIsAdding(true);
     try {
+      const baseNote = newJob.job_description.trim();
+      const extraNote = newJob.note.trim();
+      const combinedNote =
+        baseNote && extraNote ? `${baseNote}\n\n${extraNote}` : baseNote || extraNote || "";
       const { data, error } = await supabase
         .from("jobs")
         .insert({
-          name: newJob.name.trim(),
+          name: profile.full_name,
           title: newJob.title.trim(),
           company_name: newJob.company_name.trim(),
-          job_link: newJob.job_link.trim(),
-          resume_link: newJob.resume_link.trim(),
-          note: newJob.note.trim() || "",
+          job_link: newJob.job_link.trim() || "",
+          resume_link: "",
+          note: combinedNote,
         })
         .select();
       if (error) throw error;
@@ -134,7 +224,8 @@ export function JobsPipelineBoard() {
           ...prev,
         ]);
       }
-      setNewJob({ name: "", title: "", company_name: "", job_link: "", resume_link: "", note: "" });
+      setNewJob({ title: "", company_name: "", job_description: "", job_link: "", note: "" });
+      setSelectedProfileId("");
       setAddJobOpen(false);
     } catch (e) {
       console.error("Add job failed:", e);
@@ -143,9 +234,15 @@ export function JobsPipelineBoard() {
     }
   }, [newJob, supabase]);
 
-  const moveToTechnical = useCallback(
-    async (payload: DragPayload) => {
-      if (payload.source === "jobs" && payload.stage === "applied") {
+  const moveCard = useCallback(
+    async (payload: DragPayload, targetStageId: string) => {
+      if (payload.stageId === targetStageId) return;
+
+      const isTargetApplied = targetStageId === "applied";
+      const isSourceApplied = payload.source === "jobs";
+
+      if (isSourceApplied && isTargetApplied) return;
+      if (isSourceApplied) {
         const job = applied.find((j) => j.id === payload.id);
         if (!job) return;
         setMovingId({ source: "jobs", id: job.id });
@@ -157,92 +254,89 @@ export function JobsPipelineBoard() {
               company_name: job.company_name,
               title: job.title,
               resume_link: job.resume_link,
-              status: "ongoing",
+              stage_id: targetStageId,
+              status: targetStageId === "final" ? "success" : "ongoing",
             })
             .select();
           if (error) throw error;
           await supabase.from("jobs").delete().eq("id", job.id);
-          const newRow = data?.[0];
-          if (newRow)
-            setTechnical((prev) => [
-              { ...newRow, source: "technical_jobs" as const } as TechnicalJob,
+          const newRow = data?.[0] as Record<string, unknown> | undefined;
+          if (newRow) {
+            setJobsByStage((prev) => ({
               ...prev,
-            ]);
+              [targetStageId]: [
+                { ...job, id: newRow.id as number, source: "technical_jobs", stage_id: targetStageId } as TechnicalJob,
+                ...(prev[targetStageId] ?? []),
+              ],
+            }));
+          }
           setApplied((prev) => prev.filter((j) => j.id !== job.id));
         } catch (e) {
-          console.error("Move to technical failed:", e);
+          console.error("Move failed:", e);
         } finally {
           setMovingId(null);
         }
+        return;
       }
-      if (payload.source === "technical_jobs" && payload.stage === "final") {
-        const job = final.find((j) => j.id === payload.id);
+
+      if (isTargetApplied) {
+        const allTech = Object.values(jobsByStage).flat();
+        const job = allTech.find((j) => j.id === payload.id);
         if (!job) return;
         setMovingId({ source: "technical_jobs", id: job.id });
         try {
-          await supabase.from("technical_jobs").update({ status: "ongoing" }).eq("id", job.id);
-          setFinal((prev) => prev.filter((j) => j.id !== job.id));
-          setTechnical((prev) => [job, ...prev]);
+          const { error } = await supabase.from("jobs").insert({
+            name: job.name,
+            title: job.title,
+            company_name: job.company_name,
+            job_link: "",
+            resume_link: job.resume_link,
+            note: "",
+          });
+          if (error) throw error;
+          await supabase.from("technical_jobs").delete().eq("id", job.id);
+          setJobsByStage((prev) => {
+            const next = { ...prev };
+            const sid = job.stage_id ?? "technical";
+            if (next[sid]) next[sid] = next[sid].filter((j) => j.id !== job.id);
+            return next;
+          });
+          await fetchAll();
         } catch (e) {
-          console.error("Move back to technical failed:", e);
+          console.error("Move to applied failed:", e);
         } finally {
           setMovingId(null);
         }
+        return;
       }
-    },
-    [applied, final, supabase]
-  );
 
-  const moveToFinal = useCallback(
-    async (payload: DragPayload) => {
-      if (payload.source !== "technical_jobs") return;
-      const job = technical.find((j) => j.id === payload.id);
+      const allTech = Object.values(jobsByStage).flat();
+      const job = allTech.find((j) => j.id === payload.id);
       if (!job) return;
       setMovingId({ source: "technical_jobs", id: job.id });
       try {
-        await supabase.from("technical_jobs").update({ status: "success" }).eq("id", job.id);
-        setTechnical((prev) => prev.filter((j) => j.id !== job.id));
-        setFinal((prev) => [{ ...job, status: "success" }, ...prev]);
-      } catch (e) {
-        console.error("Move to final failed:", e);
-      } finally {
-        setMovingId(null);
-      }
-    },
-    [technical, supabase]
-  );
-
-  const moveToApplied = useCallback(
-    async (payload: DragPayload) => {
-      if (payload.source !== "technical_jobs") return;
-      const job = technical.find((j) => j.id === payload.id) || final.find((j) => j.id === payload.id);
-      if (!job) return;
-      setMovingId({ source: "technical_jobs", id: job.id });
-      try {
-        const { error } = await supabase.from("jobs").insert({
-          name: job.name,
-          title: job.title,
-          company_name: job.company_name,
-          job_link: "",
-          resume_link: job.resume_link,
-          note: "",
+        await supabase
+          .from("technical_jobs")
+          .update({ stage_id: targetStageId, status: targetStageId === "final" ? "success" : "ongoing" })
+          .eq("id", job.id);
+        const fromStage = job.stage_id ?? "technical";
+        setJobsByStage((prev) => {
+          const next = { ...prev };
+          if (next[fromStage]) next[fromStage] = next[fromStage].filter((j) => j.id !== job.id);
+          next[targetStageId] = [{ ...job, stage_id: targetStageId }, ...(next[targetStageId] ?? [])];
+          return next;
         });
-        if (error) throw error;
-        await supabase.from("technical_jobs").delete().eq("id", job.id);
-        setTechnical((prev) => prev.filter((j) => j.id !== job.id));
-        setFinal((prev) => prev.filter((j) => j.id !== job.id));
-        await fetchAll();
       } catch (e) {
-        console.error("Move to applied failed:", e);
+        console.error("Move between stages failed:", e);
       } finally {
         setMovingId(null);
       }
     },
-    [technical, final, supabase, fetchAll]
+    [applied, jobsByStage, supabase, fetchAll]
   );
 
   const handleDrop = useCallback(
-    (e: React.DragEvent, targetStage: PipelineStage) => {
+    (e: React.DragEvent, targetStageId: string) => {
       e.preventDefault();
       setDragOverColumn(null);
       const raw = e.dataTransfer.getData("application/json");
@@ -253,24 +347,65 @@ export function JobsPipelineBoard() {
       } catch {
         return;
       }
-      if (payload.stage === targetStage) return;
-
-      if (targetStage === "applied") moveToApplied(payload);
-      else if (targetStage === "technical") moveToTechnical(payload);
-      else if (targetStage === "final") moveToFinal(payload);
+      moveCard(payload, targetStageId);
     },
-    [moveToApplied, moveToTechnical, moveToFinal]
+    [moveCard]
   );
 
-  const handleDragOver = useCallback((e: React.DragEvent, stage: PipelineStage) => {
+  const handleDragOver = useCallback((e: React.DragEvent, stageId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    setDragOverColumn(stage);
+    setDragOverColumn(stageId);
   }, []);
 
-  const handleDragLeave = useCallback(() => {
-    setDragOverColumn(null);
-  }, []);
+  const handleDragLeave = useCallback(() => setDragOverColumn(null), []);
+
+  const addStage = useCallback(async () => {
+    const name = newStageName.trim();
+    if (!name) return;
+    let id = slug(name) || `stage-${Date.now()}`;
+    const displayStages = stages.length ? stages : DEFAULT_STAGES;
+    const maxOrder = displayStages.length ? Math.max(...displayStages.map((s) => s.sort_order)) : 0;
+    let { error } = await supabase.from("pipeline_stages").insert({ id, name, sort_order: maxOrder + 1 });
+    if (error?.code === "23505") {
+      id = `${id}-${Date.now()}`;
+      const res = await supabase.from("pipeline_stages").insert({ id, name, sort_order: maxOrder + 1 });
+      error = res.error;
+    }
+    if (!error) {
+      setNewStageName("");
+      await fetchStages();
+      await fetchAll();
+    }
+  }, [newStageName, stages, supabase, fetchStages, fetchAll]);
+
+  const removeStage = useCallback(
+    async (stageId: string) => {
+      if (stageId === "applied") return;
+      const fallback = stages.find((s) => s.id !== "applied" && s.id !== stageId)?.id ?? "technical";
+      const jobsInStage = jobsByStage[stageId] ?? [];
+      for (const job of jobsInStage) {
+        await supabase.from("technical_jobs").update({ stage_id: fallback }).eq("id", job.id);
+      }
+      await supabase.from("pipeline_stages").delete().eq("id", stageId);
+      await fetchStages();
+      await fetchAll();
+    },
+    [stages, jobsByStage, supabase, fetchStages, fetchAll]
+  );
+
+  const renameStage = useCallback(
+    async (stageId: string, name: string) => {
+      if (!name.trim()) return;
+      await supabase.from("pipeline_stages").update({ name: name.trim() }).eq("id", stageId);
+      setEditingStageId(null);
+      setEditingName("");
+      await fetchStages();
+    },
+    [supabase, fetchStages]
+  );
+
+  const displayStages = stages.length ? stages : DEFAULT_STAGES;
 
   if (isLoading) {
     return (
@@ -282,13 +417,110 @@ export function JobsPipelineBoard() {
 
   return (
     <div className="flex h-full w-full flex-col gap-4">
-      <h1 className="text-2xl font-semibold">Job Pipeline</h1>
-      <div className="grid flex-1 grid-cols-1 gap-4 md:grid-cols-3">
-        {STAGES.map(({ id: stageId, label, icon }) => {
-          let jobs: PipelineCardJob[] = [];
-          if (stageId === "applied") jobs = applied;
-          if (stageId === "technical") jobs = technical;
-          if (stageId === "final") jobs = final;
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-semibold">Job Pipeline</h1>
+        <Dialog open={manageStagesOpen} onOpenChange={setManageStagesOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-2">
+              <Settings2 className="h-4 w-4" />
+              Manage stages
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Stages</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Add, remove, or rename stages. &quot;Applied&quot; is the default and cannot be removed.
+            </p>
+            <div className="space-y-2 py-2">
+              {displayStages.map((stage) => (
+                <div
+                  key={stage.id}
+                  className="flex items-center gap-2 rounded-lg border p-2"
+                >
+                  {editingStageId === stage.id ? (
+                    <>
+                      <Input
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") renameStage(stage.id, editingName);
+                          if (e.key === "Escape") setEditingStageId(null);
+                        }}
+                        className="flex-1"
+                        autoFocus
+                      />
+                      <Button size="sm" onClick={() => renameStage(stage.id, editingName)}>
+                        Save
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex-1 font-medium">{stage.name}</span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => {
+                          setEditingStageId(stage.id);
+                          setEditingName(stage.name);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      {stage.id !== "applied" && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-destructive"
+                          onClick={() => removeStage(stage.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                placeholder="New stage name"
+                value={newStageName}
+                onChange={(e) => setNewStageName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addStage()}
+              />
+              <Button onClick={addStage} disabled={!newStageName.trim()}>
+                Add stage
+              </Button>
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline">Done</Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <div
+        className="grid flex-1 gap-4"
+        style={{ gridTemplateColumns: `repeat(${displayStages.length}, minmax(240px, 1fr))` }}
+      >
+        {displayStages.map((stage) => {
+          const stageId = stage.id;
+          const jobs = getJobsForStage(stageId);
+          const icon =
+            stageId === "applied" ? (
+              <ClipboardList className="h-5 w-5" />
+            ) : stageId === "technical" ? (
+              <Workflow className="h-5 w-5" />
+            ) : stageId === "final" ? (
+              <CheckCircle className="h-5 w-5" />
+            ) : (
+              <ClipboardList className="h-5 w-5" />
+            );
 
           return (
             <div
@@ -304,7 +536,7 @@ export function JobsPipelineBoard() {
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 font-medium text-foreground">
                   {icon}
-                  <span>{label}</span>
+                  <span>{stage.name}</span>
                   <span className="rounded-full bg-muted px-2 py-0.5 text-sm text-muted-foreground">
                     {jobs.length}
                   </span>
@@ -322,11 +554,21 @@ export function JobsPipelineBoard() {
                         <DialogTitle>Add applied job</DialogTitle>
                       </DialogHeader>
                       <div className="grid gap-3 py-2">
-                        <Input
-                          placeholder="Name *"
-                          value={newJob.name}
-                          onChange={(e) => setNewJob((p) => ({ ...p, name: e.target.value }))}
-                        />
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium">Name *</label>
+                          <select
+                            className="w-full rounded-md border bg-background px-2 py-1 text-sm"
+                            value={selectedProfileId}
+                            onChange={(e) => setSelectedProfileId(e.target.value)}
+                          >
+                            <option value="">Select a profile</option>
+                            {profiles.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.full_name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         <Input
                           placeholder="Job title *"
                           value={newJob.title}
@@ -337,17 +579,18 @@ export function JobsPipelineBoard() {
                           value={newJob.company_name}
                           onChange={(e) => setNewJob((p) => ({ ...p, company_name: e.target.value }))}
                         />
+                        <Textarea
+                          placeholder="Job description"
+                          value={newJob.job_description}
+                          onChange={(e) => setNewJob((p) => ({ ...p, job_description: e.target.value }))}
+                          rows={3}
+                          className="resize-y"
+                        />
                         <Input
-                          placeholder="Job link *"
+                          placeholder="Job link (optional)"
                           type="url"
                           value={newJob.job_link}
                           onChange={(e) => setNewJob((p) => ({ ...p, job_link: e.target.value }))}
-                        />
-                        <Input
-                          placeholder="Resume link *"
-                          type="url"
-                          value={newJob.resume_link}
-                          onChange={(e) => setNewJob((p) => ({ ...p, resume_link: e.target.value }))}
                         />
                         <Textarea
                           placeholder="Note (optional)"
@@ -383,7 +626,7 @@ export function JobsPipelineBoard() {
                   <JobPipelineCard
                     key={`${job.source}-${job.id}`}
                     job={job}
-                    stage={stageId}
+                    stageId={stageId}
                     isDragging={movingId?.source === job.source && movingId?.id === job.id}
                   />
                 ))}

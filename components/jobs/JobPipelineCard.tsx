@@ -5,7 +5,8 @@ import { Card } from "@/components/ui/card";
 import { ExternalLink, Download, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type PipelineStage = "applied" | "technical" | "final";
+/** Stage id: "applied" is reserved for jobs table; others are technical_jobs.stage_id */
+export type PipelineStageId = string;
 
 /** Applied job from `jobs` table */
 export type AppliedJob = {
@@ -24,6 +25,7 @@ export type AppliedJob = {
 export type TechnicalJob = {
   id: number;
   source: "technical_jobs";
+  stage_id?: string | null;
   name: string;
   company_name: string;
   title: string;
@@ -56,11 +58,11 @@ const StatusDot = ({ result }: { result?: string | null }) => {
 
 type JobPipelineCardProps = {
   job: PipelineCardJob;
-  stage: PipelineStage;
+  stageId: PipelineStageId;
   isDragging?: boolean;
 };
 
-export function JobPipelineCard({ job, stage, isDragging }: JobPipelineCardProps) {
+export function JobPipelineCard({ job, stageId, isDragging }: JobPipelineCardProps) {
   const technical = isTechnicalJob(job) ? job : null;
 
   return (
@@ -73,7 +75,12 @@ export function JobPipelineCard({ job, stage, isDragging }: JobPipelineCardProps
       onDragStart={(e) => {
         e.dataTransfer.setData(
           "application/json",
-          JSON.stringify({ source: job.source, id: job.id, stage })
+          JSON.stringify({
+            source: job.source,
+            id: job.id,
+            stageId: stageId,
+            ...(job.source === "technical_jobs" && "stage_id" in job && { stage_id: (job as TechnicalJob).stage_id }),
+          })
         );
         e.dataTransfer.effectAllowed = "move";
       }}
