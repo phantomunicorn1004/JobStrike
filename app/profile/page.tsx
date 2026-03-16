@@ -407,15 +407,15 @@ export default function ProfilePage() {
                   </Button>
                 </div>
               )}
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+                onClick={() => setDeleteConfirmId(profile.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
               <AlertDialog open={deleteConfirmId === profile.id} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
-                  onClick={() => setDeleteConfirmId(profile.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Remove profile?</AlertDialogTitle>
