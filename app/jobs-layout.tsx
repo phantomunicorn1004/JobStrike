@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, FileEdit } from "lucide-react";
+import { ClipboardList, FileEdit, Database } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -62,6 +62,18 @@ export default function JobsLayout({
                   <Link href="/resume-tailor">
                     <FileEdit className="h-5 w-5" />
                     <span>Resume Tailor</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/resume-db")}
+                  className="rounded-lg text-lg font-medium py-3 px-4 text-foreground hover:bg-muted transition-colors flex items-center gap-3"
+                >
+                  <Link href="/resume-db">
+                    <Database className="h-5 w-5" />
+                    <span>Resume DB</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

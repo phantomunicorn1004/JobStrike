@@ -1,15 +1,27 @@
 export type TemplateId = "modern" | "classic" | "creative" | "minimal";
 
+/** FlowCV-style skill entry: category label + sub-skills + optional level */
+export type SkillEntry = {
+  label: string;
+  subSkills?: string[];
+  level?: string;
+};
+
 export type ResumeContent = {
   profileTitle: string;
   professionalSummary: string;
   experience: Array<{
     jobTitle: string;
     company: string;
+    location?: string;
+    startDate?: string;
+    endDate?: string;
     bullets: string[];
   }>;
   contactInfo?: string;
   skills?: string[];
+  /** Structured skills (FlowCV-style). When present, used by editor; flattened into skills for export. */
+  skillEntries?: SkillEntry[];
   education?: string[];
   certifications?: string[];
 };
