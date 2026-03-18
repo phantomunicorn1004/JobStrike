@@ -5,7 +5,8 @@ import { WorkflowCanvas } from "./WorkflowCanvas";
 import { SAMPLE_WORKFLOW } from "./sampleWorkflow";
 import { NodeSettingsPanel } from "./NodeSettingsPanel";
 import { WorkflowResultPanel } from "./WorkflowResultPanel";
-import { runResumeWorkflow } from "./execution";
+import { WorkflowSettingsDialog, getWorkflowOpenaiApiKey } from "./WorkflowSettingsDialog";
+import { runResumeWorkflow, type NodeExecutionStatus } from "./execution";
 import type { WorkflowState } from "./types";
 import type { WorkflowExecutionResult } from "./contracts";
 import { Button } from "@/components/ui/button";
@@ -20,22 +21,43 @@ export function ResumeTailorWorkflow() {
   const [showNodePanel, setShowNodePanel] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [executionResult, setExecutionResult] = useState<WorkflowExecutionResult | null>(null);
+  const [nodeStatus, setNodeStatus] = useState<Record<string, NodeExecutionStatus>>({});
+  const [nodeErrors, setNodeErrors] = useState<Record<string, string>>({});
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedNode = selectedNodeId
     ? workflow.nodes.find((n) => n.id === selectedNodeId)
     : null;
 
+  const hasResumeFromDb = workflow.nodes.some(
+    (n) => n.type === "resumeSelection" && n.data?.resumeId != null && !Number.isNaN(Number(n.data.resumeId))
+  );
+  const canRun = resumeFile || hasResumeFromDb;
+
   const handleRun = async () => {
-    if (!resumeFile) {
-      toast.error("Upload a resume file (PDF or DOCX) to run the workflow.");
+    if (!canRun) {
+      toast.error("Select a resume from ResumeDB in the Resume Selection node, or upload a file.");
       return;
     }
     setIsRunning(true);
     setExecutionResult(null);
+    const initialStatus: Record<string, NodeExecutionStatus> = {};
+    workflow.nodes.forEach((n) => {
+      initialStatus[n.id] = "idle";
+    });
+    setNodeStatus(initialStatus);
+    setNodeErrors({});
     try {
-      const result = await runResumeWorkflow(workflow, { resumeFile });
+      const result = await runResumeWorkflow(workflow, {
+        resumeFile: resumeFile ?? undefined,
+        openaiApiKey: getWorkflowOpenaiApiKey() ?? undefined,
+        onNodeStatus: (nodeId, status, error) => {
+          setNodeStatus((prev) => ({ ...prev, [nodeId]: status }));
+          if (error) setNodeErrors((prev) => ({ ...prev, [nodeId]: error }));
+        },
+      });
       setExecutionResult(result);
       toast.success("Workflow completed.");
     } catch (err) {
@@ -73,7 +95,7 @@ export function ResumeTailorWorkflow() {
             variant="outline"
             size="sm"
             onClick={handleRun}
-            disabled={isRunning || !resumeFile}
+            disabled={isRunning || !canRun}
           >
             {isRunning ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -94,7 +116,7 @@ export function ResumeTailorWorkflow() {
               className={cn("h-4 w-4", !showNodePanel && "opacity-50")}
             />
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>
             <Settings2 className="h-4 w-4 mr-2" />
             Settings
           </Button>
@@ -109,6 +131,8 @@ export function ResumeTailorWorkflow() {
               onWorkflowChange={setWorkflow}
               selectedNodeId={selectedNodeId}
               onSelectNode={setSelectedNodeId}
+              nodeStatus={nodeStatus}
+              nodeErrors={nodeErrors}
             />
           </CardContent>
         </Card>
@@ -144,6 +168,8 @@ export function ResumeTailorWorkflow() {
           onClose={() => setExecutionResult(null)}
         />
       )}
+
+      <WorkflowSettingsDialog open={showSettings} onOpenChange={setShowSettings} />
     </div>
   );
 }

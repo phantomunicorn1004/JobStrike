@@ -26,6 +26,10 @@ export type TailorResumeInput = {
   jobTitle: string;
   jobDescription: string;
   resumeText: string;
+  /** Override API key (e.g. from workflow node). When set, used instead of OPENAI_API_KEY. */
+  openaiApiKey?: string;
+  /** Model to use (default gpt-4o-mini). */
+  model?: string;
 };
 
 const SYSTEM_PROMPT = `You are a scoped resume improvement engine focused on ATS optimization.
@@ -216,26 +220,30 @@ function getProxyAgent() {
 export async function tailorResumeWithOpenAI(
   input: TailorResumeInput
 ): Promise<TailorResumeResponse> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = (input.openaiApiKey?.trim() || process.env.OPENAI_API_KEY) ?? null;
   if (!apiKey) {
-    throw new Error("OPENAI_API_KEY environment variable is not set");
+    throw new Error(
+      "OpenAI API key is required. Set OPENAI_API_KEY in the environment or provide a key in the Tailor AI node settings."
+    );
   }
 
   // Support custom base URL for proxy/alternative endpoints
   const baseURL = process.env.OPENAI_BASE_URL || undefined;
   
-  // Configure proxy agent if proxy is set
-  const httpAgent = getProxyAgent();
+  // Configure proxy agent if proxy is set (only for env-based key to avoid leaking node key)
+  const httpAgent = input.openaiApiKey ? undefined : getProxyAgent();
 
   const openai = new OpenAI({
-    apiKey: apiKey,
+    apiKey,
     ...(baseURL && { baseURL }),
     ...(httpAgent && { httpAgent }),
   });
 
+  const model = input.model?.trim() || "gpt-4o-mini";
+
   try {
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: createUserPrompt(input) },

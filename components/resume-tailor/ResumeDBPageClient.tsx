@@ -44,15 +44,20 @@ import {
 
 type UploadStatus = "idle" | "uploading" | "success" | "error";
 
-/** Ensure content has skillEntries (from skillEntries or flattened from skills). */
+/** Ensure content has skillEntries (from skillEntries or from skills object/array). */
 function normalizeSkillEntries(c: ResumeContent): ResumeContent {
   if (c.skillEntries && c.skillEntries.length > 0) {
     return c;
   }
-  const entries: SkillEntry[] = (c.skills ?? []).map((s) => ({
-    label: s,
-    subSkills: [],
-  }));
+  const skills = c.skills;
+  const entries: SkillEntry[] = !skills
+    ? []
+    : Array.isArray(skills)
+      ? skills.map((s) => ({ label: s, subSkills: [] as string[] }))
+      : Object.entries(skills).map(([label, subSkills]) => ({
+          label,
+          subSkills: subSkills ?? [],
+        }));
   return { ...c, skillEntries: entries };
 }
 
@@ -63,7 +68,7 @@ const EMPTY_RESUME_CONTENT: ResumeContent = {
   professionalSummary: "",
   experience: [],
   contactInfo: "",
-  skills: [],
+  skills: {},
   skillEntries: [],
 };
 
@@ -85,9 +90,18 @@ function ResumeFormView({
   content: ResumeContent;
   onContentChange: (content: ResumeContent) => void;
 }) {
-  const entries =
-    content.skillEntries ??
-    (content.skills ?? []).map((s) => ({ label: s, subSkills: [] as string[] }));
+  const skillsRaw = content.skills;
+  const entries: SkillEntry[] =
+    content.skillEntries && content.skillEntries.length > 0
+      ? content.skillEntries
+      : !skillsRaw
+        ? []
+        : Array.isArray(skillsRaw)
+          ? skillsRaw.map((s: string) => ({ label: s, subSkills: [] as string[] }))
+          : Object.entries(skillsRaw).map(([label, subSkills]: [string, string[]]) => ({
+              label,
+              subSkills: subSkills ?? [],
+            }));
   const [editingSkillIdx, setEditingSkillIdx] = useState<number | null>(null);
   const [editingExpIdx, setEditingExpIdx] = useState<number | null>(null);
 
@@ -150,7 +164,7 @@ function ResumeFormView({
           </span>
         </div>
         <div className="space-y-1">
-          {(content.skillEntries ?? entries).map((e, idx) => (
+          {(content.skillEntries ?? entries).map((e: SkillEntry, idx: number) => (
             <div
               key={idx}
               className="flex items-center gap-2 rounded border bg-background px-2 py-2 text-sm"
@@ -181,11 +195,7 @@ function ResumeFormView({
                   setContent({
                     ...content,
                     skillEntries: list,
-                    skills: list.flatMap((x) =>
-                      x.subSkills?.length
-                        ? [x.label, ...x.subSkills]
-                        : [x.label],
-                    ),
+                    skills: Object.fromEntries(list.map((e) => [e.label, e.subSkills ?? []])),
                   });
                   if (editingSkillIdx === idx) setEditingSkillIdx(null);
                 }}
@@ -223,9 +233,7 @@ function ResumeFormView({
                     setContent({
                       ...content,
                       skillEntries: list,
-                      skills: list.flatMap((x) =>
-                        x.subSkills?.length ? [x.label, ...x.subSkills] : [x.label],
-                      ),
+                      skills: Object.fromEntries(list.map((e) => [e.label, e.subSkills ?? []])),
                     });
                   }}
                 />
@@ -242,9 +250,7 @@ function ResumeFormView({
                     setContent({
                       ...content,
                       skillEntries: list,
-                      skills: list.flatMap((x) =>
-                        x.subSkills?.length ? [x.label, ...x.subSkills] : [x.label],
-                      ),
+                      skills: Object.fromEntries(list.map((e) => [e.label, e.subSkills ?? []])),
                     });
                   }}
                 />
@@ -465,6 +471,12 @@ export function ResumeDBPageClient() {
   const [editingExpIndex, setEditingExpIndex] = useState<number | null>(null);
   const [uploadSectionCollapsed, setUploadSectionCollapsed] = useState(false);
   const [uploadHeading, setUploadHeading] = useState("RESUME FILE");
+  const profileHeadingRef = React.useRef<HTMLInputElement>(null);
+  const summaryHeadingRef = React.useRef<HTMLInputElement>(null);
+  const contactHeadingRef = React.useRef<HTMLInputElement>(null);
+  const experienceHeadingRef = React.useRef<HTMLInputElement>(null);
+  const skillsHeadingRef = React.useRef<HTMLInputElement>(null);
+  const uploadHeadingRef = React.useRef<HTMLInputElement>(null);
   const [addResumeMethod, setAddResumeMethod] =
     useState<AddResumeMethod>("choose");
 
@@ -526,20 +538,45 @@ export function ResumeDBPageClient() {
     }
   };
 
+  const [removingId, setRemovingId] = useState<number | null>(null);
+
+  const handleRemoveResume = async (id: number) => {
+    if (!confirm("Remove this resume from the database? This cannot be undone.")) {
+      return;
+    }
+    setRemovingId(id);
+    try {
+      const res = await fetch(`/api/resume-db?id=${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Failed to remove resume");
+      }
+      toast.success("Resume removed.");
+      if (viewId === id) {
+        setViewId(null);
+        setViewJson(null);
+        setViewResume(null);
+      }
+      loadResumes();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to remove resume");
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
   const handleSaveViewResume = async () => {
     if (!viewResume) return;
     const content = viewResume.content;
     const entries = content.skillEntries ?? [];
-    const flattened =
+    const skillsObj =
       entries.length > 0
-        ? entries.flatMap((e) =>
-            e.subSkills?.length ? [e.label, ...e.subSkills] : [e.label],
-          )
-        : content.skills ?? [];
+        ? Object.fromEntries(entries.map((e) => [e.label, e.subSkills ?? []]))
+        : (Array.isArray(content.skills) ? {} : content.skills ?? {});
     const contentToSave: ResumeContent = {
       ...content,
       skillEntries: entries,
-      skills: flattened,
+      skills: skillsObj,
     };
     setIsSavingView(true);
     try {
@@ -656,18 +693,16 @@ export function ResumeDBPageClient() {
 
     try {
       const entries = editorContent.skillEntries ?? [];
-      const flattenedSkills =
+      const skillsObj =
         entries.length > 0
-          ? entries.flatMap((e) =>
-              e.subSkills?.length
-                ? [e.label, ...e.subSkills]
-                : [e.label],
-            )
-          : editorContent.skills ?? [];
+          ? Object.fromEntries(entries.map((e) => [e.label, e.subSkills ?? []]))
+          : (Array.isArray(editorContent.skills)
+              ? {}
+              : editorContent.skills ?? {});
       const contentToSave: ResumeContent = {
         ...editorContent,
         skillEntries: entries,
-        skills: flattenedSkills,
+        skills: skillsObj,
       };
 
       const response = await fetch("/api/resume-db", {
@@ -860,6 +895,7 @@ export function ResumeDBPageClient() {
                               <User className="h-4 w-4" />
                             </span>
                             <input
+                              ref={profileHeadingRef}
                               className="flex-1 min-w-0 bg-transparent text-sm font-semibold uppercase tracking-wide outline-none"
                               value={profileHeading}
                               onChange={(e) =>
@@ -873,6 +909,7 @@ export function ResumeDBPageClient() {
                               variant="ghost"
                               size="sm"
                               className="h-7 text-xs shrink-0"
+                              onClick={() => profileHeadingRef.current?.focus()}
                             >
                               <Pencil className="h-3 w-3 mr-1" />
                               Edit Heading
@@ -916,6 +953,7 @@ export function ResumeDBPageClient() {
                               <FileText className="h-4 w-4" />
                             </span>
                             <input
+                              ref={summaryHeadingRef}
                               className="flex-1 min-w-0 bg-transparent text-sm font-semibold uppercase tracking-wide outline-none"
                               value={summaryHeading}
                               onChange={(e) =>
@@ -929,6 +967,7 @@ export function ResumeDBPageClient() {
                               variant="ghost"
                               size="sm"
                               className="h-7 text-xs shrink-0"
+                              onClick={() => summaryHeadingRef.current?.focus()}
                             >
                               <Pencil className="h-3 w-3 mr-1" />
                               Edit Heading
@@ -973,6 +1012,7 @@ export function ResumeDBPageClient() {
                               <Mail className="h-4 w-4" />
                             </span>
                             <input
+                              ref={contactHeadingRef}
                               className="flex-1 min-w-0 bg-transparent text-sm font-semibold uppercase tracking-wide outline-none"
                               value={contactHeading}
                               onChange={(e) =>
@@ -986,6 +1026,7 @@ export function ResumeDBPageClient() {
                               variant="ghost"
                               size="sm"
                               className="h-7 text-xs shrink-0"
+                              onClick={() => contactHeadingRef.current?.focus()}
                             >
                               <Pencil className="h-3 w-3 mr-1" />
                               Edit Heading
@@ -1030,6 +1071,7 @@ export function ResumeDBPageClient() {
                               <Sparkles className="h-4 w-4" />
                             </span>
                             <input
+                              ref={skillsHeadingRef}
                               className="flex-1 bg-transparent text-sm font-semibold uppercase tracking-wide outline-none"
                               value={skillsHeading}
                               onChange={(e) =>
@@ -1041,7 +1083,7 @@ export function ResumeDBPageClient() {
                               variant="ghost"
                               size="sm"
                               className="h-7 text-xs"
-                              onClick={() => setEditingSkillIndex(null)}
+                              onClick={() => skillsHeadingRef.current?.focus()}
                             >
                               <Pencil className="h-3 w-3 mr-1" />
                               Edit Heading
@@ -1289,6 +1331,7 @@ export function ResumeDBPageClient() {
                               <Briefcase className="h-4 w-4" />
                             </span>
                             <input
+                              ref={experienceHeadingRef}
                               className="flex-1 min-w-0 bg-transparent text-sm font-semibold uppercase tracking-wide outline-none"
                               value={experienceHeading}
                               onChange={(e) =>
@@ -1303,6 +1346,7 @@ export function ResumeDBPageClient() {
                               variant="ghost"
                               size="sm"
                               className="h-7 text-xs shrink-0"
+                              onClick={() => experienceHeadingRef.current?.focus()}
                             >
                               <Pencil className="h-3 w-3 mr-1" />
                               Edit Heading
@@ -1720,28 +1764,29 @@ export function ResumeDBPageClient() {
                           )}
                         </td>
                         <td className="py-2">
-                          <Dialog
-                            open={
-                              viewId === resume.id &&
-                              (isLoadingView || viewResume !== null)
-                            }
-                            onOpenChange={(open) => {
-                              if (!open) {
-                                setViewId(null);
-                                setViewJson(null);
-                                setViewResume(null);
-                              } else {
-                                handleViewResume(resume.id);
+                          <div className="flex items-center gap-2">
+                            <Dialog
+                              open={
+                                viewId === resume.id &&
+                                (isLoadingView || viewResume !== null)
                               }
-                            }}
-                          >
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleViewResume(resume.id)}
+                              onOpenChange={(open) => {
+                                if (!open) {
+                                  setViewId(null);
+                                  setViewJson(null);
+                                  setViewResume(null);
+                                } else {
+                                  handleViewResume(resume.id);
+                                }
+                              }}
                             >
-                              View
-                            </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleViewResume(resume.id)}
+                              >
+                                View
+                              </Button>
                             <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col">
                               <DialogHeader>
                                 <DialogTitle>
@@ -1820,6 +1865,21 @@ export function ResumeDBPageClient() {
                               )}
                             </DialogContent>
                           </Dialog>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => handleRemoveResume(resume.id)}
+                              disabled={removingId === resume.id}
+                              title="Remove resume"
+                            >
+                              {removingId === resume.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}

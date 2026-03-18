@@ -9,6 +9,7 @@ import {
 } from "docx";
 import type { ResumeStructure, SectionType } from "../structure/types";
 import type { ResumeContent } from "../../resumeTemplates/types";
+import { getSkillsAsArray } from "../../resumeTemplates/types";
 
 /**
  * Build DOCX document preserving original structure with tailored content
@@ -68,8 +69,9 @@ export function buildDOCXFromStructure(
   }
   
   // ALLOWED: Skills (editable - reorder, normalize)
-  if (tailoredContent.skills && tailoredContent.skills.length > 0) {
-    sectionMap.set("skills", tailoredContent.skills);
+  const skillsArr = getSkillsAsArray(tailoredContent.skills);
+  if (skillsArr.length > 0) {
+    sectionMap.set("skills", skillsArr);
   }
   
   // PRESERVED: Education (use original from structure if available)

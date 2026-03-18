@@ -8,6 +8,7 @@ import {
   TabStopPosition,
 } from "docx";
 import type { ResumeContent } from "../resumeTemplates/types";
+import { getSkillsAsArray } from "../resumeTemplates/types";
 import type { TemplateConfig } from "../resumeTemplates/types";
 
 export function generateDOCXDocument(
@@ -105,7 +106,8 @@ export function generateDOCXDocument(
   }
 
   // Skills
-  if (content.skills && content.skills.length > 0) {
+  const skillsArr = getSkillsAsArray(content.skills);
+  if (skillsArr.length > 0) {
     children.push(
       new Paragraph({
         text: "TECHNICAL SKILLS",
@@ -115,7 +117,7 @@ export function generateDOCXDocument(
     );
     children.push(
       new Paragraph({
-        text: content.skills.join(" • "),
+        text: skillsArr.join(" • "),
         spacing: { after: 200 },
       })
     );

@@ -247,3 +247,39 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const idParam = searchParams.get("id");
+    if (!idParam) {
+      return NextResponse.json(
+        { error: "Missing required query parameter: id" },
+        { status: 400 },
+      );
+    }
+    const id = Number(idParam);
+    if (Number.isNaN(id)) {
+      return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    }
+
+    const supabase = await getSupabaseServerClient();
+    const { error } = await supabase.from("resumes").delete().eq("id", id);
+
+    if (error) {
+      console.error("Error deleting resume from Supabase:", error);
+      return NextResponse.json(
+        { error: "Failed to delete resume from database." },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({ ok: true, id });
+  } catch (error) {
+    console.error("Resume DB DELETE API error:", error);
+    return NextResponse.json(
+      { error: "Unexpected error while deleting resume." },
+      { status: 500 },
+    );
+  }
+}
+

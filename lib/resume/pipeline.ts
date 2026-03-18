@@ -9,11 +9,16 @@ import { tailorResumeWithOpenAI } from "../resumeTailor";
 import { applyScopedTailoring } from "./tailor/scopedTailor";
 import type { ResumeStructure } from "./structure/types";
 import type { ResumeContent } from "../resumeTemplates/types";
+import { getSkillsAsArray } from "../resumeTemplates/types";
 
 export interface TailorResumePipelineInput {
   file: File | { name: string; arrayBuffer: () => Promise<ArrayBuffer>; size: number; type?: string };
   jobTitle: string;
   jobDescription: string;
+  /** Optional override for OpenAI API key (e.g. from workflow Tailor AI node). */
+  openaiApiKey?: string;
+  /** Optional model (default gpt-4o-mini). */
+  model?: string;
 }
 
 export interface TailorResumePipelineOutput {
@@ -123,6 +128,8 @@ export async function tailorResumeWithStructure(
     jobTitle: input.jobTitle,
     jobDescription: input.jobDescription,
     resumeText: parseResult.text,
+    ...(input.openaiApiKey?.trim() && { openaiApiKey: input.openaiApiKey.trim() }),
+    ...(input.model?.trim() && { model: input.model.trim() }),
   });
 
   // Validate AI response
@@ -258,8 +265,9 @@ function formatTailoredResumeText(content: ResumeContent): string {
     });
   }
   
-  if (content.skills && content.skills.length > 0) {
-    text += `TECHNICAL SKILLS\n${content.skills.join(" • ")}\n\n`;
+  const skillsArr = getSkillsAsArray(content.skills);
+  if (skillsArr.length > 0) {
+    text += `TECHNICAL SKILLS\n${skillsArr.join(" • ")}\n\n`;
   }
   
   if (content.education && content.education.length > 0) {
@@ -271,4 +279,63 @@ function formatTailoredResumeText(content: ResumeContent): string {
   }
   
   return text.trim();
+}
+
+/** Input for tailoring when resume is already parsed (e.g. from ResumeDB). */
+export interface TailorFromContentInput {
+  content: ResumeContent;
+  structure: ResumeStructure;
+  jobTitle: string;
+  jobDescription: string;
+  openaiApiKey?: string;
+  model?: string;
+}
+
+/**
+ * Tailor an already-parsed resume (e.g. from ResumeDB). Skips file parse; uses content + structure directly.
+ */
+export async function tailorResumeFromContent(
+  input: TailorFromContentInput
+): Promise<Omit<TailorResumePipelineOutput, "originalDocxBuffer" | "docxParagraphsWithFormat">> {
+  if (!input.content?.profileTitle?.trim()) {
+    throw new Error("Invalid content: profileTitle is required");
+  }
+  if (!input.structure?.sections?.length) {
+    throw new Error("Invalid structure: sections are required");
+  }
+  if (!input.jobTitle?.trim() || !input.jobDescription?.trim()) {
+    throw new Error("jobTitle and jobDescription are required");
+  }
+
+  const resumeText = formatTailoredResumeText(input.content);
+
+  const tailoredResponse = await tailorResumeWithOpenAI({
+    jobTitle: input.jobTitle,
+    jobDescription: input.jobDescription,
+    resumeText,
+    ...(input.openaiApiKey?.trim() && { openaiApiKey: input.openaiApiKey.trim() }),
+    ...(input.model?.trim() && { model: input.model.trim() }),
+  });
+
+  if (!tailoredResponse?.profile_title?.trim()) {
+    throw new Error("AI tailoring failed: missing profile title in response");
+  }
+
+  const tailoredContent = applyScopedTailoring(
+    input.structure,
+    tailoredResponse,
+    input.content
+  );
+
+  if (!tailoredContent.profileTitle?.trim() || !tailoredContent.experience?.length) {
+    throw new Error("Tailored content validation failed");
+  }
+
+  const tailoredText = formatTailoredResumeText(tailoredContent);
+
+  return {
+    tailoredText,
+    tailoredContent,
+    structure: input.structure,
+  };
 }

@@ -17,9 +17,15 @@ import type { ResumeContent } from "@/lib/resumeTemplates/types";
 import type { ResumeStructure } from "@/lib/resume/structure/types";
 import type { TemplateId } from "@/lib/resumeTemplates/types";
 
+export type NodeExecutionStatus = "idle" | "running" | "success" | "error";
+
 export interface RunWorkflowOptions {
   /** Resume file for Resume Selection (required when no resumeId load is available). */
   resumeFile?: File | null;
+  /** OpenAI API key from workflow Settings (used by JD Parsing and Tailor AI). */
+  openaiApiKey?: string;
+  /** Called when a node starts or finishes (for n8n-style status per node). */
+  onNodeStatus?: (nodeId: string, status: NodeExecutionStatus, error?: string) => void;
 }
 
 interface ExecutionContext {
@@ -132,50 +138,127 @@ export async function runResumeWorkflow(
 
   const order = topologicalOrder(workflow);
   const nodeMap = new Map(workflow.nodes.map((n) => [n.id, n]));
+  const report = options.onNodeStatus;
 
   for (const node of order) {
-    switch (node.type) {
+    report?.(node.id, "running");
+    try {
+      switch (node.type) {
       case "initialInput":
         ctx.workflowInput = input;
         break;
 
       case "resumeSelection": {
-        if (!options.resumeFile) {
+        const selectionData = nodeMap.get(node.id)?.data as Record<string, unknown> | undefined;
+        const resumeDbId = selectionData?.resumeId as number | undefined;
+
+        if (resumeDbId != null && !Number.isNaN(resumeDbId)) {
+          const res = await fetch(`/api/resume-db?id=${resumeDbId}`);
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load resume from ResumeDB.");
+          }
+          const data = await res.json();
+          const r = data.resume;
+          if (!r?.content || !r?.structure) {
+            throw new Error("Resume from DB missing content or structure.");
+          }
+          ctx.resume = { content: r.content, structure: r.structure };
+        } else if (options.resumeFile) {
+          const formData = new FormData();
+          formData.append("file", options.resumeFile);
+          const res = await fetch("/api/resume-parse-structure", { method: "POST", body: formData });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to parse resume structure.");
+          }
+          const { content, structure } = await res.json();
+          ctx.resume = { content, structure };
+        } else {
           throw new Error(
-            "Resume Selection requires a resume file. Please upload a resume (PDF or DOCX) before running."
+            "Resume Selection: choose a resume from ResumeDB in the node settings, or upload a file when running the workflow."
           );
         }
-        const formData = new FormData();
-        formData.append("file", options.resumeFile);
-        const res = await fetch("/api/resume-parse-structure", { method: "POST", body: formData });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || "Failed to parse resume structure.");
-        }
-        const { content, structure } = await res.json();
-        ctx.resume = { content, structure };
         break;
       }
 
-      case "jdParsing":
-        ctx.normalizedJd = normalizeJd(ctx.workflowInput?.jobDescription ?? "");
+      case "jdParsing": {
+        const jdDataNode = nodeMap.get(node.id)?.data as Record<string, unknown> | undefined;
+        const model = jdDataNode?.model as string | undefined;
+        const rawJd = ctx.workflowInput?.jobDescription ?? "";
+        if (!rawJd.trim()) {
+          ctx.normalizedJd = normalizeJd("");
+          break;
+        }
+        const res = await fetch("/api/jd-parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobDescription: rawJd,
+            ...(options.openaiApiKey?.trim() && { openaiApiKey: options.openaiApiKey.trim() }),
+            ...(model?.trim() && { model: model.trim() }),
+          }),
+        });
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error((errBody as { error?: string }).error ?? res.statusText);
+        }
+        ctx.normalizedJd = (await res.json()) as NormalizedJobDescription;
         break;
+      }
 
       case "tailorAi": {
-        if (!options.resumeFile) throw new Error("Tailor AI requires the resume file from Resume Selection.");
-        const formData = new FormData();
-        formData.append("file", options.resumeFile);
-        formData.append("jobTitle", input.jobTitle);
-        formData.append("jobDescription", input.jobDescription);
-        const tailorRes = await fetch("/api/resume-tailor-with-structure", {
-          method: "POST",
-          body: formData,
-        });
-        if (!tailorRes.ok) {
-          const err = await tailorRes.json().catch(() => ({}));
-          throw new Error(err.error || "Tailor AI failed.");
+        if (!ctx.resume) {
+          throw new Error("Tailor AI requires a resume from Resume Selection (ResumeDB or uploaded file).");
         }
-        const tailorData = await tailorRes.json();
+        const tailorDataNode = nodeMap.get(node.id)?.data as Record<string, unknown> | undefined;
+        const model = tailorDataNode?.model as string | undefined;
+        const openaiApiKey = options.openaiApiKey;
+
+        let tailorData: {
+          tailoredText: string;
+          tailoredContent: ResumeContent;
+          structure: ResumeStructure;
+          formatMetadata?: unknown;
+        };
+
+        const useResumeFromDb = ctx.resume != null && !options.resumeFile;
+        if (useResumeFromDb) {
+          const jsonRes = await fetch("/api/resume-tailor-from-json", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: ctx.resume.content,
+              structure: ctx.resume.structure,
+              jobTitle: input.jobTitle,
+              jobDescription: input.jobDescription,
+              ...(openaiApiKey?.trim() && { openaiApiKey: openaiApiKey.trim() }),
+              ...(model?.trim() && { model: model.trim() }),
+            }),
+          });
+          if (!jsonRes.ok) {
+            const err = await jsonRes.json().catch(() => ({}));
+            throw new Error(err.error || "Tailor AI failed.");
+          }
+          tailorData = await jsonRes.json();
+        } else {
+          if (!options.resumeFile) throw new Error("Tailor AI requires the resume file from Resume Selection.");
+          const formData = new FormData();
+          formData.append("file", options.resumeFile);
+          formData.append("jobTitle", input.jobTitle);
+          formData.append("jobDescription", input.jobDescription);
+          if (openaiApiKey?.trim()) formData.append("openaiApiKey", openaiApiKey.trim());
+          if (model?.trim()) formData.append("model", model.trim());
+          const tailorRes = await fetch("/api/resume-tailor-with-structure", {
+            method: "POST",
+            body: formData,
+          });
+          if (!tailorRes.ok) {
+            const err = await tailorRes.json().catch(() => ({}));
+            throw new Error(err.error || "Tailor AI failed.");
+          }
+          tailorData = await tailorRes.json();
+        }
         const atsRes = await fetch("/api/ats-check", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -205,7 +288,7 @@ export async function runResumeWorkflow(
           updatedResume: tailorData.tailoredContent,
         };
         ctx.tailoredStructure = tailorData.structure;
-        ctx.formatMetadata = tailorData.formatMetadata;
+        ctx.formatMetadata = tailorData.formatMetadata as ExecutionContext["formatMetadata"];
         break;
       }
 
@@ -267,6 +350,12 @@ export async function runResumeWorkflow(
 
       default:
         break;
+    }
+      report?.(node.id, "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      report?.(node.id, "error", message);
+      throw err;
     }
   }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import type { WorkflowNode as WorkflowNodeType, WorkflowState } from "./types";
 import { getNodeDefinition } from "./nodeRegistry";
 import { Label } from "@/components/ui/label";
@@ -46,6 +46,28 @@ export function NodeSettingsPanel({
 }: NodeSettingsPanelProps) {
   const def = getNodeDefinition(node.type);
   const data = node.data ?? {};
+
+  const [resumeDbList, setResumeDbList] = useState<{ id: number; roleTitle: string }[]>([]);
+  const [loadingResumeDb, setLoadingResumeDb] = useState(false);
+  useEffect(() => {
+    if (node.type !== "resumeSelection") return;
+    let cancelled = false;
+    setLoadingResumeDb(true);
+    fetch("/api/resume-db")
+      .then((res) => (res.ok ? res.json() : Promise.resolve({ resumes: [] })))
+      .then((d) => {
+        if (!cancelled) setResumeDbList(d.resumes ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setResumeDbList([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingResumeDb(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [node.type]);
 
   const setData = (key: string, value: unknown) => {
     onWorkflowChange(updateNodeData(workflow, node.id, { data: { ...data, [key]: value } }));
@@ -167,45 +189,115 @@ export function NodeSettingsPanel({
       );
     }
 
-    case "resumeSelection":
+    case "resumeSelection": {
+      const NONE_VALUE = "__none__";
+      const selectedResumeId = data.resumeId != null ? String(data.resumeId) : NONE_VALUE;
       return (
         <div className="space-y-3 text-sm">
           <p className="text-muted-foreground text-xs">{def.description}</p>
-          <p className="text-muted-foreground text-xs">
-            Resume is loaded by ID from Initial Input. Ensure resume is stored in your profile or
-            paste JSON when running.
-          </p>
+          <div>
+            <Label>Resume from ResumeDB</Label>
+            <Select
+              value={selectedResumeId}
+              onValueChange={(v) => setData("resumeId", v === NONE_VALUE ? undefined : Number(v))}
+              disabled={loadingResumeDb}
+            >
+              <SelectTrigger className="mt-1 w-full">
+                <SelectValue placeholder={loadingResumeDb ? "Loading…" : "Choose one resume"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE_VALUE}>— None (use uploaded file when running) —</SelectItem>
+                {resumeDbList.map((r) => (
+                  <SelectItem key={r.id} value={String(r.id)}>
+                    {r.roleTitle || `Resume #${r.id}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground text-xs mt-1">
+              Choose a registered resume as the original for tailoring. If none is selected, upload a
+              file when running the workflow.
+            </p>
+          </div>
         </div>
       );
+    }
 
-    case "jdParsing":
-      return (
-        <div className="space-y-3 text-sm">
-          <p className="text-muted-foreground text-xs">{def.description}</p>
-          <p className="text-muted-foreground text-xs">
-            Extracts skills, responsibilities, and seniority from the job description. No settings
-            required.
-          </p>
-        </div>
-      );
-
-    case "tailorAi": {
+    case "jdParsing": {
       const model = (data.model as string) ?? "gpt-4o-mini";
+      const COMMON_MODELS = [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-4",
+        "gpt-3.5-turbo",
+      ];
       return (
         <div className="space-y-3 text-sm">
           <p className="text-muted-foreground text-xs">{def.description}</p>
           <div>
             <Label>Model</Label>
-            <Input
+            <Select
               value={model}
-              onChange={(e) => setData("model", e.target.value)}
-              placeholder="gpt-4o-mini"
-              className="mt-1"
-            />
+              onValueChange={(v) => setData("model", v)}
+            >
+              <SelectTrigger className="mt-1 w-full">
+                <SelectValue placeholder="Choose model" />
+              </SelectTrigger>
+              <SelectContent>
+                {COMMON_MODELS.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground text-xs mt-1">
+              Model used for parsing the job description. API key is set in Workflow Settings.
+            </p>
           </div>
           <p className="text-muted-foreground text-xs">
-            Uses project OpenAI config. Tailoring preserves truthfulness and does not fabricate
-            experience.
+            Extracts required/preferred skills, responsibilities, and seniority from the JD using OpenAI.
+          </p>
+        </div>
+      );
+    }
+
+    case "tailorAi": {
+      const model = (data.model as string) ?? "gpt-4o-mini";
+      const COMMON_MODELS = [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-4",
+        "gpt-3.5-turbo",
+      ];
+      return (
+        <div className="space-y-3 text-sm">
+          <p className="text-muted-foreground text-xs">{def.description}</p>
+          <div>
+            <Label>Model</Label>
+            <Select
+              value={model}
+              onValueChange={(v) => setData("model", v)}
+            >
+              <SelectTrigger className="mt-1 w-full">
+                <SelectValue placeholder="Choose model" />
+              </SelectTrigger>
+              <SelectContent>
+                {COMMON_MODELS.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground text-xs mt-1">
+              Model used for tailoring. API key is set in Workflow Settings.
+            </p>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Tailoring preserves truthfulness and does not fabricate experience.
           </p>
         </div>
       );

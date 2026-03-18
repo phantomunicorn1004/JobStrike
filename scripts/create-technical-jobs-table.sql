@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS technical_jobs (
   second_round_result TEXT,
   third_round_date DATE,
   third_round_result TEXT,
-  status TEXT, -- ADDED status COLUMN
+  status TEXT,
+  stage_id TEXT DEFAULT 'technical',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

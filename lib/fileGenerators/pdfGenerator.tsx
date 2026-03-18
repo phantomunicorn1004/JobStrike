@@ -1,6 +1,7 @@
 import React from "react";
 import { Document, Page, Text, View, StyleSheet, type DocumentProps } from "@react-pdf/renderer";
 import type { ResumeContent } from "../resumeTemplates/types";
+import { getSkillsAsArray } from "../resumeTemplates/types";
 import type { TemplateConfig } from "../resumeTemplates/types";
 
 // Register fonts (using system fonts for ATS compatibility)
@@ -94,10 +95,10 @@ export function generatePDFDocument(
         )}
 
         {/* Skills */}
-        {content.skills && content.skills.length > 0 && (
+        {getSkillsAsArray(content.skills).length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionHeading}>TECHNICAL SKILLS</Text>
-            <Text style={styles.summary}>{content.skills.join(" • ")}</Text>
+            <Text style={styles.summary}>{getSkillsAsArray(content.skills).join(" • ")}</Text>
           </View>
         )}
 

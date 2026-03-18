@@ -19,8 +19,9 @@ export type ResumeContent = {
     bullets: string[];
   }>;
   contactInfo?: string;
-  skills?: string[];
-  /** Structured skills (FlowCV-style). When present, used by editor; flattened into skills for export. */
+  /** Skills by category: { "Category Name": ["skill1", "skill2", ...] }. Legacy: may be string[] from old data. */
+  skills?: Record<string, string[]> | string[];
+  /** Structured skills (FlowCV-style). When present, used by editor; serialized into skills object. */
   skillEntries?: SkillEntry[];
   education?: string[];
   certifications?: string[];
@@ -42,6 +43,17 @@ export type TemplateConfig = {
   };
   alignment: "left" | "center";
 };
+
+/** Convert skills (object or legacy array) to a flat string[] for display/export. */
+export function getSkillsAsArray(
+  skills: Record<string, string[]> | string[] | undefined,
+): string[] {
+  if (!skills) return [];
+  if (Array.isArray(skills)) return skills;
+  return Object.entries(skills).flatMap(([label, arr]) =>
+    arr?.length ? [label, ...arr] : [label],
+  );
+}
 
 export const TEMPLATE_CONFIGS: Record<TemplateId, TemplateConfig> = {
   modern: {

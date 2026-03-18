@@ -4,10 +4,12 @@ import { tailorResumeWithStructure } from "@/lib/resume/pipeline";
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
-    
+
     const file = formData.get("file") as File;
     const jobTitle = formData.get("jobTitle") as string;
     const jobDescription = formData.get("jobDescription") as string;
+    const openaiApiKey = formData.get("openaiApiKey") as string | null;
+    const model = formData.get("model") as string | null;
 
     // Validate required fields with explicit checks
     if (!file) {
@@ -30,11 +32,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Run structure-preserving tailoring pipeline
-    // This returns structured data WITHOUT generating files
     const result = await tailorResumeWithStructure({
       file,
       jobTitle,
       jobDescription,
+      ...(openaiApiKey?.trim() && { openaiApiKey: openaiApiKey.trim() }),
+      ...(model?.trim() && { model: model.trim() }),
     });
 
     // Return structured resume data for preview

@@ -1,5 +1,6 @@
 import { Document, Paragraph, TextRun, Packer, HeadingLevel, AlignmentType } from "docx";
 import type { ResumeContent } from "../../resumeTemplates/types";
+import { getSkillsAsArray } from "../../resumeTemplates/types";
 import type { DOCXStructureWithFormat, ParagraphWithFormat } from "../structure/docxParserWithFormat";
 
 /**
@@ -63,8 +64,9 @@ export async function buildDOCXWithPreservedFormat(
       }
     } else if (para.sectionType === "skills" && !para.isHeading && !para.isBullet) {
       // Skills content - replace with optimized skills
-      if (tailoredContent.skills && tailoredContent.skills.length > 0) {
-        textToUse = tailoredContent.skills.join(" • ");
+      const skillsArr = getSkillsAsArray(tailoredContent.skills);
+      if (skillsArr.length > 0) {
+        textToUse = skillsArr.join(" • ");
       }
     }
     // All other sections (education, certifications, headers, etc.) use original text

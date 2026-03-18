@@ -41,7 +41,12 @@ export function applyScopedTailoring(
       bullets: Array.isArray(exp.bullets) ? [...exp.bullets] : [],
     })),
     contactInfo: originalContent.contactInfo,
-    skills: originalContent.skills ? [...originalContent.skills] : undefined,
+    skills:
+      originalContent.skills === undefined
+        ? undefined
+        : Array.isArray(originalContent.skills)
+          ? [...originalContent.skills]
+          : { ...originalContent.skills },
     education: originalContent.education ? [...originalContent.education] : undefined,
     certifications: originalContent.certifications ? [...originalContent.certifications] : undefined,
   };

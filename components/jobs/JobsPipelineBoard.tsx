@@ -250,10 +250,10 @@ export function JobsPipelineBoard() {
           const { data, error } = await supabase
             .from("technical_jobs")
             .insert({
-              name: job.name,
-              company_name: job.company_name,
-              title: job.title,
-              resume_link: job.resume_link,
+              name: job.name ?? "",
+              company_name: job.company_name ?? "",
+              title: job.title ?? "",
+              resume_link: job.resume_link ?? "",
               stage_id: targetStageId,
               status: targetStageId === "final" ? "success" : "ongoing",
             })
@@ -272,7 +272,8 @@ export function JobsPipelineBoard() {
           }
           setApplied((prev) => prev.filter((j) => j.id !== job.id));
         } catch (e) {
-          console.error("Move failed:", e);
+          const msg = e instanceof Error ? e.message : (e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e));
+          console.error("Move failed:", msg || "Unknown error", e);
         } finally {
           setMovingId(null);
         }
@@ -303,7 +304,8 @@ export function JobsPipelineBoard() {
           });
           await fetchAll();
         } catch (e) {
-          console.error("Move to applied failed:", e);
+          const msg = e instanceof Error ? e.message : (e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e));
+          console.error("Move to applied failed:", msg || "Unknown error", e);
         } finally {
           setMovingId(null);
         }
@@ -327,7 +329,8 @@ export function JobsPipelineBoard() {
           return next;
         });
       } catch (e) {
-        console.error("Move between stages failed:", e);
+        const msg = e instanceof Error ? e.message : (e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e));
+        console.error("Move between stages failed:", msg || "Unknown error", e);
       } finally {
         setMovingId(null);
       }

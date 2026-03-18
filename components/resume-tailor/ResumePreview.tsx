@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, Edit, Download, Sparkles } from "lucide-react";
-import type { ResumeContent } from "@/lib/resumeTemplates/types";
+import { getSkillsAsArray, type ResumeContent } from "@/lib/resumeTemplates/types";
 
 type ResumePreviewProps = {
   resumeContent: ResumeContent;
@@ -21,6 +21,8 @@ export function ResumePreview({
   onEdit,
   isGenerating = false,
 }: ResumePreviewProps) {
+  const skillsList = getSkillsAsArray(resumeContent.skills);
+
   return (
     <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto py-8 px-4 space-y-6">
       <div className="flex items-center justify-between">
@@ -133,7 +135,7 @@ export function ResumePreview({
             <Separator />
 
             {/* Technical Skills */}
-            {resumeContent.skills && resumeContent.skills.length > 0 && (
+            {skillsList.length > 0 && (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <h3 className="text-lg font-semibold uppercase tracking-wide">
@@ -144,7 +146,7 @@ export function ResumePreview({
                   </Badge>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {resumeContent.skills.map((skill, idx) => (
+                  {skillsList.map((skill: string, idx: number) => (
                     <Badge key={idx} variant="secondary" className="text-sm">
                       {skill}
                     </Badge>
