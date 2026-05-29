@@ -11,14 +11,19 @@ const STORAGE_KEYS = {
 
 const DEFAULT_DAILY_LIMIT = 10;
 
+function enableSidePanelOnActionClick() {
+  if (!chrome.sidePanel?.setPanelBehavior) return;
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch((error) => console.warn('setPanelBehavior failed:', error));
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Smart Job Autofill Assistant installed');
-  if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
-    chrome.sidePanel
-      .setPanelBehavior({ openPanelOnActionClick: false })
-      .catch((error) => console.warn('setPanelBehavior failed:', error));
-  }
+  enableSidePanelOnActionClick();
 });
+
+chrome.runtime.onStartup.addListener(enableSidePanelOnActionClick);
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request && request.action === 'openSidePanel') {

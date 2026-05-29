@@ -1,0 +1,341 @@
+/* Viewport-fit shell: header + nav fixed height, tab content fills remainder */
+
+html {
+  height: 100%;
+}
+
+body.sidepanel {
+  height: 100%;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100dvh;
+  max-width: none;
+  margin: 0;
+  padding: 8px 10px 10px;
+  overflow: hidden;
+}
+
+.app-header {
+  flex-shrink: 0;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+}
+
+.brand {
+  gap: 8px;
+  min-width: 0;
+}
+
+.brand > div {
+  min-width: 0;
+}
+
+.brand-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+
+.eyebrow {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+}
+
+h1 {
+  font-size: 13px;
+  margin: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-actions {
+  gap: 5px;
+}
+
+.header-count {
+  padding: 4px 7px;
+  font-size: 10px;
+}
+
+.header-icon-btn,
+.theme-toggle-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.nav-primary {
+  flex-shrink: 0;
+  margin-bottom: 5px;
+  padding: 3px;
+  border-radius: 11px;
+}
+
+.tab-main {
+  padding: 7px 6px;
+  font-size: 12px;
+  gap: 5px;
+  border-radius: 9px;
+}
+
+.nav-secondary {
+  flex-shrink: 0;
+  margin-bottom: 6px;
+  gap: 5px;
+}
+
+.tab-sub {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tab-panel {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tab-panel.active {
+  display: flex;
+}
+
+/* Scrollable tab content (autofill, profile, etc.) */
+.tab-panel-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
+
+/* —— Register tab: one-screen fit —— */
+#tab-register {
+  gap: 0;
+}
+
+.register-card.register-fit {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 0;
+  padding: 10px 11px;
+  overflow: hidden;
+}
+
+.register-top {
+  flex-shrink: 0;
+}
+
+.register-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.register-title-row h2 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.register-lead {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.register-top .backend-connection-row {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.register-drive-status {
+  margin: 4px 0 0;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.register-drive-status.is-ready {
+  color: var(--success);
+}
+
+.register-drive-status.is-off {
+  color: var(--warning-text, #b45309);
+}
+
+.oauth-redirect-uri {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  font-size: 10px;
+  line-height: 1.35;
+  word-break: break-all;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+}
+
+.register-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  margin: 8px -2px 0;
+  padding: 0 2px;
+}
+
+.register-footer {
+  flex-shrink: 0;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.register-footer .register-status {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.register-footer .button-row {
+  margin-top: 0;
+}
+
+.register-form.form-grid {
+  gap: 6px;
+  margin-top: 0;
+}
+
+.register-form label {
+  gap: 3px;
+  font-size: 11px;
+}
+
+.register-form input,
+.register-form .register-select {
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+.register-files-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.register-file-field {
+  gap: 4px;
+  min-width: 0;
+}
+
+.register-file-hint {
+  display: none;
+}
+
+.register-default-check {
+  font-size: 11px;
+  gap: 4px;
+}
+
+.register-default-check input {
+  width: 14px;
+  height: 14px;
+}
+
+.register-file-drop.file-drop {
+  padding: 10px 6px;
+  gap: 2px;
+  border-radius: 10px;
+}
+
+.register-file-drop .file-drop-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.register-file-drop .file-drop-cta {
+  font-size: 10px;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.register-file-drop > .muted.small {
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.register-file-drop .file-drop-selected {
+  font-size: 10px;
+}
+
+.register-footer .btn.primary.full-width {
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+/* Compact cards globally inside scroll areas */
+.tab-panel-scroll .card {
+  padding: 11px 12px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+}
+
+.tab-panel-scroll .card h2 {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.tab-panel-scroll p {
+  margin-bottom: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.tab-panel-scroll .hero-card {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.tab-panel-scroll .action-card {
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 340px) {
+  .register-files-row {
+    grid-template-columns: 1fr;
+  }
+}

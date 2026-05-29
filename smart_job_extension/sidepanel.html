@@ -1,10 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart Job Autofill Assistant</title>
   <link rel="stylesheet" href="sidepanel.css">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="layout.css">
+  <script src="theme.js"></script>
 </head>
 <body class="sidepanel">
   <div class="app-shell">
@@ -20,65 +23,85 @@
           <h1>Job Application Assistant</h1>
         </div>
       </div>
-      <div class="header-count"><span id="dailyCount">0</span> today</div>
+      <div class="header-actions">
+        <div class="header-count"><span id="dailyCount">0</span> today</div>
+        <button type="button" class="header-icon-btn theme-toggle-btn" id="themeToggleBtn" aria-label="Switch to dark mode" title="Dark mode">
+          <span class="icon-moon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+          </span>
+          <span class="icon-sun" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+            </svg>
+          </span>
+        </button>
+        <button type="button" class="header-icon-btn" id="globalRefreshBtn" aria-label="Refresh current tab" title="Refresh scan and job info from the active tab">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
+          </svg>
+        </button>
+        <button type="button" class="header-icon-btn" id="headerSettingsBtn" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
     </header>
 
-    <nav class="tabs" aria-label="Main tabs">
-      <button class="tab active" data-tab="autofill" type="button">
+    <nav class="nav-primary" aria-label="Primary">
+      <button class="tab-main active" data-tab="autofill" data-tier="main" type="button">
         <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M13 2 L4 14 h7 l-1 8 9 -12 h-7 z"/>
           </svg>
         </span>
         <span class="tab-label">Autofill</span>
       </button>
-      <button class="tab" data-tab="profile" type="button">
+      <button class="tab-main" data-tab="register" data-tier="main" type="button">
         <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <path d="M14 2v6h6M12 18v-6M9 15h6"/>
+          </svg>
+        </span>
+        <span class="tab-label">Job Register</span>
+      </button>
+    </nav>
+
+    <nav class="nav-secondary" aria-label="More tools">
+      <button class="tab-sub" data-tab="profile" data-tier="sub" type="button">
+        <span class="tab-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="8" r="4"/>
             <path d="M4 21v-1a8 8 0 0 1 16 0v1"/>
           </svg>
         </span>
         <span class="tab-label">Profile</span>
       </button>
-      <button class="tab" data-tab="questions" type="button">
+      <button class="tab-sub" data-tab="questions" data-tier="sub" type="button">
         <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z"/>
           </svg>
         </span>
-        <span class="tab-label">Q&amp;A</span>
+        <span class="tab-label">Q&amp;A Bank</span>
       </button>
-      <button class="tab" data-tab="register" type="button">
+      <button class="tab-sub" data-tab="jobs" data-tier="sub" type="button">
         <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <path d="M14 2v6h6M12 18v-6M9 15h6"/>
-          </svg>
-        </span>
-        <span class="tab-label">Register</span>
-      </button>
-      <button class="tab" data-tab="jobs" type="button">
-        <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
           </svg>
         </span>
-        <span class="tab-label">Jobs</span>
-      </button>
-      <button class="tab" data-tab="settings" type="button">
-        <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
-        </span>
-        <span class="tab-label">Settings</span>
+        <span class="tab-label">Saved Jobs</span>
       </button>
     </nav>
 
-    <main>
+    <main class="app-main">
       <section class="tab-panel active" id="tab-autofill">
+        <div class="tab-panel-scroll">
         <div class="hero-card" id="heroCard">
           <button class="hero-close" id="dismissHeroBtn" type="button" aria-label="Dismiss tip">×</button>
           <div class="hero-icon" aria-hidden="true">
@@ -110,11 +133,6 @@
                 <span>~<strong id="minutesSaved">0</strong> min saved</span>
               </p>
             </div>
-            <button class="action-refresh-btn" id="scrapeJobBtn" type="button" title="Re-read the current page's title and company" aria-label="Refresh job info">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
-              </svg>
-            </button>
           </div>
           <div class="action-cta-row" id="autofillCtaRow">
             <button class="action-cta primary" id="fillSelectedBtn" type="button">
@@ -216,9 +234,11 @@
             </form>
           </div>
         </details>
+        </div>
       </section>
 
       <section class="tab-panel" id="tab-profile">
+        <div class="tab-panel-scroll">
         <div class="profile-page">
           <div class="profile-copy-banner" id="profileCopyBanner" role="note">
             <span class="profile-copy-banner-icon" aria-hidden="true">
@@ -268,9 +288,11 @@
           <input type="file" id="kitFilePicker" hidden>
           </div>
         </div>
+        </div>
       </section>
 
       <section class="tab-panel" id="tab-questions">
+        <div class="tab-panel-scroll">
         <div class="card question-bank-intro">
           <h2>Custom Question Bank</h2>
           <p class="muted">Save reusable answers for extra application questions. Similar questions will be suggested during scanning.</p>
@@ -314,45 +336,157 @@
           </label>
           <div id="questionsList" class="questions-list empty">No custom Q&amp;A saved yet.</div>
         </div>
+        </div>
       </section>
 
       <section class="tab-panel" id="tab-register">
-        <div class="card register-card">
-          <div class="card-header compact">
-            <div>
+        <div class="card register-card register-fit">
+          <div class="register-top">
+            <div class="register-title-row">
               <h2>Register to Resume DB</h2>
-              <p>Scrape this job page, upload resume &amp; cover letter, and save to this website.</p>
-              <div class="backend-connection-row" id="backendConnectionRow" aria-live="polite">
-                <span class="backend-connection-dot" id="backendConnectionDot"></span>
-                <span class="backend-connection-label" id="backendConnectionLabel">Checking connection…</span>
-              </div>
+              <button class="btn small" type="button" id="regScrapeBtn" title="Load job title, company, and link from the active tab">Scrape</button>
             </div>
-            <button class="btn small" type="button" id="regScrapeBtn" title="Load job title, company, and link from the active tab">Scrape page</button>
+            <p class="register-lead muted">Save job + files to Resume DB. Use <strong>↻</strong> in the header to load job info.</p>
+            <div class="backend-connection-row" id="backendConnectionRow" aria-live="polite">
+              <span class="backend-connection-dot" id="backendConnectionDot"></span>
+              <span class="backend-connection-label" id="backendConnectionLabel">Checking connection…</span>
+            </div>
+            <p class="register-drive-status is-off" id="registerDriveStatus" hidden>Checking Google Drive…</p>
           </div>
-          <form class="form-grid register-form" id="registerForm" onsubmit="return false">
-            <label>Job title<input id="regJobTitle" type="text" placeholder="e.g. Senior Engineer"></label>
-            <label>Company<input id="regCompany" type="text" placeholder="Company name"></label>
-            <label class="full">Job link<input id="regJobLink" type="url" placeholder="https://…"></label>
-            <label class="full">Candidate
-              <select id="regProfileId" class="register-select">
-                <option value="">Loading profiles…</option>
-              </select>
-            </label>
-            <label class="full">Resume file (required)
-              <input id="regResumeFile" type="file" accept=".pdf,.docx,.doc">
-            </label>
-            <label class="full">Cover letter (optional)
-              <input id="regCoverFile" type="file" accept=".pdf,.docx,.doc,.txt">
-            </label>
-          </form>
-          <div id="registerStatus" class="register-status" hidden></div>
-          <div class="button-row">
-            <button class="btn primary full-width" type="button" id="registerJobBtn">Register</button>
+          <div class="register-body">
+            <form class="form-grid register-form" id="registerForm" onsubmit="return false">
+              <label>Job title<input id="regJobTitle" type="text" placeholder="e.g. Senior Engineer"></label>
+              <label>Company<input id="regCompany" type="text" placeholder="Company name"></label>
+              <label class="full">Job link<input id="regJobLink" type="url" placeholder="https://…"></label>
+              <label class="full">Candidate
+                <select id="regProfileId" class="register-select">
+                  <option value="">Loading profiles…</option>
+                </select>
+              </label>
+              <div class="register-files-row">
+                <div class="register-file-field">
+                  <div class="register-file-head">
+                    <span class="register-file-label">Resume <span class="register-file-required">*</span></span>
+                    <label class="register-default-check" title="Original resume (not tailored for this job)">
+                      <input type="checkbox" id="regResumeDefault" aria-label="Default resume">
+                      <span>Default</span>
+                    </label>
+                  </div>
+                  <p class="register-file-hint" id="regResumeDefaultHint">Tailored resume. Check Default for original.</p>
+                  <div class="file-drop register-file-drop" id="regResumeDrop" tabindex="0" role="button" aria-label="Drop resume or click to browse">
+                    <input type="file" id="regResumeFile" accept=".pdf,.docx,.doc" hidden>
+                    <span class="file-drop-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+                      </svg>
+                    </span>
+                    <span class="file-drop-cta">Drop or browse</span>
+                    <span class="muted small">PDF · DOCX · DOC</span>
+                    <span class="file-drop-selected" id="regResumeFileName" hidden></span>
+                    <button type="button" class="file-drop-clear" id="regResumeClear" hidden data-clear-file aria-label="Remove resume">Remove</button>
+                  </div>
+                </div>
+                <div class="register-file-field">
+                  <div class="register-file-head">
+                    <span class="register-file-label">Cover <span class="register-file-optional">opt.</span></span>
+                    <label class="register-default-check" title="Original cover letter (not tailored)">
+                      <input type="checkbox" id="regCoverDefault" aria-label="Default cover letter">
+                      <span>Default</span>
+                    </label>
+                  </div>
+                  <p class="register-file-hint" id="regCoverDefaultHint">Tailored cover. Check Default for original.</p>
+                  <div class="file-drop register-file-drop" id="regCoverDrop" tabindex="0" role="button" aria-label="Drop cover letter or click to browse">
+                    <input type="file" id="regCoverFile" accept=".pdf,.docx,.doc,.txt" hidden>
+                    <span class="file-drop-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+                      </svg>
+                    </span>
+                    <span class="file-drop-cta">Drop or browse</span>
+                    <span class="muted small">PDF · DOCX · TXT</span>
+                    <span class="file-drop-selected" id="regCoverFileName" hidden></span>
+                    <button type="button" class="file-drop-clear" id="regCoverClear" hidden data-clear-file aria-label="Remove cover letter">Remove</button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="register-footer">
+            <div id="registerStatus" class="register-status" hidden></div>
+            <div class="button-row">
+              <button class="btn primary full-width" type="button" id="registerJobBtn">Register</button>
+            </div>
           </div>
         </div>
       </section>
 
       <section class="tab-panel" id="tab-settings">
+        <div class="tab-panel-scroll">
+        <div class="card appearance-card">
+          <h2>Appearance</h2>
+          <p class="muted">Choose light or dark theme. Your preference is saved in this browser.</p>
+          <div class="theme-segmented" role="group" aria-label="Theme">
+            <button type="button" class="theme-option" data-theme-option="light">Light</button>
+            <button type="button" class="theme-option" data-theme-option="dark">Dark</button>
+          </div>
+        </div>
+        <div class="card register-card">
+          <h2>Website connection (Resume DB)</h2>
+          <p class="muted">Connect the extension to your <strong>remote-work-helper</strong> site. Used by the Register tab to save jobs and load candidate profiles.</p>
+          <div class="backend-connection-row" id="settingsBackendConnectionRow" aria-live="polite">
+            <span class="backend-connection-dot" id="settingsBackendConnectionDot"></span>
+            <span class="backend-connection-label" id="settingsBackendConnectionLabel">Checking connection…</span>
+          </div>
+          <form id="backendSettingsForm" class="form-grid register-form" onsubmit="return false">
+            <label class="full">Backend URL
+              <input type="url" id="backendUrlSetting" placeholder="https://remote-work-helper.vercel.app" autocomplete="off" spellcheck="false">
+              <small class="muted">Production: <code>https://remote-work-helper.vercel.app</code> · Local dev: <code>http://localhost:3000</code></small>
+            </label>
+            <label class="full">API key (optional)
+              <input type="password" id="backendApiKeySetting" placeholder="Only if EXTENSION_API_KEY is set on the server" autocomplete="off" spellcheck="false">
+            </label>
+            <div class="button-row full">
+              <button class="btn primary" type="submit" id="saveBackendSettingsBtn">Save connection</button>
+              <button class="btn" type="button" id="testBackendConnectionBtn">Test connection</button>
+            </div>
+          </form>
+          <p class="muted register-settings-hint" id="backendSettingsHint" hidden></p>
+        </div>
+        <div class="card register-card" id="googleDriveSettingsCard">
+          <h2>Google Drive (Resume DB uploads)</h2>
+          <p class="muted">Upload resume &amp; cover letter to <strong>your</strong> Google Drive from the extension, then save sharing links to Resume DB. Check <strong>Default</strong> on Register to use the default links below (original files).</p>
+          <div class="backend-connection-row" aria-live="polite">
+            <span class="backend-connection-dot" id="googleDriveConnectionDot"></span>
+            <span class="backend-connection-label" id="googleDriveConnectionLabel">Not configured</span>
+          </div>
+          <form id="googleDriveSettingsForm" class="form-grid register-form" onsubmit="return false">
+            <label class="full">OAuth Client ID
+              <input type="text" id="googleOAuthClientIdSetting" placeholder="123456789-abc.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+              <small class="muted">Google Cloud → Credentials → OAuth client (Web application). Add redirect URI below.</small>
+            </label>
+            <label class="full">OAuth redirect URI <span class="muted">(copy into Google Cloud)</span>
+              <code class="oauth-redirect-uri" id="googleOAuthRedirectUri">—</code>
+            </label>
+            <label class="full">Upload folder ID (optional)
+              <input type="text" id="googleDriveFolderIdSetting" placeholder="Drive folder ID from folder URL" autocomplete="off" spellcheck="false">
+              <small class="muted">From <code>drive.google.com/.../folders/FOLDER_ID</code>. Leave empty for Drive root.</small>
+            </label>
+            <label class="full">Default resume sharing link
+              <input type="url" id="googleDefaultResumeUrlSetting" placeholder="https://drive.google.com/file/d/…/view?usp=sharing" autocomplete="off" spellcheck="false">
+              <small class="muted">Used when <strong>Default</strong> is checked on Register (original resume).</small>
+            </label>
+            <label class="full">Default cover letter sharing link
+              <input type="url" id="googleDefaultCoverUrlSetting" placeholder="https://drive.google.com/file/d/…/view?usp=sharing" autocomplete="off" spellcheck="false">
+              <small class="muted">Used when <strong>Default</strong> is checked for cover letter.</small>
+            </label>
+            <div class="button-row full wrap">
+              <button class="btn primary" type="submit" id="saveGoogleDriveSettingsBtn">Save Drive settings</button>
+              <button class="btn" type="button" id="connectGoogleDriveBtn">Connect Google Drive</button>
+              <button class="btn" type="button" id="disconnectGoogleDriveBtn">Disconnect</button>
+            </div>
+          </form>
+          <p class="muted register-settings-hint" id="googleDriveSettingsHint" hidden></p>
+        </div>
         <div class="card">
           <h2>AI autofill (hybrid mode)</h2>
           <p class="muted">Use your OpenAI API key for smarter answers on custom questions. Profile-based fields still use your saved data; AI helps when a value is missing or needs refinement. Your key stays in browser storage only.</p>
@@ -432,18 +566,21 @@
             </div>
           </form>
         </div>
+        </div>
       </section>
 
       <section class="tab-panel" id="tab-jobs">
+        <div class="tab-panel-scroll">
         <div class="card">
           <div class="card-header compact">
             <div>
-              <h2>Saved Applications</h2>
+              <h2>Saved Jobs</h2>
               <p>Kept in the same JSON format as your previous extension.</p>
             </div>
             <button class="btn danger" id="resetJobsBtn">Clear All</button>
           </div>
           <div id="savedJobsList" class="saved-list empty">No saved applications yet.</div>
+        </div>
         </div>
       </section>
     </main>
@@ -452,6 +589,7 @@
   </div>
   <script src="toast.js"></script>
   <script src="ai-fill.js"></script>
+  <script src="google-drive.js"></script>
   <script src="register-resume-db.js"></script>
   <script src="sidepanel.js"></script>
 </body>

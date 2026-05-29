@@ -39,9 +39,6 @@ icons/                 # extension + toolbar icons (teal lightning mark)
 background.js
 field-registry.js
 content.js
-popup.html
-popup.js
-styles.css
 sidepanel.html
 sidepanel.js
 sidepanel.css
@@ -68,7 +65,7 @@ python scripts/generate-icons.py
 
 ### 1. Open the side panel
 
-Click the extension icon, then click **Open Autofill Panel**.
+Click the extension icon in the Chrome toolbar. The autofill side panel opens directly (no popup).
 
 ### 2. Save your profile
 

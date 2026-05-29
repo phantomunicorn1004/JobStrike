@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Smart Job Autofill Assistant",
-  "version": "4.1.0",
+  "version": "4.5.0",
   "description": "Autofill job applications with a saved profile, custom question answers, and saved job JSON export.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -15,19 +15,21 @@
     "unlimitedStorage",
     "scripting",
     "downloads",
-    "sidePanel"
+    "sidePanel",
+    "identity"
   ],
   "host_permissions": [
     "<all_urls>",
     "http://localhost:3000/*",
-    "https://*.vercel.app/*"
+    "https://*.vercel.app/*",
+    "https://www.googleapis.com/*",
+    "https://accounts.google.com/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Smart Job Autofill Assistant",
-    "default_popup": "popup.html",
+    "default_title": "Open Smart Job Autofill Panel",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",

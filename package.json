@@ -47,6 +47,7 @@
     "date-fns": "4.1.0",
     "docx": "^9.5.1",
     "embla-carousel-react": "8.5.1",
+    "googleapis": "^173.0.0",
     "https-proxy-agent": "^7.0.6",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",

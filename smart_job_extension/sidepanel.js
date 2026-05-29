@@ -608,6 +608,11 @@ function getKitUploadForCategory(category) {
 window.addEventListener('DOMContentLoaded', init);
 
 function init() {
+  if (window.SmartJobTheme) {
+    window.SmartJobTheme.initTheme();
+    window.SmartJobTheme.wireThemeToggle();
+    window.SmartJobTheme.wireThemeOptions();
+  }
   setupTabs();
   if (window.SmartJobRegisterResumeDb) {
     window.SmartJobRegisterResumeDb.initRegisterResumeDb(showStatus);
@@ -623,7 +628,8 @@ function init() {
 }
 
 function bindEvents() {
-  document.getElementById('scrapeJobBtn').addEventListener('click', scrapeCurrentJob);
+  const globalRefreshBtn = document.getElementById('globalRefreshBtn');
+  if (globalRefreshBtn) globalRefreshBtn.addEventListener('click', () => globalRefreshCurrentTab());
   document.getElementById('fillSelectedBtn').addEventListener('click', () => autofillThisPage({ useAi: false }));
   const fillAiBtn = document.getElementById('fillSelectedAiBtn');
   if (fillAiBtn) fillAiBtn.addEventListener('click', () => autofillThisPage({ useAi: true }));
@@ -884,11 +890,14 @@ function clearOpenAiKeyError() {
   }
 }
 
+function openSettingsPanel() {
+  activateExtensionTab('settings', { tier: 'settings' });
+}
+
 function showOpenAiKeyRequired(message) {
   const text = message || 'OpenAI API key is required. Enter your key below and click Save AI settings.';
   showStatus(text, 'error', 7000);
-  const settingsTab = document.querySelector('.tab[data-tab="settings"]');
-  if (settingsTab) settingsTab.click();
+  openSettingsPanel();
   window.setTimeout(() => {
     const input = document.getElementById('openaiApiKeySetting');
     const hint = document.getElementById('openaiApiKeyHint');
@@ -990,14 +999,42 @@ function resetSettingsForm(event) {
   showStatus('Defaults loaded. Click Save Settings to apply.', 'info');
 }
 
+function activateExtensionTab(tabId, options = {}) {
+  const tier = options.tier || 'main';
+
+  document.querySelectorAll('.tab-panel').forEach((panel) => {
+    panel.classList.toggle('active', panel.id === `tab-${tabId}`);
+  });
+
+  const settingsBtn = document.getElementById('headerSettingsBtn');
+  const isSettings = tabId === 'settings' || tier === 'settings';
+
+  if (settingsBtn) {
+    settingsBtn.classList.toggle('active', isSettings);
+  }
+
+  document.querySelectorAll('.tab-main').forEach((btn) => {
+    btn.classList.toggle('active', !isSettings && tier === 'main' && btn.dataset.tab === tabId);
+  });
+
+  document.querySelectorAll('.tab-sub').forEach((btn) => {
+    btn.classList.toggle('active', !isSettings && tier === 'sub' && btn.dataset.tab === tabId);
+  });
+}
+
 function setupTabs() {
-  document.querySelectorAll('.tab').forEach((btn) => {
+  document.querySelectorAll('.tab-main, .tab-sub').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item === btn));
-      document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `tab-${tab}`));
+      activateExtensionTab(btn.dataset.tab, { tier: btn.dataset.tier || 'main' });
     });
   });
+
+  const settingsBtn = document.getElementById('headerSettingsBtn');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      openSettingsPanel();
+    });
+  }
 }
 
 function loadAllData() {
@@ -2342,17 +2379,104 @@ function downloadUploadedFile(entry) {
   a.remove();
 }
 
+async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
+  const { response, tab } = await sendToActiveTab({ action: 'getJobFields' });
+  if (!response?.success && !response?.job_title && !response?.company_name) {
+    throw new Error(response?.error || 'Could not read job info from this page.');
+  }
+
+  const jobTitle = response.job_title || '';
+  const company = response.company_name || '';
+  const jobLink = response.job_link || tab.url || '';
+
+  const setValue = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+  };
+
+  setValue('jobCompany', company);
+  setValue('jobTitle', jobTitle);
+  setValue('jobLink', jobLink);
+  setValue('regJobTitle', jobTitle);
+  setValue('regCompany', company);
+  setValue('regJobLink', jobLink);
+
+  const urlEl = document.getElementById('currentUrl');
+  if (urlEl) urlEl.textContent = jobLink;
+
+  const regStatus = document.getElementById('registerStatus');
+  if (regStatus) {
+    regStatus.textContent = 'Job info loaded from current tab.';
+    regStatus.className = 'register-status is-success';
+    regStatus.hidden = false;
+  }
+
+  if (showSuccess) showStatus('Job info refreshed from current tab.', 'success');
+  return { jobTitle, company, jobLink };
+}
+
 async function scrapeCurrentJob(showSuccess = true) {
   try {
-    const { response, tab } = await sendToActiveTab({ action: 'getJobFields' });
-    if (!response || !response.success) throw new Error(response?.error || 'Could not scrape job info.');
-    document.getElementById('jobCompany').value = response.company_name || '';
-    document.getElementById('jobTitle').value = response.job_title || '';
-    document.getElementById('jobLink').value = response.job_link || tab.url || '';
-    document.getElementById('currentUrl').textContent = response.job_link || tab.url || '';
-    if (showSuccess) showStatus('Job info loaded from current tab.', 'success');
+    await scrapeJobInfoToAllForms({ showSuccess });
   } catch (error) {
-    if (showSuccess) showStatus(error.message, 'error');
+    const msg = error.message || String(error);
+    const friendly = /receiving end does not exist/i.test(msg)
+      ? 'Cannot read this tab. Reload the job page, then use Refresh in the header.'
+      : msg;
+    if (showSuccess) showStatus(friendly, 'error');
+  }
+}
+
+async function globalRefreshCurrentTab() {
+  const btn = document.getElementById('globalRefreshBtn');
+  if (btn?.disabled) return;
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-spinning');
+    }
+    showStatus('Refreshing current tab…', 'info', 0);
+
+    const tab = await getActiveTab();
+    if (!tab?.url || !/^https?:\/\//.test(tab.url)) {
+      throw new Error('Open a normal web page first.');
+    }
+
+    try {
+      await sendToActiveTab({ action: 'prepareForScan' });
+    } catch (_) {
+      // optional scroll-to-top before scan
+    }
+
+    await scrapeJobInfoToAllForms({ showSuccess: false });
+    await scanCurrentPage({ silent: true });
+
+    const fieldCount = currentFields.length;
+    const adapter = lastAdapterDebug?.adapter;
+    const adapterNote = adapter ? ` · ${adapter}` : '';
+    showStatus(
+      `Refreshed · ${fieldCount} field${fieldCount === 1 ? '' : 's'} detected${adapterNote}.`,
+      'success',
+      3500
+    );
+  } catch (error) {
+    const msg = error.message || String(error);
+    const friendly = /receiving end does not exist/i.test(msg)
+      ? 'Cannot refresh this tab. Reload the page, then try again.'
+      : msg;
+    showStatus(friendly, 'error');
+    const regStatus = document.getElementById('registerStatus');
+    if (regStatus) {
+      regStatus.textContent = friendly;
+      regStatus.className = 'register-status is-error';
+      regStatus.hidden = false;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-spinning');
+    }
   }
 }
 
