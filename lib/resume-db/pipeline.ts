@@ -71,3 +71,30 @@ export async function removeApplicationFromPipeline(
 export function isInPipeline(app: Pick<ResumeDbApplication, "pipelineJobId" | "apply">): boolean {
   return app.pipelineJobId != null || app.apply === "In Pipeline";
 }
+
+export async function syncPipelineJobFromApplication(
+  applicationId: number,
+): Promise<void> {
+  const app = await getApplicationById(applicationId);
+  if (!app?.pipelineJobId) return;
+
+  const supabase = getSupabaseAdminClient();
+  const noteParts: string[] = [];
+  if (app.coverLetterUrl) {
+    noteParts.push(`Cover letter: ${app.coverLetterUrl}`);
+  }
+  noteParts.push(`Resume DB #${app.id}`);
+
+  const { error } = await supabase
+    .from("jobs")
+    .update({
+      title: app.jobTitle || "Role",
+      company_name: app.company || "Company",
+      job_link: app.jobLink || "",
+      resume_link: app.resumeUrl || "",
+      note: noteParts.join("\n"),
+    } as never)
+    .eq("id", app.pipelineJobId);
+
+  if (error) throw new Error(error.message);
+}

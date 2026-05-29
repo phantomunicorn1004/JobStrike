@@ -31,6 +31,7 @@ import {
   Settings2,
   Trash2,
   Pencil,
+  GripVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +55,13 @@ function slug(name: string): string {
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "");
+}
+
+function reorderList<T>(list: T[], fromIndex: number, toIndex: number): T[] {
+  const next = [...list];
+  const [removed] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, removed);
+  return next;
 }
 
 type ProfileOption = { id: number; full_name: string };
@@ -80,6 +88,9 @@ export function JobsPipelineBoard() {
   const [newStageName, setNewStageName] = useState("");
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [stageDragId, setStageDragId] = useState<string | null>(null);
+  const [stageDropTargetId, setStageDropTargetId] = useState<string | null>(null);
+  const [savingStageOrder, setSavingStageOrder] = useState(false);
   const supabase = getSupabaseBrowserClient();
 
   const fetchStages = useCallback(async (): Promise<StageConfig[]> => {
@@ -408,6 +419,67 @@ export function JobsPipelineBoard() {
     [supabase, fetchStages]
   );
 
+  const persistStageOrder = useCallback(
+    async (ordered: StageConfig[]) => {
+      const withOrder = ordered.map((stage, index) => ({
+        ...stage,
+        sort_order: index,
+      }));
+      setStages(withOrder);
+      const results = await Promise.all(
+        withOrder.map((stage) =>
+          supabase
+            .from("pipeline_stages")
+            .update({ sort_order: stage.sort_order })
+            .eq("id", stage.id),
+        ),
+      );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
+    },
+    [supabase],
+  );
+
+  const handleStageDragStart = (e: React.DragEvent, stageId: string) => {
+    e.dataTransfer.setData("text/stage-id", stageId);
+    e.dataTransfer.effectAllowed = "move";
+    setStageDragId(stageId);
+  };
+
+  const handleStageDragEnd = () => {
+    setStageDragId(null);
+    setStageDropTargetId(null);
+  };
+
+  const handleStageDragOver = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (stageDropTargetId !== targetId) setStageDropTargetId(targetId);
+  };
+
+  const handleStageDrop = async (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    const sourceId = e.dataTransfer.getData("text/stage-id");
+    setStageDragId(null);
+    setStageDropTargetId(null);
+    if (!sourceId || sourceId === targetId || savingStageOrder) return;
+
+    const current = stages.length ? stages : DEFAULT_STAGES;
+    const fromIndex = current.findIndex((s) => s.id === sourceId);
+    const toIndex = current.findIndex((s) => s.id === targetId);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+
+    setSavingStageOrder(true);
+    try {
+      await persistStageOrder(reorderList(current, fromIndex, toIndex));
+    } catch (error) {
+      console.error("Reorder stages error:", error);
+      await fetchStages();
+    } finally {
+      setSavingStageOrder(false);
+    }
+  };
+
   const displayStages = stages.length ? stages : DEFAULT_STAGES;
 
   if (isLoading) {
@@ -434,14 +506,38 @@ export function JobsPipelineBoard() {
               <DialogTitle>Stages</DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
-              Add, remove, or rename stages. &quot;Applied&quot; is the default and cannot be removed.
+              Drag stages to reorder. Add, remove, or rename stages. &quot;Applied&quot; is the
+              default and cannot be removed.
             </p>
             <div className="space-y-2 py-2">
               {displayStages.map((stage) => (
                 <div
                   key={stage.id}
-                  className="flex items-center gap-2 rounded-lg border p-2"
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg border p-2 transition-colors",
+                    stageDragId === stage.id && "opacity-50",
+                    stageDropTargetId === stage.id &&
+                      stageDragId !== stage.id &&
+                      "border-primary bg-primary/5",
+                  )}
+                  onDragOver={(e) => handleStageDragOver(e, stage.id)}
+                  onDrop={(e) => handleStageDrop(e, stage.id)}
                 >
+                  <button
+                    type="button"
+                    draggable={!savingStageOrder && editingStageId !== stage.id}
+                    onDragStart={(e) => handleStageDragStart(e, stage.id)}
+                    onDragEnd={handleStageDragEnd}
+                    disabled={savingStageOrder || editingStageId === stage.id}
+                    className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+                      "cursor-grab active:cursor-grabbing hover:bg-muted hover:text-foreground",
+                      "disabled:cursor-not-allowed disabled:opacity-40",
+                    )}
+                    aria-label={`Drag to reorder ${stage.name}`}
+                  >
+                    <GripVertical className="h-4 w-4" />
+                  </button>
                   {editingStageId === stage.id ? (
                     <>
                       <Input

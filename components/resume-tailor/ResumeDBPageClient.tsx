@@ -21,6 +21,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ResumeDBEditDialog } from "@/components/resume-tailor/ResumeDBEditDialog";
 import {
   Select,
   SelectContent,
@@ -31,15 +33,20 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Download,
   ExternalLink,
   Eye,
   FileJson,
   Loader2,
+  Pencil,
   RefreshCw,
   Search,
   Trash2,
   Workflow,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -63,6 +70,44 @@ export type ResumeDbRow = {
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
+type SortKey = "company" | "jobTitle" | "pipeline" | null;
+type SortDir = "asc" | "desc";
+
+function SortableHead({
+  label,
+  active,
+  direction,
+  onSort,
+  className,
+}: {
+  label: string;
+  active: boolean;
+  direction: SortDir;
+  onSort: () => void;
+  className?: string;
+}) {
+  const Icon = active
+    ? direction === "asc"
+      ? ArrowUp
+      : ArrowDown
+    : ArrowUpDown;
+  return (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={onSort}
+        className={cn(
+          "inline-flex items-center gap-1 font-semibold hover:text-foreground transition-colors",
+          active ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {label}
+        <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
+      </button>
+    </TableHead>
+  );
+}
+
 function fileNameFromUrl(url: string, fallback: string): string {
   if (!url) return fallback;
   try {
@@ -85,6 +130,25 @@ function formatApplied(iso: string, fallback: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function isWithinAppliedDateRange(
+  appliedAt: string,
+  from: string,
+  to: string,
+): boolean {
+  if (!from && !to) return true;
+  const d = new Date(appliedAt);
+  if (Number.isNaN(d.getTime())) return false;
+  if (from) {
+    const start = new Date(`${from}T00:00:00`);
+    if (d < start) return false;
+  }
+  if (to) {
+    const end = new Date(`${to}T23:59:59.999`);
+    if (d > end) return false;
+  }
+  return true;
 }
 
 function PreviewDialog({
@@ -172,11 +236,20 @@ export function ResumeDBPageClient() {
   const [rows, setRows] = useState<ResumeDbRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(10);
   const [removingRow, setRemovingRow] = useState<number | null>(null);
   const [togglingRow, setTogglingRow] = useState<number | null>(null);
   const [preview, setPreview] = useState<{ title: string; url: string } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [editRow, setEditRow] = useState<ResumeDbRow | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [bulkRemoving, setBulkRemoving] = useState(false);
+  const [bulkExporting, setBulkExporting] = useState(false);
 
   const loadRows = useCallback(async () => {
     setIsLoading(true);
@@ -203,37 +276,73 @@ export function ResumeDBPageClient() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, pageSize]);
+  }, [search, pageSize, dateFrom, dateTo, sortKey, sortDir]);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [search, dateFrom, dateTo]);
+
+  const handleSort = (key: Exclude<SortKey, null>) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const hasActiveFilters = Boolean(search.trim() || dateFrom || dateTo);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [
-        r.entryId,
-        r.company,
-        r.jobTitle,
-        r.candidate,
-        r.jobLink,
-        r.apply,
-        r.date,
-        r.appliedAt,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
-    );
-  }, [rows, search]);
+    return rows.filter((r) => {
+      if (q) {
+        const haystack = [
+          r.entryId,
+          r.company,
+          r.jobTitle,
+          r.candidate,
+          r.jobLink,
+          r.apply,
+          r.date,
+          r.appliedAt,
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      if (!isWithinAppliedDateRange(r.appliedAt, dateFrom, dateTo)) return false;
+      return true;
+    });
+  }, [rows, search, dateFrom, dateTo]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const sorted = useMemo(() => {
+    const list = [...filtered];
+    if (!sortKey) return list;
+    list.sort((a, b) => {
+      if (sortKey === "pipeline") {
+        const av = a.inPipeline ? 0 : 1;
+        const bv = b.inPipeline ? 0 : 1;
+        const cmp = av - bv;
+        return sortDir === "asc" ? cmp : -cmp;
+      }
+      const av = (sortKey === "company" ? a.company : a.jobTitle).trim().toLowerCase();
+      const bv = (sortKey === "company" ? b.company : b.jobTitle).trim().toLowerCase();
+      const cmp = av.localeCompare(bv, undefined, { sensitivity: "base" });
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return list;
+  }, [filtered, sortKey, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageRows = useMemo(() => {
     const start = (safePage - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, safePage, pageSize]);
+    return sorted.slice(start, start + pageSize);
+  }, [sorted, safePage, pageSize]);
 
-  const rangeStart = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const rangeEnd = Math.min(safePage * pageSize, filtered.length);
+  const rangeStart = sorted.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(safePage * pageSize, sorted.length);
 
   const handleDelete = async (rowIndex: number) => {
     if (!confirm("Delete this application?")) return;
@@ -293,26 +402,130 @@ export function ResumeDBPageClient() {
     }
   };
 
+  const filteredIds = useMemo(
+    () => sorted.map((r) => r.rowIndex),
+    [sorted],
+  );
+
+  const allFilteredSelected =
+    filteredIds.length > 0 && filteredIds.every((id) => selectedIds.has(id));
+  const someFilteredSelected =
+    filteredIds.some((id) => selectedIds.has(id)) && !allFilteredSelected;
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredIds));
+    }
+  };
+
+  const toggleSelectRow = (rowIndex: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowIndex)) next.delete(rowIndex);
+      else next.add(rowIndex);
+      return next;
+    });
+  };
+
+  const downloadJsonBlob = (fileName: string, data: unknown) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const downloadJson = async (row: ResumeDbRow) => {
     try {
-      const res = await fetch(
-        `/api/resume-db/export?id=${row.rowIndex}&download=1`,
-      );
+      const res = await fetch(`/api/resume-db/export?id=${row.rowIndex}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Export failed");
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `resume-db-${row.entryId || row.rowIndex}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const data = await res.json();
+      downloadJsonBlob(
+        `resume-db-${row.entryId || row.rowIndex}.json`,
+        data.job ?? data,
+      );
       toast.success("JSON downloaded.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Export failed");
     }
+  };
+
+  const downloadSelectedJson = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkExporting(true);
+    try {
+      const jobs = await Promise.all(
+        ids.map(async (id) => {
+          const res = await fetch(`/api/resume-db/export?id=${id}`);
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Export failed for #${id}`);
+          }
+          const data = await res.json();
+          return data.job ?? data;
+        }),
+      );
+      downloadJsonBlob(
+        `resume-db-export-${ids.length}-${Date.now()}.json`,
+        jobs,
+      );
+      toast.success(`Downloaded JSON for ${ids.length} application(s).`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Bulk export failed");
+    } finally {
+      setBulkExporting(false);
+    }
+  };
+
+  const deleteSelected = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (
+      !confirm(
+        `Delete ${ids.length} selected application${ids.length === 1 ? "" : "s"}?`,
+      )
+    ) {
+      return;
+    }
+    setBulkRemoving(true);
+    try {
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          const res = await fetch(`/api/resume-db?id=${id}`, { method: "DELETE" });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Delete failed for #${id}`);
+          }
+        }),
+      );
+      void results;
+      toast.success(`Deleted ${ids.length} application(s).`);
+      setSelectedIds(new Set());
+      loadRows();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Bulk delete failed");
+    } finally {
+      setBulkRemoving(false);
+    }
+  };
+
+  const handleEditSaved = (updated: Partial<ResumeDbRow>) => {
+    if (updated.rowIndex == null) return;
+    setRows((prev) =>
+      prev.map((r) =>
+        r.rowIndex === updated.rowIndex ? { ...r, ...updated } : r,
+      ),
+    );
   };
 
   return (
@@ -342,24 +555,172 @@ export function ResumeDBPageClient() {
         </div>
 
         <Card className="rounded-2xl border-border/60 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <CardTitle className="text-lg">Registered applications</CardTitle>
-                <CardDescription>
-                  Preview documents, export JSON, or send to the job pipeline.
-                </CardDescription>
-              </div>
-              <div className="relative w-full sm:max-w-xs">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <CardHeader className="pb-3 space-y-3">
+            <div>
+              <CardTitle className="text-lg">Registered applications</CardTitle>
+              <CardDescription>
+                Preview documents, export JSON, or send to the job pipeline.
+              </CardDescription>
+            </div>
+
+            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-end gap-2">
+              <div className="relative flex-1 xl:max-w-[220px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                 <Input
-                  className="pl-9 rounded-xl bg-muted/30 border-border/60"
+                  className="pl-9 rounded-xl bg-muted/30 border-border/60 h-9"
                   placeholder="Search company, role, ID…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+                  <span className="sr-only">Applied from</span>
+                  <span aria-hidden="true">From</span>
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="h-9 w-[140px] rounded-xl bg-muted/30 border-border/60 text-xs"
+                    aria-label="Applied date from"
+                  />
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+                  <span className="sr-only">Applied to</span>
+                  <span aria-hidden="true">To</span>
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    min={dateFrom || undefined}
+                    className="h-9 w-[140px] rounded-xl bg-muted/30 border-border/60 text-xs"
+                    aria-label="Applied date to"
+                  />
+                </label>
+
+                {hasActiveFilters && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 rounded-xl text-xs px-2"
+                    onClick={() => {
+                      setSearch("");
+                      setDateFrom("");
+                      setDateTo("");
+                    }}
+                  >
+                    <X className="h-3.5 w-3.5 mr-1" />
+                    Clear
+                  </Button>
+                )}
+
+                <div className="flex items-center gap-1.5 ml-auto xl:ml-0 shrink-0 border-l border-border/60 pl-2">
+                  <span className="text-xs text-muted-foreground hidden sm:inline whitespace-nowrap">
+                    Rows
+                  </span>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(v) => setPageSize(Number(v))}
+                  >
+                    <SelectTrigger className="h-9 w-[68px] rounded-xl" size="sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_SIZE_OPTIONS.map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-xl"
+                    disabled={safePage <= 1 || sorted.length === 0}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs tabular-nums min-w-[72px] text-center text-muted-foreground">
+                    {sorted.length === 0
+                      ? "0 / 0"
+                      : `${safePage} / ${totalPages}`}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 rounded-xl"
+                    disabled={safePage >= totalPages || sorted.length === 0}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
+
+            {!isLoading && selectedIds.size > 0 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
+                <span className="text-sm font-medium">
+                  {selectedIds.size} selected
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  disabled={bulkExporting}
+                  onClick={downloadSelectedJson}
+                >
+                  {bulkExporting ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <FileJson className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  Download JSON
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg text-destructive hover:text-destructive"
+                  disabled={bulkRemoving}
+                  onClick={deleteSelected}
+                >
+                  {bulkRemoving ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  Remove selected
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 rounded-lg ml-auto"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Clear selection
+                </Button>
+              </div>
+            )}
+            {!isLoading && (
+              <p className="text-xs text-muted-foreground">
+                {filtered.length === 0
+                  ? rows.length === 0
+                    ? "No applications yet."
+                    : "No matches for your filters."
+                  : `Showing ${rangeStart}–${rangeEnd} of ${sorted.length}${
+                      hasActiveFilters ? ` (${rows.length} total)` : ""
+                    }`}
+              </p>
+            )}
           </CardHeader>
           <CardContent className="p-0">
             {isLoading ? (
@@ -371,36 +732,73 @@ export function ResumeDBPageClient() {
               <p className="p-8 text-sm text-muted-foreground text-center">
                 {rows.length === 0
                   ? "No entries yet. Use the extension Register tab on a job posting."
-                  : "No matches for your search."}
+                  : "No matches for your search or date filters."}
               </p>
             ) : (
-              <>
-                <div className="overflow-x-auto">
+              <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent bg-muted/30">
-                        <TableHead className="font-semibold w-[72px]">ID</TableHead>
-                        <TableHead className="font-semibold">Company</TableHead>
+                        <TableHead className="w-[44px]">
+                          <Checkbox
+                            checked={
+                              allFilteredSelected
+                                ? true
+                                : someFilteredSelected
+                                  ? "indeterminate"
+                                  : false
+                            }
+                            onCheckedChange={toggleSelectAll}
+                            aria-label="Select all filtered applications"
+                          />
+                        </TableHead>
+                        <TableHead className="font-semibold w-[52px]">No</TableHead>
                         <TableHead className="font-semibold">Job link</TableHead>
-                        <TableHead className="font-semibold">Job title</TableHead>
+                        <SortableHead
+                          label="Company"
+                          active={sortKey === "company"}
+                          direction={sortDir}
+                          onSort={() => handleSort("company")}
+                        />
+                        <SortableHead
+                          label="Job title"
+                          active={sortKey === "jobTitle"}
+                          direction={sortDir}
+                          onSort={() => handleSort("jobTitle")}
+                          className="max-w-[160px]"
+                        />
                         <TableHead className="font-semibold">Resume</TableHead>
                         <TableHead className="font-semibold">Cover letter</TableHead>
-                        <TableHead className="font-semibold w-[120px]">Pipeline</TableHead>
+                        <SortableHead
+                          label="Pipeline"
+                          active={sortKey === "pipeline"}
+                          direction={sortDir}
+                          onSort={() => handleSort("pipeline")}
+                          className="w-[120px]"
+                        />
                         <TableHead className="font-semibold w-[160px]">Applied</TableHead>
+                        <TableHead className="font-semibold w-[72px]">JSON</TableHead>
                         <TableHead className="font-semibold text-right w-[88px]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {pageRows.map((row) => (
+                      {pageRows.map((row, index) => (
                         <TableRow
                           key={row.rowIndex}
-                          className="group hover:bg-muted/20 transition-colors"
+                          className={cn(
+                            "group hover:bg-muted/20 transition-colors",
+                            selectedIds.has(row.rowIndex) && "bg-primary/5",
+                          )}
                         >
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {String(row.entryId || row.rowIndex).slice(0, 12)}
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedIds.has(row.rowIndex)}
+                              onCheckedChange={() => toggleSelectRow(row.rowIndex)}
+                              aria-label={`Select ${row.company || "application"}`}
+                            />
                           </TableCell>
-                          <TableCell className="font-medium max-w-[120px] truncate">
-                            {row.company || "—"}
+                          <TableCell className="text-sm tabular-nums text-muted-foreground">
+                            {rangeStart + index}
                           </TableCell>
                           <TableCell>
                             {row.jobLink ? (
@@ -422,6 +820,9 @@ export function ResumeDBPageClient() {
                             ) : (
                               "—"
                             )}
+                          </TableCell>
+                          <TableCell className="font-medium max-w-[120px] truncate">
+                            {row.company || "—"}
                           </TableCell>
                           <TableCell className="max-w-[150px] truncate">
                             {row.jobTitle || "—"}
@@ -482,21 +883,36 @@ export function ResumeDBPageClient() {
                             {formatApplied(row.appliedAt, row.date)}
                           </TableCell>
                           <TableCell>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 w-7 p-0 rounded-lg"
+                              title="Download JSON"
+                              onClick={() => downloadJson(row)}
+                            >
+                              <FileJson className="h-3.5 w-3.5" />
+                              <span className="sr-only">Download JSON</span>
+                            </Button>
+                          </TableCell>
+                          <TableCell>
                             <div className="flex justify-end gap-0.5 opacity-80 group-hover:opacity-100">
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 rounded-lg"
-                                title="Download JSON"
-                                onClick={() => downloadJson(row)}
+                                title="Edit"
+                                onClick={() => {
+                                  setEditRow(row);
+                                  setEditOpen(true);
+                                }}
                               >
-                                <FileJson className="h-4 w-4" />
+                                <Pencil className="h-4 w-4" />
                               </Button>
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
-                                title="Delete"
+                                title="Remove"
                                 disabled={removingRow === row.rowIndex}
                                 onClick={() => handleDelete(row.rowIndex)}
                               >
@@ -513,59 +929,6 @@ export function ResumeDBPageClient() {
                     </TableBody>
                   </Table>
                 </div>
-
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t bg-muted/20 rounded-b-2xl">
-                  <p className="text-xs text-muted-foreground">
-                    Showing {rangeStart}–{rangeEnd} of {filtered.length}
-                    {search.trim() ? ` (filtered from ${rows.length})` : ""}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>Rows per page</span>
-                      <Select
-                        value={String(pageSize)}
-                        onValueChange={(v) => setPageSize(Number(v))}
-                      >
-                        <SelectTrigger className="h-8 w-[72px] rounded-lg" size="sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PAGE_SIZE_OPTIONS.map((n) => (
-                            <SelectItem key={n} value={String(n)}>
-                              {n}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 rounded-lg"
-                        disabled={safePage <= 1}
-                        onClick={() => setPage((p) => Math.max(1, p - 1))}
-                        aria-label="Previous page"
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </Button>
-                      <span className="text-xs tabular-nums min-w-[80px] text-center">
-                        Page {safePage} of {totalPages}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 rounded-lg"
-                        disabled={safePage >= totalPages}
-                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                        aria-label="Next page"
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </>
             )}
           </CardContent>
         </Card>
@@ -575,6 +938,16 @@ export function ResumeDBPageClient() {
           onOpenChange={(open) => !open && setPreview(null)}
           title={preview?.title ?? "Preview"}
           url={preview?.url ?? ""}
+        />
+
+        <ResumeDBEditDialog
+          row={editRow}
+          open={editOpen}
+          onOpenChange={(open) => {
+            setEditOpen(open);
+            if (!open) setEditRow(null);
+          }}
+          onSaved={handleEditSaved}
         />
       </div>
     </JobsLayout>

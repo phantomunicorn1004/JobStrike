@@ -19,6 +19,8 @@ type DbRow = {
   applied_at: string;
   created_at: string;
   pipeline_job_id: number | null;
+  resume_storage_path: string | null;
+  cover_letter_storage_path: string | null;
 };
 
 function mapRow(row: DbRow): ResumeDbApplication {
@@ -36,6 +38,8 @@ function mapRow(row: DbRow): ResumeDbApplication {
     appliedAt: row.applied_at,
     createdAt: row.created_at,
     pipelineJobId: row.pipeline_job_id ?? null,
+    resumeStoragePath: row.resume_storage_path ?? null,
+    coverLetterStoragePath: row.cover_letter_storage_path ?? null,
   };
 }
 
@@ -119,6 +123,12 @@ export async function updateApplication(
   if (input.resumeUrl !== undefined) patch.resume_url = input.resumeUrl;
   if (input.coverLetterUrl !== undefined) patch.cover_letter_url = input.coverLetterUrl;
   if (input.pipelineJobId !== undefined) patch.pipeline_job_id = input.pipelineJobId;
+  if (input.resumeStoragePath !== undefined) {
+    patch.resume_storage_path = input.resumeStoragePath;
+  }
+  if (input.coverLetterStoragePath !== undefined) {
+    patch.cover_letter_storage_path = input.coverLetterStoragePath;
+  }
 
   const { error } = await supabase
     .from("resume_db_applications")

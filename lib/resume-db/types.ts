@@ -12,6 +12,8 @@ export type ResumeDbApplication = {
   appliedAt: string;
   createdAt: string;
   pipelineJobId: number | null;
+  resumeStoragePath?: string | null;
+  coverLetterStoragePath?: string | null;
 };
 
 export type ResumeDbApplicationInput = {
