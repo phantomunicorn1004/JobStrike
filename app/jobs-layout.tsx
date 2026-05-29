@@ -103,9 +103,9 @@ export default function JobsLayout({
           >
             <Link
               href="/dashboard"
-              aria-label="Remote work helper"
+              aria-label="Remote Helper"
               className={cn(
-                "flex min-w-0 flex-1 items-center gap-3",
+                "flex min-w-0 flex-1 items-center gap-3.5",
                 "group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center",
               )}
             >
@@ -114,21 +114,21 @@ export default function JobsLayout({
                 alt=""
                 aria-hidden="true"
                 className={cn(
-                  "h-14 w-14 shrink-0 rounded-2xl object-contain",
-                  "group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:w-9 group-data-[collapsible=icon]:rounded-xl",
+                  "h-[4.5rem] w-[4.5rem] shrink-0 rounded-2xl object-contain",
+                  "group-data-[collapsible=icon]:h-10 group-data-[collapsible=icon]:w-10 group-data-[collapsible=icon]:rounded-xl",
                 )}
               />
               <div
                 className={cn(
-                  "min-w-0 leading-tight",
+                  "min-w-0 leading-none",
                   "group-data-[collapsible=icon]:hidden",
                 )}
               >
-                <span className="block text-lg font-bold tracking-tight text-foreground">
-                  Remote work
+                <span className="block text-sm font-bold tracking-[0.22em] text-foreground uppercase">
+                  Remote
                 </span>
-                <span className="block text-lg font-bold tracking-tight text-primary">
-                  helper
+                <span className="mt-1.5 block text-sm font-bold tracking-[0.28em] text-primary uppercase">
+                  Helper
                 </span>
               </div>
             </Link>
