@@ -31,14 +31,16 @@ export function ResumeTailorWorkflow() {
     ? workflow.nodes.find((n) => n.id === selectedNodeId)
     : null;
 
-  const hasResumeFromDb = workflow.nodes.some(
-    (n) => n.type === "resumeSelection" && n.data?.resumeId != null && !Number.isNaN(Number(n.data.resumeId))
-  );
+  const hasResumeFromDb = workflow.nodes.some((n) => {
+    if (n.type !== "resumeSelection") return false;
+    const raw = n.data?.sheetRowIndex ?? n.data?.resumeId;
+    return raw != null && !Number.isNaN(Number(raw)) && Number(raw) >= 2;
+  });
   const canRun = resumeFile || hasResumeFromDb;
 
   const handleRun = async () => {
     if (!canRun) {
-      toast.error("Select a resume from ResumeDB in the Resume Selection node, or upload a file.");
+      toast.error("Select a Resume DB sheet row in Resume Selection, or upload a file.");
       return;
     }
     setIsRunning(true);

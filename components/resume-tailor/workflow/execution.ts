@@ -20,7 +20,7 @@ import type { TemplateId } from "@/lib/resumeTemplates/types";
 export type NodeExecutionStatus = "idle" | "running" | "success" | "error";
 
 export interface RunWorkflowOptions {
-  /** Resume file for Resume Selection (required when no resumeId load is available). */
+  /** Resume file for Resume Selection (required when no sheet row is selected). */
   resumeFile?: File | null;
   /** OpenAI API key from workflow Settings (used by JD Parsing and Tailor AI). */
   openaiApiKey?: string;
@@ -80,7 +80,11 @@ function getInitialInput(workflow: WorkflowState): WorkflowInput | null {
     companyName: String(d.companyName ?? "").trim(),
     jobDescription: String(d.jobDescription ?? "").trim(),
     jobLink: d.jobLink ? String(d.jobLink).trim() : undefined,
-    resumeId: d.resumeId ? String(d.resumeId).trim() : undefined,
+    sheetRowIndex: d.sheetRowIndex
+      ? String(d.sheetRowIndex).trim()
+      : d.resumeId
+        ? String(d.resumeId).trim()
+        : undefined,
     templateId: (d.templateId as TemplateId) ?? "modern",
     options: d.options as WorkflowInput["options"],
   };
@@ -150,18 +154,30 @@ export async function runResumeWorkflow(
 
       case "resumeSelection": {
         const selectionData = nodeMap.get(node.id)?.data as Record<string, unknown> | undefined;
-        const resumeDbId = selectionData?.resumeId as number | undefined;
+        const sheetRowRaw =
+          selectionData?.sheetRowIndex ?? selectionData?.resumeId;
+        const sheetRowIndex =
+          sheetRowRaw != null && String(sheetRowRaw).trim() !== ""
+            ? Number(sheetRowRaw)
+            : NaN;
 
-        if (resumeDbId != null && !Number.isNaN(resumeDbId)) {
-          const res = await fetch(`/api/resume-db?id=${resumeDbId}`);
+        if (!Number.isNaN(sheetRowIndex) && sheetRowIndex >= 2) {
+          const res = await fetch(
+            `/api/resume-db?id=${sheetRowIndex}&parse=true`,
+          );
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load resume from ResumeDB.");
+            throw new Error(
+              err.error ||
+                "Failed to load resume from Google Sheet (resume_url).",
+            );
           }
           const data = await res.json();
           const r = data.resume;
           if (!r?.content || !r?.structure) {
-            throw new Error("Resume from DB missing content or structure.");
+            throw new Error(
+              "Could not parse resume from resume_url. Check the Google Drive link and sharing.",
+            );
           }
           ctx.resume = { content: r.content, structure: r.structure };
         } else if (options.resumeFile) {
@@ -176,7 +192,7 @@ export async function runResumeWorkflow(
           ctx.resume = { content, structure };
         } else {
           throw new Error(
-            "Resume Selection: choose a resume from ResumeDB in the node settings, or upload a file when running the workflow."
+            "Resume Selection: choose a sheet row from Resume DB, or upload a file when running the workflow."
           );
         }
         break;

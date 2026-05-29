@@ -14,7 +14,7 @@ export const SAMPLE_WORKFLOW: WorkflowState = {
         companyName: "",
         jobDescription: "",
         jobLink: "",
-        resumeId: "",
+        sheetRowIndex: "",
         templateId: "modern",
         options: { maxPages: 2, tone: "professional", atsMode: true, preserveJobOrder: true },
       },
@@ -24,7 +24,7 @@ export const SAMPLE_WORKFLOW: WorkflowState = {
       type: "resumeSelection",
       label: "Resume Selection",
       position: { x: 260, y: 200 },
-      description: "Choose one JSON resume",
+      description: "Choose a sheet row (resume_url on Drive)",
       data: {},
     },
     {

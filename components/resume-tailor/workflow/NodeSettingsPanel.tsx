@@ -47,7 +47,17 @@ export function NodeSettingsPanel({
   const def = getNodeDefinition(node.type);
   const data = node.data ?? {};
 
-  const [resumeDbList, setResumeDbList] = useState<{ id: number; roleTitle: string }[]>([]);
+  const [resumeDbList, setResumeDbList] = useState<
+    {
+      rowIndex: number;
+      id?: number;
+      candidate: string;
+      jobTitle: string;
+      company: string;
+      resumeUrl: string;
+      roleTitle?: string;
+    }[]
+  >([]);
   const [loadingResumeDb, setLoadingResumeDb] = useState(false);
   useEffect(() => {
     if (node.type !== "resumeSelection") return;
@@ -83,7 +93,7 @@ export function NodeSettingsPanel({
       const companyName = (data.companyName as string) ?? "";
       const jobDescription = (data.jobDescription as string) ?? "";
       const jobLink = (data.jobLink as string) ?? "";
-      const resumeId = (data.resumeId as string) ?? "";
+      const sheetRowIndex = (data.sheetRowIndex as string) ?? "";
       const templateId = (data.templateId as TemplateId) ?? "modern";
       const options = (data.options as { maxPages?: number; tone?: string; atsMode?: boolean; preserveJobOrder?: boolean }) ?? {};
       return (
@@ -126,11 +136,11 @@ export function NodeSettingsPanel({
             />
           </div>
           <div>
-            <Label>Resume ID</Label>
+            <Label>Sheet row (optional)</Label>
             <Input
-              value={resumeId}
-              onChange={(e) => setData("resumeId", e.target.value)}
-              placeholder="Resume identifier"
+              value={sheetRowIndex}
+              onChange={(e) => setData("sheetRowIndex", e.target.value)}
+              placeholder="Row index from Resume DB"
               className="mt-1"
             />
           </div>
@@ -191,32 +201,47 @@ export function NodeSettingsPanel({
 
     case "resumeSelection": {
       const NONE_VALUE = "__none__";
-      const selectedResumeId = data.resumeId != null ? String(data.resumeId) : NONE_VALUE;
+      const selectedRow =
+        data.sheetRowIndex != null
+          ? String(data.sheetRowIndex)
+          : data.resumeId != null
+            ? String(data.resumeId)
+            : NONE_VALUE;
       return (
         <div className="space-y-3 text-sm">
           <p className="text-muted-foreground text-xs">{def.description}</p>
           <div>
-            <Label>Resume from ResumeDB</Label>
+            <Label>Entry from Resume DB (Google Sheet)</Label>
             <Select
-              value={selectedResumeId}
-              onValueChange={(v) => setData("resumeId", v === NONE_VALUE ? undefined : Number(v))}
+              value={selectedRow}
+              onValueChange={(v) =>
+                setData("sheetRowIndex", v === NONE_VALUE ? undefined : Number(v))
+              }
               disabled={loadingResumeDb}
             >
               <SelectTrigger className="mt-1 w-full">
-                <SelectValue placeholder={loadingResumeDb ? "Loading…" : "Choose one resume"} />
+                <SelectValue placeholder={loadingResumeDb ? "Loading…" : "Choose a sheet row"} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE_VALUE}>— None (use uploaded file when running) —</SelectItem>
-                {resumeDbList.map((r) => (
-                  <SelectItem key={r.id} value={String(r.id)}>
-                    {r.roleTitle || `Resume #${r.id}`}
-                  </SelectItem>
-                ))}
+                {resumeDbList.map((r) => {
+                  const rowIndex = r.rowIndex ?? r.id ?? 0;
+                  const label =
+                    [r.candidate, r.jobTitle, r.company].filter(Boolean).join(" — ") ||
+                    r.roleTitle ||
+                    `Row ${rowIndex}`;
+                  return (
+                    <SelectItem key={rowIndex} value={String(rowIndex)}>
+                      {label}
+                      {!r.resumeUrl ? " (no resume_url)" : ""}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
             <p className="text-muted-foreground text-xs mt-1">
-              Choose a registered resume as the original for tailoring. If none is selected, upload a
-              file when running the workflow.
+              Loads the resume from <span className="font-medium">resume_url</span> on Google Drive.
+              Share the file with your service account. Or upload a file when running the workflow.
             </p>
           </div>
         </div>

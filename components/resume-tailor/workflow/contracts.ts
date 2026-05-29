@@ -13,7 +13,8 @@ export interface WorkflowInput {
   companyName: string;
   jobDescription: string;
   jobLink?: string;
-  resumeId?: string;
+  /** Google Sheet row index from Resume DB. */
+  sheetRowIndex?: string;
   templateId?: TemplateId;
   options?: {
     maxPages?: number;
