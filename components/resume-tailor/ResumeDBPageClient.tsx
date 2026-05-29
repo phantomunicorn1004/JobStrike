@@ -849,7 +849,7 @@ export function ResumeDBPageClient() {
           <div className="relative min-w-[160px] flex-1 sm:max-w-xs lg:max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
-              className="pl-9 rounded-xl bg-muted/30 border-border/60 h-9"
+              className="pl-9 rounded-xl bg-card h-9"
               placeholder="Search company, role, ID…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -993,7 +993,7 @@ export function ResumeDBPageClient() {
           </div>
         )}
 
-        <Card className="flex min-h-0 flex-1 flex-col gap-0 rounded-xl border-border/60 py-0 shadow-sm">
+        <Card className="flex min-h-0 flex-1 flex-col gap-0 rounded-xl py-0">
           <CardContent className="p-0">
             {isLoading ? (
               <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground sm:p-6">

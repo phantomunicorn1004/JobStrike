@@ -93,8 +93,8 @@ export default function JobsLayout({
 
   return (
     <SidebarProvider defaultOpen>
-      <Sidebar collapsible="icon" className="border-r-0">
-        <SidebarHeader className="min-w-0 overflow-hidden border-b border-border bg-background px-3 py-4">
+      <Sidebar collapsible="icon" className="border-r border-sidebar-border shadow-[2px_0_16px_rgba(102,102,255,0.06)]">
+        <SidebarHeader className="min-w-0 overflow-hidden border-b border-sidebar-border px-3 py-4">
           <div
             className={cn(
               "flex min-w-0 items-start justify-between gap-2",
@@ -144,7 +144,7 @@ export default function JobsLayout({
           </div>
         </SidebarHeader>
 
-        <SidebarContent className="min-w-0 overflow-x-hidden bg-background px-1 py-6">
+        <SidebarContent className="min-w-0 overflow-x-hidden px-1 py-6">
           <SidebarGroup className="p-0">
             <SidebarGroupContent>
               <SidebarMenu className="gap-1">
@@ -159,7 +159,7 @@ export default function JobsLayout({
           </SidebarGroup>
         </SidebarContent>
 
-        <SidebarFooter className="border-t border-border bg-background p-2">
+        <SidebarFooter className="border-t border-sidebar-border p-2">
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
@@ -185,7 +185,7 @@ export default function JobsLayout({
         <SidebarRail />
       </Sidebar>
 
-      <SidebarInset className="min-w-0">
+      <SidebarInset className="min-w-0 bg-background">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 md:hidden">
           <SidebarTrigger />
           <span className="text-sm font-medium text-muted-foreground">Menu</span>
