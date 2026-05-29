@@ -36,7 +36,7 @@ export type ResumeDbRow = {
   rowIndex: number;
   entryId: string;
   candidate: string;
-  email: string;
+  profileId: number | null;
   jobLink: string;
   apply: string;
   jobTitle: string;
@@ -142,7 +142,6 @@ export function ResumeDBPageClient() {
         r.company,
         r.jobTitle,
         r.candidate,
-        r.email,
         r.jobLink,
         r.apply,
         r.date,
@@ -154,7 +153,7 @@ export function ResumeDBPageClient() {
   }, [rows, search]);
 
   const handleDelete = async (rowIndex: number) => {
-    if (!confirm("Delete this row from the Google Sheet?")) return;
+    if (!confirm("Delete this application?")) return;
     setRemovingRow(rowIndex);
     try {
       const res = await fetch(`/api/resume-db?id=${rowIndex}`, {
@@ -202,8 +201,8 @@ export function ResumeDBPageClient() {
           <div>
             <h1 className="text-3xl font-bold">Resume Management</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {rows.length} application{rows.length === 1 ? "" : "s"} from Google
-              Sheet — register new jobs via the Smart Job extension.
+              {rows.length} application{rows.length === 1 ? "" : "s"} — register
+              new jobs via the Smart Job extension.
             </p>
           </div>
           <Button variant="outline" onClick={loadRows} disabled={isLoading}>
@@ -232,7 +231,7 @@ export function ResumeDBPageClient() {
             {isLoading ? (
               <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading from Google Sheet…
+                Loading applications…
               </div>
             ) : filtered.length === 0 ? (
               <p className="p-6 text-sm text-muted-foreground">

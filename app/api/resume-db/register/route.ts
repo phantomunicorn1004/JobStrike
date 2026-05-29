@@ -1,38 +1,24 @@
 import { NextRequest } from "next/server";
-import { appendResumeDbEntry } from "@/lib/google-sheets/resumeDbSheet";
-import {
-  buildUniqueFileName,
-  guessMimeType,
-  newEntryId,
-  uploadFileToGoogleDrive,
-} from "@/lib/google-sheets/driveUpload";
 import { corsJson, corsOptions, verifyExtensionKey } from "@/lib/api/extensionCors";
+import {
+  createApplication,
+  listProfiles,
+} from "@/lib/resume-db/repository";
+import {
+  buildStoragePath,
+  guessContentType,
+  newEntryId,
+  uploadApplicationFile,
+} from "@/lib/resume-db/storage";
 
 export function OPTIONS() {
   return corsOptions();
 }
 
-function formatToday(): string {
-  const d = new Date();
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
-
-function sheetErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Unexpected error during registration.";
-}
-
-function sheetErrorStatus(message: string): number {
+function errorStatus(message: string): number {
   const lower = message.toLowerCase();
-  if (
-    lower.includes("missing") ||
-    lower.includes("not set") ||
-    lower.includes("invalid") ||
-    lower.includes("required")
-  ) {
-    return 400;
-  }
   if (lower.includes("unauthorized")) return 401;
+  if (lower.includes("required") || lower.includes("invalid")) return 400;
   return 500;
 }
 
@@ -49,9 +35,11 @@ export async function POST(request: NextRequest) {
     const companyName = String(
       formData.get("companyName") ?? formData.get("company") ?? "",
     ).trim();
-    const candidate = String(formData.get("candidate") ?? "").trim();
-    const email = String(formData.get("email") ?? "").trim();
-    const apply = String(formData.get("apply") ?? "Registered").trim();
+    const profileIdRaw = formData.get("profileId") ?? formData.get("profile_id");
+    const profileId =
+      profileIdRaw != null && String(profileIdRaw).trim() !== ""
+        ? Number(profileIdRaw)
+        : null;
 
     const resumeFile = formData.get("resume") as File | null;
     const coverFile = formData.get("coverLetter") as File | null;
@@ -67,59 +55,79 @@ export async function POST(request: NextRequest) {
       return corsJson({ error: "resume file is required." }, { status: 400 });
     }
 
+    if (profileId == null || Number.isNaN(profileId)) {
+      return corsJson({ error: "profileId (candidate) is required." }, { status: 400 });
+    }
+
+    const profiles = await listProfiles();
+    const profile = profiles.find((p) => p.id === profileId);
+    if (!profile) {
+      return corsJson({ error: "Selected profile not found." }, { status: 400 });
+    }
+
     const entryId = newEntryId();
     const resumeBuffer = Buffer.from(await resumeFile.arrayBuffer());
-    const resumeUpload = await uploadFileToGoogleDrive(
+    const resumePath = buildStoragePath(
+      entryId,
+      "resume",
+      resumeFile.name || "resume.pdf",
+    );
+    const resumeUpload = await uploadApplicationFile(
       resumeBuffer,
-      buildUniqueFileName(entryId, "resume", resumeFile.name || "resume.pdf"),
-      resumeFile.type || guessMimeType(resumeFile.name),
+      resumePath,
+      resumeFile.type || guessContentType(resumeFile.name),
     );
 
     let coverLetterUrl = "";
+    let coverStoragePath: string | undefined;
     if (coverFile && coverFile.size > 0) {
       const coverBuffer = Buffer.from(await coverFile.arrayBuffer());
-      const coverUpload = await uploadFileToGoogleDrive(
-        coverBuffer,
-        buildUniqueFileName(
-          entryId,
-          "cover",
-          coverFile.name || "cover_letter.pdf",
-        ),
-        coverFile.type || guessMimeType(coverFile.name),
+      coverStoragePath = buildStoragePath(
+        entryId,
+        "cover",
+        coverFile.name || "cover_letter.pdf",
       );
-      coverLetterUrl = coverUpload.webViewLink;
+      const coverUpload = await uploadApplicationFile(
+        coverBuffer,
+        coverStoragePath,
+        coverFile.type || guessContentType(coverFile.name),
+      );
+      coverLetterUrl = coverUpload.publicUrl;
     }
 
-    const { rowIndex } = await appendResumeDbEntry({
+    const application = await createApplication({
       entryId,
-      candidate,
-      email,
+      profileId,
+      candidateName: profile.full_name,
       jobLink,
-      apply,
       jobTitle,
       company: companyName,
-      resumeUrl: resumeUpload.webViewLink,
+      apply: String(formData.get("apply") ?? "Registered").trim(),
+      resumeUrl: resumeUpload.publicUrl,
       coverLetterUrl,
-      date: formatToday(),
+      resumeStoragePath: resumeUpload.storagePath,
+      coverLetterStoragePath: coverStoragePath,
     });
 
     return corsJson(
       {
         ok: true,
-        entryId,
-        rowIndex,
+        id: application.id,
+        rowIndex: application.id,
+        entryId: application.entryId,
+        profileId: application.profileId,
+        candidateName: application.candidateName,
         jobLink,
         jobTitle,
         companyName,
-        resumeUrl: resumeUpload.webViewLink,
-        coverLetterUrl,
-        resumeFileName: resumeUpload.fileName,
+        resumeUrl: application.resumeUrl,
+        coverLetterUrl: application.coverLetterUrl,
       },
       { status: 201 },
     );
   } catch (error) {
     console.error("Resume DB register error:", error);
-    const message = sheetErrorMessage(error);
-    return corsJson({ error: message }, { status: sheetErrorStatus(message) });
+    const message = error instanceof Error ? error.message : "Registration failed.";
+    return corsJson({ error: message }, { status: errorStatus(message) });
   }
 }

@@ -34,7 +34,7 @@ export function ResumeTailorWorkflow() {
   const hasResumeFromDb = workflow.nodes.some((n) => {
     if (n.type !== "resumeSelection") return false;
     const raw = n.data?.sheetRowIndex ?? n.data?.resumeId;
-    return raw != null && !Number.isNaN(Number(raw)) && Number(raw) >= 2;
+    return raw != null && !Number.isNaN(Number(raw)) && Number(raw) >= 1;
   });
   const canRun = resumeFile || hasResumeFromDb;
 

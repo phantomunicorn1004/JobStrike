@@ -211,7 +211,7 @@ export function NodeSettingsPanel({
         <div className="space-y-3 text-sm">
           <p className="text-muted-foreground text-xs">{def.description}</p>
           <div>
-            <Label>Entry from Resume DB (Google Sheet)</Label>
+            <Label>Entry from Resume DB</Label>
             <Select
               value={selectedRow}
               onValueChange={(v) =>
@@ -240,8 +240,8 @@ export function NodeSettingsPanel({
               </SelectContent>
             </Select>
             <p className="text-muted-foreground text-xs mt-1">
-              Loads the resume from <span className="font-medium">resume_url</span> on Google Drive.
-              Share the file with your service account. Or upload a file when running the workflow.
+              Loads the resume file stored on this website for the selected application.
+              Or upload a file when running the workflow.
             </p>
           </div>
         </div>

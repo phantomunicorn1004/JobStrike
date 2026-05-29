@@ -161,7 +161,7 @@ export async function runResumeWorkflow(
             ? Number(sheetRowRaw)
             : NaN;
 
-        if (!Number.isNaN(sheetRowIndex) && sheetRowIndex >= 2) {
+        if (!Number.isNaN(sheetRowIndex) && sheetRowIndex >= 1) {
           const res = await fetch(
             `/api/resume-db?id=${sheetRowIndex}&parse=true`,
           );
@@ -169,7 +169,7 @@ export async function runResumeWorkflow(
             const err = await res.json().catch(() => ({}));
             throw new Error(
               err.error ||
-                "Failed to load resume from Google Sheet (resume_url).",
+                "Failed to load resume from Resume DB.",
             );
           }
           const data = await res.json();

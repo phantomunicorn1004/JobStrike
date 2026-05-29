@@ -321,25 +321,23 @@
           <div class="card-header compact">
             <div>
               <h2>Register to Resume DB</h2>
-              <p>Scrape this job page, upload resume &amp; cover letter, and save to the project Google Sheet + Drive.</p>
+              <p>Scrape this job page, upload resume &amp; cover letter, and save to this website.</p>
+              <div class="backend-connection-row" id="backendConnectionRow" aria-live="polite">
+                <span class="backend-connection-dot" id="backendConnectionDot"></span>
+                <span class="backend-connection-label" id="backendConnectionLabel">Checking connection…</span>
+              </div>
             </div>
             <button class="btn small" type="button" id="regScrapeBtn" title="Load job title, company, and link from the active tab">Scrape page</button>
           </div>
           <form class="form-grid register-form" id="registerForm" onsubmit="return false">
-            <label class="full">Backend URL
-              <input type="url" id="backendUrlSetting" placeholder="http://localhost:3000" autocomplete="off">
-            </label>
-            <label class="full">API key (optional)
-              <input type="password" id="backendApiKeySetting" placeholder="EXTENSION_API_KEY if set on server" autocomplete="off">
-            </label>
-            <div class="button-row full">
-              <button class="btn small" type="button" id="saveBackendBtn">Save backend settings</button>
-            </div>
             <label>Job title<input id="regJobTitle" type="text" placeholder="e.g. Senior Engineer"></label>
             <label>Company<input id="regCompany" type="text" placeholder="Company name"></label>
             <label class="full">Job link<input id="regJobLink" type="url" placeholder="https://…"></label>
-            <label>Candidate (optional)<input id="regCandidate" type="text" autocomplete="name"></label>
-            <label>Email (optional)<input id="regEmail" type="email" autocomplete="email"></label>
+            <label class="full">Candidate
+              <select id="regProfileId" class="register-select">
+                <option value="">Loading profiles…</option>
+              </select>
+            </label>
             <label class="full">Resume file (required)
               <input id="regResumeFile" type="file" accept=".pdf,.docx,.doc">
             </label>
