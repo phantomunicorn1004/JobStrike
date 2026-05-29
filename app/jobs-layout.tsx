@@ -90,7 +90,9 @@ export default function JobsLayout({
           </SidebarFooter>
         </Sidebar>
 
-        <main className="min-w-0 flex-1 bg-background p-4">{children}</main>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-background p-3 sm:p-4">
+          {children}
+        </main>
       </div>
     </SidebarProvider>
   );

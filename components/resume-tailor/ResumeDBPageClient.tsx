@@ -4,8 +4,13 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import JobsLayout from "@/app/jobs-layout";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +38,8 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  CalendarRange,
+  User,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -108,15 +115,43 @@ function SortableHead({
   );
 }
 
-function fileNameFromUrl(url: string, fallback: string): string {
-  if (!url) return fallback;
-  try {
-    const path = new URL(url).pathname;
-    const segment = path.split("/").filter(Boolean).pop();
-    return segment && segment.length < 80 ? decodeURIComponent(segment) : fallback;
-  } catch {
-    return fallback;
-  }
+function DocActions({
+  url,
+  label,
+  company,
+  onPreview,
+}: {
+  url: string;
+  label: string;
+  company: string;
+  onPreview: (title: string, url: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <Button
+        variant="outline"
+        size="icon"
+        className="h-7 w-7 rounded-md shrink-0"
+        title={`Preview ${label}`}
+        onClick={() => onPreview(`${label} — ${company}`, url)}
+      >
+        <Eye className="h-3.5 w-3.5" />
+        <span className="sr-only">Preview {label}</span>
+      </Button>
+      <Button
+        variant="outline"
+        size="icon"
+        className="h-7 w-7 rounded-md shrink-0"
+        asChild
+        title={`Download ${label}`}
+      >
+        <a href={url} target="_blank" rel="noopener noreferrer" download>
+          <Download className="h-3.5 w-3.5" />
+          <span className="sr-only">Download {label}</span>
+        </a>
+      </Button>
+    </div>
+  );
 }
 
 function formatApplied(iso: string, fallback: string): string {
@@ -194,41 +229,241 @@ function PreviewDialog({
   );
 }
 
-function DocActions({
-  url,
-  label,
-  company,
-  onPreview,
+type CandidateFilterOption = { key: string; label: string };
+
+function matchesCandidateFilter(row: ResumeDbRow, filterKey: string): boolean {
+  if (!filterKey) return true;
+  if (filterKey.startsWith("profile-")) {
+    const id = Number(filterKey.slice(8));
+    return row.profileId === id;
+  }
+  if (filterKey.startsWith("name-")) {
+    const name = decodeURIComponent(filterKey.slice(5));
+    return row.profileId == null && row.candidate.trim() === name;
+  }
+  return true;
+}
+
+function buildCandidateFilterOptions(
+  profiles: { id: number; full_name: string }[],
+  rows: ResumeDbRow[],
+): CandidateFilterOption[] {
+  const profileNames = new Set(profiles.map((p) => p.full_name.trim().toLowerCase()));
+  const profileIdsInOptions = new Set<number>();
+  const options: CandidateFilterOption[] = profiles.map((p) => {
+    profileIdsInOptions.add(p.id);
+    return {
+      key: `profile-${p.id}`,
+      label: p.full_name,
+    };
+  });
+
+  for (const row of rows) {
+    if (row.profileId != null && !profileIdsInOptions.has(row.profileId)) {
+      profileIdsInOptions.add(row.profileId);
+      options.push({
+        key: `profile-${row.profileId}`,
+        label: row.candidate.trim() || `Profile #${row.profileId}`,
+      });
+    }
+  }
+
+  const orphanNames = new Map<string, string>();
+  for (const row of rows) {
+    const name = row.candidate.trim();
+    if (!name || row.profileId != null) continue;
+    const normalized = name.toLowerCase();
+    if (profileNames.has(normalized)) continue;
+    orphanNames.set(normalized, name);
+  }
+
+  for (const name of orphanNames.values()) {
+    options.push({
+      key: `name-${encodeURIComponent(name)}`,
+      label: name,
+    });
+  }
+
+  return options.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+}
+
+function CandidateFilter({
+  value,
+  options,
+  onApply,
+  onClear,
 }: {
-  url: string;
-  label: string;
-  company: string;
-  onPreview: (title: string, url: string) => void;
+  value: string;
+  options: CandidateFilterOption[];
+  onApply: (key: string) => void;
+  onClear: () => void;
 }) {
-  const name = fileNameFromUrl(url, label);
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const active = Boolean(value);
+  const selectedLabel = options.find((o) => o.key === value)?.label;
+
+  useEffect(() => {
+    if (open) setDraft(value);
+  }, [open, value]);
+
+  const apply = () => {
+    onApply(draft);
+    setOpen(false);
+  };
+
+  const clear = () => {
+    setDraft("");
+    onClear();
+    setOpen(false);
+  };
+
   return (
-    <div className="flex flex-col gap-1.5 min-w-[130px]">
-      <div className="flex gap-1">
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="outline"
           size="sm"
-          className="h-7 text-xs rounded-lg"
-          onClick={() => onPreview(`${label} — ${company}`, url)}
+          className={cn(
+            "h-9 gap-1.5 rounded-xl shrink-0 max-w-[200px]",
+            active && "border-primary/60 bg-primary/5 text-primary",
+          )}
         >
-          <Eye className="h-3 w-3 mr-1" />
-          Preview
+          <User className="h-4 w-4 shrink-0" />
+          <span className="truncate hidden sm:inline">
+            {active && selectedLabel ? selectedLabel : "Candidate"}
+          </span>
+          {active && (
+            <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-medium shrink-0">
+              On
+            </span>
+          )}
         </Button>
-        <Button variant="outline" size="sm" className="h-7 text-xs rounded-lg" asChild>
-          <a href={url} target="_blank" rel="noopener noreferrer" download>
-            <Download className="h-3 w-3 mr-1" />
-            Download
-          </a>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-3" align="start">
+        <p className="text-sm font-medium mb-3">Filter by candidate</p>
+        <Select
+          value={draft || "__all__"}
+          onValueChange={(v) => setDraft(v === "__all__" ? "" : v)}
+        >
+          <SelectTrigger className="h-9 w-full">
+            <SelectValue placeholder="All candidates" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All candidates</SelectItem>
+            {options.map((option) => (
+              <SelectItem key={option.key} value={option.key}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {options.length === 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">No profiles or candidates yet.</p>
+        )}
+        <div className="mt-3 flex justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={clear}>
+            Clear
+          </Button>
+          <Button type="button" size="sm" className="h-8" onClick={apply}>
+            Apply
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function AppliedDateFilter({
+  dateFrom,
+  dateTo,
+  onApply,
+  onClear,
+}: {
+  dateFrom: string;
+  dateTo: string;
+  onApply: (from: string, to: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draftFrom, setDraftFrom] = useState(dateFrom);
+  const [draftTo, setDraftTo] = useState(dateTo);
+  const active = Boolean(dateFrom || dateTo);
+
+  useEffect(() => {
+    if (open) {
+      setDraftFrom(dateFrom);
+      setDraftTo(dateTo);
+    }
+  }, [open, dateFrom, dateTo]);
+
+  const apply = () => {
+    onApply(draftFrom, draftTo);
+    setOpen(false);
+  };
+
+  const clear = () => {
+    setDraftFrom("");
+    setDraftTo("");
+    onClear();
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className={cn(
+            "h-9 gap-1.5 rounded-xl shrink-0",
+            active && "border-primary/60 bg-primary/5 text-primary",
+          )}
+        >
+          <CalendarRange className="h-4 w-4" />
+          <span className="hidden sm:inline">Applied date</span>
+          {active && (
+            <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-medium">
+              On
+            </span>
+          )}
         </Button>
-      </div>
-      <span className="text-[10px] text-muted-foreground truncate max-w-[140px]" title={name}>
-        {name}
-      </span>
-    </div>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-3" align="end">
+        <p className="text-sm font-medium mb-3">Filter by applied date</p>
+        <div className="grid gap-2">
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            From
+            <Input
+              type="date"
+              value={draftFrom}
+              onChange={(e) => setDraftFrom(e.target.value)}
+              className="h-8 text-xs"
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            To
+            <Input
+              type="date"
+              value={draftTo}
+              onChange={(e) => setDraftTo(e.target.value)}
+              min={draftFrom || undefined}
+              className="h-8 text-xs"
+            />
+          </label>
+        </div>
+        <div className="mt-3 flex justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={clear}>
+            Clear
+          </Button>
+          <Button type="button" size="sm" className="h-8" onClick={apply}>
+            Apply
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -250,17 +485,27 @@ export function ResumeDBPageClient() {
   const [editOpen, setEditOpen] = useState(false);
   const [bulkRemoving, setBulkRemoving] = useState(false);
   const [bulkExporting, setBulkExporting] = useState(false);
+  const [profiles, setProfiles] = useState<{ id: number; full_name: string }[]>([]);
+  const [candidateFilter, setCandidateFilter] = useState("");
 
   const loadRows = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch("/api/resume-db");
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+      const [resumeRes, profilesRes] = await Promise.all([
+        fetch("/api/resume-db"),
+        fetch("/api/profiles"),
+      ]);
+      if (!resumeRes.ok) {
+        const err = await resumeRes.json().catch(() => ({}));
         throw new Error(err.error || "Failed to load Resume DB.");
       }
-      const data = await res.json();
+      const data = await resumeRes.json();
       setRows(data.resumes ?? []);
+
+      if (profilesRes.ok) {
+        const profileData = await profilesRes.json().catch(() => ({}));
+        setProfiles(profileData.profiles ?? []);
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to load Resume DB.",
@@ -276,11 +521,16 @@ export function ResumeDBPageClient() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, pageSize, dateFrom, dateTo, sortKey, sortDir]);
+  }, [search, pageSize, dateFrom, dateTo, candidateFilter, sortKey, sortDir]);
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [search, dateFrom, dateTo]);
+  }, [search, dateFrom, dateTo, candidateFilter]);
+
+  const candidateFilterOptions = useMemo(
+    () => buildCandidateFilterOptions(profiles, rows),
+    [profiles, rows],
+  );
 
   const handleSort = (key: Exclude<SortKey, null>) => {
     if (sortKey === key) {
@@ -291,7 +541,7 @@ export function ResumeDBPageClient() {
     }
   };
 
-  const hasActiveFilters = Boolean(search.trim() || dateFrom || dateTo);
+  const hasActiveFilters = Boolean(search.trim() || dateFrom || dateTo || candidateFilter);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -311,10 +561,11 @@ export function ResumeDBPageClient() {
           .toLowerCase();
         if (!haystack.includes(q)) return false;
       }
+      if (!matchesCandidateFilter(r, candidateFilter)) return false;
       if (!isWithinAppliedDateRange(r.appliedAt, dateFrom, dateTo)) return false;
       return true;
     });
-  }, [rows, search, dateFrom, dateTo]);
+  }, [rows, search, candidateFilter, dateFrom, dateTo]);
 
   const sorted = useMemo(() => {
     const list = [...filtered];
@@ -530,11 +781,11 @@ export function ResumeDBPageClient() {
 
   return (
     <JobsLayout>
-      <div className="flex flex-col gap-6 max-w-[1400px]">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-3xl font-bold tracking-tight">Resume Management</h1>
-            <p className="text-sm text-muted-foreground">
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-2 sm:gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+          <div className="min-w-0 space-y-0.5">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Resume Management</h1>
+            <p className="text-xs text-muted-foreground sm:text-sm">
               {rows.length} application{rows.length === 1 ? "" : "s"} — register via
               the Smart Job extension. Toggle status to add jobs to the{" "}
               <Link href="/jobs" className="text-primary underline-offset-4 hover:underline">
@@ -545,201 +796,182 @@ export function ResumeDBPageClient() {
           </div>
           <Button
             variant="outline"
-            className="rounded-xl shadow-sm"
+            size="sm"
+            className="rounded-lg shadow-sm shrink-0"
             onClick={loadRows}
             disabled={isLoading}
           >
-            <RefreshCw className={cn("h-4 w-4 mr-2", isLoading && "animate-spin")} />
-            Refresh
+            <RefreshCw className={cn("h-4 w-4 sm:mr-2", isLoading && "animate-spin")} />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
 
-        <Card className="rounded-2xl border-border/60 shadow-sm">
-          <CardHeader className="pb-3 space-y-3">
-            <div>
-              <CardTitle className="text-lg">Registered applications</CardTitle>
-              <CardDescription>
-                Preview documents, export JSON, or send to the job pipeline.
-              </CardDescription>
-            </div>
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div className="relative min-w-[160px] flex-1 sm:max-w-xs lg:max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              className="pl-9 rounded-xl bg-muted/30 border-border/60 h-9"
+              placeholder="Search company, role, ID…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
 
-            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-end gap-2">
-              <div className="relative flex-1 xl:max-w-[220px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  className="pl-9 rounded-xl bg-muted/30 border-border/60 h-9"
-                  placeholder="Search company, role, ID…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
+          <AppliedDateFilter
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onApply={(from, to) => {
+              setDateFrom(from);
+              setDateTo(to);
+            }}
+            onClear={() => {
+              setDateFrom("");
+              setDateTo("");
+            }}
+          />
 
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-                  <span className="sr-only">Applied from</span>
-                  <span aria-hidden="true">From</span>
-                  <Input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="h-9 w-[140px] rounded-xl bg-muted/30 border-border/60 text-xs"
-                    aria-label="Applied date from"
-                  />
-                </label>
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-                  <span className="sr-only">Applied to</span>
-                  <span aria-hidden="true">To</span>
-                  <Input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    min={dateFrom || undefined}
-                    className="h-9 w-[140px] rounded-xl bg-muted/30 border-border/60 text-xs"
-                    aria-label="Applied date to"
-                  />
-                </label>
+          <CandidateFilter
+            value={candidateFilter}
+            options={candidateFilterOptions}
+            onApply={setCandidateFilter}
+            onClear={() => setCandidateFilter("")}
+          />
 
-                {hasActiveFilters && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-9 rounded-xl text-xs px-2"
-                    onClick={() => {
-                      setSearch("");
-                      setDateFrom("");
-                      setDateTo("");
-                    }}
-                  >
-                    <X className="h-3.5 w-3.5 mr-1" />
-                    Clear
-                  </Button>
-                )}
+          {hasActiveFilters && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 rounded-xl text-xs px-2"
+              onClick={() => {
+                setSearch("");
+                setDateFrom("");
+                setDateTo("");
+                setCandidateFilter("");
+              }}
+            >
+              <X className="h-3.5 w-3.5 mr-1" />
+              Clear filters
+            </Button>
+          )}
 
-                <div className="flex items-center gap-1.5 ml-auto xl:ml-0 shrink-0 border-l border-border/60 pl-2">
-                  <span className="text-xs text-muted-foreground hidden sm:inline whitespace-nowrap">
-                    Rows
-                  </span>
-                  <Select
-                    value={String(pageSize)}
-                    onValueChange={(v) => setPageSize(Number(v))}
-                  >
-                    <SelectTrigger className="h-9 w-[68px] rounded-xl" size="sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PAGE_SIZE_OPTIONS.map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          {n}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 rounded-xl"
-                    disabled={safePage <= 1 || sorted.length === 0}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    aria-label="Previous page"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="text-xs tabular-nums min-w-[72px] text-center text-muted-foreground">
-                    {sorted.length === 0
-                      ? "0 / 0"
-                      : `${safePage} / ${totalPages}`}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9 rounded-xl"
-                    disabled={safePage >= totalPages || sorted.length === 0}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    aria-label="Next page"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {!isLoading && selectedIds.size > 0 && (
-              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
-                <span className="text-sm font-medium">
-                  {selectedIds.size} selected
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg"
-                  disabled={bulkExporting}
-                  onClick={downloadSelectedJson}
-                >
-                  {bulkExporting ? (
-                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <FileJson className="h-3.5 w-3.5 mr-1.5" />
-                  )}
-                  Download JSON
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg text-destructive hover:text-destructive"
-                  disabled={bulkRemoving}
-                  onClick={deleteSelected}
-                >
-                  {bulkRemoving ? (
-                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                  )}
-                  Remove selected
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 rounded-lg ml-auto"
-                  onClick={() => setSelectedIds(new Set())}
-                >
-                  Clear selection
-                </Button>
-              </div>
-            )}
+          <div className="flex items-center gap-1.5 ml-auto shrink-0">
             {!isLoading && (
-              <p className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground whitespace-nowrap mr-1 hidden md:inline">
                 {filtered.length === 0
                   ? rows.length === 0
-                    ? "No applications yet."
-                    : "No matches for your filters."
-                  : `Showing ${rangeStart}–${rangeEnd} of ${sorted.length}${
-                      hasActiveFilters ? ` (${rows.length} total)` : ""
-                    }`}
-              </p>
+                    ? "No applications"
+                    : "No matches"
+                  : `${rangeStart}–${rangeEnd} of ${sorted.length}`}
+              </span>
             )}
-          </CardHeader>
+            <span className="text-xs text-muted-foreground hidden sm:inline whitespace-nowrap">
+              Rows
+            </span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => setPageSize(Number(v))}
+            >
+              <SelectTrigger className="h-9 w-[68px] rounded-xl" size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 rounded-xl"
+              disabled={safePage <= 1 || sorted.length === 0}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-xs tabular-nums min-w-[72px] text-center text-muted-foreground">
+              {sorted.length === 0 ? "0 / 0" : `${safePage} / ${totalPages}`}
+            </span>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 rounded-xl"
+              disabled={safePage >= totalPages || sorted.length === 0}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              aria-label="Next page"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        {!isLoading && selectedIds.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
+            <span className="text-sm font-medium">{selectedIds.size} selected</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              disabled={bulkExporting}
+              onClick={downloadSelectedJson}
+            >
+              {bulkExporting ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <FileJson className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Download JSON
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg text-destructive hover:text-destructive"
+              disabled={bulkRemoving}
+              onClick={deleteSelected}
+            >
+              {bulkRemoving ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Remove selected
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg ml-auto"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Clear selection
+            </Button>
+          </div>
+        )}
+
+        <Card className="flex min-h-0 flex-1 flex-col gap-0 rounded-xl border-border/60 py-0 shadow-sm">
           <CardContent className="p-0">
             {isLoading ? (
-              <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground sm:p-6">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Loading applications…
               </div>
             ) : filtered.length === 0 ? (
-              <p className="p-8 text-sm text-muted-foreground text-center">
+              <p className="p-4 text-sm text-muted-foreground text-center sm:p-6">
                 {rows.length === 0
                   ? "No entries yet. Use the extension Register tab on a job posting."
                   : "No matches for your search or date filters."}
               </p>
             ) : (
-              <div className="overflow-x-auto">
-                  <Table>
+              <Table className="table-fixed w-full">
                     <TableHeader>
                       <TableRow className="hover:bg-transparent bg-muted/30">
-                        <TableHead className="w-[44px]">
+                        <TableHead className="w-[36px] px-1">
                           <Checkbox
                             checked={
                               allFilteredSelected
@@ -752,33 +984,36 @@ export function ResumeDBPageClient() {
                             aria-label="Select all filtered applications"
                           />
                         </TableHead>
-                        <TableHead className="font-semibold w-[52px]">No</TableHead>
-                        <TableHead className="font-semibold">Job link</TableHead>
+                        <TableHead className="w-[40px] px-1 font-semibold">No</TableHead>
+                        <TableHead className="w-[72px] px-1 font-semibold">Job link</TableHead>
                         <SortableHead
                           label="Company"
                           active={sortKey === "company"}
                           direction={sortDir}
                           onSort={() => handleSort("company")}
+                          className="min-w-0 px-1"
                         />
                         <SortableHead
                           label="Job title"
                           active={sortKey === "jobTitle"}
                           direction={sortDir}
                           onSort={() => handleSort("jobTitle")}
-                          className="max-w-[160px]"
+                          className="min-w-0 px-1"
                         />
-                        <TableHead className="font-semibold">Resume</TableHead>
-                        <TableHead className="font-semibold">Cover letter</TableHead>
+                        <TableHead className="w-[60px] px-1 font-semibold">Resume</TableHead>
+                        <TableHead className="w-[60px] px-1 font-semibold" title="Cover letter">
+                          Cover
+                        </TableHead>
                         <SortableHead
                           label="Pipeline"
                           active={sortKey === "pipeline"}
                           direction={sortDir}
                           onSort={() => handleSort("pipeline")}
-                          className="w-[120px]"
+                          className="w-[64px] px-1"
                         />
-                        <TableHead className="font-semibold w-[160px]">Applied</TableHead>
-                        <TableHead className="font-semibold w-[72px]">JSON</TableHead>
-                        <TableHead className="font-semibold text-right w-[88px]">Actions</TableHead>
+                        <TableHead className="w-[128px] px-1 font-semibold">Applied</TableHead>
+                        <TableHead className="w-[44px] px-1 font-semibold">JSON</TableHead>
+                        <TableHead className="w-[72px] px-1 font-semibold text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -790,17 +1025,17 @@ export function ResumeDBPageClient() {
                             selectedIds.has(row.rowIndex) && "bg-primary/5",
                           )}
                         >
-                          <TableCell>
+                          <TableCell className="px-1">
                             <Checkbox
                               checked={selectedIds.has(row.rowIndex)}
                               onCheckedChange={() => toggleSelectRow(row.rowIndex)}
                               aria-label={`Select ${row.company || "application"}`}
                             />
                           </TableCell>
-                          <TableCell className="text-sm tabular-nums text-muted-foreground">
+                          <TableCell className="px-1 text-sm tabular-nums text-muted-foreground">
                             {rangeStart + index}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="px-1">
                             {row.jobLink ? (
                               <Button
                                 variant="link"
@@ -821,13 +1056,13 @@ export function ResumeDBPageClient() {
                               "—"
                             )}
                           </TableCell>
-                          <TableCell className="font-medium max-w-[120px] truncate">
+                          <TableCell className="min-w-0 max-w-0 px-1 font-medium truncate">
                             {row.company || "—"}
                           </TableCell>
-                          <TableCell className="max-w-[150px] truncate">
+                          <TableCell className="min-w-0 max-w-0 px-1 truncate">
                             {row.jobTitle || "—"}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="px-1">
                             {row.resumeUrl ? (
                               <DocActions
                                 url={row.resumeUrl}
@@ -839,7 +1074,7 @@ export function ResumeDBPageClient() {
                               <span className="text-muted-foreground text-sm">—</span>
                             )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="px-1">
                             {row.coverLetterUrl ? (
                               <DocActions
                                 url={row.coverLetterUrl}
@@ -851,8 +1086,8 @@ export function ResumeDBPageClient() {
                               <span className="text-muted-foreground text-sm">—</span>
                             )}
                           </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
+                          <TableCell className="px-1">
+                            <div className="flex items-center justify-center gap-1">
                               <Switch
                                 checked={row.inPipeline}
                                 disabled={togglingRow === row.rowIndex}
@@ -862,27 +1097,22 @@ export function ResumeDBPageClient() {
                                 aria-label={`Add ${row.company} to pipeline`}
                               />
                               {togglingRow === row.rowIndex ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                               ) : row.inPipeline ? (
                                 <Link
                                   href="/jobs"
-                                  className="text-[10px] text-primary flex items-center gap-0.5 hover:underline"
+                                  className="text-primary shrink-0"
                                   title="View in pipeline"
                                 >
-                                  <Workflow className="h-3 w-3" />
-                                  Pipeline
+                                  <Workflow className="h-3.5 w-3.5" />
                                 </Link>
-                              ) : (
-                                <span className="text-[10px] text-muted-foreground">
-                                  Off
-                                </span>
-                              )}
+                              ) : null}
                             </div>
                           </TableCell>
-                          <TableCell className="text-xs whitespace-nowrap tabular-nums text-muted-foreground">
+                          <TableCell className="px-1 text-xs whitespace-nowrap tabular-nums text-muted-foreground">
                             {formatApplied(row.appliedAt, row.date)}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="px-1">
                             <Button
                               variant="outline"
                               size="sm"
@@ -894,7 +1124,7 @@ export function ResumeDBPageClient() {
                               <span className="sr-only">Download JSON</span>
                             </Button>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="px-1">
                             <div className="flex justify-end gap-0.5 opacity-80 group-hover:opacity-100">
                               <Button
                                 variant="ghost"
@@ -928,7 +1158,6 @@ export function ResumeDBPageClient() {
                       ))}
                     </TableBody>
                   </Table>
-                </div>
             )}
           </CardContent>
         </Card>
