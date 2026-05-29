@@ -49,6 +49,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   ChevronLeft,
   ChevronRight,
   CalendarRange,
@@ -295,27 +300,37 @@ function CandidateFilter({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={cn(
-            "h-9 gap-1.5 rounded-xl shrink-0 max-w-[200px]",
-            active && "border-primary/60 bg-primary/5 text-primary",
-          )}
-        >
-          <User className="h-4 w-4 shrink-0" />
-          <span className="truncate hidden sm:inline">
-            {active && selectedLabel ? selectedLabel : "Candidate"}
-          </span>
-          {active && (
-            <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-medium shrink-0">
-              On
-            </span>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={
+                active && selectedLabel
+                  ? `Candidate filter: ${selectedLabel}`
+                  : "Filter by candidate"
+              }
+              className={cn(
+                "relative h-9 w-9 rounded-xl shrink-0",
+                active && "border-primary/60 bg-primary/5 text-primary",
+              )}
+            >
+              <User className="h-4 w-4" />
+              {active && (
+                <span
+                  className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                  aria-hidden
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {active && selectedLabel ? `Candidate: ${selectedLabel}` : "Filter by candidate"}
+        </TooltipContent>
+      </Tooltip>
       <PopoverContent className="w-64 p-3" align="start">
         <p className="text-sm font-medium mb-3">Filter by candidate</p>
         <Select
@@ -385,27 +400,48 @@ function AppliedDateFilter({
     setOpen(false);
   };
 
+  const activeLabel =
+    dateFrom && dateTo
+      ? `${dateFrom} – ${dateTo}`
+      : dateFrom
+        ? `From ${dateFrom}`
+        : dateTo
+          ? `Until ${dateTo}`
+          : null;
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={cn(
-            "h-9 gap-1.5 rounded-xl shrink-0",
-            active && "border-primary/60 bg-primary/5 text-primary",
-          )}
-        >
-          <CalendarRange className="h-4 w-4" />
-          <span className="hidden sm:inline">Applied date</span>
-          {active && (
-            <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-medium">
-              On
-            </span>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={
+                active && activeLabel
+                  ? `Applied date filter: ${activeLabel}`
+                  : "Filter by applied date"
+              }
+              className={cn(
+                "relative h-9 w-9 rounded-xl shrink-0",
+                active && "border-primary/60 bg-primary/5 text-primary",
+              )}
+            >
+              <CalendarRange className="h-4 w-4" />
+              {active && (
+                <span
+                  className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                  aria-hidden
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {active && activeLabel ? `Applied date: ${activeLabel}` : "Filter by applied date"}
+        </TooltipContent>
+      </Tooltip>
       <PopoverContent className="w-64 p-3" align="end">
         <p className="text-sm font-medium mb-3">Filter by applied date</p>
         <div className="grid gap-2">
@@ -782,7 +818,7 @@ export function ResumeDBPageClient() {
       <div className="flex min-h-0 w-full flex-1 flex-col gap-2 sm:gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
           <div className="min-w-0 space-y-0.5">
-            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Resume Management</h1>
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Resume DB</h1>
             <p className="text-xs text-muted-foreground sm:text-sm">
               {rows.length} application{rows.length === 1 ? "" : "s"} — register via
               the Smart Job extension. Toggle status to add jobs to the{" "}
@@ -792,16 +828,21 @@ export function ResumeDBPageClient() {
               .
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-lg shadow-sm shrink-0"
-            onClick={loadRows}
-            disabled={isLoading}
-          >
-            <RefreshCw className={cn("h-4 w-4 sm:mr-2", isLoading && "animate-spin")} />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 rounded-lg shadow-sm shrink-0"
+                onClick={loadRows}
+                disabled={isLoading}
+                aria-label="Refresh applications"
+              >
+                <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Refresh</TooltipContent>
+          </Tooltip>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">

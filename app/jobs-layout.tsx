@@ -76,7 +76,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
         className="rounded-lg text-base font-medium"
       >
         <Link href={item.href}>
-          <Icon className="h-5 w-5" />
+          <Icon className="h-4 w-4 shrink-0" />
           <span>{item.label}</span>
         </Link>
       </SidebarMenuButton>
@@ -94,34 +94,43 @@ export default function JobsLayout({
   return (
     <SidebarProvider defaultOpen>
       <Sidebar collapsible="icon" className="border-r-0">
-        <SidebarHeader className="border-b border-border bg-background px-2 py-3">
+        <SidebarHeader className="min-w-0 overflow-hidden border-b border-border bg-background px-3 py-4">
           <div
             className={cn(
-              "flex items-center justify-between gap-2",
-              "group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:justify-center",
+              "flex min-w-0 items-start justify-between gap-2",
+              "group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center",
             )}
           >
             <Link
               href="/dashboard"
-              className="flex min-w-0 shrink items-center overflow-hidden"
+              aria-label="Remote work helper"
+              className={cn(
+                "flex min-w-0 flex-1 items-center gap-3",
+                "group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center",
+              )}
             >
-              <img
-                src="/logo.png"
-                alt="Remote work helper"
-                className={cn(
-                  "h-[72px] w-auto py-1 transition-all duration-200",
-                  "group-data-[collapsible=icon]:hidden",
-                )}
-              />
               <img
                 src="/logo-icon.png"
                 alt=""
                 aria-hidden="true"
                 className={cn(
-                  "hidden h-9 w-9 shrink-0 rounded-xl object-contain",
-                  "group-data-[collapsible=icon]:block",
+                  "h-14 w-14 shrink-0 rounded-2xl object-contain",
+                  "group-data-[collapsible=icon]:h-9 group-data-[collapsible=icon]:w-9 group-data-[collapsible=icon]:rounded-xl",
                 )}
               />
+              <div
+                className={cn(
+                  "min-w-0 leading-tight",
+                  "group-data-[collapsible=icon]:hidden",
+                )}
+              >
+                <span className="block text-lg font-bold tracking-tight text-foreground">
+                  Remote work
+                </span>
+                <span className="block text-lg font-bold tracking-tight text-primary">
+                  helper
+                </span>
+              </div>
             </Link>
             <div
               className={cn(
@@ -135,15 +144,15 @@ export default function JobsLayout({
           </div>
         </SidebarHeader>
 
-        <SidebarContent className="bg-background px-1 py-6">
+        <SidebarContent className="min-w-0 overflow-x-hidden bg-background px-1 py-6">
           <SidebarGroup className="p-0">
             <SidebarGroupContent>
               <SidebarMenu className="gap-1">
                 <NavLink item={NAV_ITEMS[0]} pathname={pathname} />
-                <SidebarSeparator className="my-2" />
+                <SidebarSeparator className="my-2 group-data-[collapsible=icon]:hidden" />
                 <NavLink item={NAV_ITEMS[1]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[2]} pathname={pathname} />
-                <SidebarSeparator className="my-2" />
+                <SidebarSeparator className="my-2 group-data-[collapsible=icon]:hidden" />
                 <NavLink item={NAV_ITEMS[3]} pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
