@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, FileEdit, Database } from "lucide-react";
+import { ClipboardList, FileEdit, Database, LayoutDashboard } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -40,6 +40,19 @@ export default function JobsLayout({
           </div>
           <SidebarContent className="bg-background flex-1 px-2 py-8">
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname === "/dashboard"}
+                  className="rounded-lg text-lg font-medium py-3 px-4 text-foreground hover:bg-muted transition-colors flex items-center gap-3"
+                >
+                  <Link href="/dashboard">
+                    <LayoutDashboard className="h-5 w-5" />
+                    <span>Dashboard</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <Separator className="my-2" />
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
