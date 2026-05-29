@@ -18,6 +18,7 @@ type DbRow = {
   cover_letter_url: string;
   applied_at: string;
   created_at: string;
+  pipeline_job_id: number | null;
 };
 
 function mapRow(row: DbRow): ResumeDbApplication {
@@ -34,6 +35,7 @@ function mapRow(row: DbRow): ResumeDbApplication {
     coverLetterUrl: row.cover_letter_url ?? "",
     appliedAt: row.applied_at,
     createdAt: row.created_at,
+    pipelineJobId: row.pipeline_job_id ?? null,
   };
 }
 
@@ -116,6 +118,7 @@ export async function updateApplication(
   if (input.apply !== undefined) patch.apply = input.apply;
   if (input.resumeUrl !== undefined) patch.resume_url = input.resumeUrl;
   if (input.coverLetterUrl !== undefined) patch.cover_letter_url = input.coverLetterUrl;
+  if (input.pipelineJobId !== undefined) patch.pipeline_job_id = input.pipelineJobId;
 
   const { error } = await supabase
     .from("resume_db_applications")

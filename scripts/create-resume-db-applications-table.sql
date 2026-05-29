@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS resume_db_applications (
   cover_letter_url TEXT DEFAULT '',
   resume_storage_path TEXT,
   cover_letter_storage_path TEXT,
+  pipeline_job_id BIGINT REFERENCES jobs(id) ON DELETE SET NULL,
   applied_at TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );

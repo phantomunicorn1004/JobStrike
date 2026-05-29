@@ -11,6 +11,7 @@ export type ResumeDbApplication = {
   coverLetterUrl: string;
   appliedAt: string;
   createdAt: string;
+  pipelineJobId: number | null;
 };
 
 export type ResumeDbApplicationInput = {
@@ -25,6 +26,7 @@ export type ResumeDbApplicationInput = {
   coverLetterUrl?: string;
   resumeStoragePath?: string;
   coverLetterStoragePath?: string;
+  pipelineJobId?: number | null;
 };
 
 export type ResumeDbJobExport = {

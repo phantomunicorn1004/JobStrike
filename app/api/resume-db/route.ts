@@ -8,6 +8,10 @@ import {
   listApplications,
   updateApplication,
 } from "@/lib/resume-db/repository";
+import {
+  addApplicationToPipeline,
+  removeApplicationFromPipeline,
+} from "@/lib/resume-db/pipeline";
 import type { ResumeDbApplicationInput } from "@/lib/resume-db/types";
 
 export function OPTIONS() {
@@ -16,7 +20,15 @@ export function OPTIONS() {
 
 function mapForList(app: Awaited<ReturnType<typeof listApplications>>[number]) {
   const applied = new Date(app.appliedAt);
-  const date = `${applied.getMonth() + 1}/${applied.getDate()}`;
+  const date = Number.isNaN(applied.getTime())
+    ? ""
+    : applied.toLocaleString(undefined, {
+        month: "numeric",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
   return {
     id: app.id,
     rowIndex: app.id,
@@ -32,6 +44,8 @@ function mapForList(app: Awaited<ReturnType<typeof listApplications>>[number]) {
     coverLetterUrl: app.coverLetterUrl,
     date,
     appliedAt: app.appliedAt,
+    pipelineJobId: app.pipelineJobId,
+    inPipeline: app.pipelineJobId != null || app.apply === "In Pipeline",
     roleTitle: app.jobTitle || app.candidateName || `Application ${app.id}`,
   };
 }
@@ -145,6 +159,16 @@ export async function PATCH(request: NextRequest) {
     const existing = await getApplicationById(id);
     if (!existing) {
       return corsJson({ error: "Application not found" }, { status: 404 });
+    }
+
+    if (typeof body.inPipeline === "boolean") {
+      if (body.inPipeline) {
+        await addApplicationToPipeline(id);
+      } else {
+        await removeApplicationFromPipeline(id);
+      }
+      const updated = await getApplicationById(id);
+      return corsJson({ ok: true, ...(updated ? mapForList(updated) : {}) });
     }
 
     const entry = parseEntryBody(body);
