@@ -50,18 +50,18 @@ type DashboardData = {
 };
 
 const bidChartConfig = {
-  count: { label: "Applications", color: "hsl(var(--chart-1))" },
+  count: { label: "Applications", color: "var(--chart-1)" },
 } satisfies ChartConfig;
 
 const STAGE_COLORS = [
-  "hsl(var(--chart-1))",
-  "hsl(var(--chart-2))",
-  "hsl(var(--chart-3))",
-  "hsl(var(--chart-4))",
-  "hsl(var(--chart-5))",
-  "#6366f1",
-  "#14b8a6",
-  "#f97316",
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+  "#6666ff",
+  "#8888ff",
+  "#9944ff",
 ];
 
 function formatChartDate(ymd: string): string {

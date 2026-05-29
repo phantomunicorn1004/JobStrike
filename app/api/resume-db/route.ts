@@ -3,13 +3,13 @@ import { corsJson, corsOptions } from "@/lib/api/extensionCors";
 import { parseResumeFromPublicUrl } from "@/lib/resume-db/parseFromUrl";
 import {
   createApplication,
-  deleteApplication,
   getApplicationById,
   listApplications,
   updateApplication,
 } from "@/lib/resume-db/repository";
 import {
   addApplicationToPipeline,
+  deleteApplicationWithPipeline,
   removeApplicationFromPipeline,
 } from "@/lib/resume-db/pipeline";
 import type { ResumeDbApplicationInput } from "@/lib/resume-db/types";
@@ -197,7 +197,7 @@ export async function DELETE(request: NextRequest) {
       return corsJson({ error: "Invalid id" }, { status: 400 });
     }
 
-    await deleteApplication(id);
+    await deleteApplicationWithPipeline(id);
     return corsJson({ ok: true, id });
   } catch (error) {
     console.error("Resume DB DELETE error:", error);

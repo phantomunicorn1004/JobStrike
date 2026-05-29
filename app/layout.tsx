@@ -10,8 +10,8 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Rson Remote Team - Job Market Platform",
-  description: "Professional job market platform for managing remote team applications",
+  title: "Remote work helper",
+  description: "Track applications, tailor resumes, and manage your job pipeline.",
   generator: "v0.app",
   icons: {
     icon: [
@@ -29,6 +29,7 @@ export const metadata: Metadata = {
       },
     ],
     apple: "/apple-icon.png",
+    shortcut: "/favicon-32x32.png",
   },
 }
 

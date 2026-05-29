@@ -1,12 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" fill="none" aria-hidden="true">
   <defs>
-    <linearGradient id="bg" x1="90" y1="0" x2="90" y2="180" gradientUnits="userSpaceOnUse">
+    <linearGradient id="logo-bg" x1="90" y1="0" x2="90" y2="180" gradientUnits="userSpaceOnUse">
       <stop stop-color="#8888ff"/>
       <stop offset="1" stop-color="#6666ff"/>
     </linearGradient>
   </defs>
-  <rect width="180" height="180" rx="40" fill="url(#bg)"/>
-  <path d="M36 68h108v8H36z" fill="none"/>
+  <rect width="180" height="180" rx="40" fill="url(#logo-bg)"/>
   <path d="M48 68l42-22 42 22v12H48V68z" stroke="#fff" stroke-width="5" stroke-linejoin="round" fill="none"/>
   <path d="M132 68v8h10v-14l-8-4" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
   <path d="M90 52v78" stroke="#fff" stroke-width="7" stroke-linecap="round"/>

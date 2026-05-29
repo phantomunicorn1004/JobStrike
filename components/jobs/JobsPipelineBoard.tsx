@@ -4,7 +4,6 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -138,16 +137,6 @@ export function JobsPipelineBoard() {
   const [isLoading, setIsLoading] = useState(true);
   const [movingId, setMovingId] = useState<{ source: string; id: number } | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
-  const [addJobOpen, setAddJobOpen] = useState(false);
-  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
-  const [newJob, setNewJob] = useState({
-    title: "",
-    company_name: "",
-    job_description: "",
-    job_link: "",
-    note: "",
-  });
-  const [isAdding, setIsAdding] = useState(false);
   const [manageStagesOpen, setManageStagesOpen] = useState(false);
   const [newStageName, setNewStageName] = useState("");
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
@@ -394,63 +383,6 @@ export function JobsPipelineBoard() {
     },
     [supabase, patchJobInState, detailTarget?.stageId],
   );
-
-  const handleAddJob = useCallback(async () => {
-    const profile = profiles.find((p) => p.id === Number(selectedProfileId));
-    if (!profile) return;
-    if (!newJob.title.trim() || !newJob.company_name.trim()) return;
-    setIsAdding(true);
-    try {
-      const baseNote = newJob.job_description.trim();
-      const extraNote = newJob.note.trim();
-      const combinedNote =
-        baseNote && extraNote ? `${baseNote}\n\n${extraNote}` : baseNote || extraNote || "";
-      const enteredAt = stageEnteredNow();
-      const stageDates = { applied: enteredAt };
-      const { data, error } = await supabase
-        .from("jobs")
-        .insert({
-          name: profile.full_name,
-          title: newJob.title.trim(),
-          company_name: newJob.company_name.trim(),
-          job_link: newJob.job_link.trim() || "",
-          resume_link: "",
-          note: combinedNote,
-          stage_entered_at: enteredAt,
-          stage_dates: stageDates,
-        })
-        .select();
-      if (error) throw error;
-      const row = data?.[0] as Record<string, unknown> | undefined;
-      if (row) {
-        setApplied((prev) => [
-          {
-            id: row.id as number,
-            source: "jobs",
-            name: row.name as string,
-            title: row.title as string,
-            company_name: row.company_name as string,
-            job_link: row.job_link as string,
-            resume_link: row.resume_link as string,
-            note: (row.note as string) ?? "",
-            created_at: row.created_at as string,
-            stage_entered_at: enteredAt,
-            stage_dates: normalizeStageDates(row.stage_dates, "applied", enteredAt),
-            recruiter_name: null,
-            recruiter_contact: null,
-          },
-          ...prev,
-        ]);
-      }
-      setNewJob({ title: "", company_name: "", job_description: "", job_link: "", note: "" });
-      setSelectedProfileId("");
-      setAddJobOpen(false);
-    } catch (e) {
-      console.error("Add job failed:", e);
-    } finally {
-      setIsAdding(false);
-    }
-  }, [newJob, supabase]);
 
   const moveCard = useCallback(
     async (payload: DragPayload, targetStageId: string) => {
@@ -988,85 +920,6 @@ export function JobsPipelineBoard() {
                       : jobs.length}
                   </span>
                 </div>
-                {stageId === "applied" && (
-                  <Dialog open={addJobOpen} onOpenChange={setAddJobOpen}>
-                    <DialogTrigger asChild>
-                      <Button size="sm" variant="outline" className="shrink-0 gap-1">
-                        <Plus className="h-4 w-4" />
-                        Add
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader>
-                        <DialogTitle>Add applied job</DialogTitle>
-                      </DialogHeader>
-                      <div className="grid gap-3 py-2">
-                        <div className="space-y-1">
-                          <label className="text-sm font-medium">Name *</label>
-                          <select
-                            className="w-full rounded-md border bg-background px-2 py-1 text-sm"
-                            value={selectedProfileId}
-                            onChange={(e) => setSelectedProfileId(e.target.value)}
-                          >
-                            <option value="">Select a profile</option>
-                            {profiles.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.full_name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <Input
-                          placeholder="Job title *"
-                          value={newJob.title}
-                          onChange={(e) => setNewJob((p) => ({ ...p, title: e.target.value }))}
-                        />
-                        <Input
-                          placeholder="Company name *"
-                          value={newJob.company_name}
-                          onChange={(e) => setNewJob((p) => ({ ...p, company_name: e.target.value }))}
-                        />
-                        <Textarea
-                          placeholder="Job description"
-                          value={newJob.job_description}
-                          onChange={(e) => setNewJob((p) => ({ ...p, job_description: e.target.value }))}
-                          rows={3}
-                          className="resize-y"
-                        />
-                        <Input
-                          placeholder="Job link (optional)"
-                          type="url"
-                          value={newJob.job_link}
-                          onChange={(e) => setNewJob((p) => ({ ...p, job_link: e.target.value }))}
-                        />
-                        <Textarea
-                          placeholder="Note (optional)"
-                          value={newJob.note}
-                          onChange={(e) => setNewJob((p) => ({ ...p, note: e.target.value }))}
-                          rows={2}
-                          className="resize-none"
-                        />
-                      </div>
-                      <DialogFooter>
-                        <DialogClose asChild>
-                          <Button type="button" variant="outline">
-                            Cancel
-                          </Button>
-                        </DialogClose>
-                        <Button onClick={handleAddJob} disabled={isAdding}>
-                          {isAdding ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Adding…
-                            </>
-                          ) : (
-                            "Add job"
-                          )}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                )}
               </div>
               <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
                 {jobs.map((job) => (
@@ -1080,6 +933,11 @@ export function JobsPipelineBoard() {
                     }
                   />
                 ))}
+                {jobs.length === 0 && !hasActiveFilters && stageId === "applied" && (
+                  <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                    Register via Resume DB or the extension, then enable Pipeline on that row.
+                  </p>
+                )}
                 {jobs.length === 0 && hasActiveFilters && totalInStage > 0 && (
                   <p className="py-4 text-center text-xs text-muted-foreground">
                     No matches in this stage

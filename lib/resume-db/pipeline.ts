@@ -1,6 +1,52 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { ResumeDbApplication } from "@/lib/resume-db/types";
-import { getApplicationById, updateApplication } from "@/lib/resume-db/repository";
+import {
+  deleteApplication,
+  getApplicationById,
+  updateApplication,
+} from "@/lib/resume-db/repository";
+
+export function resumeDbMarker(applicationId: number): string {
+  return `Resume DB #${applicationId}`;
+}
+
+/** Remove all pipeline cards created from or linked to a Resume DB application. */
+export async function deletePipelineCardsForApplication(
+  applicationId: number,
+  pipelineJobId: number | null,
+): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const marker = resumeDbMarker(applicationId);
+
+  if (pipelineJobId) {
+    const { error } = await supabase.from("jobs").delete().eq("id", pipelineJobId);
+    if (error) throw new Error(error.message);
+  }
+
+  const { error: techError } = await supabase
+    .from("technical_jobs")
+    .delete()
+    .ilike("job_description", `%${marker}%`);
+
+  if (techError) throw new Error(techError.message);
+
+  const { error: jobsNoteError } = await supabase
+    .from("jobs")
+    .delete()
+    .ilike("note", `%${marker}%`);
+
+  if (jobsNoteError) throw new Error(jobsNoteError.message);
+}
+
+export async function deleteApplicationWithPipeline(
+  applicationId: number,
+): Promise<void> {
+  const app = await getApplicationById(applicationId);
+  if (!app) throw new Error("Application not found.");
+
+  await deletePipelineCardsForApplication(applicationId, app.pipelineJobId);
+  await deleteApplication(applicationId);
+}
 
 export async function addApplicationToPipeline(
   applicationId: number,
@@ -17,7 +63,7 @@ export async function addApplicationToPipeline(
   if (app.coverLetterUrl) {
     noteParts.push(`Cover letter: ${app.coverLetterUrl}`);
   }
-  noteParts.push(`Resume DB #${app.id}`);
+  noteParts.push(resumeDbMarker(app.id));
 
   const enteredAt = new Date().toISOString();
   const { data, error } = await supabase
@@ -52,18 +98,7 @@ export async function removeApplicationFromPipeline(
   const app = await getApplicationById(applicationId);
   if (!app) throw new Error("Application not found.");
 
-  if (!app.pipelineJobId) {
-    await updateApplication(applicationId, { apply: "Registered", pipelineJobId: null });
-    return;
-  }
-
-  const supabase = getSupabaseAdminClient();
-  const { error: deleteError } = await supabase
-    .from("jobs")
-    .delete()
-    .eq("id", app.pipelineJobId);
-
-  if (deleteError) throw new Error(deleteError.message);
+  await deletePipelineCardsForApplication(applicationId, app.pipelineJobId);
 
   await updateApplication(applicationId, {
     apply: "Registered",
@@ -86,7 +121,7 @@ export async function syncPipelineJobFromApplication(
   if (app.coverLetterUrl) {
     noteParts.push(`Cover letter: ${app.coverLetterUrl}`);
   }
-  noteParts.push(`Resume DB #${app.id}`);
+  noteParts.push(resumeDbMarker(app.id));
 
   const { error } = await supabase
     .from("jobs")

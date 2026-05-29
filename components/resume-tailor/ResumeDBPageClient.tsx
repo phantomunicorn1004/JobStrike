@@ -1103,7 +1103,7 @@ export function ResumeDBPageClient() {
                             "—"
                           )}
                         </ResizableTableCell>
-                        <ResizableTableCell widthPercent={percents.company} className="font-medium">
+                        <ResizableTableCell widthPercent={percents.company} className="font-medium text-primary">
                           <span className="block truncate" title={row.company || undefined}>
                             {row.company || "—"}
                           </span>
