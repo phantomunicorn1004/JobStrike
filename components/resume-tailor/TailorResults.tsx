@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Download, AlertCircle, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { matchedBadgeClass, missingBadgeClass } from "@/lib/ui/semanticColors";
 
 type TailorResultsProps = {
   data: {
@@ -95,7 +96,7 @@ export function TailorResults({
             <div className="flex flex-wrap gap-2">
               {data.matchedKeywords.length > 0 ? (
                 data.matchedKeywords.map((keyword, idx) => (
-                  <Badge key={idx} variant="default" className="bg-green-500">
+                  <Badge key={idx} variant="default" className={matchedBadgeClass}>
                     {keyword}
                   </Badge>
                 ))
@@ -114,7 +115,7 @@ export function TailorResults({
             <div className="flex flex-wrap gap-2">
               {data.missingKeywords.length > 0 ? (
                 data.missingKeywords.map((keyword, idx) => (
-                  <Badge key={idx} variant="outline" className="border-yellow-500 text-yellow-700 dark:text-yellow-400">
+                  <Badge key={idx} variant="outline" className={missingBadgeClass}>
                     {keyword}
                   </Badge>
                 ))

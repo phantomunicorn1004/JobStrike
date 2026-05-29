@@ -10,8 +10,15 @@ type SortDir = "asc" | "desc";
 
 type BaseProps = {
   columnId: ResumeDBColumnId;
-  width: number;
-  onResize: (id: ResumeDBColumnId, width: number) => void;
+  widthPercent: number;
+  rightColumnId: ResumeDBColumnId | null;
+  tableRef: React.RefObject<HTMLTableElement | null>;
+  onResizePair: (
+    leftId: ResumeDBColumnId,
+    rightId: ResumeDBColumnId,
+    leftPercent: number,
+  ) => void;
+  onAutoFit: (columnId: ResumeDBColumnId) => void;
   className?: string;
   align?: "left" | "center" | "right";
   children: React.ReactNode;
@@ -19,18 +26,25 @@ type BaseProps = {
 
 function ResizeHandle({
   onResizeStart,
+  onAutoFit,
 }: {
   onResizeStart: (clientX: number) => void;
+  onAutoFit: () => void;
 }) {
   return (
     <div
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize column"
+      aria-label="Resize column. Double-click to fit column to content."
       onMouseDown={(e) => {
         e.preventDefault();
         e.stopPropagation();
         onResizeStart(e.clientX);
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onAutoFit();
       }}
       className={cn(
         "absolute right-0 top-0 z-10 h-full w-2 translate-x-1/2 cursor-col-resize",
@@ -44,19 +58,27 @@ function ResizeHandle({
 
 function useColumnResize(
   columnId: ResumeDBColumnId,
-  width: number,
-  onResize: (id: ResumeDBColumnId, width: number) => void,
+  rightColumnId: ResumeDBColumnId | null,
+  leftPercent: number,
+  tableRef: React.RefObject<HTMLTableElement | null>,
+  onResizePair: BaseProps["onResizePair"],
 ) {
   const startX = useRef(0);
-  const startWidth = useRef(width);
+  const startLeftPercent = useRef(leftPercent);
 
   const beginResize = (clientX: number) => {
+    if (!rightColumnId) return;
     startX.current = clientX;
-    startWidth.current = width;
+    startLeftPercent.current = leftPercent;
 
     const onMove = (event: MouseEvent) => {
-      const delta = event.clientX - startX.current;
-      onResize(columnId, startWidth.current + delta);
+      const tableWidth = tableRef.current?.offsetWidth ?? 800;
+      const deltaPercent = ((event.clientX - startX.current) / tableWidth) * 100;
+      onResizePair(
+        columnId,
+        rightColumnId,
+        startLeftPercent.current + deltaPercent,
+      );
     };
 
     const onUp = () => {
@@ -75,19 +97,32 @@ function useColumnResize(
   return beginResize;
 }
 
+function percentStyle(widthPercent: number): React.CSSProperties {
+  return { width: `${widthPercent}%` };
+}
+
 export function ResizableTableHead({
   columnId,
-  width,
-  onResize,
+  widthPercent,
+  rightColumnId,
+  tableRef,
+  onResizePair,
+  onAutoFit,
   className,
   align = "left",
   children,
 }: BaseProps) {
-  const beginResize = useColumnResize(columnId, width, onResize);
+  const beginResize = useColumnResize(
+    columnId,
+    rightColumnId,
+    widthPercent,
+    tableRef,
+    onResizePair,
+  );
 
   return (
     <TableHead
-      style={{ width, minWidth: width, maxWidth: width }}
+      style={percentStyle(widthPercent)}
       className={cn(
         "relative border-r border-border/50 px-2 py-2.5 last:border-r-0",
         align === "center" && "text-center",
@@ -100,21 +135,31 @@ export function ResizableTableHead({
           typeof children === "string"
             ? "truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground"
             : "flex w-full min-w-0",
-          align === "center" && (typeof children === "string" ? "mx-auto w-fit" : "justify-center"),
-          align === "right" && (typeof children === "string" ? "ml-auto w-fit" : "justify-end"),
+          align === "center" &&
+            (typeof children === "string" ? "mx-auto w-fit" : "justify-center"),
+          align === "right" &&
+            (typeof children === "string" ? "ml-auto w-fit" : "justify-end"),
         )}
       >
         {children}
       </div>
-      <ResizeHandle onResizeStart={beginResize} />
+      {rightColumnId ? (
+        <ResizeHandle
+          onResizeStart={beginResize}
+          onAutoFit={() => onAutoFit(columnId)}
+        />
+      ) : null}
     </TableHead>
   );
 }
 
 export function ResizableSortableHead({
   columnId,
-  width,
-  onResize,
+  widthPercent,
+  rightColumnId,
+  tableRef,
+  onResizePair,
+  onAutoFit,
   label,
   active,
   direction,
@@ -128,11 +173,17 @@ export function ResizableSortableHead({
   onSort: () => void;
 }) {
   const Icon = active ? (direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
-  const beginResize = useColumnResize(columnId, width, onResize);
+  const beginResize = useColumnResize(
+    columnId,
+    rightColumnId,
+    widthPercent,
+    tableRef,
+    onResizePair,
+  );
 
   return (
     <TableHead
-      style={{ width, minWidth: width, maxWidth: width }}
+      style={percentStyle(widthPercent)}
       className={cn(
         "relative border-r border-border/50 px-2 py-2.5 last:border-r-0",
         align === "center" && "text-center",
@@ -153,25 +204,30 @@ export function ResizableSortableHead({
         <span className="truncate">{label}</span>
         <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
       </button>
-      <ResizeHandle onResizeStart={beginResize} />
+      {rightColumnId ? (
+        <ResizeHandle
+          onResizeStart={beginResize}
+          onAutoFit={() => onAutoFit(columnId)}
+        />
+      ) : null}
     </TableHead>
   );
 }
 
 export function ResizableTableCell({
-  width,
+  widthPercent,
   className,
   align = "left",
   children,
 }: {
-  width: number;
+  widthPercent: number;
   className?: string;
   align?: "left" | "center" | "right";
   children: React.ReactNode;
 }) {
   return (
     <td
-      style={{ width, minWidth: width, maxWidth: width }}
+      style={percentStyle(widthPercent)}
       className={cn(
         "border-r border-border/40 px-2 py-2 align-middle text-sm last:border-r-0",
         align === "center" && "text-center",

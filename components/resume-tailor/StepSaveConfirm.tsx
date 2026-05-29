@@ -7,6 +7,13 @@ import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useState } from "react";
+import { cn } from "@/lib/utils";
+import {
+  successBorderClass,
+  successIconClass,
+  successPanelClass,
+  successTextStrongClass,
+} from "@/lib/ui/semanticColors";
 
 type StepSaveConfirmProps = {
   data: {
@@ -43,10 +50,10 @@ export function StepSaveConfirm({ data, updateData }: StepSaveConfirmProps) {
         </p>
       </div>
 
-      <Card className="border-green-500">
+      <Card className={successBorderClass}>
         <CardHeader>
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-green-500" />
+            <CheckCircle2 className={cn("h-5 w-5", successIconClass)} />
             <CardTitle>Success Summary</CardTitle>
           </div>
         </CardHeader>
@@ -112,8 +119,8 @@ export function StepSaveConfirm({ data, updateData }: StepSaveConfirmProps) {
         </Button>
 
         {data.savedToJob && (
-          <div className="bg-green-50 dark:bg-green-950 p-4 rounded-lg border border-green-200 dark:border-green-800">
-            <p className="text-sm text-green-800 dark:text-green-200 text-center">
+          <div className={cn("rounded-lg p-4", successPanelClass)}>
+            <p className={cn("text-sm text-center", successTextStrongClass)}>
               ✓ Resume successfully saved to Job table!
             </p>
           </div>

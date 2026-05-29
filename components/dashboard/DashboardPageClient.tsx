@@ -5,6 +5,7 @@ import JobsLayout from "@/app/jobs-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   ChartContainer,
   ChartTooltip,
@@ -28,6 +29,12 @@ import { toast } from "sonner";
 
 type BidPoint = { date: string; count: number };
 type StageCount = { stageId: string; stageName: string; count: number };
+type BidRange = "week" | "month";
+
+const BID_RANGE_DAYS: Record<BidRange, number> = {
+  week: 7,
+  month: 30,
+};
 
 type DashboardData = {
   appliedDate: string;
@@ -77,6 +84,7 @@ function formatLongDate(ymd: string): string {
 export function DashboardPageClient() {
   const today = localYmd();
   const [appliedDate, setAppliedDate] = useState(today);
+  const [bidRange, setBidRange] = useState<BidRange>("month");
   const [stageFrom, setStageFrom] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 29);
@@ -91,6 +99,7 @@ export function DashboardPageClient() {
     try {
       const params = new URLSearchParams({
         date: appliedDate,
+        bidDays: String(BID_RANGE_DAYS[bidRange]),
         stageFrom,
         stageTo,
       });
@@ -105,7 +114,7 @@ export function DashboardPageClient() {
     } finally {
       setIsLoading(false);
     }
-  }, [appliedDate, stageFrom, stageTo]);
+  }, [appliedDate, bidRange, stageFrom, stageTo]);
 
   useEffect(() => {
     loadDashboard();
@@ -127,9 +136,11 @@ export function DashboardPageClient() {
     [data?.stageCounts],
   );
 
+  const bidRangeLabel = bidRange === "week" ? "Last 7 days" : "Last 30 days";
+
   return (
     <JobsLayout>
-      <div className="flex min-h-0 w-full flex-1 flex-col gap-4">
+      <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Dashboard</h1>
@@ -214,136 +225,163 @@ export function DashboardPageClient() {
               </Card>
             </div>
 
-            <Card className="rounded-xl">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-muted-foreground" />
-                  <div>
-                    <CardTitle className="text-lg">Applications per day</CardTitle>
+            <div className="grid min-w-0 gap-4 xl:grid-cols-2 xl:items-start">
+              <Card className="min-w-0 rounded-xl">
+                <CardHeader className="gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <TrendingUp className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <CardTitle className="text-lg">Applications per day</CardTitle>
+                      <CardDescription className="truncate">
+                        {data
+                          ? `${bidRangeLabel} (${formatChartDate(data.bidFrom)} – ${formatChartDate(data.bidTo)})`
+                          : bidRangeLabel}
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <ToggleGroup
+                    type="single"
+                    value={bidRange}
+                    onValueChange={(value) => {
+                      if (value === "week" || value === "month") setBidRange(value);
+                    }}
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                  >
+                    <ToggleGroupItem value="week" aria-label="Weekly view">
+                      Weekly
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="month" aria-label="Monthly view">
+                      Monthly
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </CardHeader>
+                <CardContent className="min-w-0">
+                  <ChartContainer
+                    config={bidChartConfig}
+                    className="aspect-auto h-[200px] w-full min-h-0 min-w-0 sm:h-[220px]"
+                  >
+                    <BarChart
+                      data={data?.bidsByDate ?? []}
+                      margin={{ left: 0, right: 4, top: 8, bottom: 0 }}
+                    >
+                      <CartesianGrid vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={8}
+                        interval={bidRange === "month" ? 4 : 0}
+                        minTickGap={bidRange === "month" ? 8 : 16}
+                        tickFormatter={formatChartDate}
+                      />
+                      <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={28} />
+                      <ChartTooltip
+                        content={
+                          <ChartTooltipContent
+                            labelFormatter={(value) => formatLongDate(String(value))}
+                          />
+                        }
+                      />
+                      <Bar dataKey="count" fill="var(--color-count)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
+
+              <Card className="min-w-0 rounded-xl">
+                <CardHeader className="gap-3 space-y-0 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="min-w-0">
+                    <CardTitle className="text-lg">Pipeline by stage</CardTitle>
                     <CardDescription>
-                      Bid / application count from Resume DB (
-                      {data ? `${formatChartDate(data.bidFrom)} – ${formatChartDate(data.bidTo)}` : "last 30 days"})
+                      Cards counted by when they entered their current stage
+                      {stageTotal > 0 ? ` (${stageTotal} total)` : ""}.
                     </CardDescription>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <ChartContainer config={bidChartConfig} className="aspect-[2/1] w-full min-h-[240px]">
-                  <BarChart data={data?.bidsByDate ?? []} margin={{ left: 0, right: 8, top: 8 }}>
-                    <CartesianGrid vertical={false} />
-                    <XAxis
-                      dataKey="date"
-                      tickLine={false}
-                      axisLine={false}
-                      tickMargin={8}
-                      minTickGap={24}
-                      tickFormatter={formatChartDate}
-                    />
-                    <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} />
-                    <ChartTooltip
-                      content={
-                        <ChartTooltipContent
-                          labelFormatter={(value) => formatLongDate(String(value))}
-                        />
-                      }
-                    />
-                    <Bar dataKey="count" fill="var(--color-count)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ChartContainer>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-xl">
-              <CardHeader className="gap-4 space-y-0 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <CardTitle className="text-lg">Pipeline by stage</CardTitle>
-                  <CardDescription>
-                    Cards counted by when they entered their current stage
-                    {stageTotal > 0 ? ` (${stageTotal} total)` : ""}.
-                  </CardDescription>
-                </div>
-                <div className="flex flex-wrap items-end gap-2">
-                  <label className="grid gap-1 text-xs text-muted-foreground">
-                    From
-                    <Input
-                      type="date"
-                      value={stageFrom}
-                      max={stageTo}
-                      onChange={(e) => setStageFrom(e.target.value)}
-                      className="h-9 w-[140px]"
-                    />
-                  </label>
-                  <label className="grid gap-1 text-xs text-muted-foreground">
-                    To
-                    <Input
-                      type="date"
-                      value={stageTo}
-                      min={stageFrom}
-                      max={today}
-                      onChange={(e) => setStageTo(e.target.value)}
-                      className="h-9 w-[140px]"
-                    />
-                  </label>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {(data?.stageCounts.length ?? 0) === 0 || stageTotal === 0 ? (
-                  <p className="py-12 text-center text-sm text-muted-foreground">
-                    No pipeline cards entered a stage in this date range.
-                  </p>
-                ) : (
-                  <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-center">
-                    <ChartContainer
-                      config={stageChartConfig}
-                      className="mx-auto aspect-square w-full max-w-[320px]"
-                    >
-                      <PieChart>
-                        <ChartTooltip content={<ChartTooltipContent nameKey="stageName" />} />
-                        <Pie
-                          data={data?.stageCounts ?? []}
-                          dataKey="count"
-                          nameKey="stageName"
-                          innerRadius={56}
-                          outerRadius={96}
-                          paddingAngle={2}
-                        >
-                          {(data?.stageCounts ?? []).map((entry, index) => (
-                            <Cell
-                              key={entry.stageId}
-                              fill={STAGE_COLORS[index % STAGE_COLORS.length]}
-                            />
-                          ))}
-                        </Pie>
-                      </PieChart>
-                    </ChartContainer>
-                    <ul className="grid gap-2 text-sm">
-                      {(data?.stageCounts ?? []).map((stage, index) => (
-                        <li
-                          key={stage.stageId}
-                          className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
-                        >
-                          <span className="flex items-center gap-2 min-w-0">
-                            <span
-                              className="h-2.5 w-2.5 shrink-0 rounded-full"
-                              style={{
-                                backgroundColor: STAGE_COLORS[index % STAGE_COLORS.length],
-                              }}
-                            />
-                            <span className="truncate">{stage.stageName}</span>
-                          </span>
-                          <span className="tabular-nums font-medium shrink-0">
-                            {stage.count}
-                            <span className="text-muted-foreground font-normal ml-1">
-                              ({stageTotal ? Math.round((stage.count / stageTotal) * 100) : 0}%)
-                            </span>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+                  <div className="flex shrink-0 flex-wrap items-end gap-2">
+                    <label className="grid gap-1 text-xs text-muted-foreground">
+                      From
+                      <Input
+                        type="date"
+                        value={stageFrom}
+                        max={stageTo}
+                        onChange={(e) => setStageFrom(e.target.value)}
+                        className="h-9 w-[132px]"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs text-muted-foreground">
+                      To
+                      <Input
+                        type="date"
+                        value={stageTo}
+                        min={stageFrom}
+                        max={today}
+                        onChange={(e) => setStageTo(e.target.value)}
+                        className="h-9 w-[132px]"
+                      />
+                    </label>
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </CardHeader>
+                <CardContent className="min-w-0">
+                  {(data?.stageCounts.length ?? 0) === 0 || stageTotal === 0 ? (
+                    <p className="py-10 text-center text-sm text-muted-foreground">
+                      No pipeline cards entered a stage in this date range.
+                    </p>
+                  ) : (
+                    <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,160px)_minmax(0,1fr)] sm:items-center">
+                      <ChartContainer
+                        config={stageChartConfig}
+                        className="mx-auto aspect-square h-[160px] w-full max-w-[160px] min-w-0 sm:mx-0"
+                      >
+                        <PieChart>
+                          <ChartTooltip content={<ChartTooltipContent nameKey="stageName" />} />
+                          <Pie
+                            data={data?.stageCounts ?? []}
+                            dataKey="count"
+                            nameKey="stageName"
+                            innerRadius={44}
+                            outerRadius={72}
+                            paddingAngle={2}
+                          >
+                            {(data?.stageCounts ?? []).map((entry, index) => (
+                              <Cell
+                                key={entry.stageId}
+                                fill={STAGE_COLORS[index % STAGE_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                        </PieChart>
+                      </ChartContainer>
+                      <ul className="grid max-h-[220px] min-w-0 gap-1.5 overflow-y-auto text-sm">
+                        {(data?.stageCounts ?? []).map((stage, index) => (
+                          <li
+                            key={stage.stageId}
+                            className="flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5"
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span
+                                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                style={{
+                                  backgroundColor: STAGE_COLORS[index % STAGE_COLORS.length],
+                                }}
+                              />
+                              <span className="truncate">{stage.stageName}</span>
+                            </span>
+                            <span className="shrink-0 tabular-nums font-medium">
+                              {stage.count}
+                              <span className="ml-1 font-normal text-muted-foreground">
+                                ({stageTotal ? Math.round((stage.count / stageTotal) * 100) : 0}%)
+                              </span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </>
         )}
       </div>

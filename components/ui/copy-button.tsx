@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { Copy } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export function CopyButton({ value }: { value: string }) {
   const [isCopied, setIsCopied] = React.useState(false);
@@ -13,7 +14,7 @@ export function CopyButton({ value }: { value: string }) {
 
   return (
     <button
-      className="ml-2 p-1 rounded hover:bg-blue-100 border border-transparent hover:border-blue-300 text-gray-700 transition"
+      className="ml-2 rounded border border-transparent p-1 text-muted-foreground transition hover:border-border hover:bg-accent hover:text-accent-foreground"
       onClick={handleCopy}
       type="button"
       title="Copy"
@@ -21,7 +22,7 @@ export function CopyButton({ value }: { value: string }) {
     >
       <Copy
         size={16}
-        className={isCopied ? "text-blue-600" : "text-gray-400"}
+        className={cn(isCopied && "text-primary")}
       />
     </button>
   );

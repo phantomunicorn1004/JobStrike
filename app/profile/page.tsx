@@ -387,7 +387,7 @@ export default function ProfilePage() {
         {profiles.map((profile) => (
           <div
             key={profile.id}
-            className="border flex-1 min-w-[320px] p-6 rounded-lg shadow-sm bg-card text-card-foreground space-y-4"
+            className="flex-1 min-w-[320px] space-y-4 rounded-lg border border-border bg-card p-6 text-card-foreground shadow-sm"
           >
             <div className="mb-2 flex items-start justify-between gap-2">
               <h2 className="text-2xl font-semibold truncate min-w-0 flex-1">

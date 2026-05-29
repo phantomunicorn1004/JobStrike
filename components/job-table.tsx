@@ -237,7 +237,7 @@ export function JobTable() {
     <Card className="w-full">
       <div className="p-4 flex items-center justify-between">
         <div className="relative w-64">
-          <span className="absolute inset-y-0 left-0 flex items-center pl-2 text-gray-400 pointer-events-none">
+          <span className="absolute inset-y-0 left-0 flex items-center pl-2 text-muted-foreground pointer-events-none">
             <svg
               width="18"
               height="18"
@@ -258,7 +258,7 @@ export function JobTable() {
             placeholder="Search jobs..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-8 pr-2 py-1 w-full border rounded outline-none focus:ring-2 focus:ring-primary text-sm"
+            className="pl-8 pr-2 py-1 w-full rounded-md border border-input bg-background text-foreground text-sm outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
       </div>

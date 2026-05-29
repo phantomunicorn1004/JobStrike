@@ -7,6 +7,8 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, Edit, Download, Sparkles } from "lucide-react";
 import { getSkillsAsArray, type ResumeContent } from "@/lib/resumeTemplates/types";
+import { cn } from "@/lib/utils";
+import { infoPanelClass, infoTextClass, warningPanelClass, warningTextClass } from "@/lib/ui/semanticColors";
 
 type ResumePreviewProps = {
   resumeContent: ResumeContent;
@@ -53,8 +55,8 @@ export function ResumePreview({
         </div>
       </div>
 
-      <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-        <p className="text-sm text-blue-900 dark:text-blue-200">
+      <div className={cn("rounded-lg p-4", infoPanelClass)}>
+        <p className={cn("text-sm", infoTextClass)}>
           <strong>Note:</strong> Only the profile title, summary, skills, and experience
           accomplishments have been optimized. All other sections (company names, dates,
           education, certifications) remain unchanged from your original resume.
@@ -125,8 +127,8 @@ export function ResumePreview({
                 ))}
               </div>
             ) : (
-              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
-                <p className="text-sm text-yellow-900 dark:text-yellow-200 font-medium">
+              <div className={cn("rounded-lg p-4", warningPanelClass)}>
+                <p className={cn("text-sm font-medium", warningTextClass)}>
                   ⚠️ Work Experience section not found. This may indicate a parsing issue. Please check your original resume format.
                 </p>
               </div>

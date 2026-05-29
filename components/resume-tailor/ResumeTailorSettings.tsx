@@ -143,7 +143,7 @@ Return a JSON object with:
                 {templates.map((template) => (
                   <div
                     key={template.id}
-                    className="flex items-center justify-between p-3 border rounded-lg"
+                    className="flex items-center justify-between rounded-lg border border-border p-3"
                   >
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 text-muted-foreground" />

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import JobsLayout from "@/app/jobs-layout";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,12 @@ import {
   useResizableColumns,
   type ResumeDBColumnId,
 } from "@/components/resume-tailor/useResizableColumns";
+import {
+  COLUMN_ORDER,
+  FLEX_COLUMN_IDS,
+  getNeighborColumnId,
+  measureColumnFitPx,
+} from "@/components/resume-tailor/resumeDbTableConfig";
 import {
   Select,
   SelectContent,
@@ -83,20 +89,6 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
 type SortKey = "company" | "jobTitle" | "pipeline" | null;
 type SortDir = "asc" | "desc";
-
-const COLUMN_ORDER: ResumeDBColumnId[] = [
-  "select",
-  "no",
-  "jobLink",
-  "company",
-  "jobTitle",
-  "resume",
-  "coverLetter",
-  "pipeline",
-  "applied",
-  "json",
-  "actions",
-];
 
 function DocActions({
   url,
@@ -468,17 +460,8 @@ export function ResumeDBPageClient() {
   const [editOpen, setEditOpen] = useState(false);
   const [bulkRemoving, setBulkRemoving] = useState(false);
   const [bulkExporting, setBulkExporting] = useState(false);
-  const { widths, setColumnWidth } = useResizableColumns();
-
-  const tableWidth = useMemo(
-    () => COLUMN_ORDER.reduce((sum, id) => sum + widths[id], 0),
-    [widths],
-  );
-
-  const handleColumnResize = useCallback(
-    (id: ResumeDBColumnId, width: number) => setColumnWidth(id, width),
-    [setColumnWidth],
-  );
+  const tableRef = useRef<HTMLTableElement>(null);
+  const { percents, resizePair, fitColumn } = useResizableColumns();
   const [profiles, setProfiles] = useState<{ id: number; full_name: string }[]>([]);
   const [candidateFilter, setCandidateFilter] = useState("");
 
@@ -588,6 +571,27 @@ export function ResumeDBPageClient() {
 
   const rangeStart = sorted.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const rangeEnd = Math.min(safePage * pageSize, sorted.length);
+
+  const handleAutoFitColumn = useCallback(
+    (columnId: ResumeDBColumnId) => {
+      const tableWidth = tableRef.current?.offsetWidth ?? 1000;
+      const fitPx = measureColumnFitPx(columnId, pageRows);
+      fitColumn(columnId, (fitPx / tableWidth) * 100, FLEX_COLUMN_IDS);
+    },
+    [pageRows, fitColumn],
+  );
+
+  const columnResizeProps = useCallback(
+    (columnId: ResumeDBColumnId) => ({
+      columnId,
+      widthPercent: percents[columnId],
+      rightColumnId: getNeighborColumnId(columnId),
+      tableRef,
+      onResizePair: resizePair,
+      onAutoFit: handleAutoFitColumn,
+    }),
+    [percents, resizePair, handleAutoFitColumn],
+  );
 
   const handleDelete = async (rowIndex: number) => {
     if (!confirm("Delete this application?")) return;
@@ -962,25 +966,24 @@ export function ResumeDBPageClient() {
                   : "No matches for your search or date filters."}
               </p>
             ) : (
-              <div className="overflow-x-auto">
+              <div>
                 <p className="px-3 py-2 text-[11px] text-muted-foreground border-b border-border/40">
-                  Drag the right edge of a column header to resize, like a spreadsheet.
+                  Drag a column border to resize. Double-click a border to fit the left column.
                 </p>
                 <Table
-                  className="table-fixed w-max min-w-full"
-                  style={{ width: Math.max(tableWidth, 960) }}
+                  ref={tableRef}
+                  scrollable={false}
+                  className="table-fixed w-full"
                 >
                   <colgroup>
                     {COLUMN_ORDER.map((id) => (
-                      <col key={id} style={{ width: widths[id] }} />
+                      <col key={id} style={{ width: `${percents[id]}%` }} />
                     ))}
                   </colgroup>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent bg-muted/40">
                       <ResizableTableHead
-                        columnId="select"
-                        width={widths.select}
-                        onResize={handleColumnResize}
+                        {...columnResizeProps("select")}
                         align="center"
                       >
                         <Checkbox
@@ -996,83 +999,59 @@ export function ResumeDBPageClient() {
                         />
                       </ResizableTableHead>
                       <ResizableTableHead
-                        columnId="no"
-                        width={widths.no}
-                        onResize={handleColumnResize}
+                        {...columnResizeProps("no")}
                         align="center"
                       >
                         No
                       </ResizableTableHead>
-                      <ResizableTableHead
-                        columnId="jobLink"
-                        width={widths.jobLink}
-                        onResize={handleColumnResize}
-                      >
+                      <ResizableTableHead {...columnResizeProps("jobLink")}>
                         Job link
                       </ResizableTableHead>
                       <ResizableSortableHead
-                        columnId="company"
-                        width={widths.company}
-                        onResize={handleColumnResize}
+                        {...columnResizeProps("company")}
                         label="Company"
                         active={sortKey === "company"}
                         direction={sortDir}
                         onSort={() => handleSort("company")}
                       />
                       <ResizableSortableHead
-                        columnId="jobTitle"
-                        width={widths.jobTitle}
-                        onResize={handleColumnResize}
+                        {...columnResizeProps("jobTitle")}
                         label="Job title"
                         active={sortKey === "jobTitle"}
                         direction={sortDir}
                         onSort={() => handleSort("jobTitle")}
                       />
                       <ResizableTableHead
-                        columnId="resume"
-                        width={widths.resume}
-                        onResize={handleColumnResize}
+                        {...columnResizeProps("resume")}
                         align="center"
                       >
                         Resume
                       </ResizableTableHead>
                       <ResizableTableHead
-                        columnId="coverLetter"
-                        width={widths.coverLetter}
-                        onResize={handleColumnResize}
+                        {...columnResizeProps("coverLetter")}
                         align="center"
                       >
                         Cover letter
                       </ResizableTableHead>
                       <ResizableSortableHead
-                        columnId="pipeline"
-                        width={widths.pipeline}
-                        onResize={handleColumnResize}
+                        {...columnResizeProps("pipeline")}
                         label="Pipeline"
                         active={sortKey === "pipeline"}
                         direction={sortDir}
                         onSort={() => handleSort("pipeline")}
                         align="center"
                       />
-                      <ResizableTableHead
-                        columnId="applied"
-                        width={widths.applied}
-                        onResize={handleColumnResize}
-                      >
+                      <ResizableTableHead {...columnResizeProps("applied")}>
                         Applied
                       </ResizableTableHead>
                       <ResizableTableHead
-                        columnId="json"
-                        width={widths.json}
-                        onResize={handleColumnResize}
+                        {...columnResizeProps("json")}
                         align="center"
                       >
                         JSON
                       </ResizableTableHead>
                       <ResizableTableHead
-                        columnId="actions"
-                        width={widths.actions}
-                        onResize={handleColumnResize}
+                        {...columnResizeProps("actions")}
                         align="center"
                       >
                         Actions
@@ -1088,7 +1067,7 @@ export function ResumeDBPageClient() {
                           selectedIds.has(row.rowIndex) && "bg-primary/5",
                         )}
                       >
-                        <ResizableTableCell width={widths.select} align="center">
+                        <ResizableTableCell widthPercent={percents.select} align="center">
                           <Checkbox
                             checked={selectedIds.has(row.rowIndex)}
                             onCheckedChange={() => toggleSelectRow(row.rowIndex)}
@@ -1096,13 +1075,13 @@ export function ResumeDBPageClient() {
                           />
                         </ResizableTableCell>
                         <ResizableTableCell
-                          width={widths.no}
+                          widthPercent={percents.no}
                           align="center"
                           className="tabular-nums text-muted-foreground"
                         >
                           {rangeStart + index}
                         </ResizableTableCell>
-                        <ResizableTableCell width={widths.jobLink}>
+                        <ResizableTableCell widthPercent={percents.jobLink}>
                           {row.jobLink ? (
                             <Button
                               variant="link"
@@ -1124,17 +1103,17 @@ export function ResumeDBPageClient() {
                             "—"
                           )}
                         </ResizableTableCell>
-                        <ResizableTableCell width={widths.company} className="font-medium">
+                        <ResizableTableCell widthPercent={percents.company} className="font-medium">
                           <span className="block truncate" title={row.company || undefined}>
                             {row.company || "—"}
                           </span>
                         </ResizableTableCell>
-                        <ResizableTableCell width={widths.jobTitle}>
+                        <ResizableTableCell widthPercent={percents.jobTitle}>
                           <span className="block truncate" title={row.jobTitle || undefined}>
                             {row.jobTitle || "—"}
                           </span>
                         </ResizableTableCell>
-                        <ResizableTableCell width={widths.resume} align="center">
+                        <ResizableTableCell widthPercent={percents.resume} align="center">
                           {row.resumeUrl ? (
                             <DocActions
                               url={row.resumeUrl}
@@ -1146,7 +1125,7 @@ export function ResumeDBPageClient() {
                             <span className="text-muted-foreground">—</span>
                           )}
                         </ResizableTableCell>
-                        <ResizableTableCell width={widths.coverLetter} align="center">
+                        <ResizableTableCell widthPercent={percents.coverLetter} align="center">
                           {row.coverLetterUrl ? (
                             <DocActions
                               url={row.coverLetterUrl}
@@ -1158,7 +1137,7 @@ export function ResumeDBPageClient() {
                             <span className="text-muted-foreground">—</span>
                           )}
                         </ResizableTableCell>
-                        <ResizableTableCell width={widths.pipeline} align="center">
+                        <ResizableTableCell widthPercent={percents.pipeline} align="center">
                           <div className="flex items-center justify-center gap-1.5">
                             <Switch
                               checked={row.inPipeline}
@@ -1182,12 +1161,12 @@ export function ResumeDBPageClient() {
                           </div>
                         </ResizableTableCell>
                         <ResizableTableCell
-                          width={widths.applied}
+                          widthPercent={percents.applied}
                           className="text-xs tabular-nums text-muted-foreground whitespace-nowrap"
                         >
                           {formatApplied(row.appliedAt, row.date)}
                         </ResizableTableCell>
-                        <ResizableTableCell width={widths.json} align="center">
+                        <ResizableTableCell widthPercent={percents.json} align="center">
                           <Button
                             variant="outline"
                             size="sm"
@@ -1199,7 +1178,7 @@ export function ResumeDBPageClient() {
                             <span className="sr-only">Download JSON</span>
                           </Button>
                         </ResizableTableCell>
-                        <ResizableTableCell width={widths.actions} align="center">
+                        <ResizableTableCell widthPercent={percents.actions} align="center">
                           <div className="flex items-center justify-center gap-0.5 opacity-80 group-hover:opacity-100">
                             <Button
                               variant="ghost"

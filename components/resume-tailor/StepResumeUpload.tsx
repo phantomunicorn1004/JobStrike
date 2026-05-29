@@ -8,6 +8,7 @@ import { Upload, FileText, X, Loader2, AlertCircle, CheckCircle2 } from "lucide-
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { successBorderClass, successIconClass } from "@/lib/ui/semanticColors";
 
 type StepResumeUploadProps = {
   data: {
@@ -206,11 +207,11 @@ University of Technology | 2014 - 2018`;
           )}
         </div>
       ) : (
-        <Card className="border-green-500">
+        <Card className={successBorderClass}>
           <CardContent className="pt-6">
             <div className="flex items-start gap-4">
-              <div className="p-3 bg-green-100 dark:bg-green-900/20 rounded-lg">
-                <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
+              <div className="rounded-lg bg-emerald-500/10 p-3 dark:bg-emerald-500/15">
+                <CheckCircle2 className={cn("h-6 w-6", successIconClass)} />
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">

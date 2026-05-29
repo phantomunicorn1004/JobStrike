@@ -9,6 +9,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { successTextClass } from "@/lib/ui/semanticColors";
 
 type StepJDInputProps = {
   data: {
@@ -322,7 +324,7 @@ This is a great opportunity to grow your career with a dynamic company.`;
             )}
           </Button>
           {data.jdConfirmed && (
-            <p className="text-sm text-green-600 mt-2 text-center">
+            <p className={cn("text-sm mt-2 text-center", successTextClass)}>
               Job description confirmed. You can proceed to the next step.
             </p>
           )}

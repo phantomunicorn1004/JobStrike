@@ -11,6 +11,8 @@ import { Separator } from "@/components/ui/separator";
 import { Loader2, Plus, Trash2, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import { successPanelClass, successTextStrongClass } from "@/lib/ui/semanticColors";
 
 type TailoredResumeData = {
   profileTitle: string;
@@ -597,8 +599,8 @@ export function StepTailorResume({ data, updateData }: StepTailorResumeProps) {
                 </Button>
               </div>
               {data.atsScore !== null && (
-                <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg p-3">
-                  <p className="text-sm text-green-800 dark:text-green-200 text-center">
+                <div className={cn("rounded-lg border p-3", successPanelClass)}>
+                  <p className={cn("text-sm text-center", successTextStrongClass)}>
                     ✓ ATS check completed ({data.atsScore}%). You can proceed to Step 4 for detailed results or continue to template selection.
                   </p>
                 </div>

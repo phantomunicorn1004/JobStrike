@@ -23,26 +23,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Download } from "lucide-react";
+import { Download, CheckCircle2, XCircle, Clock } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 // Status icons
 const StatusIcon = ({ result }: { result?: string }) => {
   if (result === "success")
     return (
-      <span title="Success" style={{ color: "green" }}>
-        ✔️
+      <span title="Success">
+        <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
       </span>
     );
   if (result === "fail")
     return (
-      <span title="Failed" style={{ color: "red" }}>
-        ❌
+      <span title="Failed">
+        <XCircle className="h-4 w-4 text-destructive" />
       </span>
     );
   return (
-    <span title="Ongoing" style={{ color: "#EAB308" }}>
-      ⏳
+    <span title="Ongoing">
+      <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
     </span>
   );
 };
@@ -265,7 +265,7 @@ export function TechnicalJobTable() {
               <div className="flex gap-2 items-center">
                 <span className="text-sm font-medium">Result</span>
                 <select
-                  className="border p-1 rounded"
+                  className="rounded-md border border-input bg-background p-1 text-foreground text-sm"
                   value={newJob.status || "ongoing"}
                   onChange={(e) => handleInput("status", e.target.value)}
                 >

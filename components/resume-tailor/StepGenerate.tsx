@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
+import { successBorderClass, successIconClass } from "@/lib/ui/semanticColors";
 
 type StepGenerateProps = {
   data: {
@@ -175,9 +177,9 @@ export function StepGenerate({ data, updateData }: StepGenerateProps) {
           )}
         </div>
       ) : (
-        <Card className="border-green-500">
+        <Card className={successBorderClass}>
           <CardContent className="pt-6 space-y-4">
-            <div className="flex items-center justify-center gap-2 text-green-600">
+            <div className={cn("flex items-center justify-center gap-2", successIconClass)}>
               <FileText className="h-5 w-5" />
               <p className="font-medium">Resume generated successfully!</p>
             </div>

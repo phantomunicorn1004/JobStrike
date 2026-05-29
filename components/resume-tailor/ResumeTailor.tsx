@@ -21,6 +21,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  infoPanelClass,
+  infoTextClass,
+  successBorderClass,
+  successIconClass,
+} from "@/lib/ui/semanticColors";
 import { ATSScoreComparison } from "./ATSScoreComparison";
 import { TailorResults } from "./TailorResults";
 import { ResumeTailorSettings } from "./ResumeTailorSettings";
@@ -566,17 +572,17 @@ export function ResumeTailor() {
           <p className="text-sm text-muted-foreground mt-2">
             Enter job details and upload your resume. We'll optimize it for ATS and the role.
           </p>
-          <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-            <p className="text-sm font-medium text-blue-900 dark:text-blue-200 mb-2">
+          <div className={cn("mt-4 rounded-lg p-3", infoPanelClass)}>
+            <p className={cn("mb-2 text-sm font-medium", infoTextClass)}>
               What We'll Improve:
             </p>
-            <ul className="text-xs text-blue-800 dark:text-blue-300 space-y-1 list-disc list-inside">
+            <ul className="list-inside list-disc space-y-1 text-xs text-muted-foreground">
               <li>Profile/headline title</li>
               <li>Professional summary</li>
               <li>Technical skills (reorder & normalize)</li>
               <li>Work experience accomplishments (bullet points only)</li>
             </ul>
-            <p className="text-xs text-blue-700 dark:text-blue-400 mt-2 font-medium">
+            <p className="mt-2 text-xs font-medium text-muted-foreground">
               Everything else (company names, dates, education, certifications) remains unchanged.
             </p>
           </div>
@@ -676,11 +682,11 @@ export function ResumeTailor() {
                 )}
               </div>
             ) : (
-              <Card className="mt-2 border-green-500">
+              <Card className={cn("mt-2", successBorderClass)}>
                 <CardContent className="pt-6">
                   <div className="flex items-start gap-4">
-                    <div className="p-3 bg-green-100 dark:bg-green-900/20 rounded-lg">
-                      <FileText className="h-6 w-6 text-green-600 dark:text-green-400" />
+                    <div className="rounded-lg bg-emerald-500/10 p-3 dark:bg-emerald-500/15">
+                      <FileText className={cn("h-6 w-6", successIconClass)} />
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">

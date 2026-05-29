@@ -56,6 +56,18 @@ export default function JobsLayout({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
+                  isActive={pathname.startsWith("/resume-db")}
+                  className="rounded-lg text-lg font-medium py-3 px-4 text-foreground hover:bg-muted transition-colors flex items-center gap-3"
+                >
+                  <Link href="/resume-db">
+                    <Database className="h-5 w-5" />
+                    <span>Resume DB</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
                   isActive={pathname === "/jobs"}
                   className="rounded-lg text-lg font-medium py-3 px-4 text-foreground hover:bg-muted transition-colors flex items-center gap-3"
                 >
@@ -78,18 +90,6 @@ export default function JobsLayout({
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname.startsWith("/resume-db")}
-                  className="rounded-lg text-lg font-medium py-3 px-4 text-foreground hover:bg-muted transition-colors flex items-center gap-3"
-                >
-                  <Link href="/resume-db">
-                    <Database className="h-5 w-5" />
-                    <span>Resume DB</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarContent>
           <SidebarFooter className="mt-auto">
@@ -97,7 +97,7 @@ export default function JobsLayout({
               <img
                 src="/placeholder-user.jpg"
                 alt="Profile"
-                className="w-12 h-12 rounded-full mx-auto cursor-pointer border-2 border-gray-300 hover:border-blue-600 transition"
+                className="mx-auto h-12 w-12 cursor-pointer rounded-full border-2 border-border transition hover:border-primary"
               />
             </Link>
           </SidebarFooter>

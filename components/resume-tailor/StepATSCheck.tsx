@@ -8,6 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, CheckCircle2, XCircle, AlertTriangle, Info } from "lucide-react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  scoreBgClass,
+  successIconClass,
+  warningIconClass,
+} from "@/lib/ui/semanticColors";
+import { cn } from "@/lib/utils";
 
 type StepATSCheckProps = {
   data: {
@@ -87,9 +93,7 @@ export function StepATSCheck({ data, updateData }: StepATSCheckProps) {
 
   const getScoreColor = (score: number | null) => {
     if (!score) return "bg-muted";
-    if (score >= 80) return "bg-green-500";
-    if (score >= 60) return "bg-yellow-500";
-    return "bg-red-500";
+    return scoreBgClass(score);
   };
 
   const getScoreLabel = (score: number | null) => {
@@ -193,7 +197,7 @@ export function StepATSCheck({ data, updateData }: StepATSCheckProps) {
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <CheckCircle2 className={cn("h-4 w-4", successIconClass)} />
                 Matched Keywords
               </CardTitle>
             </CardHeader>
@@ -217,7 +221,7 @@ export function StepATSCheck({ data, updateData }: StepATSCheckProps) {
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <XCircle className="h-4 w-4 text-red-500" />
+                <XCircle className="h-4 w-4 text-destructive" />
                 Missing Keywords
               </CardTitle>
             </CardHeader>
@@ -244,7 +248,7 @@ export function StepATSCheck({ data, updateData }: StepATSCheckProps) {
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+              <AlertTriangle className={cn("h-4 w-4", warningIconClass)} />
               Weak Keywords
             </CardTitle>
           </CardHeader>

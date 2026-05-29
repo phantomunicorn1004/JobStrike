@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { ExternalLink, Download, GripVertical, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { statusDot } from "@/lib/ui/semanticColors";
 import type { StageDates } from "@/lib/jobs/pipelineCardUtils";
 
 export type { StageDates };
@@ -61,10 +62,10 @@ function isTechnicalJob(job: PipelineCardJob): job is TechnicalJob {
 
 const StatusDot = ({ result }: { result?: string | null }) => {
   if (result === "success")
-    return <span className="h-2 w-2 rounded-full bg-green-500" title="Success" />;
+    return <span className={cn("h-2 w-2 rounded-full", statusDot.success)} title="Success" />;
   if (result === "fail")
-    return <span className="h-2 w-2 rounded-full bg-red-500" title="Failed" />;
-  return <span className="h-2 w-2 rounded-full bg-amber-500" title="Ongoing" />;
+    return <span className={cn("h-2 w-2 rounded-full", statusDot.fail)} title="Failed" />;
+  return <span className={cn("h-2 w-2 rounded-full", statusDot.pending)} title="Ongoing" />;
 };
 
 type JobPipelineCardProps = {

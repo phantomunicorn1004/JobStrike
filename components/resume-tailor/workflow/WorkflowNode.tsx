@@ -2,6 +2,7 @@
 
 import React, { useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { statusDot, successIconClass } from "@/lib/ui/semanticColors";
 import type { WorkflowNode } from "./types";
 import { getNodeDefinition } from "./nodeRegistry";
 import { GripVertical, Loader2, CheckCircle2, XCircle } from "lucide-react";
@@ -44,7 +45,7 @@ export function WorkflowNode({
     executionStatus === "running"
       ? "bg-primary"
       : executionStatus === "success"
-      ? "bg-green-500"
+      ? statusDot.success
       : executionStatus === "error"
       ? "bg-destructive"
       : "bg-muted-foreground/40";
@@ -121,7 +122,7 @@ export function WorkflowNode({
             ? "ring-2 ring-primary ring-offset-2 shadow-md"
             : "hover:shadow-md hover:-translate-y-[1px]",
           executionStatus === "running" && "ring-2 ring-primary/50 ring-offset-1",
-          executionStatus === "success" && "ring-2 ring-green-500/50 ring-offset-1",
+          executionStatus === "success" && "ring-2 ring-emerald-500/50 dark:ring-emerald-400/50 ring-offset-1 ring-offset-background",
           executionStatus === "error" && "ring-2 ring-destructive/50 ring-offset-1"
         )}
       >
@@ -141,7 +142,7 @@ export function WorkflowNode({
         <div className="ml-auto flex items-center gap-1 shrink-0 pr-1">
           {executionStatus === "success" && (
             <span title="Completed" className="inline-flex">
-              <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+              <CheckCircle2 className={cn("h-4 w-4", successIconClass)} />
             </span>
           )}
           {executionStatus === "error" && (
