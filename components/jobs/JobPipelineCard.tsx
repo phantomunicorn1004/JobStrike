@@ -2,8 +2,12 @@
 
 import React from "react";
 import { Card } from "@/components/ui/card";
-import { ExternalLink, Download, GripVertical } from "lucide-react";
+import { ExternalLink, Download, GripVertical, Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { StageDates } from "@/lib/jobs/pipelineCardUtils";
+
+export type { StageDates };
 
 /** Stage id: "applied" is reserved for jobs table; others are technical_jobs.stage_id */
 export type PipelineStageId = string;
@@ -19,6 +23,10 @@ export type AppliedJob = {
   resume_link: string;
   note: string;
   created_at: string;
+  stage_entered_at?: string | null;
+  stage_dates?: StageDates;
+  recruiter_name?: string | null;
+  recruiter_contact?: string | null;
 };
 
 /** Technical/Final job from `technical_jobs` table */
@@ -30,6 +38,7 @@ export type TechnicalJob = {
   company_name: string;
   title: string;
   resume_link: string;
+  job_description?: string | null;
   recruiter_name?: string | null;
   recruiter_contact?: string | null;
   first_round_date?: string | null;
@@ -40,6 +49,8 @@ export type TechnicalJob = {
   third_round_result?: string | null;
   status?: string | null;
   created_at?: string;
+  stage_entered_at?: string | null;
+  stage_dates?: StageDates;
 };
 
 export type PipelineCardJob = AppliedJob | TechnicalJob;
@@ -60,9 +71,10 @@ type JobPipelineCardProps = {
   job: PipelineCardJob;
   stageId: PipelineStageId;
   isDragging?: boolean;
+  onDetail?: () => void;
 };
 
-export function JobPipelineCard({ job, stageId, isDragging }: JobPipelineCardProps) {
+export function JobPipelineCard({ job, stageId, isDragging, onDetail }: JobPipelineCardProps) {
   const technical = isTechnicalJob(job) ? job : null;
 
   return (
@@ -96,12 +108,32 @@ export function JobPipelineCard({ job, stageId, isDragging }: JobPipelineCardPro
           <p className="text-sm text-muted-foreground truncate" title={job.company_name}>
             {job.company_name}
           </p>
+          {job.name && (
+            <p className="text-xs text-muted-foreground truncate" title={job.name}>
+              {job.name}
+            </p>
+          )}
           {technical?.recruiter_name && (
             <p className="text-xs text-muted-foreground truncate">
               {technical.recruiter_name}
             </p>
           )}
           <div className="flex flex-wrap items-center gap-2 pt-1">
+            {onDetail && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-xs rounded-md"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDetail();
+                }}
+              >
+                <Info className="h-3 w-3 mr-1" />
+                Detail
+              </Button>
+            )}
             {"job_link" in job && job.job_link && (
               <a
                 href={job.job_link}

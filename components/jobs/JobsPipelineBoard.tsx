@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,25 @@ import {
   type TechnicalJob,
   type PipelineCardJob,
 } from "./JobPipelineCard";
+import { JobPipelineDetailDialog, type PipelineCardDetailsUpdate } from "./JobPipelineDetailDialog";
+import {
+  mergeStageDate,
+  normalizeStageDates,
+  cardNotes,
+} from "@/lib/jobs/pipelineCardUtils";
+import { toast } from "sonner";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   ClipboardList,
@@ -32,6 +51,9 @@ import {
   Trash2,
   Pencil,
   GripVertical,
+  Search,
+  User,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +88,48 @@ function reorderList<T>(list: T[], fromIndex: number, toIndex: number): T[] {
 
 type ProfileOption = { id: number; full_name: string };
 
+function stageEnteredNow(): string {
+  return new Date().toISOString();
+}
+
+function jobMatchesSearch(job: PipelineCardJob, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const parts = [
+    job.name,
+    job.title,
+    job.company_name,
+    job.resume_link,
+    "job_link" in job ? job.job_link : "",
+    "note" in job ? job.note : "",
+  ];
+  if (job.source === "technical_jobs") {
+    parts.push(
+      job.recruiter_name ?? "",
+      job.recruiter_contact ?? "",
+      job.status ?? "",
+      job.job_description ?? "",
+    );
+  }
+  return parts.join(" ").toLowerCase().includes(q);
+}
+
+function buildCandidateOptions(
+  profiles: ProfileOption[],
+  jobs: PipelineCardJob[],
+): string[] {
+  const names = new Set<string>();
+  for (const profile of profiles) {
+    const name = profile.full_name.trim();
+    if (name) names.add(name);
+  }
+  for (const job of jobs) {
+    const name = job.name.trim();
+    if (name) names.add(name);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
 export function JobsPipelineBoard() {
   const [stages, setStages] = useState<StageConfig[]>([]);
   const [applied, setApplied] = useState<AppliedJob[]>([]);
@@ -91,6 +155,14 @@ export function JobsPipelineBoard() {
   const [stageDragId, setStageDragId] = useState<string | null>(null);
   const [stageDropTargetId, setStageDropTargetId] = useState<string | null>(null);
   const [savingStageOrder, setSavingStageOrder] = useState(false);
+  const [search, setSearch] = useState("");
+  const [candidateFilter, setCandidateFilter] = useState("");
+  const [candidateFilterOpen, setCandidateFilterOpen] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<{
+    job: PipelineCardJob;
+    stageId: string;
+    stageName: string;
+  } | null>(null);
   const supabase = getSupabaseBrowserClient();
 
   const fetchStages = useCallback(async (): Promise<StageConfig[]> => {
@@ -132,37 +204,53 @@ export function JobsPipelineBoard() {
         );
       }
 
-      const appliedRows: AppliedJob[] = (jobsRes.data || []).map((row: Record<string, unknown>) => ({
-        id: row.id as number,
-        source: "jobs",
-        name: row.name as string,
-        title: row.title as string,
-        company_name: row.company_name as string,
-        job_link: row.job_link as string,
-        resume_link: row.resume_link as string,
-        note: (row.note as string) ?? "",
-        created_at: row.created_at as string,
-      }));
+      const appliedRows: AppliedJob[] = (jobsRes.data || []).map((row: Record<string, unknown>) => {
+        const createdAt = row.created_at as string;
+        const stageEnteredAt = (row.stage_entered_at as string | null) ?? createdAt;
+        return {
+          id: row.id as number,
+          source: "jobs",
+          name: row.name as string,
+          title: row.title as string,
+          company_name: row.company_name as string,
+          job_link: row.job_link as string,
+          resume_link: row.resume_link as string,
+          note: (row.note as string) ?? "",
+          created_at: createdAt,
+          stage_entered_at: stageEnteredAt,
+          stage_dates: normalizeStageDates(row.stage_dates, "applied", stageEnteredAt),
+          recruiter_name: (row.recruiter_name as string | null) ?? null,
+          recruiter_contact: (row.recruiter_contact as string | null) ?? null,
+        };
+      });
 
-      const techRows: TechnicalJob[] = (techRes.data || []).map((row: Record<string, unknown>) => ({
-        id: row.id as number,
-        source: "technical_jobs",
-        stage_id: (row.stage_id as string | null) ?? null,
-        name: row.name as string,
-        company_name: row.company_name as string,
-        title: row.title as string,
-        resume_link: row.resume_link as string,
-        recruiter_name: row.recruiter_name as string | null,
-        recruiter_contact: row.recruiter_contact as string | null,
-        first_round_date: row.first_round_date as string | null,
-        first_round_result: row.first_round_result as string | null,
-        second_round_date: row.second_round_date as string | null,
-        second_round_result: row.second_round_result as string | null,
-        third_round_date: row.third_round_date as string | null,
-        third_round_result: row.third_round_result as string | null,
-        status: row.status as string | null,
-        created_at: row.created_at as string,
-      }));
+      const techRows: TechnicalJob[] = (techRes.data || []).map((row: Record<string, unknown>) => {
+        const stageId = (row.stage_id as string | null) ?? "technical";
+        const createdAt = row.created_at as string;
+        const stageEnteredAt = (row.stage_entered_at as string | null) ?? createdAt;
+        return {
+          id: row.id as number,
+          source: "technical_jobs",
+          stage_id: stageId,
+          name: row.name as string,
+          company_name: row.company_name as string,
+          title: row.title as string,
+          resume_link: row.resume_link as string,
+          job_description: (row.job_description as string | null) ?? null,
+          recruiter_name: row.recruiter_name as string | null,
+          recruiter_contact: row.recruiter_contact as string | null,
+          first_round_date: row.first_round_date as string | null,
+          first_round_result: row.first_round_result as string | null,
+          second_round_date: row.second_round_date as string | null,
+          second_round_result: row.second_round_result as string | null,
+          third_round_date: row.third_round_date as string | null,
+          third_round_result: row.third_round_result as string | null,
+          status: row.status as string | null,
+          created_at: createdAt,
+          stage_entered_at: stageEnteredAt,
+          stage_dates: normalizeStageDates(row.stage_dates, stageId, stageEnteredAt),
+        };
+      });
 
       setApplied(appliedRows);
 
@@ -193,7 +281,118 @@ export function JobsPipelineBoard() {
       if (stageId === "applied") return applied;
       return jobsByStage[stageId] ?? [];
     },
-    [applied, jobsByStage]
+    [applied, jobsByStage],
+  );
+
+  const allPipelineJobs = useMemo(
+    () => [...applied, ...Object.values(jobsByStage).flat()],
+    [applied, jobsByStage],
+  );
+
+  const candidateOptions = useMemo(
+    () => buildCandidateOptions(profiles, allPipelineJobs),
+    [profiles, allPipelineJobs],
+  );
+
+  const hasActiveFilters = Boolean(search.trim() || candidateFilter);
+
+  const filterJob = useCallback(
+    (job: PipelineCardJob) => {
+      if (!jobMatchesSearch(job, search)) return false;
+      if (candidateFilter && job.name.trim() !== candidateFilter) return false;
+      return true;
+    },
+    [search, candidateFilter],
+  );
+
+  const getFilteredJobsForStage = useCallback(
+    (stageId: string) => getJobsForStage(stageId).filter(filterJob),
+    [getJobsForStage, filterJob],
+  );
+
+  const patchJobInState = useCallback((updated: PipelineCardJob) => {
+    if (updated.source === "jobs") {
+      setApplied((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
+    } else {
+      const stageId = updated.stage_id ?? "technical";
+      setJobsByStage((prev) => {
+        const next: Record<string, TechnicalJob[]> = {};
+        for (const [sid, list] of Object.entries(prev)) {
+          next[sid] = list.filter((j) => j.id !== updated.id);
+        }
+        if (!next[stageId]) next[stageId] = [];
+        next[stageId] = [updated, ...next[stageId]];
+        return next;
+      });
+    }
+    setDetailTarget((prev) =>
+      prev &&
+      prev.job.source === updated.source &&
+      prev.job.id === updated.id
+        ? { ...prev, job: updated }
+        : prev,
+    );
+  }, []);
+
+  const handleSaveCardDetails = useCallback(
+    async (job: PipelineCardJob, update: PipelineCardDetailsUpdate) => {
+      const currentStageId =
+        job.source === "jobs"
+          ? detailTarget?.stageId ?? "applied"
+          : (job as TechnicalJob).stage_id ?? detailTarget?.stageId ?? "technical";
+      const stageEnteredAt =
+        update.stage_dates[currentStageId] ?? job.stage_entered_at ?? job.created_at;
+
+      try {
+        if (job.source === "jobs") {
+          const { error } = await supabase
+            .from("jobs")
+            .update({
+              stage_dates: update.stage_dates,
+              recruiter_name: update.recruiter_name || null,
+              recruiter_contact: update.recruiter_contact || null,
+              note: update.notes,
+              stage_entered_at: stageEnteredAt,
+            })
+            .eq("id", job.id);
+          if (error) throw error;
+          patchJobInState({
+            ...job,
+            stage_dates: update.stage_dates,
+            recruiter_name: update.recruiter_name || null,
+            recruiter_contact: update.recruiter_contact || null,
+            note: update.notes,
+            stage_entered_at: stageEnteredAt,
+          });
+        } else {
+          const { error } = await supabase
+            .from("technical_jobs")
+            .update({
+              stage_dates: update.stage_dates,
+              recruiter_name: update.recruiter_name || null,
+              recruiter_contact: update.recruiter_contact || null,
+              job_description: update.notes,
+              stage_entered_at: stageEnteredAt,
+            })
+            .eq("id", job.id);
+          if (error) throw error;
+          patchJobInState({
+            ...job,
+            stage_dates: update.stage_dates,
+            recruiter_name: update.recruiter_name || null,
+            recruiter_contact: update.recruiter_contact || null,
+            job_description: update.notes,
+            stage_entered_at: stageEnteredAt,
+          } as TechnicalJob);
+        }
+        toast.success("Application details saved.");
+      } catch (e) {
+        console.error("Save card details failed:", e);
+        toast.error("Failed to save application details.");
+        throw e;
+      }
+    },
+    [supabase, patchJobInState, detailTarget?.stageId],
   );
 
   const handleAddJob = useCallback(async () => {
@@ -206,6 +405,8 @@ export function JobsPipelineBoard() {
       const extraNote = newJob.note.trim();
       const combinedNote =
         baseNote && extraNote ? `${baseNote}\n\n${extraNote}` : baseNote || extraNote || "";
+      const enteredAt = stageEnteredNow();
+      const stageDates = { applied: enteredAt };
       const { data, error } = await supabase
         .from("jobs")
         .insert({
@@ -215,6 +416,8 @@ export function JobsPipelineBoard() {
           job_link: newJob.job_link.trim() || "",
           resume_link: "",
           note: combinedNote,
+          stage_entered_at: enteredAt,
+          stage_dates: stageDates,
         })
         .select();
       if (error) throw error;
@@ -231,6 +434,10 @@ export function JobsPipelineBoard() {
             resume_link: row.resume_link as string,
             note: (row.note as string) ?? "",
             created_at: row.created_at as string,
+            stage_entered_at: enteredAt,
+            stage_dates: normalizeStageDates(row.stage_dates, "applied", enteredAt),
+            recruiter_name: null,
+            recruiter_contact: null,
           },
           ...prev,
         ]);
@@ -257,6 +464,13 @@ export function JobsPipelineBoard() {
         const job = applied.find((j) => j.id === payload.id);
         if (!job) return;
         setMovingId({ source: "jobs", id: job.id });
+        const enteredAt = stageEnteredNow();
+        const sourceStageId = payload.stageId;
+        const stageDates = mergeStageDate(
+          mergeStageDate(job.stage_dates, sourceStageId, job.stage_entered_at ?? job.created_at),
+          targetStageId,
+          enteredAt,
+        );
         try {
           const { data, error } = await supabase
             .from("technical_jobs")
@@ -267,6 +481,11 @@ export function JobsPipelineBoard() {
               resume_link: job.resume_link ?? "",
               stage_id: targetStageId,
               status: targetStageId === "final" ? "success" : "ongoing",
+              stage_entered_at: enteredAt,
+              stage_dates: stageDates,
+              job_description: cardNotes(job),
+              recruiter_name: job.recruiter_name ?? null,
+              recruiter_contact: job.recruiter_contact ?? null,
             })
             .select();
           if (error) throw error;
@@ -276,7 +495,15 @@ export function JobsPipelineBoard() {
             setJobsByStage((prev) => ({
               ...prev,
               [targetStageId]: [
-                { ...job, id: newRow.id as number, source: "technical_jobs", stage_id: targetStageId } as TechnicalJob,
+                {
+                  ...job,
+                  id: newRow.id as number,
+                  source: "technical_jobs",
+                  stage_id: targetStageId,
+                  stage_entered_at: enteredAt,
+                  stage_dates: stageDates,
+                  job_description: cardNotes(job),
+                } as TechnicalJob,
                 ...(prev[targetStageId] ?? []),
               ],
             }));
@@ -296,6 +523,17 @@ export function JobsPipelineBoard() {
         const job = allTech.find((j) => j.id === payload.id);
         if (!job) return;
         setMovingId({ source: "technical_jobs", id: job.id });
+        const enteredAt = stageEnteredNow();
+        const sourceStageId = job.stage_id ?? payload.stageId;
+        const stageDates = mergeStageDate(
+          mergeStageDate(
+            job.stage_dates,
+            sourceStageId,
+            job.stage_entered_at ?? job.created_at ?? enteredAt,
+          ),
+          targetStageId,
+          enteredAt,
+        );
         try {
           const { error } = await supabase.from("jobs").insert({
             name: job.name,
@@ -303,7 +541,11 @@ export function JobsPipelineBoard() {
             company_name: job.company_name,
             job_link: "",
             resume_link: job.resume_link,
-            note: "",
+            note: cardNotes(job),
+            recruiter_name: job.recruiter_name ?? null,
+            recruiter_contact: job.recruiter_contact ?? null,
+            stage_entered_at: enteredAt,
+            stage_dates: stageDates,
           });
           if (error) throw error;
           await supabase.from("technical_jobs").delete().eq("id", job.id);
@@ -327,16 +569,26 @@ export function JobsPipelineBoard() {
       const job = allTech.find((j) => j.id === payload.id);
       if (!job) return;
       setMovingId({ source: "technical_jobs", id: job.id });
+      const enteredAt = stageEnteredNow();
+      const fromStage = job.stage_id ?? "technical";
+      const stageDates = mergeStageDate(job.stage_dates, targetStageId, enteredAt);
       try {
         await supabase
           .from("technical_jobs")
-          .update({ stage_id: targetStageId, status: targetStageId === "final" ? "success" : "ongoing" })
+          .update({
+            stage_id: targetStageId,
+            status: targetStageId === "final" ? "success" : "ongoing",
+            stage_entered_at: enteredAt,
+            stage_dates: stageDates,
+          })
           .eq("id", job.id);
-        const fromStage = job.stage_id ?? "technical";
         setJobsByStage((prev) => {
           const next = { ...prev };
           if (next[fromStage]) next[fromStage] = next[fromStage].filter((j) => j.id !== job.id);
-          next[targetStageId] = [{ ...job, stage_id: targetStageId }, ...(next[targetStageId] ?? [])];
+          next[targetStageId] = [
+            { ...job, stage_id: targetStageId, stage_entered_at: enteredAt, stage_dates: stageDates },
+            ...(next[targetStageId] ?? []),
+          ];
           return next;
         });
       } catch (e) {
@@ -603,13 +855,107 @@ export function JobsPipelineBoard() {
         </Dialog>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[160px] flex-1 sm:max-w-xs">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Input
+            className="h-9 pl-9 rounded-lg bg-muted/30"
+            placeholder="Search title, company, candidate…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        <Popover open={candidateFilterOpen} onOpenChange={setCandidateFilterOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={cn(
+                "h-9 gap-1.5 rounded-lg shrink-0 max-w-[200px]",
+                candidateFilter && "border-primary/60 bg-primary/5 text-primary",
+              )}
+            >
+              <User className="h-4 w-4 shrink-0" />
+              <span className="truncate hidden sm:inline">
+                {candidateFilter || "Candidate"}
+              </span>
+              {candidateFilter && (
+                <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-medium shrink-0">
+                  On
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-64 p-3" align="start">
+            <p className="text-sm font-medium mb-3">Filter by candidate</p>
+            <Select
+              value={candidateFilter || "__all__"}
+              onValueChange={(v) => setCandidateFilter(v === "__all__" ? "" : v)}
+            >
+              <SelectTrigger className="h-9 w-full">
+                <SelectValue placeholder="All candidates" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All candidates</SelectItem>
+                {candidateOptions.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="mt-3 flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8"
+                onClick={() => {
+                  setCandidateFilter("");
+                  setCandidateFilterOpen(false);
+                }}
+              >
+                Clear
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8"
+                onClick={() => setCandidateFilterOpen(false)}
+              >
+                Apply
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        {hasActiveFilters && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-9 rounded-lg text-xs px-2"
+            onClick={() => {
+              setSearch("");
+              setCandidateFilter("");
+            }}
+          >
+            <X className="h-3.5 w-3.5 mr-1" />
+            Clear filters
+          </Button>
+        )}
+      </div>
+
       <div
         className="grid min-h-0 w-full flex-1 gap-4"
         style={{ gridTemplateColumns: `repeat(${displayStages.length}, minmax(0, 1fr))` }}
       >
         {displayStages.map((stage) => {
           const stageId = stage.id;
-          const jobs = getJobsForStage(stageId);
+          const jobs = getFilteredJobsForStage(stageId);
+          const totalInStage = getJobsForStage(stageId).length;
           const icon =
             stageId === "applied" ? (
               <ClipboardList className="h-5 w-5" />
@@ -637,7 +983,9 @@ export function JobsPipelineBoard() {
                   {icon}
                   <span>{stage.name}</span>
                   <span className="rounded-full bg-muted px-2 py-0.5 text-sm text-muted-foreground">
-                    {jobs.length}
+                    {hasActiveFilters && jobs.length !== totalInStage
+                      ? `${jobs.length}/${totalInStage}`
+                      : jobs.length}
                   </span>
                 </div>
                 {stageId === "applied" && (
@@ -727,13 +1075,30 @@ export function JobsPipelineBoard() {
                     job={job}
                     stageId={stageId}
                     isDragging={movingId?.source === job.source && movingId?.id === job.id}
+                    onDetail={() =>
+                      setDetailTarget({ job, stageId, stageName: stage.name })
+                    }
                   />
                 ))}
+                {jobs.length === 0 && hasActiveFilters && totalInStage > 0 && (
+                  <p className="py-4 text-center text-xs text-muted-foreground">
+                    No matches in this stage
+                  </p>
+                )}
               </div>
             </div>
           );
         })}
       </div>
+
+      <JobPipelineDetailDialog
+        open={detailTarget != null}
+        onOpenChange={(open) => !open && setDetailTarget(null)}
+        job={detailTarget?.job ?? null}
+        currentStageId={detailTarget?.stageId ?? "applied"}
+        stages={displayStages.map((s) => ({ id: s.id, name: s.name }))}
+        onSave={handleSaveCardDetails}
+      />
     </div>
   );
 }

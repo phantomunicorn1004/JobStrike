@@ -19,6 +19,7 @@ export async function addApplicationToPipeline(
   }
   noteParts.push(`Resume DB #${app.id}`);
 
+  const enteredAt = new Date().toISOString();
   const { data, error } = await supabase
     .from("jobs")
     .insert({
@@ -28,6 +29,8 @@ export async function addApplicationToPipeline(
       job_link: app.jobLink || "",
       resume_link: app.resumeUrl || "",
       note: noteParts.join("\n"),
+      stage_entered_at: enteredAt,
+      stage_dates: { applied: enteredAt },
     } as never)
     .select("id")
     .single();
