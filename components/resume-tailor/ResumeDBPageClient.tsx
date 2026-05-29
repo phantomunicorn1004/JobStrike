@@ -20,14 +20,21 @@ import {
 import {
   Table,
   TableBody,
-  TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ResumeDBEditDialog } from "@/components/resume-tailor/ResumeDBEditDialog";
+import {
+  ResizableSortableHead,
+  ResizableTableCell,
+  ResizableTableHead,
+} from "@/components/resume-tailor/ResumeDBResizableTable";
+import {
+  useResizableColumns,
+  type ResumeDBColumnId,
+} from "@/components/resume-tailor/useResizableColumns";
 import {
   Select,
   SelectContent,
@@ -40,9 +47,6 @@ import {
   ChevronRight,
   CalendarRange,
   User,
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
   Download,
   ExternalLink,
   Eye,
@@ -80,40 +84,19 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type SortKey = "company" | "jobTitle" | "pipeline" | null;
 type SortDir = "asc" | "desc";
 
-function SortableHead({
-  label,
-  active,
-  direction,
-  onSort,
-  className,
-}: {
-  label: string;
-  active: boolean;
-  direction: SortDir;
-  onSort: () => void;
-  className?: string;
-}) {
-  const Icon = active
-    ? direction === "asc"
-      ? ArrowUp
-      : ArrowDown
-    : ArrowUpDown;
-  return (
-    <TableHead className={className}>
-      <button
-        type="button"
-        onClick={onSort}
-        className={cn(
-          "inline-flex items-center gap-1 font-semibold hover:text-foreground transition-colors",
-          active ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        {label}
-        <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-      </button>
-    </TableHead>
-  );
-}
+const COLUMN_ORDER: ResumeDBColumnId[] = [
+  "select",
+  "no",
+  "jobLink",
+  "company",
+  "jobTitle",
+  "resume",
+  "coverLetter",
+  "pipeline",
+  "applied",
+  "json",
+  "actions",
+];
 
 function DocActions({
   url,
@@ -127,7 +110,7 @@ function DocActions({
   onPreview: (title: string, url: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="flex items-center justify-center gap-1 mx-auto w-fit">
       <Button
         variant="outline"
         size="icon"
@@ -485,6 +468,17 @@ export function ResumeDBPageClient() {
   const [editOpen, setEditOpen] = useState(false);
   const [bulkRemoving, setBulkRemoving] = useState(false);
   const [bulkExporting, setBulkExporting] = useState(false);
+  const { widths, setColumnWidth } = useResizableColumns();
+
+  const tableWidth = useMemo(
+    () => COLUMN_ORDER.reduce((sum, id) => sum + widths[id], 0),
+    [widths],
+  );
+
+  const handleColumnResize = useCallback(
+    (id: ResumeDBColumnId, width: number) => setColumnWidth(id, width),
+    [setColumnWidth],
+  );
   const [profiles, setProfiles] = useState<{ id: number; full_name: string }[]>([]);
   const [candidateFilter, setCandidateFilter] = useState("");
 
@@ -968,196 +962,278 @@ export function ResumeDBPageClient() {
                   : "No matches for your search or date filters."}
               </p>
             ) : (
-              <Table className="table-fixed w-full">
-                    <TableHeader>
-                      <TableRow className="hover:bg-transparent bg-muted/30">
-                        <TableHead className="w-[36px] px-1">
+              <div className="overflow-x-auto">
+                <p className="px-3 py-2 text-[11px] text-muted-foreground border-b border-border/40">
+                  Drag the right edge of a column header to resize, like a spreadsheet.
+                </p>
+                <Table
+                  className="table-fixed w-max min-w-full"
+                  style={{ width: Math.max(tableWidth, 960) }}
+                >
+                  <colgroup>
+                    {COLUMN_ORDER.map((id) => (
+                      <col key={id} style={{ width: widths[id] }} />
+                    ))}
+                  </colgroup>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent bg-muted/40">
+                      <ResizableTableHead
+                        columnId="select"
+                        width={widths.select}
+                        onResize={handleColumnResize}
+                        align="center"
+                      >
+                        <Checkbox
+                          checked={
+                            allFilteredSelected
+                              ? true
+                              : someFilteredSelected
+                                ? "indeterminate"
+                                : false
+                          }
+                          onCheckedChange={toggleSelectAll}
+                          aria-label="Select all filtered applications"
+                        />
+                      </ResizableTableHead>
+                      <ResizableTableHead
+                        columnId="no"
+                        width={widths.no}
+                        onResize={handleColumnResize}
+                        align="center"
+                      >
+                        No
+                      </ResizableTableHead>
+                      <ResizableTableHead
+                        columnId="jobLink"
+                        width={widths.jobLink}
+                        onResize={handleColumnResize}
+                      >
+                        Job link
+                      </ResizableTableHead>
+                      <ResizableSortableHead
+                        columnId="company"
+                        width={widths.company}
+                        onResize={handleColumnResize}
+                        label="Company"
+                        active={sortKey === "company"}
+                        direction={sortDir}
+                        onSort={() => handleSort("company")}
+                      />
+                      <ResizableSortableHead
+                        columnId="jobTitle"
+                        width={widths.jobTitle}
+                        onResize={handleColumnResize}
+                        label="Job title"
+                        active={sortKey === "jobTitle"}
+                        direction={sortDir}
+                        onSort={() => handleSort("jobTitle")}
+                      />
+                      <ResizableTableHead
+                        columnId="resume"
+                        width={widths.resume}
+                        onResize={handleColumnResize}
+                        align="center"
+                      >
+                        Resume
+                      </ResizableTableHead>
+                      <ResizableTableHead
+                        columnId="coverLetter"
+                        width={widths.coverLetter}
+                        onResize={handleColumnResize}
+                        align="center"
+                      >
+                        Cover letter
+                      </ResizableTableHead>
+                      <ResizableSortableHead
+                        columnId="pipeline"
+                        width={widths.pipeline}
+                        onResize={handleColumnResize}
+                        label="Pipeline"
+                        active={sortKey === "pipeline"}
+                        direction={sortDir}
+                        onSort={() => handleSort("pipeline")}
+                        align="center"
+                      />
+                      <ResizableTableHead
+                        columnId="applied"
+                        width={widths.applied}
+                        onResize={handleColumnResize}
+                      >
+                        Applied
+                      </ResizableTableHead>
+                      <ResizableTableHead
+                        columnId="json"
+                        width={widths.json}
+                        onResize={handleColumnResize}
+                        align="center"
+                      >
+                        JSON
+                      </ResizableTableHead>
+                      <ResizableTableHead
+                        columnId="actions"
+                        width={widths.actions}
+                        onResize={handleColumnResize}
+                        align="center"
+                      >
+                        Actions
+                      </ResizableTableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageRows.map((row, index) => (
+                      <TableRow
+                        key={row.rowIndex}
+                        className={cn(
+                          "group hover:bg-muted/20 transition-colors",
+                          selectedIds.has(row.rowIndex) && "bg-primary/5",
+                        )}
+                      >
+                        <ResizableTableCell width={widths.select} align="center">
                           <Checkbox
-                            checked={
-                              allFilteredSelected
-                                ? true
-                                : someFilteredSelected
-                                  ? "indeterminate"
-                                  : false
-                            }
-                            onCheckedChange={toggleSelectAll}
-                            aria-label="Select all filtered applications"
+                            checked={selectedIds.has(row.rowIndex)}
+                            onCheckedChange={() => toggleSelectRow(row.rowIndex)}
+                            aria-label={`Select ${row.company || "application"}`}
                           />
-                        </TableHead>
-                        <TableHead className="w-[40px] px-1 font-semibold">No</TableHead>
-                        <TableHead className="w-[72px] px-1 font-semibold">Job link</TableHead>
-                        <SortableHead
-                          label="Company"
-                          active={sortKey === "company"}
-                          direction={sortDir}
-                          onSort={() => handleSort("company")}
-                          className="min-w-0 px-1"
-                        />
-                        <SortableHead
-                          label="Job title"
-                          active={sortKey === "jobTitle"}
-                          direction={sortDir}
-                          onSort={() => handleSort("jobTitle")}
-                          className="min-w-0 px-1"
-                        />
-                        <TableHead className="w-[60px] px-1 font-semibold">Resume</TableHead>
-                        <TableHead className="w-[60px] px-1 font-semibold" title="Cover letter">
-                          Cover
-                        </TableHead>
-                        <SortableHead
-                          label="Pipeline"
-                          active={sortKey === "pipeline"}
-                          direction={sortDir}
-                          onSort={() => handleSort("pipeline")}
-                          className="w-[64px] px-1"
-                        />
-                        <TableHead className="w-[128px] px-1 font-semibold">Applied</TableHead>
-                        <TableHead className="w-[44px] px-1 font-semibold">JSON</TableHead>
-                        <TableHead className="w-[72px] px-1 font-semibold text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {pageRows.map((row, index) => (
-                        <TableRow
-                          key={row.rowIndex}
-                          className={cn(
-                            "group hover:bg-muted/20 transition-colors",
-                            selectedIds.has(row.rowIndex) && "bg-primary/5",
-                          )}
+                        </ResizableTableCell>
+                        <ResizableTableCell
+                          width={widths.no}
+                          align="center"
+                          className="tabular-nums text-muted-foreground"
                         >
-                          <TableCell className="px-1">
-                            <Checkbox
-                              checked={selectedIds.has(row.rowIndex)}
-                              onCheckedChange={() => toggleSelectRow(row.rowIndex)}
-                              aria-label={`Select ${row.company || "application"}`}
-                            />
-                          </TableCell>
-                          <TableCell className="px-1 text-sm tabular-nums text-muted-foreground">
-                            {rangeStart + index}
-                          </TableCell>
-                          <TableCell className="px-1">
-                            {row.jobLink ? (
-                              <Button
-                                variant="link"
-                                size="sm"
-                                className="h-auto p-0 text-primary"
-                                asChild
-                              >
-                                <a
-                                  href={row.jobLink}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  Open
-                                  <ExternalLink className="h-3 w-3 ml-1" />
-                                </a>
-                              </Button>
-                            ) : (
-                              "—"
-                            )}
-                          </TableCell>
-                          <TableCell className="min-w-0 max-w-0 px-1 font-medium truncate">
-                            {row.company || "—"}
-                          </TableCell>
-                          <TableCell className="min-w-0 max-w-0 px-1 truncate">
-                            {row.jobTitle || "—"}
-                          </TableCell>
-                          <TableCell className="px-1">
-                            {row.resumeUrl ? (
-                              <DocActions
-                                url={row.resumeUrl}
-                                label="Resume"
-                                company={row.company}
-                                onPreview={(title, url) => setPreview({ title, url })}
-                              />
-                            ) : (
-                              <span className="text-muted-foreground text-sm">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="px-1">
-                            {row.coverLetterUrl ? (
-                              <DocActions
-                                url={row.coverLetterUrl}
-                                label="Cover letter"
-                                company={row.company}
-                                onPreview={(title, url) => setPreview({ title, url })}
-                              />
-                            ) : (
-                              <span className="text-muted-foreground text-sm">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="px-1">
-                            <div className="flex items-center justify-center gap-1">
-                              <Switch
-                                checked={row.inPipeline}
-                                disabled={togglingRow === row.rowIndex}
-                                onCheckedChange={(checked) =>
-                                  handlePipelineToggle(row, checked)
-                                }
-                                aria-label={`Add ${row.company} to pipeline`}
-                              />
-                              {togglingRow === row.rowIndex ? (
-                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                              ) : row.inPipeline ? (
-                                <Link
-                                  href="/jobs"
-                                  className="text-primary shrink-0"
-                                  title="View in pipeline"
-                                >
-                                  <Workflow className="h-3.5 w-3.5" />
-                                </Link>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                          <TableCell className="px-1 text-xs whitespace-nowrap tabular-nums text-muted-foreground">
-                            {formatApplied(row.appliedAt, row.date)}
-                          </TableCell>
-                          <TableCell className="px-1">
+                          {rangeStart + index}
+                        </ResizableTableCell>
+                        <ResizableTableCell width={widths.jobLink}>
+                          {row.jobLink ? (
                             <Button
-                              variant="outline"
+                              variant="link"
                               size="sm"
-                              className="h-7 w-7 p-0 rounded-lg"
-                              title="Download JSON"
-                              onClick={() => downloadJson(row)}
+                              className="h-auto max-w-full p-0 text-primary truncate inline-flex"
+                              asChild
                             >
-                              <FileJson className="h-3.5 w-3.5" />
-                              <span className="sr-only">Download JSON</span>
+                              <a
+                                href={row.jobLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={row.jobLink}
+                              >
+                                Open
+                                <ExternalLink className="h-3 w-3 ml-1 shrink-0" />
+                              </a>
                             </Button>
-                          </TableCell>
-                          <TableCell className="px-1">
-                            <div className="flex justify-end gap-0.5 opacity-80 group-hover:opacity-100">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 rounded-lg"
-                                title="Edit"
-                                onClick={() => {
-                                  setEditRow(row);
-                                  setEditOpen(true);
-                                }}
+                          ) : (
+                            "—"
+                          )}
+                        </ResizableTableCell>
+                        <ResizableTableCell width={widths.company} className="font-medium">
+                          <span className="block truncate" title={row.company || undefined}>
+                            {row.company || "—"}
+                          </span>
+                        </ResizableTableCell>
+                        <ResizableTableCell width={widths.jobTitle}>
+                          <span className="block truncate" title={row.jobTitle || undefined}>
+                            {row.jobTitle || "—"}
+                          </span>
+                        </ResizableTableCell>
+                        <ResizableTableCell width={widths.resume} align="center">
+                          {row.resumeUrl ? (
+                            <DocActions
+                              url={row.resumeUrl}
+                              label="Resume"
+                              company={row.company}
+                              onPreview={(title, url) => setPreview({ title, url })}
+                            />
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </ResizableTableCell>
+                        <ResizableTableCell width={widths.coverLetter} align="center">
+                          {row.coverLetterUrl ? (
+                            <DocActions
+                              url={row.coverLetterUrl}
+                              label="Cover letter"
+                              company={row.company}
+                              onPreview={(title, url) => setPreview({ title, url })}
+                            />
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </ResizableTableCell>
+                        <ResizableTableCell width={widths.pipeline} align="center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <Switch
+                              checked={row.inPipeline}
+                              disabled={togglingRow === row.rowIndex}
+                              onCheckedChange={(checked) =>
+                                handlePipelineToggle(row, checked)
+                              }
+                              aria-label={`Add ${row.company} to pipeline`}
+                            />
+                            {togglingRow === row.rowIndex ? (
+                              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                            ) : row.inPipeline ? (
+                              <Link
+                                href="/jobs"
+                                className="text-primary shrink-0"
+                                title="View in pipeline"
                               >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
-                                title="Remove"
-                                disabled={removingRow === row.rowIndex}
-                                onClick={() => handleDelete(row.rowIndex)}
-                              >
-                                {removingRow === row.rowIndex ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                                <Workflow className="h-3 w-3" />
+                              </Link>
+                            ) : null}
+                          </div>
+                        </ResizableTableCell>
+                        <ResizableTableCell
+                          width={widths.applied}
+                          className="text-xs tabular-nums text-muted-foreground whitespace-nowrap"
+                        >
+                          {formatApplied(row.appliedAt, row.date)}
+                        </ResizableTableCell>
+                        <ResizableTableCell width={widths.json} align="center">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0 rounded-lg"
+                            title="Download JSON"
+                            onClick={() => downloadJson(row)}
+                          >
+                            <FileJson className="h-3.5 w-3.5" />
+                            <span className="sr-only">Download JSON</span>
+                          </Button>
+                        </ResizableTableCell>
+                        <ResizableTableCell width={widths.actions} align="center">
+                          <div className="flex items-center justify-center gap-0.5 opacity-80 group-hover:opacity-100">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-lg"
+                              title="Edit"
+                              onClick={() => {
+                                setEditRow(row);
+                                setEditOpen(true);
+                              }}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
+                              title="Remove"
+                              disabled={removingRow === row.rowIndex}
+                              onClick={() => handleDelete(row.rowIndex)}
+                            >
+                              {removingRow === row.rowIndex ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        </ResizableTableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
