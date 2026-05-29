@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { parseResume } from "@/lib/resume/parseResume";
 import { parseDOCXStructure } from "@/lib/resume/structure/docxParser";
 import { inferStructureFromText, structureToContent } from "@/lib/resume/structure/infer";
@@ -13,6 +13,11 @@ import {
   updateResumeDbEntry,
 } from "@/lib/google-sheets/resumeDbSheet";
 import type { ResumeDbEntryInput } from "@/lib/google-sheets/types";
+import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+
+export function OPTIONS() {
+  return corsOptions();
+}
 
 function sheetErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -88,14 +93,36 @@ async function parseDriveResume(resumeUrl: string) {
 
 function parseEntryBody(body: Record<string, unknown>): ResumeDbEntryInput {
   return {
+    entryId: String(body.entryId ?? body.entry_id ?? "").trim(),
     candidate: String(body.candidate ?? "").trim(),
     email: String(body.email ?? "").trim(),
     jobLink: String(body.jobLink ?? body.job_link ?? "").trim(),
-    apply: String(body.apply ?? "").trim(),
+    apply: String(body.apply ?? body.status ?? "").trim(),
     jobTitle: String(body.jobTitle ?? body.job_title ?? "").trim(),
-    company: String(body.company ?? "").trim(),
+    company: String(body.company ?? body.company_name ?? "").trim(),
     resumeUrl: String(body.resumeUrl ?? body.resume_url ?? "").trim(),
+    coverLetterUrl: String(
+      body.coverLetterUrl ?? body.cover_letter_url ?? body.cover_letter_link ?? "",
+    ).trim(),
     date: String(body.date ?? "").trim(),
+  };
+}
+
+function mapEntryForList(e: Awaited<ReturnType<typeof listResumeDbEntries>>[number]) {
+  return {
+    rowIndex: e.rowIndex,
+    entryId: e.entryId,
+    candidate: e.candidate,
+    email: e.email,
+    jobLink: e.jobLink,
+    apply: e.apply,
+    jobTitle: e.jobTitle,
+    company: e.company,
+    resumeUrl: e.resumeUrl,
+    coverLetterUrl: e.coverLetterUrl,
+    date: e.date,
+    id: e.rowIndex,
+    roleTitle: e.jobTitle || e.candidate || `Row ${e.rowIndex}`,
   };
 }
 
@@ -108,27 +135,27 @@ export async function GET(request: NextRequest) {
     if (idParam) {
       const rowIndex = Number(idParam);
       if (Number.isNaN(rowIndex) || rowIndex < 2) {
-        return NextResponse.json({ error: "Invalid row id" }, { status: 400 });
+        return corsJson({ error: "Invalid row id" }, { status: 400 });
       }
 
       const entry = await getResumeDbEntry(rowIndex);
       if (!entry) {
-        return NextResponse.json({ error: "Row not found in sheet" }, { status: 404 });
+        return corsJson({ error: "Row not found in sheet" }, { status: 404 });
       }
 
       if (!shouldParse) {
-        return NextResponse.json({ resume: entry });
+        return corsJson({ resume: entry });
       }
 
       if (!entry.resumeUrl) {
-        return NextResponse.json(
+        return corsJson(
           { error: "This row has no resume_url set." },
           { status: 400 },
         );
       }
 
       const parsed = await parseDriveResume(entry.resumeUrl);
-      return NextResponse.json({
+      return corsJson({
         resume: {
           ...entry,
           content: parsed.content,
@@ -140,26 +167,13 @@ export async function GET(request: NextRequest) {
     }
 
     const entries = await listResumeDbEntries();
-    return NextResponse.json({
-      resumes: entries.map((e) => ({
-        rowIndex: e.rowIndex,
-        candidate: e.candidate,
-        email: e.email,
-        jobLink: e.jobLink,
-        apply: e.apply,
-        jobTitle: e.jobTitle,
-        company: e.company,
-        resumeUrl: e.resumeUrl,
-        date: e.date,
-        // Back-compat for workflow list labels
-        id: e.rowIndex,
-        roleTitle: e.jobTitle || e.candidate || `Row ${e.rowIndex}`,
-      })),
+    return corsJson({
+      resumes: entries.map(mapEntryForList),
     });
   } catch (error) {
     console.error("Resume DB GET error:", error);
     const message = sheetErrorMessage(error);
-    return NextResponse.json({ error: message }, { status: sheetErrorStatus(message) });
+    return corsJson({ error: message }, { status: sheetErrorStatus(message) });
   }
 }
 
@@ -169,25 +183,25 @@ export async function POST(request: NextRequest) {
     const entry = parseEntryBody(body);
 
     if (!entry.jobTitle && !entry.candidate) {
-      return NextResponse.json(
+      return corsJson(
         { error: "At least job title or candidate is required." },
         { status: 400 },
       );
     }
 
     if (!entry.resumeUrl) {
-      return NextResponse.json(
+      return corsJson(
         { error: "resume_url (Google Drive link) is required." },
         { status: 400 },
       );
     }
 
     const { rowIndex } = await appendResumeDbEntry(entry);
-    return NextResponse.json({ rowIndex, ...entry }, { status: 201 });
+    return corsJson({ rowIndex, ...entry }, { status: 201 });
   } catch (error) {
     console.error("Resume DB POST error:", error);
     const message = sheetErrorMessage(error);
-    return NextResponse.json({ error: message }, { status: sheetErrorStatus(message) });
+    return corsJson({ error: message }, { status: sheetErrorStatus(message) });
   }
 }
 
@@ -196,19 +210,24 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json();
     const rowIndex = Number(body.rowIndex ?? body.id);
     if (Number.isNaN(rowIndex) || rowIndex < 2) {
-      return NextResponse.json(
+      return corsJson(
         { error: "Missing or invalid rowIndex" },
         { status: 400 },
       );
     }
 
+    const existing = await getResumeDbEntry(rowIndex);
     const entry = parseEntryBody(body);
+    if (!entry.entryId && existing?.entryId) {
+      entry.entryId = existing.entryId;
+    }
+
     await updateResumeDbEntry(rowIndex, entry);
-    return NextResponse.json({ ok: true, rowIndex, ...entry });
+    return corsJson({ ok: true, rowIndex, ...entry });
   } catch (error) {
     console.error("Resume DB PATCH error:", error);
     const message = sheetErrorMessage(error);
-    return NextResponse.json({ error: message }, { status: sheetErrorStatus(message) });
+    return corsJson({ error: message }, { status: sheetErrorStatus(message) });
   }
 }
 
@@ -217,7 +236,7 @@ export async function DELETE(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const idParam = searchParams.get("id");
     if (!idParam) {
-      return NextResponse.json(
+      return corsJson(
         { error: "Missing required query parameter: id" },
         { status: 400 },
       );
@@ -225,14 +244,14 @@ export async function DELETE(request: NextRequest) {
 
     const rowIndex = Number(idParam);
     if (Number.isNaN(rowIndex) || rowIndex < 2) {
-      return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+      return corsJson({ error: "Invalid id" }, { status: 400 });
     }
 
     await deleteResumeDbEntry(rowIndex);
-    return NextResponse.json({ ok: true, rowIndex });
+    return corsJson({ ok: true, rowIndex });
   } catch (error) {
     console.error("Resume DB DELETE error:", error);
     const message = sheetErrorMessage(error);
-    return NextResponse.json({ error: message }, { status: sheetErrorStatus(message) });
+    return corsJson({ error: message }, { status: sheetErrorStatus(message) });
   }
 }

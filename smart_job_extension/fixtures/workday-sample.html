@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Workday My Information fixture — Smart Job Autofill</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 720px; }
+    .css-7t35fz { margin-bottom: 16px; }
+    .css-1ud5i8o { display: block; font-weight: 600; margin-bottom: 4px; }
+    .css-1fc83zd { color: #c00; }
+    input.css-1ez3yv1, input.css-1jafa2r { width: 100%; max-width: 344px; padding: 8px; box-sizing: border-box; }
+    .css-12zup1l { position: relative; max-width: 344px; }
+    .css-h3llp8 { width: 100%; text-align: left; padding: 8px 28px 8px 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    .css-77hcv { display: none; }
+    .css-1utp272 { display: inline-flex; align-items: center; gap: 8px; margin-right: 16px; }
+    fieldset { border: none; padding: 0; margin: 0 0 16px; }
+  </style>
+</head>
+<body>
+  <div data-automation-id="applyFlowPage">
+    <h2 data-automation-id="jobTitleHeading">Senior Build and Release Engineer</h2>
+    <ol data-automation-id="progressBar">
+      <li data-automation-id="progressBarActiveStep"><label>My Information</label></li>
+      <li data-automation-id="progressBarInactiveStep"><label>My Experience</label></li>
+    </ol>
+
+    <div data-automation-id="applyFlowMyInfoPage">
+      <h3>My Information</h3>
+      <p><abbr class="css-1fc83zd">*</abbr> Indicates a required field</p>
+
+      <div data-automation-id="formField-source" class="css-7t35fz">
+        <label for="source--source" class="css-1ud5i8o"><span>How Did You Hear About Us?<abbr class="css-1fc83zd">*</abbr></span></label>
+        <div data-automation-id="multiSelectContainer">
+          <input id="source--source" name="source" class="css-1jafa2r" placeholder="Search" aria-required="true">
+        </div>
+      </div>
+
+      <div data-automation-id="formField-candidateIsPreviousWorker" class="css-gvoll6">
+        <fieldset>
+          <legend><label class="css-1ud5i8o"><span>Are you a former employee?<abbr class="css-1fc83zd">*</abbr></span></label></legend>
+          <div name="candidateIsPreviousWorker" aria-required="true">
+            <div class="css-1utp272">
+              <input id="wd-yes" name="candidateIsPreviousWorker" type="radio" value="true">
+              <label for="wd-yes">Yes</label>
+            </div>
+            <div class="css-1utp272">
+              <input id="wd-no" name="candidateIsPreviousWorker" type="radio" value="false">
+              <label for="wd-no">No</label>
+            </div>
+          </div>
+        </fieldset>
+      </div>
+
+      <div data-automation-id="formField-country" class="css-7t35fz">
+        <label for="country--country" class="css-1ud5i8o"><span>Country / Territory<abbr class="css-1fc83zd">*</abbr></span></label>
+        <div class="css-12zup1l">
+          <button type="button" aria-haspopup="listbox" name="country" id="country--country" class="css-h3llp8">Select One</button>
+          <input type="text" class="css-77hcv" value="">
+        </div>
+      </div>
+
+      <div role="group" aria-labelledby="Name-section">
+        <h4 id="Name-section">Name</h4>
+        <div data-automation-id="formField-legalName--firstName" class="css-7t35fz">
+          <label for="name--legalName--firstName" class="css-1ud5i8o"><span>First Name<abbr class="css-1fc83zd">*</abbr></span></label>
+          <input type="text" id="name--legalName--firstName" name="legalName--firstName" aria-required="true" class="css-1ez3yv1">
+        </div>
+        <div data-automation-id="formField-legalName--lastName" class="css-7t35fz">
+          <label for="name--legalName--lastName" class="css-1ud5i8o"><span>Last Name<abbr class="css-1fc83zd">*</abbr></span></label>
+          <input type="text" id="name--legalName--lastName" name="legalName--lastName" aria-required="true" class="css-1ez3yv1">
+        </div>
+      </div>
+
+      <div role="group" aria-labelledby="Address-section">
+        <h4 id="Address-section">Address</h4>
+        <div data-automation-id="formField-addressLine1" class="css-7t35fz">
+          <label for="address--addressLine1" class="css-1ud5i8o"><span>Address Line 1<abbr class="css-1fc83zd">*</abbr></span></label>
+          <input type="text" id="address--addressLine1" name="addressLine1" aria-required="true" class="css-1ez3yv1">
+        </div>
+        <div data-automation-id="formField-city" class="css-7t35fz">
+          <label for="address--city" class="css-1ud5i8o"><span>City<abbr class="css-1fc83zd">*</abbr></span></label>
+          <input type="text" id="address--city" name="city" aria-required="true" class="css-1ez3yv1">
+        </div>
+        <div data-automation-id="formField-countryRegion" class="css-7t35fz">
+          <label for="address--countryRegion" class="css-1ud5i8o"><span>State<abbr class="css-1fc83zd">*</abbr></span></label>
+          <div class="css-12zup1l">
+            <button type="button" aria-haspopup="listbox" name="countryRegion" id="address--countryRegion" class="css-h3llp8">Select One</button>
+            <input type="text" class="css-77hcv" value="">
+          </div>
+        </div>
+        <div data-automation-id="formField-postalCode" class="css-7t35fz">
+          <label for="address--postalCode" class="css-1ud5i8o"><span>Postal Code<abbr class="css-1fc83zd">*</abbr></span></label>
+          <input type="text" id="address--postalCode" name="postalCode" aria-required="true" class="css-1ez3yv1">
+        </div>
+      </div>
+
+      <div data-automation-id="formField-phoneNumber" class="css-7t35fz">
+        <label for="phoneNumber--phoneNumber" class="css-1ud5i8o"><span>Phone Number<abbr class="css-1fc83zd">*</abbr></span></label>
+        <input type="text" id="phoneNumber--phoneNumber" name="phoneNumber" aria-required="true" class="css-1ez3yv1">
+      </div>
+    </div>
+
+    <div data-automation-id="pageFooter">
+      <button type="button" data-automation-id="pageFooterNextButton">Save and Continue</button>
+    </div>
+  </div>
+</body>
+</html>

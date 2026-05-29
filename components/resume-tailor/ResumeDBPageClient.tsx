@@ -1,19 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import JobsLayout from "@/app/jobs-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Table,
@@ -23,18 +19,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import {
+  Download,
   ExternalLink,
+  Eye,
+  FileJson,
   Loader2,
-  Pencil,
-  Plus,
   RefreshCw,
+  Search,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
-type ResumeDbRow = {
+export type ResumeDbRow = {
   rowIndex: number;
+  entryId: string;
   candidate: string;
   email: string;
   jobLink: string;
@@ -42,128 +42,73 @@ type ResumeDbRow = {
   jobTitle: string;
   company: string;
   resumeUrl: string;
+  coverLetterUrl: string;
   date: string;
 };
 
-const EMPTY_FORM: Omit<ResumeDbRow, "rowIndex"> = {
-  candidate: "",
-  email: "",
-  jobLink: "",
-  apply: "",
-  jobTitle: "",
-  company: "",
-  resumeUrl: "",
-  date: "",
-};
-
-function formatToday(): string {
-  const d = new Date();
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+function fileNameFromUrl(url: string, fallback: string): string {
+  if (!url) return fallback;
+  try {
+    const path = new URL(url).pathname;
+    const segment = path.split("/").filter(Boolean).pop();
+    return segment && segment.length < 80 ? decodeURIComponent(segment) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
-function EntryForm({
-  values,
-  onChange,
-  idPrefix,
+function PreviewDialog({
+  open,
+  onOpenChange,
+  title,
+  url,
 }: {
-  values: Omit<ResumeDbRow, "rowIndex">;
-  onChange: (values: Omit<ResumeDbRow, "rowIndex">) => void;
-  idPrefix: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  url: string;
 }) {
-  const set = (key: keyof Omit<ResumeDbRow, "rowIndex">, value: string) =>
-    onChange({ ...values, [key]: value });
+  const previewUrl = url.includes("drive.google.com")
+    ? url.replace("/view", "/preview").replace("?usp=sharing", "")
+    : url;
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="space-y-1.5">
-        <Label htmlFor={`${idPrefix}-candidate`}>Candidate</Label>
-        <Input
-          id={`${idPrefix}-candidate`}
-          value={values.candidate}
-          onChange={(e) => set("candidate", e.target.value)}
-          placeholder="Candidate name"
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor={`${idPrefix}-email`}>Email</Label>
-        <Input
-          id={`${idPrefix}-email`}
-          type="email"
-          value={values.email}
-          onChange={(e) => set("email", e.target.value)}
-          placeholder="email@example.com"
-        />
-      </div>
-      <div className="space-y-1.5 sm:col-span-2">
-        <Label htmlFor={`${idPrefix}-jobLink`}>Job link</Label>
-        <Input
-          id={`${idPrefix}-jobLink`}
-          value={values.jobLink}
-          onChange={(e) => set("jobLink", e.target.value)}
-          placeholder="https://..."
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor={`${idPrefix}-apply`}>Apply</Label>
-        <Input
-          id={`${idPrefix}-apply`}
-          value={values.apply}
-          onChange={(e) => set("apply", e.target.value)}
-          placeholder="Applied / Pending / etc."
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor={`${idPrefix}-date`}>Date</Label>
-        <Input
-          id={`${idPrefix}-date`}
-          value={values.date}
-          onChange={(e) => set("date", e.target.value)}
-          placeholder="M/DD"
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor={`${idPrefix}-jobTitle`}>Job title</Label>
-        <Input
-          id={`${idPrefix}-jobTitle`}
-          value={values.jobTitle}
-          onChange={(e) => set("jobTitle", e.target.value)}
-          placeholder="e.g. Backend Software Engineer"
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor={`${idPrefix}-company`}>Company</Label>
-        <Input
-          id={`${idPrefix}-company`}
-          value={values.company}
-          onChange={(e) => set("company", e.target.value)}
-          placeholder="Company name"
-        />
-      </div>
-      <div className="space-y-1.5 sm:col-span-2">
-        <Label htmlFor={`${idPrefix}-resumeUrl`}>resume_url (Google Drive)</Label>
-        <Input
-          id={`${idPrefix}-resumeUrl`}
-          value={values.resumeUrl}
-          onChange={(e) => set("resumeUrl", e.target.value)}
-          placeholder="https://drive.google.com/file/d/..."
-        />
-        <p className="text-xs text-muted-foreground">
-          Share the PDF or DOCX on Google Drive with your service account email.
-        </p>
-      </div>
-    </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        {url ? (
+          <div className="flex flex-col gap-3 flex-1 min-h-0">
+            <iframe
+              src={previewUrl}
+              title={title}
+              className="w-full flex-1 min-h-[480px] rounded-md border bg-muted"
+            />
+            <Button variant="outline" size="sm" asChild className="w-fit">
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Open in new tab
+              </a>
+            </Button>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No link available.</p>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
 export function ResumeDBPageClient() {
   const [rows, setRows] = useState<ResumeDbRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [editRow, setEditRow] = useState<ResumeDbRow | null>(null);
-  const [addForm, setAddForm] = useState({ ...EMPTY_FORM, date: formatToday() });
-  const [editForm, setEditForm] = useState<Omit<ResumeDbRow, "rowIndex">>(EMPTY_FORM);
+  const [search, setSearch] = useState("");
   const [removingRow, setRemovingRow] = useState<number | null>(null);
+  const [preview, setPreview] = useState<{
+    title: string;
+    url: string;
+  } | null>(null);
 
   const loadRows = useCallback(async () => {
     setIsLoading(true);
@@ -171,7 +116,7 @@ export function ResumeDBPageClient() {
       const res = await fetch("/api/resume-db");
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to load Resume DB from Google Sheet.");
+        throw new Error(err.error || "Failed to load Resume DB.");
       }
       const data = await res.json();
       setRows(data.resumes ?? []);
@@ -188,249 +133,296 @@ export function ResumeDBPageClient() {
     loadRows();
   }, [loadRows]);
 
-  const handleAdd = async () => {
-    if (!addForm.resumeUrl.trim()) {
-      toast.error("resume_url is required.");
-      return;
-    }
-    setIsSaving(true);
-    try {
-      const res = await fetch("/api/resume-db", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(addForm),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to add row.");
-      }
-      toast.success("Row added to Google Sheet.");
-      setIsAddOpen(false);
-      setAddForm({ ...EMPTY_FORM, date: formatToday() });
-      loadRows();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to add row.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const openEdit = (row: ResumeDbRow) => {
-    setEditRow(row);
-    setEditForm({
-      candidate: row.candidate,
-      email: row.email,
-      jobLink: row.jobLink,
-      apply: row.apply,
-      jobTitle: row.jobTitle,
-      company: row.company,
-      resumeUrl: row.resumeUrl,
-      date: row.date,
-    });
-  };
-
-  const handleUpdate = async () => {
-    if (!editRow) return;
-    if (!editForm.resumeUrl.trim()) {
-      toast.error("resume_url is required.");
-      return;
-    }
-    setIsSaving(true);
-    try {
-      const res = await fetch("/api/resume-db", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowIndex: editRow.rowIndex, ...editForm }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to update row.");
-      }
-      toast.success("Row updated.");
-      setEditRow(null);
-      loadRows();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to update row.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      [
+        r.entryId,
+        r.company,
+        r.jobTitle,
+        r.candidate,
+        r.email,
+        r.jobLink,
+        r.apply,
+        r.date,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [rows, search]);
 
   const handleDelete = async (rowIndex: number) => {
     if (!confirm("Delete this row from the Google Sheet?")) return;
     setRemovingRow(rowIndex);
     try {
-      const res = await fetch(`/api/resume-db?id=${rowIndex}`, { method: "DELETE" });
+      const res = await fetch(`/api/resume-db?id=${rowIndex}`, {
+        method: "DELETE",
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to delete row.");
+        throw new Error(err.error || "Delete failed");
       }
       toast.success("Row deleted.");
       loadRows();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete row.");
+      toast.error(error instanceof Error ? error.message : "Delete failed");
     } finally {
       setRemovingRow(null);
+    }
+  };
+
+  const downloadJson = async (row: ResumeDbRow) => {
+    try {
+      const res = await fetch(
+        `/api/resume-db/export?id=${row.rowIndex}&download=1`,
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Export failed");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `resume-db-${row.entryId || row.rowIndex}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("JSON downloaded.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Export failed");
     }
   };
 
   return (
     <JobsLayout>
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold">Resume DB</h1>
+            <h1 className="text-3xl font-bold">Resume Management</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Synced with Google Sheet — resume files linked via{" "}
-              <span className="font-medium">resume_url</span> (Google Drive).
+              {rows.length} application{rows.length === 1 ? "" : "s"} from Google
+              Sheet — register new jobs via the Smart Job extension.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={loadRows} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add entry
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Add sheet entry</DialogTitle>
-                  <DialogDescription>
-                    Fields match your Google Sheet: Candidate, Email, Job_link, Apply,
-                    Job_title, Company, resume_url, Date.
-                  </DialogDescription>
-                </DialogHeader>
-                <EntryForm values={addForm} onChange={setAddForm} idPrefix="add" />
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsAddOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleAdd} disabled={isSaving}>
-                    {isSaving ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      "Save to sheet"
-                    )}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
+          <Button variant="outline" onClick={loadRows} disabled={isLoading}>
+            <RefreshCw
+              className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+        </div>
+
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            placeholder="Search company, role, resume file…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
 
         <Card>
-          <CardHeader>
-            <CardTitle>Registered entries</CardTitle>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Registered applications</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             {isLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading from Google Sheet...
+                Loading from Google Sheet…
               </div>
-            ) : rows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No entries yet. Add a row or populate your Google Sheet tab.
+            ) : filtered.length === 0 ? (
+              <p className="p-6 text-sm text-muted-foreground">
+                {rows.length === 0
+                  ? "No entries yet. Use the extension Register tab on a job posting."
+                  : "No matches for your search."}
               </p>
             ) : (
-              <div className="overflow-x-auto rounded-md border">
+              <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Candidate</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Job link</TableHead>
-                      <TableHead>Apply</TableHead>
-                      <TableHead>Job title</TableHead>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-[56px]">ID</TableHead>
                       <TableHead>Company</TableHead>
-                      <TableHead>resume_url</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="w-[100px]">Actions</TableHead>
+                      <TableHead>Job link</TableHead>
+                      <TableHead>Job title</TableHead>
+                      <TableHead>Resume</TableHead>
+                      <TableHead>Cover letter</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Applied</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rows.map((row) => (
-                      <TableRow key={row.rowIndex}>
-                        <TableCell className="whitespace-nowrap">
-                          {row.candidate || "—"}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {row.email || "—"}
-                        </TableCell>
-                        <TableCell className="max-w-[160px] truncate">
-                          {row.jobLink ? (
-                            <a
-                              href={row.jobLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary hover:underline inline-flex items-center gap-1"
-                            >
-                              Link
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell>{row.apply || "—"}</TableCell>
-                        <TableCell className="max-w-[180px] truncate">
-                          {row.jobTitle || "—"}
-                        </TableCell>
-                        <TableCell>{row.company || "—"}</TableCell>
-                        <TableCell className="max-w-[140px] truncate">
-                          {row.resumeUrl ? (
-                            <a
-                              href={row.resumeUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary hover:underline inline-flex items-center gap-1"
-                              title={row.resumeUrl}
-                            >
-                              Drive
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>{row.date || "—"}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => openEdit(row)}
-                              title="Edit"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => handleDelete(row.rowIndex)}
-                              disabled={removingRow === row.rowIndex}
-                              title="Delete"
-                            >
-                              {removingRow === row.rowIndex ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {filtered.map((row) => {
+                      const resumeName = fileNameFromUrl(
+                        row.resumeUrl,
+                        "resume",
+                      );
+                      const coverName = fileNameFromUrl(
+                        row.coverLetterUrl,
+                        "cover letter",
+                      );
+                      return (
+                        <TableRow key={row.rowIndex}>
+                          <TableCell className="font-mono text-xs">
+                            {row.entryId || row.rowIndex}
+                          </TableCell>
+                          <TableCell className="font-medium max-w-[140px] truncate">
+                            {row.company || "—"}
+                          </TableCell>
+                          <TableCell>
+                            {row.jobLink ? (
+                              <Button variant="link" size="sm" className="h-auto p-0" asChild>
+                                <a
+                                  href={row.jobLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  Open
+                                  <ExternalLink className="h-3 w-3 ml-1" />
+                                </a>
+                              </Button>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="max-w-[160px] truncate">
+                            {row.jobTitle || "—"}
+                          </TableCell>
+                          <TableCell>
+                            {row.resumeUrl ? (
+                              <div className="flex flex-col gap-1 min-w-[140px]">
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    onClick={() =>
+                                      setPreview({
+                                        title: `Resume — ${row.company}`,
+                                        url: row.resumeUrl,
+                                      })
+                                    }
+                                  >
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    Preview
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    asChild
+                                  >
+                                    <a
+                                      href={row.resumeUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      download
+                                    >
+                                      <Download className="h-3 w-3 mr-1" />
+                                      Download
+                                    </a>
+                                  </Button>
+                                </div>
+                                <span
+                                  className="text-[10px] text-muted-foreground truncate"
+                                  title={resumeName}
+                                >
+                                  {resumeName}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {row.coverLetterUrl ? (
+                              <div className="flex flex-col gap-1 min-w-[140px]">
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    onClick={() =>
+                                      setPreview({
+                                        title: `Cover letter — ${row.company}`,
+                                        url: row.coverLetterUrl,
+                                      })
+                                    }
+                                  >
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    Preview
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    asChild
+                                  >
+                                    <a
+                                      href={row.coverLetterUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      download
+                                    >
+                                      <Download className="h-3 w-3 mr-1" />
+                                      Download
+                                    </a>
+                                  </Button>
+                                </div>
+                                <span
+                                  className="text-[10px] text-muted-foreground truncate"
+                                  title={coverName}
+                                >
+                                  {coverName}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="font-normal">
+                              {row.apply || "—"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">
+                            {row.date || "—"}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="Download JSON"
+                                onClick={() => downloadJson(row)}
+                              >
+                                <FileJson className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive"
+                                title="Delete row"
+                                disabled={removingRow === row.rowIndex}
+                                onClick={() => handleDelete(row.rowIndex)}
+                              >
+                                {removingRow === row.rowIndex ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -438,29 +430,12 @@ export function ResumeDBPageClient() {
           </CardContent>
         </Card>
 
-        <Dialog open={editRow != null} onOpenChange={(open) => !open && setEditRow(null)}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Edit row {editRow?.rowIndex}</DialogTitle>
-            </DialogHeader>
-            <EntryForm values={editForm} onChange={setEditForm} idPrefix="edit" />
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setEditRow(null)}>
-                Cancel
-              </Button>
-              <Button onClick={handleUpdate} disabled={isSaving}>
-                {isSaving ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  "Update sheet"
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <PreviewDialog
+          open={preview != null}
+          onOpenChange={(open) => !open && setPreview(null)}
+          title={preview?.title ?? "Preview"}
+          url={preview?.url ?? ""}
+        />
       </div>
     </JobsLayout>
   );

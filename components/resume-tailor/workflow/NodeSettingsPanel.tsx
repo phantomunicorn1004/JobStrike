@@ -228,7 +228,7 @@ export function NodeSettingsPanel({
                   const rowIndex = r.rowIndex ?? r.id ?? 0;
                   const label =
                     [r.candidate, r.jobTitle, r.company].filter(Boolean).join(" — ") ||
-                    r.roleTitle ||
+                    (r as { roleTitle?: string }).roleTitle ||
                     `Row ${rowIndex}`;
                   return (
                     <SelectItem key={rowIndex} value={String(rowIndex)}>

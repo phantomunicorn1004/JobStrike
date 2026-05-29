@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Senior Engineer — Example Corp (SmartRecruiters fixture)</title>
+</head>
+<body>
+  <header>
+    <span class="company-name">Example Corp</span>
+    <h1 class="job-title" data-automation="job-title">Senior Software Engineer</h1>
+  </header>
+
+  <main>
+    <form data-automation="job-application-form" id="application-form">
+      <div class="question" data-automation="question-first-name">
+        <label for="firstName">First name</label>
+        <input id="firstName" name="firstName" type="text">
+      </div>
+      <div class="question" data-automation="question-last-name">
+        <label for="lastName">Last name</label>
+        <input id="lastName" name="lastName" type="text">
+      </div>
+      <div class="question" data-automation="question-email">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email">
+      </div>
+      <div class="question" data-automation="question-phone">
+        <label for="phone">Phone</label>
+        <input id="phone" name="phone" type="tel">
+      </div>
+      <div class="question" data-automation="question-linkedin">
+        <label for="linkedIn">LinkedIn</label>
+        <input id="linkedIn" name="linkedIn" type="url">
+      </div>
+      <div class="question" data-automation="question-resume">
+        <label for="resume">Resume</label>
+        <input id="resume" name="resume" type="file">
+      </div>
+      <div class="question" data-automation="question-cover">
+        <label for="coverLetter">Cover letter</label>
+        <input id="coverLetter" name="coverLetter" type="file">
+      </div>
+      <div class="question" data-automation="question-custom">
+        <label for="screening_1">Describe your experience with distributed systems</label>
+        <textarea id="screening_1" name="screening_1"></textarea>
+      </div>
+      <section data-compliance-type="DIVERSITY" data-automation="diversity-section">
+        <h2>Confidential diversity questions</h2>
+        <div class="question">
+          <label>Gender</label>
+          <input type="radio" name="diversity_gender" value="decline">
+        </div>
+      </section>
+      <button type="submit">Submit</button>
+    </form>
+  </main>
+
+  <footer>
+    <input type="email" name="newsletter" placeholder="Subscribe">
+  </footer>
+</body>
+</html>

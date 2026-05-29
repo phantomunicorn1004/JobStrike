@@ -25,9 +25,17 @@ function buildHeaderMap(headerRow: string[]): HeaderMap {
     if (key) map[key] = index;
   });
 
-  // Legacy column name from sheet screenshot
   if (map.resume_url == null && map.resume_id != null) {
     map.resume_url = map.resume_id;
+  }
+  if (map.cover_letter_url == null && map.cover_letter_link != null) {
+    map.cover_letter_url = map.cover_letter_link;
+  }
+  if (map.job_link == null && map.joblink != null) {
+    map.job_link = map.joblink;
+  }
+  if (map.job_title == null && map.jobtitle != null) {
+    map.job_title = map.jobtitle;
   }
 
   return map;
@@ -38,31 +46,55 @@ function cell(row: string[], index: number | undefined): string {
   return String(row[index] ?? "").trim();
 }
 
-function rowToEntry(rowIndex: number, row: string[], headers: HeaderMap): ResumeDbEntry {
+function rowToEntry(
+  rowIndex: number,
+  row: string[],
+  headers: HeaderMap,
+): ResumeDbEntry {
   return {
     rowIndex,
+    entryId: cell(row, headers.entry_id),
     candidate: cell(row, headers.candidate),
     email: cell(row, headers.email),
-    jobLink: cell(row, headers.job_link ?? headers.joblink),
+    jobLink: cell(row, headers.job_link),
     apply: cell(row, headers.apply),
-    jobTitle: cell(row, headers.job_title ?? headers.jobtitle),
+    jobTitle: cell(row, headers.job_title),
     company: cell(row, headers.company),
-    resumeUrl: cell(row, headers.resume_url ?? headers.resume_id),
+    resumeUrl: cell(row, headers.resume_url),
+    coverLetterUrl: cell(row, headers.cover_letter_url),
     date: cell(row, headers.date),
   };
 }
 
-function entryToRowValues(entry: ResumeDbEntryInput): string[] {
-  return [
-    entry.candidate,
-    entry.email,
-    entry.jobLink,
-    entry.apply,
-    entry.jobTitle,
-    entry.company,
-    entry.resumeUrl,
-    entry.date,
-  ];
+function entryToRowValues(
+  entry: ResumeDbEntryInput,
+  headers: HeaderMap,
+  headerRow: string[],
+): string[] {
+  const fieldMap: Record<string, string> = {
+    entry_id: entry.entryId,
+    candidate: entry.candidate,
+    email: entry.email,
+    job_link: entry.jobLink,
+    apply: entry.apply,
+    job_title: entry.jobTitle,
+    company: entry.company,
+    resume_url: entry.resumeUrl,
+    cover_letter_url: entry.coverLetterUrl,
+    date: entry.date,
+  };
+
+  if (headerRow.length === 0) {
+    return RESUME_DB_COLUMNS.map((col) => {
+      const key = normalizeHeader(col);
+      return fieldMap[key] ?? "";
+    });
+  }
+
+  return headerRow.map((col) => {
+    const key = normalizeHeader(col);
+    return fieldMap[key] ?? "";
+  });
 }
 
 function tabRange(suffix: string): string {
@@ -71,13 +103,25 @@ function tabRange(suffix: string): string {
   return `${escaped}!${suffix}`;
 }
 
+function columnLetter(count: number): string {
+  let n = count;
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s || "A";
+}
+
 async function getSheetsClient() {
   const auth = getGoogleAuth([SHEETS_SCOPE]);
   return google.sheets({ version: "v4", auth });
 }
 
-async function readAllRows(): Promise<{
+async function readSheetData(): Promise<{
   headers: HeaderMap;
+  headerRow: string[];
   rows: { rowIndex: number; values: string[] }[];
 }> {
   const sheets = await getSheetsClient();
@@ -91,24 +135,49 @@ async function readAllRows(): Promise<{
 
   const values = (response.data.values ?? []) as string[][];
   if (values.length === 0) {
-    return { headers: {}, rows: [] };
+    return { headers: {}, headerRow: [], rows: [] };
   }
 
-  const headers = buildHeaderMap(values[0].map((c) => String(c ?? "")));
+  const headerRow = values[0].map((c) => String(c ?? ""));
+  const headers = buildHeaderMap(headerRow);
   const rows = values.slice(1).map((row, i) => ({
     rowIndex: i + 2,
     values: row.map((c) => String(c ?? "")),
   }));
 
-  return { headers, rows };
+  return { headers, headerRow, rows };
 }
 
 function isRowEmpty(row: string[]): boolean {
   return row.every((c) => !String(c).trim());
 }
 
+async function ensureHeaderRow(): Promise<{
+  headers: HeaderMap;
+  headerRow: string[];
+}> {
+  const data = await readSheetData();
+  if (data.headerRow.length > 0 && Object.keys(data.headers).length > 0) {
+    return { headers: data.headers, headerRow: data.headerRow };
+  }
+
+  const sheets = await getSheetsClient();
+  const spreadsheetId = getSheetId();
+  const headerRow = RESUME_DB_COLUMNS.slice();
+  const endCol = columnLetter(headerRow.length);
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: tabRange(`A1:${endCol}1`),
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [headerRow] },
+  });
+
+  return { headers: buildHeaderMap(headerRow), headerRow };
+}
+
 export async function listResumeDbEntries(): Promise<ResumeDbEntry[]> {
-  const { headers, rows } = await readAllRows();
+  const { headers, rows } = await readSheetData();
   return rows
     .filter((r) => !isRowEmpty(r.values))
     .map((r) => rowToEntry(r.rowIndex, r.values, headers));
@@ -121,33 +190,32 @@ export async function getResumeDbEntry(
   return entries.find((e) => e.rowIndex === rowIndex) ?? null;
 }
 
+export async function getResumeDbEntryByEntryId(
+  entryId: string,
+): Promise<ResumeDbEntry | null> {
+  const entries = await listResumeDbEntries();
+  return entries.find((e) => e.entryId === entryId) ?? null;
+}
+
 export async function appendResumeDbEntry(
   entry: ResumeDbEntryInput,
 ): Promise<{ rowIndex: number }> {
   const sheets = await getSheetsClient();
   const spreadsheetId = getSheetId();
-
-  const { headers, rows } = await readAllRows();
+  const { headers, headerRow } = await ensureHeaderRow();
+  const { rows } = await readSheetData();
   const nextRowIndex = rows.length > 0 ? rows[rows.length - 1].rowIndex + 1 : 2;
-
-  if (Object.keys(headers).length === 0) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: tabRange("A1:H1"),
-      valueInputOption: "USER_ENTERED",
-      requestBody: {
-        values: [RESUME_DB_COLUMNS.slice()],
-      },
-    });
-  }
+  const endCol = columnLetter(
+    Math.max(headerRow.length, RESUME_DB_COLUMNS.length),
+  );
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: tabRange("A:H"),
+    range: tabRange(`A:${endCol}`),
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: {
-      values: [entryToRowValues(entry)],
+      values: [entryToRowValues(entry, headers, headerRow)],
     },
   });
 
@@ -160,13 +228,17 @@ export async function updateResumeDbEntry(
 ): Promise<void> {
   const sheets = await getSheetsClient();
   const spreadsheetId = getSheetId();
+  const { headers, headerRow } = await ensureHeaderRow();
+  const endCol = columnLetter(
+    Math.max(headerRow.length, RESUME_DB_COLUMNS.length),
+  );
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: tabRange(`A${rowIndex}:H${rowIndex}`),
+    range: tabRange(`A${rowIndex}:${endCol}${rowIndex}`),
     valueInputOption: "USER_ENTERED",
     requestBody: {
-      values: [entryToRowValues(entry)],
+      values: [entryToRowValues(entry, headers, headerRow)],
     },
   });
 }
@@ -181,9 +253,7 @@ export async function deleteResumeDbEntry(rowIndex: number): Promise<void> {
   });
 
   const tabName = getSheetTabName();
-  const sheet = meta.data.sheets?.find(
-    (s) => s.properties?.title === tabName,
-  );
+  const sheet = meta.data.sheets?.find((s) => s.properties?.title === tabName);
   const sheetId = sheet?.properties?.sheetId;
   if (sheetId == null) {
     throw new Error(`Sheet tab "${tabName}" not found in spreadsheet.`);
