@@ -1,5 +1,10 @@
 import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+import {
+  requireRequestUser,
+  resolveRequestUser,
+  unauthorizedJson,
+} from "@/lib/auth/resolve-request-user";
 import { parseResumeFromPublicUrl } from "@/lib/resume-db/parseFromUrl";
 import {
   createApplication,
@@ -73,6 +78,11 @@ function parseEntryBody(body: Record<string, unknown>): ResumeDbApplicationInput
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await resolveRequestUser(request);
+    if (!user) {
+      return corsJson(unauthorizedJson(), { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const idParam = searchParams.get("id");
     const shouldParse = searchParams.get("parse") === "true";
@@ -83,7 +93,7 @@ export async function GET(request: NextRequest) {
         return corsJson({ error: "Invalid id" }, { status: 400 });
       }
 
-      const entry = await getApplicationById(id);
+      const entry = await getApplicationById(id, user.id);
       if (!entry) {
         return corsJson({ error: "Application not found" }, { status: 404 });
       }
@@ -109,7 +119,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const entries = await listApplications();
+    const entries = await listApplications(user.id);
     return corsJson({ resumes: entries.map(mapForList) });
   } catch (error) {
     console.error("Resume DB GET error:", error);
@@ -120,6 +130,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireRequestUser(request);
     const body = await request.json();
     const entry = parseEntryBody(body);
 
@@ -139,53 +150,57 @@ export async function POST(request: NextRequest) {
       entry.entryId = newEntryId();
     }
 
-    const application = await createApplication(entry);
+    const application = await createApplication(user.id, entry);
     return corsJson({ ...mapForList(application) }, { status: 201 });
   } catch (error) {
     console.error("Resume DB POST error:", error);
     const message = error instanceof Error ? error.message : "Create failed.";
-    return corsJson({ error: message }, { status: 500 });
+    const status = message === "Unauthorized" ? 401 : 500;
+    return corsJson({ error: message }, { status });
   }
 }
 
 export async function PATCH(request: NextRequest) {
   try {
+    const user = await requireRequestUser(request);
     const body = await request.json();
     const id = Number(body.rowIndex ?? body.id);
     if (Number.isNaN(id) || id < 1) {
       return corsJson({ error: "Missing or invalid id" }, { status: 400 });
     }
 
-    const existing = await getApplicationById(id);
+    const existing = await getApplicationById(id, user.id);
     if (!existing) {
       return corsJson({ error: "Application not found" }, { status: 404 });
     }
 
     if (typeof body.inPipeline === "boolean") {
       if (body.inPipeline) {
-        await addApplicationToPipeline(id);
+        await addApplicationToPipeline(id, user.id);
       } else {
-        await removeApplicationFromPipeline(id);
+        await removeApplicationFromPipeline(id, user.id);
       }
-      const updated = await getApplicationById(id);
+      const updated = await getApplicationById(id, user.id);
       return corsJson({ ok: true, ...(updated ? mapForList(updated) : {}) });
     }
 
     const entry = parseEntryBody(body);
     if (!entry.entryId) entry.entryId = existing.entryId;
 
-    await updateApplication(id, entry);
-    const updated = await getApplicationById(id);
+    await updateApplication(id, user.id, entry);
+    const updated = await getApplicationById(id, user.id);
     return corsJson({ ok: true, ...(updated ? mapForList(updated) : {}) });
   } catch (error) {
     console.error("Resume DB PATCH error:", error);
     const message = error instanceof Error ? error.message : "Update failed.";
-    return corsJson({ error: message }, { status: 500 });
+    const status = message === "Unauthorized" ? 401 : 500;
+    return corsJson({ error: message }, { status });
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
+    const user = await requireRequestUser(request);
     const { searchParams } = new URL(request.url);
     const idParam = searchParams.get("id");
     if (!idParam) {
@@ -197,11 +212,12 @@ export async function DELETE(request: NextRequest) {
       return corsJson({ error: "Invalid id" }, { status: 400 });
     }
 
-    await deleteApplicationWithPipeline(id);
+    await deleteApplicationWithPipeline(id, user.id);
     return corsJson({ ok: true, id });
   } catch (error) {
     console.error("Resume DB DELETE error:", error);
     const message = error instanceof Error ? error.message : "Delete failed.";
-    return corsJson({ error: message }, { status: 500 });
+    const status = message === "Unauthorized" ? 401 : 500;
+    return corsJson({ error: message }, { status });
   }
 }

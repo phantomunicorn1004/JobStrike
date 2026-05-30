@@ -40,18 +40,20 @@ export async function deletePipelineCardsForApplication(
 
 export async function deleteApplicationWithPipeline(
   applicationId: number,
+  userId: string,
 ): Promise<void> {
-  const app = await getApplicationById(applicationId);
+  const app = await getApplicationById(applicationId, userId);
   if (!app) throw new Error("Application not found.");
 
   await deletePipelineCardsForApplication(applicationId, app.pipelineJobId);
-  await deleteApplication(applicationId);
+  await deleteApplication(applicationId, userId);
 }
 
 export async function addApplicationToPipeline(
   applicationId: number,
+  userId: string,
 ): Promise<{ pipelineJobId: number }> {
-  const app = await getApplicationById(applicationId);
+  const app = await getApplicationById(applicationId, userId);
   if (!app) throw new Error("Application not found.");
 
   if (app.pipelineJobId) {
@@ -84,7 +86,7 @@ export async function addApplicationToPipeline(
   if (error) throw new Error(error.message);
 
   const pipelineJobId = (data as { id: number }).id;
-  await updateApplication(applicationId, {
+  await updateApplication(applicationId, userId, {
     apply: "In Pipeline",
     pipelineJobId,
   });
@@ -94,13 +96,14 @@ export async function addApplicationToPipeline(
 
 export async function removeApplicationFromPipeline(
   applicationId: number,
+  userId: string,
 ): Promise<void> {
-  const app = await getApplicationById(applicationId);
+  const app = await getApplicationById(applicationId, userId);
   if (!app) throw new Error("Application not found.");
 
   await deletePipelineCardsForApplication(applicationId, app.pipelineJobId);
 
-  await updateApplication(applicationId, {
+  await updateApplication(applicationId, userId, {
     apply: "Registered",
     pipelineJobId: null,
   });
@@ -112,8 +115,9 @@ export function isInPipeline(app: Pick<ResumeDbApplication, "pipelineJobId" | "a
 
 export async function syncPipelineJobFromApplication(
   applicationId: number,
+  userId: string,
 ): Promise<void> {
-  const app = await getApplicationById(applicationId);
+  const app = await getApplicationById(applicationId, userId);
   if (!app?.pipelineJobId) return;
 
   const supabase = getSupabaseAdminClient();

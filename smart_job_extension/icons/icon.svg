@@ -1,10 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Smart Job Autofill">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" fill="none" aria-hidden="true">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#06b6d4"/>
-      <stop offset="100%" stop-color="#0891b2"/>
+    <linearGradient id="logo-bg" x1="90" y1="0" x2="90" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8888ff"/>
+      <stop offset="1" stop-color="#6666ff"/>
     </linearGradient>
   </defs>
-  <rect width="128" height="128" rx="36" fill="url(#bg)"/>
-  <path fill="#ffffff" d="M69 18 36 74h28l-4 36 33-56H65z"/>
+  <rect width="180" height="180" rx="40" fill="url(#logo-bg)"/>
+  <path d="M48 68l42-22 42 22v12H48V68z" stroke="#fff" stroke-width="5" stroke-linejoin="round" fill="none"/>
+  <path d="M132 68v8h10v-14l-8-4" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M90 52v78" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+  <path d="M78 64l12-18 12 18" fill="#fff"/>
+  <path d="M78 64h24v10H78z" fill="#fff"/>
+  <circle cx="62" cy="98" r="11" fill="#dcdcff"/>
+  <circle cx="118" cy="98" r="11" fill="#dcdcff"/>
+  <path d="M51 98h18" stroke="#dcdcff" stroke-width="5" stroke-linecap="round"/>
+  <path d="M111 98h18" stroke="#dcdcff" stroke-width="5" stroke-linecap="round"/>
+  <path d="M54 118h72" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+  <path d="M54 118v8h72v-8" stroke="#fff" stroke-width="5" stroke-linejoin="round" fill="none"/>
+  <path d="M62 126h56" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
 </svg>

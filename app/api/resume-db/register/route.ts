@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
-import { corsJson, corsOptions, verifyExtensionKey } from "@/lib/api/extensionCors";
+import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+import { requireRequestUser } from "@/lib/auth/resolve-request-user";
 import { isGoogleDriveConfigured } from "@/lib/google-drive/config";
 import {
   createApplication,
-  listProfiles,
+  getProfileById,
 } from "@/lib/resume-db/repository";
 import {
   buildStoragePath,
@@ -24,12 +25,8 @@ function errorStatus(message: string): number {
 }
 
 export async function POST(request: NextRequest) {
-  const authError = verifyExtensionKey(request);
-  if (authError) {
-    return corsJson({ error: authError }, { status: 401 });
-  }
-
   try {
+    const user = await requireRequestUser(request);
     const formData = await request.formData();
     const jobLink = String(formData.get("jobLink") ?? formData.get("job_link") ?? "").trim();
     const jobTitle = String(formData.get("jobTitle") ?? formData.get("job_title") ?? "").trim();
@@ -63,8 +60,7 @@ export async function POST(request: NextRequest) {
       return corsJson({ error: "profileId (candidate) is required." }, { status: 400 });
     }
 
-    const profiles = await listProfiles();
-    const profile = profiles.find((p) => p.id === profileId);
+    const profile = await getProfileById(user.id, profileId);
     if (!profile) {
       return corsJson({ error: "Selected profile not found." }, { status: 400 });
     }
@@ -119,7 +115,7 @@ export async function POST(request: NextRequest) {
       return corsJson({ error: "resume_url could not be resolved." }, { status: 400 });
     }
 
-    const application = await createApplication({
+    const application = await createApplication(user.id, {
       entryId,
       profileId,
       candidateName: profile.full_name,

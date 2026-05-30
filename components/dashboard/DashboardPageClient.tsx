@@ -103,7 +103,9 @@ export function DashboardPageClient() {
         stageFrom,
         stageTo,
       });
-      const res = await fetch(`/api/dashboard?${params}`);
+      const res = await fetch(`/api/dashboard?${params}`, {
+        credentials: "same-origin",
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Failed to load dashboard.");

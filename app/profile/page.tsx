@@ -26,7 +26,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Edit2, Loader2, Plus, Trash2 } from "lucide-react";
 
@@ -85,7 +84,6 @@ export default function ProfilePage() {
   const [isAdding, setIsAdding] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const supabase = getSupabaseBrowserClient();
 
   useEffect(() => {
     fetchProfiles();
@@ -93,13 +91,13 @@ export default function ProfilePage() {
 
   const fetchProfiles = async () => {
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .order("id");
-
-      if (error) throw error;
-      setProfiles(data || []);
+      const res = await fetch("/api/profiles?full=1", { credentials: "same-origin" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to load profiles");
+      }
+      const data = await res.json();
+      setProfiles(data.profiles || []);
     } catch (error) {
       console.error("Error fetching profiles:", error);
       toast.error("Failed to load profiles");
@@ -141,9 +139,11 @@ export default function ProfilePage() {
     try {
       const work_emails = d.work_emails.split(",").map((s) => s.trim()).filter(Boolean);
       const phone_numbers = d.phone_numbers.split(",").map((s) => s.trim()).filter(Boolean);
-      const { error } = await supabase
-        .from("profiles")
-        .update({
+      const res = await fetch(`/api/profiles/${editingProfileId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
           full_name: d.full_name.trim(),
           dob: d.dob.trim(),
           work_emails: work_emails.length ? work_emails : [],
@@ -155,10 +155,12 @@ export default function ProfilePage() {
           postal_code: d.postal_code.trim(),
           university: d.university.trim(),
           linkedin: d.linkedin.trim(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", editingProfileId);
-      if (error) throw error;
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Update failed");
+      }
       setProfiles((prev) =>
         prev.map((p) =>
           p.id === editingProfileId
@@ -208,20 +210,28 @@ export default function ProfilePage() {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
-      const { error } = await supabase.from("profiles").insert({
-        full_name: name,
-        dob: newProfile.dob.trim(),
-        work_emails: work_emails.length ? work_emails : [],
-        phone_numbers: phone_numbers.length ? phone_numbers : [],
-        ssn: newProfile.ssn.trim(),
-        address: newProfile.address.trim(),
-        city: newProfile.city.trim(),
-        state: newProfile.state.trim(),
-        postal_code: newProfile.postal_code.trim(),
-        university: newProfile.university.trim(),
-        linkedin: newProfile.linkedin.trim(),
+      const res = await fetch("/api/profiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          full_name: name,
+          dob: newProfile.dob.trim(),
+          work_emails: work_emails.length ? work_emails : [],
+          phone_numbers: phone_numbers.length ? phone_numbers : [],
+          ssn: newProfile.ssn.trim(),
+          address: newProfile.address.trim(),
+          city: newProfile.city.trim(),
+          state: newProfile.state.trim(),
+          postal_code: newProfile.postal_code.trim(),
+          university: newProfile.university.trim(),
+          linkedin: newProfile.linkedin.trim(),
+        }),
       });
-      if (error) throw error;
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to add profile");
+      }
       setNewProfile(emptyNewProfile);
       setAddProfileOpen(false);
       await fetchProfiles();
@@ -237,8 +247,14 @@ export default function ProfilePage() {
   const handleDeleteProfile = async (profileId: number) => {
     setIsDeleting(true);
     try {
-      const { error } = await supabase.from("profiles").delete().eq("id", profileId);
-      if (error) throw error;
+      const res = await fetch(`/api/profiles/${profileId}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to remove profile");
+      }
       setDeleteConfirmId(null);
       setProfiles((prev) => prev.filter((p) => p.id !== profileId));
       toast.success("Profile removed");

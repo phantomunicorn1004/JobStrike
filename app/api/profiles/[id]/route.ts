@@ -1,15 +1,7 @@
 import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
-import {
-  requireRequestUser,
-  resolveRequestUser,
-  unauthorizedJson,
-} from "@/lib/auth/resolve-request-user";
-import {
-  createProfile,
-  listProfileRecords,
-  listProfiles,
-} from "@/lib/resume-db/repository";
+import { requireRequestUser } from "@/lib/auth/resolve-request-user";
+import { deleteProfile, updateProfile } from "@/lib/resume-db/repository";
 
 export function OPTIONS() {
   return corsOptions();
@@ -46,43 +38,47 @@ function parseProfileBody(body: Record<string, unknown>) {
   };
 }
 
-export async function GET(request: NextRequest) {
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
   try {
-    const user = await resolveRequestUser(request);
-    if (!user) {
-      return corsJson(unauthorizedJson(), { status: 401 });
+    const user = await requireRequestUser(request);
+    const { id: idParam } = await context.params;
+    const profileId = Number(idParam);
+    if (Number.isNaN(profileId) || profileId < 1) {
+      return corsJson({ error: "Invalid profile id" }, { status: 400 });
     }
 
-    const { searchParams } = new URL(request.url);
-    if (searchParams.get("full") === "1") {
-      const profiles = await listProfileRecords(user.id);
-      return corsJson({ profiles });
-    }
-
-    const profiles = await listProfiles(user.id);
-    return corsJson({ profiles });
+    const body = await request.json();
+    const profile = parseProfileBody(body);
+    await updateProfile(user.id, profileId, profile);
+    return corsJson({ ok: true });
   } catch (error) {
-    console.error("Profiles list error:", error);
-    const message = error instanceof Error ? error.message : "Failed to load profiles.";
-    return corsJson({ error: message }, { status: 500 });
+    console.error("Profiles update error:", error);
+    const message = error instanceof Error ? error.message : "Failed to update profile.";
+    const status = message === "Unauthorized" ? 401 : 500;
+    return corsJson({ error: message }, { status });
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
   try {
     const user = await requireRequestUser(request);
-    const body = await request.json();
-    const profile = parseProfileBody(body);
-
-    if (!profile.full_name) {
-      return corsJson({ error: "Full name is required." }, { status: 400 });
+    const { id: idParam } = await context.params;
+    const profileId = Number(idParam);
+    if (Number.isNaN(profileId) || profileId < 1) {
+      return corsJson({ error: "Invalid profile id" }, { status: 400 });
     }
 
-    const created = await createProfile(user.id, profile);
-    return corsJson({ profile: created }, { status: 201 });
+    await deleteProfile(user.id, profileId);
+    return corsJson({ ok: true });
   } catch (error) {
-    console.error("Profiles create error:", error);
-    const message = error instanceof Error ? error.message : "Failed to create profile.";
+    console.error("Profiles delete error:", error);
+    const message = error instanceof Error ? error.message : "Failed to delete profile.";
     const status = message === "Unauthorized" ? 401 : 500;
     return corsJson({ error: message }, { status });
   }

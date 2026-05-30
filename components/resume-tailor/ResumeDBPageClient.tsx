@@ -505,8 +505,8 @@ export function ResumeDBPageClient() {
     setIsLoading(true);
     try {
       const [resumeRes, profilesRes] = await Promise.all([
-        fetch("/api/resume-db"),
-        fetch("/api/profiles"),
+        fetch("/api/resume-db", { credentials: "same-origin" }),
+        fetch("/api/profiles", { credentials: "same-origin" }),
       ]);
       if (!resumeRes.ok) {
         const err = await resumeRes.json().catch(() => ({}));
@@ -635,6 +635,7 @@ export function ResumeDBPageClient() {
     try {
       const res = await fetch(`/api/resume-db?id=${rowIndex}`, {
         method: "DELETE",
+        credentials: "same-origin",
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -655,6 +656,7 @@ export function ResumeDBPageClient() {
       const res = await fetch("/api/resume-db", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ rowIndex: row.rowIndex, inPipeline: checked }),
       });
       const data = await res.json().catch(() => ({}));
@@ -728,7 +730,9 @@ export function ResumeDBPageClient() {
 
   const downloadJson = async (row: ResumeDbRow) => {
     try {
-      const res = await fetch(`/api/resume-db/export?id=${row.rowIndex}`);
+      const res = await fetch(`/api/resume-db/export?id=${row.rowIndex}`, {
+        credentials: "same-origin",
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Export failed");
@@ -751,7 +755,9 @@ export function ResumeDBPageClient() {
     try {
       const jobs = await Promise.all(
         ids.map(async (id) => {
-          const res = await fetch(`/api/resume-db/export?id=${id}`);
+          const res = await fetch(`/api/resume-db/export?id=${id}`, {
+            credentials: "same-origin",
+          });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Export failed for #${id}`);
@@ -786,7 +792,10 @@ export function ResumeDBPageClient() {
     try {
       const results = await Promise.all(
         ids.map(async (id) => {
-          const res = await fetch(`/api/resume-db?id=${id}`, { method: "DELETE" });
+          const res = await fetch(`/api/resume-db?id=${id}`, {
+            method: "DELETE",
+            credentials: "same-origin",
+          });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Delete failed for #${id}`);

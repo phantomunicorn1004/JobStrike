@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+import { requireRequestUser } from "@/lib/auth/resolve-request-user";
 import {
   getApplicationById,
   updateApplication,
@@ -47,13 +48,14 @@ function mapForList(app: NonNullable<Awaited<ReturnType<typeof getApplicationByI
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireRequestUser(request);
     const formData = await request.formData();
     const id = Number(formData.get("id") ?? formData.get("rowIndex"));
     if (Number.isNaN(id) || id < 1) {
       return corsJson({ error: "Missing or invalid id" }, { status: 400 });
     }
 
-    const existing = await getApplicationById(id);
+    const existing = await getApplicationById(id, user.id);
     if (!existing) {
       return corsJson({ error: "Application not found" }, { status: 404 });
     }
@@ -114,7 +116,7 @@ export async function POST(request: NextRequest) {
       coverStoragePath = upload.storagePath;
     }
 
-    await updateApplication(id, {
+    await updateApplication(id, user.id, {
       company,
       jobTitle,
       jobLink,
@@ -124,9 +126,9 @@ export async function POST(request: NextRequest) {
       coverLetterStoragePath: coverStoragePath ?? undefined,
     });
 
-    await syncPipelineJobFromApplication(id);
+    await syncPipelineJobFromApplication(id, user.id);
 
-    const updated = await getApplicationById(id);
+    const updated = await getApplicationById(id, user.id);
     if (!updated) {
       return corsJson({ error: "Update failed" }, { status: 500 });
     }
@@ -135,6 +137,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Resume DB update error:", error);
     const message = error instanceof Error ? error.message : "Update failed.";
-    return corsJson({ error: message }, { status: 500 });
+    const status = message === "Unauthorized" ? 401 : 500;
+    return corsJson({ error: message }, { status });
   }
 }

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { randomBytes } from "node:crypto";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/admin";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { normalizeUsername, DEFAULT_ADMIN_USERNAME } from "@/lib/auth/constants";
@@ -10,6 +11,7 @@ type AppUserRow = {
   username: string;
   password_hash: string;
   role: UserRole;
+  extension_api_key: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -36,6 +38,21 @@ export async function findUserByUsername(
     .maybeSingle();
   if (error) throw error;
   return (data as AppUserRow | null) ?? null;
+}
+
+export async function findUserByExtensionApiKey(
+  apiKey: string,
+): Promise<AppUser | null> {
+  const supabase = getSupabaseServiceRoleClient();
+  const key = apiKey.trim();
+  if (!key) return null;
+  const { data, error } = await supabase
+    .from("app_users")
+    .select("id, username, role, created_at, updated_at")
+    .eq("extension_api_key", key)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapRow(data as AppUserRow) : null;
 }
 
 export async function findUserById(id: string): Promise<AppUser | null> {
@@ -68,9 +85,10 @@ export async function createAppUser(input: {
   const username = normalizeUsername(input.username);
   const password_hash = await hashPassword(input.password);
   const role = input.role ?? "member";
+  const extension_api_key = randomBytes(24).toString("hex");
   const { data, error } = await supabase
     .from("app_users")
-    .insert({ username, password_hash, role } as never)
+    .insert({ username, password_hash, role, extension_api_key } as never)
     .select("id, username, role, created_at, updated_at")
     .single();
   if (error) throw error;

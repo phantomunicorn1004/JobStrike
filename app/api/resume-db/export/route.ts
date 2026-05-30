@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getApplicationById } from "@/lib/resume-db/repository";
 import type { ResumeDbJobExport } from "@/lib/resume-db/types";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+import {
+  resolveRequestUser,
+  unauthorizedJson,
+} from "@/lib/auth/resolve-request-user";
 
 export function OPTIONS() {
   return corsOptions();
@@ -9,6 +13,11 @@ export function OPTIONS() {
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await resolveRequestUser(request);
+    if (!user) {
+      return corsJson(unauthorizedJson(), { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const idParam = searchParams.get("id");
     if (!idParam) {
@@ -20,7 +29,7 @@ export async function GET(request: NextRequest) {
       return corsJson({ error: "Invalid id" }, { status: 400 });
     }
 
-    const entry = await getApplicationById(id);
+    const entry = await getApplicationById(id, user.id);
     if (!entry) {
       return corsJson({ error: "Application not found" }, { status: 404 });
     }

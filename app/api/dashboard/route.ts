@@ -1,5 +1,9 @@
 import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+import {
+  resolveRequestUser,
+  unauthorizedJson,
+} from "@/lib/auth/resolve-request-user";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   addDaysYmd,
@@ -19,6 +23,11 @@ export function OPTIONS() {
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await resolveRequestUser(request);
+    if (!user) {
+      return corsJson(unauthorizedJson(), { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const today = localYmd();
     const appliedDate = searchParams.get("date") || today;
@@ -32,7 +41,10 @@ export async function GET(request: NextRequest) {
 
     const supabase = getSupabaseAdminClient();
     const [applicationsRes, jobsRes, techRes, stagesRes] = await Promise.all([
-      supabase.from("resume_db_applications").select("applied_at"),
+      supabase
+        .from("resume_db_applications")
+        .select("applied_at")
+        .eq("user_id", user.id),
       supabase
         .from("jobs")
         .select("created_at, stage_entered_at, stage_dates"),

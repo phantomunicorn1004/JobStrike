@@ -5,6 +5,9 @@ export const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 7;
 
 export const DEFAULT_ADMIN_USERNAME = "ideapulse@remote.helper.com";
 
+/** Existing Resume DB data owner (migration default). */
+export const DEFAULT_RESUME_DB_OWNER_USERNAME = "stevenspiethdev@gmail.com";
+
 /** App pages for regular members (admins are redirected away). */
 export const MEMBER_ROUTE_PREFIXES = [
   "/dashboard",

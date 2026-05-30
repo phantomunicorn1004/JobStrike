@@ -9,6 +9,7 @@ type DbRow = {
   id: number;
   entry_id: string;
   profile_id: number | null;
+  user_id: string;
   candidate_name: string;
   job_link: string;
   job_title: string;
@@ -22,6 +23,26 @@ type DbRow = {
   resume_storage_path: string | null;
   cover_letter_storage_path: string | null;
 };
+
+type ProfileRow = {
+  id: number;
+  full_name: string;
+  dob: string;
+  work_emails: string[];
+  phone_numbers: string[];
+  ssn: string;
+  address: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  university: string;
+  linkedin: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProfileRecord = Omit<ProfileRow, "user_id">;
 
 function mapRow(row: DbRow): ResumeDbApplication {
   return {
@@ -43,22 +64,98 @@ function mapRow(row: DbRow): ResumeDbApplication {
   };
 }
 
-export async function listProfiles(): Promise<ProfileListItem[]> {
+export async function listProfiles(userId: string): Promise<ProfileListItem[]> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("profiles")
     .select("id, full_name")
+    .eq("user_id", userId)
     .order("full_name", { ascending: true });
 
   if (error) throw new Error(error.message);
   return (data ?? []) as ProfileListItem[];
 }
 
-export async function listApplications(): Promise<ResumeDbApplication[]> {
+export async function listProfileRecords(userId: string): Promise<ProfileRecord[]> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .order("id", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as ProfileRow[]).map(({ user_id: _uid, ...profile }) => profile);
+}
+
+export async function createProfile(
+  userId: string,
+  input: Omit<ProfileRecord, "id" | "created_at" | "updated_at">,
+): Promise<ProfileRecord> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .insert({ ...input, user_id: userId } as never)
+    .select("*")
+    .single();
+
+  if (error) throw new Error(error.message);
+  const row = data as ProfileRow;
+  const { user_id: _uid, ...profile } = row;
+  return profile;
+}
+
+export async function updateProfile(
+  userId: string,
+  profileId: number,
+  input: Partial<Omit<ProfileRecord, "id" | "created_at" | "updated_at">>,
+): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ ...input, updated_at: new Date().toISOString() } as never)
+    .eq("id", profileId)
+    .eq("user_id", userId);
+
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteProfile(userId: string, profileId: number): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from("profiles")
+    .delete()
+    .eq("id", profileId)
+    .eq("user_id", userId);
+
+  if (error) throw new Error(error.message);
+}
+
+export async function getProfileById(
+  userId: string,
+  profileId: number,
+): Promise<ProfileRecord | null> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", profileId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const row = data as ProfileRow;
+  const { user_id: _uid, ...profile } = row;
+  return profile;
+}
+
+export async function listApplications(userId: string): Promise<ResumeDbApplication[]> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("resume_db_applications")
     .select("*")
+    .eq("user_id", userId)
     .order("id", { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -67,12 +164,14 @@ export async function listApplications(): Promise<ResumeDbApplication[]> {
 
 export async function getApplicationById(
   id: number,
+  userId: string,
 ): Promise<ResumeDbApplication | null> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("resume_db_applications")
     .select("*")
     .eq("id", id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
@@ -81,10 +180,12 @@ export async function getApplicationById(
 }
 
 export async function createApplication(
+  userId: string,
   input: ResumeDbApplicationInput,
 ): Promise<ResumeDbApplication> {
   const supabase = getSupabaseAdminClient();
   const row = {
+    user_id: userId,
     entry_id: input.entryId,
     profile_id: input.profileId ?? null,
     candidate_name: input.candidateName,
@@ -110,6 +211,7 @@ export async function createApplication(
 
 export async function updateApplication(
   id: number,
+  userId: string,
   input: Partial<ResumeDbApplicationInput>,
 ): Promise<void> {
   const supabase = getSupabaseAdminClient();
@@ -133,17 +235,19 @@ export async function updateApplication(
   const { error } = await supabase
     .from("resume_db_applications")
     .update(patch as never)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", userId);
 
   if (error) throw new Error(error.message);
 }
 
-export async function deleteApplication(id: number): Promise<void> {
+export async function deleteApplication(id: number, userId: string): Promise<void> {
   const supabase = getSupabaseAdminClient();
   const { error } = await supabase
     .from("resume_db_applications")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", userId);
 
   if (error) throw new Error(error.message);
 }

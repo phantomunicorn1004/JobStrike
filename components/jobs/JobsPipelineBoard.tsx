@@ -219,16 +219,19 @@ export function JobsPipelineBoard() {
       const [jobsRes, techRes, profilesRes] = await Promise.all([
         supabase.from("jobs").select("*").order("id", { ascending: false }),
         supabase.from("technical_jobs").select("*").order("id", { ascending: false }),
-        supabase.from("profiles").select("id, full_name").order("full_name", { ascending: true }),
+        fetch("/api/profiles", { credentials: "same-origin" }),
       ]);
       if (jobsRes.error) throw jobsRes.error;
       if (techRes.error) throw techRes.error;
-      if (!profilesRes.error && profilesRes.data) {
+      if (profilesRes.ok) {
+        const profileData = await profilesRes.json().catch(() => ({}));
         setProfiles(
-          (profilesRes.data as { id: number; full_name: string }[]).map((p) => ({
-            id: p.id,
-            full_name: p.full_name,
-          })),
+          ((profileData.profiles ?? []) as { id: number; full_name: string }[]).map(
+            (p) => ({
+              id: p.id,
+              full_name: p.full_name,
+            }),
+          ),
         );
       }
 

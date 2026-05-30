@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "node scripts/check-build-path.js && next build",
     "typecheck": "tsc --noEmit",
-    "seed:admin": "node scripts/seed-admin-user.mjs"
+    "seed:admin": "node scripts/seed-admin-user.mjs",
+    "assign:resume-db": "node scripts/assign-resume-db-owner.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
