@@ -140,11 +140,11 @@
     const btn = document.getElementById('registerJobBtn');
     if (btn) {
       btn.disabled = busy || !backendConnected;
-      btn.textContent = busy ? 'Registering…' : 'Register';
+      btn.textContent = busy ? 'Registering…' : 'Register to DB';
     }
   }
 
-  function setConnectionStatus(state, detail) {
+  function setConnectionStatus(state, detail, username) {
     const pairs = [
       ['backendConnectionDot', 'backendConnectionLabel'],
       ['settingsBackendConnectionDot', 'settingsBackendConnectionLabel']
@@ -154,9 +154,16 @@
       const label = document.getElementById(labelId);
       if (!dot || !label) continue;
       dot.className = 'backend-connection-dot is-' + state;
-      label.textContent =
-        detail ||
-        (state === 'ok' ? 'Connected' : state === 'checking' ? 'Checking…' : 'Not connected');
+      if (state === 'ok' && username) {
+        label.innerHTML =
+          'Signed in · <strong class="backend-connection-user">' +
+          escapeHtml(username) +
+          '</strong>';
+      } else {
+        label.textContent =
+          detail ||
+          (state === 'ok' ? 'Connected' : state === 'checking' ? 'Checking…' : 'Not connected');
+      }
     }
   }
 
@@ -256,8 +263,7 @@
       }
       const data = await res.json().catch(() => ({}));
       const username = data.user?.username || config.username;
-      const host = config.baseUrl.replace(/^https?:\/\//, '');
-      setConnectionStatus('ok', `Signed in · ${username || host}`);
+      setConnectionStatus('ok', null, username);
       updateBackendDependentUi(true);
       if (global.SmartJobGoogleDrive) {
         global.SmartJobGoogleDrive.updateRegisterDriveBadge();
@@ -566,18 +572,19 @@
     const queue = await getOfflineQueue();
 
     if (countEl) {
-      countEl.textContent = queue.length === 1 ? '1 queued' : `${queue.length} queued`;
+      const n = queue.length;
+      countEl.textContent = n === 1 ? '1 saved' : `${n} saved`;
     }
 
     if (!listEl) return;
 
     if (!queue.length) {
-      listEl.className = 'register-queue-list empty';
-      listEl.textContent = 'No queued jobs yet.';
+      listEl.hidden = true;
+      listEl.innerHTML = '';
       return;
     }
 
-    listEl.className = 'register-queue-list';
+    listEl.hidden = false;
     listEl.innerHTML = queue
       .slice()
       .reverse()
@@ -625,8 +632,8 @@
     queue.push(entry);
     await saveOfflineQueue(queue);
     await renderOfflineQueue();
-    setRegisterStatus(`Saved to offline queue (${queue.length} total).`, 'success');
-    if (showStatus) showStatus('Job saved to offline queue.', 'success');
+    setRegisterStatus(`Queued (${queue.length}).`, 'success');
+    if (showStatus) showStatus('Saved to queue.', 'success');
   }
 
   function exportOfflineQueueJson(showStatus) {

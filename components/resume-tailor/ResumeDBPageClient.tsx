@@ -28,7 +28,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ResumeDBEditDialog } from "@/components/resume-tailor/ResumeDBEditDialog";
 import {
   extractGoogleDriveFileId,
-  googleDriveDirectDownloadUrl,
   googleDriveViewUrl,
 } from "@/lib/google-drive/urls";
 import {
@@ -106,48 +105,55 @@ function getDocumentViewUrl(url: string): string {
   return url;
 }
 
-function getDocumentDownloadUrl(url: string): string {
-  const fileId = extractGoogleDriveFileId(url);
-  if (fileId) return googleDriveDirectDownloadUrl(fileId);
-  return url;
+function filenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const star = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      return star[1].trim();
+    }
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain?.[1]?.trim() || null;
 }
 
-function guessFileName(url: string, fallback: string): string {
-  try {
-    const pathname = new URL(url).pathname;
-    const segment = pathname.split("/").pop();
-    if (segment) return decodeURIComponent(segment);
-  } catch {
-    /* ignore */
+async function downloadApplicationFile(
+  applicationId: number,
+  kind: "resume" | "cover",
+  fallbackName: string,
+) {
+  const res = await fetch(
+    `/api/resume-db/download?id=${applicationId}&kind=${kind}`,
+    { credentials: "same-origin" },
+  );
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error || "Download failed");
   }
-  return fallback;
+
+  const blob = await res.blob();
+  const fileName =
+    filenameFromContentDisposition(res.headers.get("content-disposition")) ||
+    fallbackName;
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
 }
 
-async function downloadDocument(url: string, fallbackName: string) {
-  const downloadUrl = getDocumentDownloadUrl(url);
-  const fileId = extractGoogleDriveFileId(url);
-
-  if (fileId) {
-    window.open(downloadUrl, "_blank", "noopener,noreferrer");
-    return;
-  }
-
-  try {
-    const res = await fetch(downloadUrl);
-    if (!res.ok) throw new Error("Download failed");
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = guessFileName(url, fallbackName);
-    anchor.click();
-    URL.revokeObjectURL(objectUrl);
-  } catch {
-    window.open(downloadUrl, "_blank", "noopener,noreferrer");
-  }
-}
-
-function ResumeFileActions({ url, company }: { url: string; company: string }) {
+function ResumeFileActions({
+  applicationId,
+  url,
+  company,
+}: {
+  applicationId: number;
+  url: string;
+  company: string;
+}) {
   const viewUrl = getDocumentViewUrl(url);
 
   return (
@@ -167,7 +173,17 @@ function ResumeFileActions({ url, company }: { url: string; company: string }) {
         size="icon"
         className="h-7 w-7 rounded-md shrink-0"
         title={`Download resume — ${company}`}
-        onClick={() => void downloadDocument(url, "resume.pdf")}
+        onClick={() => {
+          void downloadApplicationFile(
+            applicationId,
+            "resume",
+            `${company || "resume"}-resume.docx`,
+          ).catch((error) => {
+            toast.error(
+              error instanceof Error ? error.message : "Download failed.",
+            );
+          });
+        }}
       >
         <Download className="h-3.5 w-3.5" />
         <span className="sr-only">Download resume</span>
@@ -177,16 +193,20 @@ function ResumeFileActions({ url, company }: { url: string; company: string }) {
 }
 
 function DocActions({
+  applicationId,
   url,
   label,
   company,
   onPreview,
 }: {
+  applicationId: number;
   url: string;
   label: string;
   company: string;
   onPreview: (title: string, url: string) => void;
 }) {
+  const kind = label.toLowerCase().includes("cover") ? "cover" : "resume";
+
   return (
     <div className="flex items-center justify-center gap-1 mx-auto w-fit">
       <Button
@@ -203,13 +223,21 @@ function DocActions({
         variant="outline"
         size="icon"
         className="h-7 w-7 rounded-md shrink-0"
-        asChild
         title={`Download ${label}`}
+        onClick={() => {
+          void downloadApplicationFile(
+            applicationId,
+            kind,
+            `${company || "document"}-${kind === "cover" ? "cover-letter" : "resume"}.docx`,
+          ).catch((error) => {
+            toast.error(
+              error instanceof Error ? error.message : "Download failed.",
+            );
+          });
+        }}
       >
-        <a href={url} target="_blank" rel="noopener noreferrer" download>
-          <Download className="h-3.5 w-3.5" />
-          <span className="sr-only">Download {label}</span>
-        </a>
+        <Download className="h-3.5 w-3.5" />
+        <span className="sr-only">Download {label}</span>
       </Button>
     </div>
   );
@@ -1247,6 +1275,7 @@ export function ResumeDBPageClient() {
                         <ResizableTableCell widthPercent={percents.resume} align="center">
                           {row.resumeUrl ? (
                             <ResumeFileActions
+                              applicationId={row.rowIndex}
                               url={row.resumeUrl}
                               company={row.company}
                             />
@@ -1257,6 +1286,7 @@ export function ResumeDBPageClient() {
                         <ResizableTableCell widthPercent={percents.coverLetter} align="center">
                           {row.coverLetterUrl ? (
                             <DocActions
+                              applicationId={row.rowIndex}
                               url={row.coverLetterUrl}
                               label="Cover letter"
                               company={row.company}

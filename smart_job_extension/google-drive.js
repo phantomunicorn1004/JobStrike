@@ -331,14 +331,14 @@
       if (!isDriveConfigured(c)) {
         el.textContent = 'Configure Google Drive in Settings';
         el.className = 'register-drive-status is-off';
+        el.hidden = false;
       } else if (!isDriveConnected(c)) {
         el.textContent = 'Connect Google Drive in Settings to upload files';
         el.className = 'register-drive-status is-off';
+        el.hidden = false;
       } else {
-        el.textContent = 'Google Drive ready — uploads use your account';
-        el.className = 'register-drive-status is-ready';
+        el.hidden = true;
       }
-      el.hidden = false;
     });
   }
 

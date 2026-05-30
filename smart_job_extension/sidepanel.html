@@ -334,19 +334,19 @@
       <section class="tab-panel active" id="tab-register">
         <div class="card register-card register-fit">
           <div class="register-top">
-            <div class="register-title-row">
-              <h2>Register to Resume DB</h2>
-              <button class="btn small" type="button" id="regScrapeBtn" title="Load job title, company, and link from the active tab">Scrape</button>
+            <div class="register-toolbar">
+              <div class="register-status-bar" aria-live="polite">
+                <div class="backend-connection-row" id="backendConnectionRow">
+                  <span class="backend-connection-dot" id="backendConnectionDot"></span>
+                  <span class="backend-connection-label" id="backendConnectionLabel">Checking connection…</span>
+                </div>
+                <span class="register-drive-status is-off" id="registerDriveStatus" hidden></span>
+              </div>
+              <button class="btn small register-scrape-btn" type="button" id="regScrapeBtn" title="Load job title, company, and link from the active tab">Scrape</button>
             </div>
-            <p class="register-lead muted">Save job + files to Resume DB. Use <strong>↻</strong> in the header to load job info.</p>
             <p class="register-offline-banner" id="registerOfflineBanner" hidden>
-              Sign in under <strong>Settings → Website connection</strong> to register jobs on the server. You can still scrape job info and save to the offline queue below.
+              Sign in under Settings → Website connection to register on the server.
             </p>
-            <div class="backend-connection-row" id="backendConnectionRow" aria-live="polite">
-              <span class="backend-connection-dot" id="backendConnectionDot"></span>
-              <span class="backend-connection-label" id="backendConnectionLabel">Checking connection…</span>
-            </div>
-            <p class="register-drive-status is-off" id="registerDriveStatus" hidden>Checking Google Drive…</p>
           </div>
           <div class="register-body" id="registerBackendPanel">
             <form class="form-grid register-form" id="registerForm" onsubmit="return false">
@@ -406,24 +406,18 @@
               </div>
             </form>
           </div>
-          <div class="register-footer">
+          <div class="register-action-group">
             <div id="registerStatus" class="register-status" hidden></div>
-            <div class="button-row">
-              <button class="btn primary full-width" type="button" id="registerJobBtn" disabled>Register</button>
+            <div class="register-action-primary">
+              <button class="btn primary full-width" type="button" id="registerJobBtn" disabled>Register to DB</button>
             </div>
-          </div>
-          <div class="register-offline-panel card register-card" id="registerOfflinePanel">
-            <div class="register-offline-head">
-              <h3>Offline job queue</h3>
-              <span class="register-queue-badge" id="registerQueueCount" aria-live="polite">0 queued</span>
-            </div>
-            <p class="muted small">Save applied jobs locally when you are offline or not signed in. Export as JSON anytime.</p>
-            <div class="button-row wrap">
-              <button class="btn" type="button" id="saveToQueueBtn">Save to queue</button>
+            <div class="register-action-secondary">
+              <button class="btn" type="button" id="saveToQueueBtn">Save</button>
               <button class="btn" type="button" id="exportQueueBtn">Export JSON</button>
-              <button class="btn danger" type="button" id="clearQueueBtn">Clear queue</button>
+              <button class="btn danger" type="button" id="clearQueueBtn">Clear</button>
             </div>
-            <div id="registerQueueList" class="register-queue-list empty">No queued jobs yet.</div>
+            <p class="register-queue-count" id="registerQueueCount" aria-live="polite">0 saved</p>
+            <div id="registerQueueList" class="register-queue-list" hidden></div>
           </div>
         </div>
       </section>
