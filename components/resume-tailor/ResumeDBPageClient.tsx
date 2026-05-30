@@ -27,6 +27,11 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ResumeDBEditDialog } from "@/components/resume-tailor/ResumeDBEditDialog";
 import {
+  extractGoogleDriveFileId,
+  googleDriveDirectDownloadUrl,
+  googleDriveViewUrl,
+} from "@/lib/google-drive/urls";
+import {
   ResizableSortableHead,
   ResizableTableCell,
   ResizableTableHead,
@@ -94,6 +99,82 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
 type SortKey = "company" | "jobTitle" | "pipeline" | null;
 type SortDir = "asc" | "desc";
+
+function getDocumentViewUrl(url: string): string {
+  const fileId = extractGoogleDriveFileId(url);
+  if (fileId) return googleDriveViewUrl(fileId);
+  return url;
+}
+
+function getDocumentDownloadUrl(url: string): string {
+  const fileId = extractGoogleDriveFileId(url);
+  if (fileId) return googleDriveDirectDownloadUrl(fileId);
+  return url;
+}
+
+function guessFileName(url: string, fallback: string): string {
+  try {
+    const pathname = new URL(url).pathname;
+    const segment = pathname.split("/").pop();
+    if (segment) return decodeURIComponent(segment);
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
+async function downloadDocument(url: string, fallbackName: string) {
+  const downloadUrl = getDocumentDownloadUrl(url);
+  const fileId = extractGoogleDriveFileId(url);
+
+  if (fileId) {
+    window.open(downloadUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  try {
+    const res = await fetch(downloadUrl);
+    if (!res.ok) throw new Error("Download failed");
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = guessFileName(url, fallbackName);
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    window.open(downloadUrl, "_blank", "noopener,noreferrer");
+  }
+}
+
+function ResumeFileActions({ url, company }: { url: string; company: string }) {
+  const viewUrl = getDocumentViewUrl(url);
+
+  return (
+    <div className="flex items-center justify-center gap-1 mx-auto w-fit">
+      <Button
+        variant="outline"
+        size="icon"
+        className="h-7 w-7 rounded-md shrink-0"
+        title={`Open resume on Google Drive — ${company}`}
+        onClick={() => window.open(viewUrl, "_blank", "noopener,noreferrer")}
+      >
+        <Eye className="h-3.5 w-3.5" />
+        <span className="sr-only">Open resume in new tab</span>
+      </Button>
+      <Button
+        variant="outline"
+        size="icon"
+        className="h-7 w-7 rounded-md shrink-0"
+        title={`Download resume — ${company}`}
+        onClick={() => void downloadDocument(url, "resume.pdf")}
+      >
+        <Download className="h-3.5 w-3.5" />
+        <span className="sr-only">Download resume</span>
+      </Button>
+    </div>
+  );
+}
 
 function DocActions({
   url,
@@ -1165,11 +1246,9 @@ export function ResumeDBPageClient() {
                         </ResizableTableCell>
                         <ResizableTableCell widthPercent={percents.resume} align="center">
                           {row.resumeUrl ? (
-                            <DocActions
+                            <ResumeFileActions
                               url={row.resumeUrl}
-                              label="Resume"
                               company={row.company}
-                              onPreview={(title, url) => setPreview({ title, url })}
                             />
                           ) : (
                             <span className="text-muted-foreground">—</span>

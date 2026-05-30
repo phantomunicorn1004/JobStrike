@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Remote Helper",
+  "name": "Remote Helper Ext",
   "version": "4.5.0",
-  "description": "Autofill job applications with Remote Helper — saved profile, custom Q&A, and Resume DB registration.",
+  "description": "Chrome extension for Remote Helper — autofill job applications, custom Q&A, and Resume DB registration.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -29,7 +29,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Open Remote Helper",
+    "default_title": "Remote Helper Ext",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",

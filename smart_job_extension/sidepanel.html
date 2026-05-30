@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Remote Helper</title>
+  <title>Remote Helper Ext</title>
   <link rel="stylesheet" href="sidepanel.css">
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="layout.css">
@@ -17,8 +17,8 @@
           <img src="icons/icon-48.png" alt="" class="brand-mark" width="32" height="32" />
         </div>
         <div>
-          <div class="eyebrow">Remote Helper</div>
-          <h1>Job Application Assistant</h1>
+          <div class="eyebrow">Remote Helper Ext</div>
+          <h1>Job Assistant</h1>
         </div>
       </div>
       <div class="header-actions">
@@ -50,13 +50,13 @@
     </header>
 
     <nav class="nav-primary" aria-label="Primary">
-      <button class="tab-main active" data-tab="autofill" data-tier="main" type="button">
+      <button class="tab-main" data-tab="autofill" data-tier="main" type="button">
         <span class="tab-icon" aria-hidden="true">
           <img src="icons/icon-16.png" alt="" class="brand-mark-inline" width="16" height="16" />
         </span>
         <span class="tab-label">Autofill</span>
       </button>
-      <button class="tab-main" data-tab="register" data-tier="main" type="button">
+      <button class="tab-main active" data-tab="register" data-tier="main" type="button" id="registerTabBtn" aria-describedby="registerTabHint">
         <span class="tab-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -96,7 +96,7 @@
     </nav>
 
     <main class="app-main">
-      <section class="tab-panel active" id="tab-autofill">
+      <section class="tab-panel" id="tab-autofill">
         <div class="tab-panel-scroll">
         <div class="hero-card" id="heroCard">
           <button class="hero-close" id="dismissHeroBtn" type="button" aria-label="Dismiss tip">×</button>
@@ -331,7 +331,7 @@
         </div>
       </section>
 
-      <section class="tab-panel" id="tab-register">
+      <section class="tab-panel active" id="tab-register">
         <div class="card register-card register-fit">
           <div class="register-top">
             <div class="register-title-row">
@@ -339,13 +339,16 @@
               <button class="btn small" type="button" id="regScrapeBtn" title="Load job title, company, and link from the active tab">Scrape</button>
             </div>
             <p class="register-lead muted">Save job + files to Resume DB. Use <strong>↻</strong> in the header to load job info.</p>
+            <p class="register-offline-banner" id="registerOfflineBanner" hidden>
+              Sign in under <strong>Settings → Website connection</strong> to register jobs on the server. You can still scrape job info and save to the offline queue below.
+            </p>
             <div class="backend-connection-row" id="backendConnectionRow" aria-live="polite">
               <span class="backend-connection-dot" id="backendConnectionDot"></span>
               <span class="backend-connection-label" id="backendConnectionLabel">Checking connection…</span>
             </div>
             <p class="register-drive-status is-off" id="registerDriveStatus" hidden>Checking Google Drive…</p>
           </div>
-          <div class="register-body">
+          <div class="register-body" id="registerBackendPanel">
             <form class="form-grid register-form" id="registerForm" onsubmit="return false">
               <label>Job title<input id="regJobTitle" type="text" placeholder="e.g. Senior Engineer"></label>
               <label>Company<input id="regCompany" type="text" placeholder="Company name"></label>
@@ -406,8 +409,21 @@
           <div class="register-footer">
             <div id="registerStatus" class="register-status" hidden></div>
             <div class="button-row">
-              <button class="btn primary full-width" type="button" id="registerJobBtn">Register</button>
+              <button class="btn primary full-width" type="button" id="registerJobBtn" disabled>Register</button>
             </div>
+          </div>
+          <div class="register-offline-panel card register-card" id="registerOfflinePanel">
+            <div class="register-offline-head">
+              <h3>Offline job queue</h3>
+              <span class="register-queue-badge" id="registerQueueCount" aria-live="polite">0 queued</span>
+            </div>
+            <p class="muted small">Save applied jobs locally when you are offline or not signed in. Export as JSON anytime.</p>
+            <div class="button-row wrap">
+              <button class="btn" type="button" id="saveToQueueBtn">Save to queue</button>
+              <button class="btn" type="button" id="exportQueueBtn">Export JSON</button>
+              <button class="btn danger" type="button" id="clearQueueBtn">Clear queue</button>
+            </div>
+            <div id="registerQueueList" class="register-queue-list empty">No queued jobs yet.</div>
           </div>
         </div>
       </section>
@@ -424,7 +440,7 @@
         </div>
         <div class="card register-card">
           <h2>Website connection (Resume DB)</h2>
-          <p class="muted">Connect the extension to your <strong>remote-work-helper</strong> site. Used by the Register tab to save jobs and load candidate profiles.</p>
+          <p class="muted">Sign in with your <strong>remote-work-helper</strong> account. Used by the Register tab to save jobs and load candidate profiles.</p>
           <div class="backend-connection-row" id="settingsBackendConnectionRow" aria-live="polite">
             <span class="backend-connection-dot" id="settingsBackendConnectionDot"></span>
             <span class="backend-connection-label" id="settingsBackendConnectionLabel">Checking connection…</span>
@@ -434,11 +450,16 @@
               <input type="url" id="backendUrlSetting" placeholder="https://remote-work-helper.vercel.app" autocomplete="off" spellcheck="false">
               <small class="muted">Production: <code>https://remote-work-helper.vercel.app</code> · Local dev: <code>http://localhost:3000</code></small>
             </label>
-            <label class="full">API key (optional)
-              <input type="password" id="backendApiKeySetting" placeholder="Only if EXTENSION_API_KEY is set on the server" autocomplete="off" spellcheck="false">
+            <label class="full">Username
+              <input type="text" id="backendUsernameSetting" placeholder="your@email.com" autocomplete="username" spellcheck="false">
             </label>
-            <div class="button-row full">
-              <button class="btn primary" type="submit" id="saveBackendSettingsBtn">Save connection</button>
+            <label class="full">Password
+              <input type="password" id="backendPasswordSetting" placeholder="Your account password" autocomplete="current-password">
+            </label>
+            <p class="muted small full" id="backendSignedInAs" hidden>Signed in as <strong id="backendSignedInUser"></strong></p>
+            <div class="button-row full wrap">
+              <button class="btn primary" type="submit" id="saveBackendSettingsBtn">Sign in</button>
+              <button class="btn" type="button" id="signOutBackendBtn">Sign out</button>
               <button class="btn" type="button" id="testBackendConnectionBtn">Test connection</button>
             </div>
           </form>

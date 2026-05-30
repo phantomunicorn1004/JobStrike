@@ -1,10 +1,15 @@
-import { NextResponse } from "next/server";
-import { getSessionUser } from "@/lib/auth/session";
+import { NextRequest } from "next/server";
+import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+import { resolveRequestUser } from "@/lib/auth/resolve-request-user";
 
-export async function GET() {
-  const user = await getSessionUser();
+export function OPTIONS() {
+  return corsOptions();
+}
+
+export async function GET(request: NextRequest) {
+  const user = await resolveRequestUser(request);
   if (!user) {
-    return NextResponse.json({ user: null }, { status: 401 });
+    return corsJson({ user: null }, { status: 401 });
   }
-  return NextResponse.json({ user });
+  return corsJson({ user });
 }

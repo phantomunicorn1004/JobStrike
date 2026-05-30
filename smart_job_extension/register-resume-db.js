@@ -3,44 +3,101 @@
  */
 (function (global) {
   const BACKEND_URL_KEY = 'resume_db_backend_url';
-  const API_KEY_KEY = 'resume_db_api_key';
+  const AUTH_USERNAME_KEY = 'resume_db_auth_username';
+  const AUTH_USER_ID_KEY = 'resume_db_auth_user_id';
+  const EXTENSION_API_KEY_KEY = 'resume_db_extension_api_key';
+  const LEGACY_API_KEY_KEY = 'resume_db_api_key';
   const SELECTED_PROFILE_KEY = 'resume_db_selected_profile_id';
+  const OFFLINE_QUEUE_KEY = 'resume_db_offline_queue';
   const DEFAULT_BACKEND = 'https://remote-work-helper.vercel.app';
+  const QUEUE_VERSION = 1;
 
   let connectionPollTimer = null;
   let profilesLoadSeq = 0;
+  let backendConnected = false;
 
   function normalizeBackendUrl(url) {
     const trimmed = String(url || '').trim().replace(/\/+$/, '');
     return trimmed || DEFAULT_BACKEND;
   }
 
+  function isAuthenticated(config) {
+    return Boolean(config?.extensionApiKey && config?.username);
+  }
+
   async function getBackendConfig() {
     return new Promise((resolve) => {
-      chrome.storage.local.get([BACKEND_URL_KEY, API_KEY_KEY], (result) => {
-        resolve({
-          baseUrl: normalizeBackendUrl(result[BACKEND_URL_KEY]),
-          apiKey: String(result[API_KEY_KEY] || '').trim()
-        });
-      });
+      chrome.storage.local.get(
+        [
+          BACKEND_URL_KEY,
+          AUTH_USERNAME_KEY,
+          AUTH_USER_ID_KEY,
+          EXTENSION_API_KEY_KEY,
+          LEGACY_API_KEY_KEY
+        ],
+        (result) => {
+          const extensionApiKey = String(
+            result[EXTENSION_API_KEY_KEY] || result[LEGACY_API_KEY_KEY] || ''
+          ).trim();
+          resolve({
+            baseUrl: normalizeBackendUrl(result[BACKEND_URL_KEY]),
+            username: String(result[AUTH_USERNAME_KEY] || '').trim(),
+            userId: String(result[AUTH_USER_ID_KEY] || '').trim(),
+            extensionApiKey,
+            apiKey: extensionApiKey
+          });
+        }
+      );
     });
   }
 
-  async function saveBackendConfig(baseUrl, apiKey) {
+  async function saveAuthConfig({ baseUrl, username, userId, extensionApiKey }) {
     return new Promise((resolve) => {
       chrome.storage.local.set(
         {
           [BACKEND_URL_KEY]: normalizeBackendUrl(baseUrl),
-          [API_KEY_KEY]: String(apiKey || '').trim()
+          [AUTH_USERNAME_KEY]: String(username || '').trim(),
+          [AUTH_USER_ID_KEY]: String(userId || '').trim(),
+          [EXTENSION_API_KEY_KEY]: String(extensionApiKey || '').trim(),
+          [LEGACY_API_KEY_KEY]: ''
         },
         resolve
       );
     });
   }
 
-  function apiHeaders(apiKey) {
+  async function saveBackendUrlOnly(baseUrl) {
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ [BACKEND_URL_KEY]: normalizeBackendUrl(baseUrl) }, resolve);
+    });
+  }
+
+  async function clearAuthConfig() {
+    return new Promise((resolve) => {
+      chrome.storage.local.remove(
+        [AUTH_USERNAME_KEY, AUTH_USER_ID_KEY, EXTENSION_API_KEY_KEY, LEGACY_API_KEY_KEY],
+        resolve
+      );
+    });
+  }
+
+  async function saveBackendConfig(baseUrl, apiKey) {
+    const config = await getBackendConfig();
+    if (apiKey) {
+      return saveAuthConfig({
+        baseUrl,
+        username: config.username,
+        userId: config.userId,
+        extensionApiKey: apiKey
+      });
+    }
+    return saveBackendUrlOnly(baseUrl);
+  }
+
+  function apiHeaders(config) {
     const headers = {};
-    if (apiKey) headers['X-Extension-Key'] = apiKey;
+    const key = config?.extensionApiKey || config?.apiKey;
+    if (key) headers['X-Extension-Key'] = key;
     return headers;
   }
 
@@ -82,7 +139,7 @@
   function setRegisterBusy(busy) {
     const btn = document.getElementById('registerJobBtn');
     if (btn) {
-      btn.disabled = busy;
+      btn.disabled = busy || !backendConnected;
       btn.textContent = busy ? 'Registering…' : 'Register';
     }
   }
@@ -103,36 +160,113 @@
     }
   }
 
+  function updateBackendDependentUi(connected) {
+    backendConnected = connected;
+
+    const registerBtn = document.getElementById('registerJobBtn');
+    const profileSelect = document.getElementById('regProfileId');
+    const offlineBanner = document.getElementById('registerOfflineBanner');
+    const registerTabBtn = document.getElementById('registerTabBtn');
+    const signedInAs = document.getElementById('backendSignedInAs');
+    const signedInUser = document.getElementById('backendSignedInUser');
+
+    if (registerBtn) registerBtn.disabled = !connected;
+    if (profileSelect) profileSelect.disabled = !connected;
+    if (offlineBanner) offlineBanner.hidden = connected;
+    if (registerTabBtn) registerTabBtn.classList.toggle('is-auth-required', !connected);
+
+    void getBackendConfig().then((config) => {
+      if (signedInAs && signedInUser) {
+        if (connected && config.username) {
+          signedInUser.textContent = config.username;
+          signedInAs.hidden = false;
+        } else {
+          signedInAs.hidden = true;
+        }
+      }
+    });
+  }
+
   async function loadBackendSettingsForm() {
-    const { baseUrl, apiKey } = await getBackendConfig();
+    const config = await getBackendConfig();
     const urlInput = document.getElementById('backendUrlSetting');
-    const keyInput = document.getElementById('backendApiKeySetting');
-    if (urlInput) urlInput.value = baseUrl;
-    if (keyInput) keyInput.value = apiKey;
+    const usernameInput = document.getElementById('backendUsernameSetting');
+    const passwordInput = document.getElementById('backendPasswordSetting');
+    const signedInAs = document.getElementById('backendSignedInAs');
+    const signedInUser = document.getElementById('backendSignedInUser');
+
+    if (urlInput) urlInput.value = config.baseUrl;
+    if (usernameInput) {
+      usernameInput.value = config.username || usernameInput.value || '';
+    }
+    if (passwordInput) passwordInput.value = '';
+
+    if (signedInAs && signedInUser) {
+      if (config.username && config.extensionApiKey) {
+        signedInUser.textContent = config.username;
+        signedInAs.hidden = false;
+      } else {
+        signedInAs.hidden = true;
+      }
+    }
+  }
+
+  async function loginWithCredentials(baseUrl, username, password) {
+    const res = await fetch(`${normalizeBackendUrl(baseUrl)}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Sign in failed (${res.status})`);
+    }
+    if (!data.extensionApiKey) {
+      throw new Error('Server did not return an extension key. Update the backend and try again.');
+    }
+    await saveAuthConfig({
+      baseUrl,
+      username: data.user?.username || username,
+      userId: data.user?.id || '',
+      extensionApiKey: data.extensionApiKey
+    });
+    return data;
   }
 
   async function checkBackendConnection() {
     setConnectionStatus('checking', 'Checking…');
-    const { baseUrl, apiKey } = await getBackendConfig();
+    const config = await getBackendConfig();
+
+    if (!isAuthenticated(config)) {
+      setConnectionStatus('error', 'Not signed in — Settings → Website connection');
+      updateBackendDependentUi(false);
+      return false;
+    }
+
     try {
-      const res = await fetch(`${baseUrl}/api/health`, {
-        headers: apiHeaders(apiKey),
+      const res = await fetch(`${config.baseUrl}/api/auth/me`, {
+        headers: apiHeaders(config),
+        credentials: 'include',
         cache: 'no-store'
       });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json().catch(() => ({}));
-      if (data.ok) {
-        const host = baseUrl.replace(/^https?:\/\//, '');
-        setConnectionStatus('ok', 'Connected · ' + host);
-        if (global.SmartJobGoogleDrive) {
-          global.SmartJobGoogleDrive.updateRegisterDriveBadge();
-        }
-        return true;
+      if (!res.ok) {
+        if (res.status === 401) await clearAuthConfig();
+        throw new Error('Unauthorized');
       }
-      throw new Error('Invalid response');
+      const data = await res.json().catch(() => ({}));
+      const username = data.user?.username || config.username;
+      const host = config.baseUrl.replace(/^https?:\/\//, '');
+      setConnectionStatus('ok', `Signed in · ${username || host}`);
+      updateBackendDependentUi(true);
+      if (global.SmartJobGoogleDrive) {
+        global.SmartJobGoogleDrive.updateRegisterDriveBadge();
+      }
+      return true;
     } catch (err) {
-      const short = baseUrl.replace(/^https?:\/\//, '');
-      setConnectionStatus('error', 'Not connected · ' + short);
+      const host = config.baseUrl.replace(/^https?:\/\//, '');
+      setConnectionStatus('error', 'Not connected · ' + host);
+      updateBackendDependentUi(false);
       return false;
     }
   }
@@ -175,6 +309,13 @@
     const select = document.getElementById('regProfileId');
     if (!select) return;
 
+    const config = await getBackendConfig();
+    if (!isAuthenticated(config)) {
+      select.innerHTML = '<option value="">Sign in to load profiles</option>';
+      select.disabled = true;
+      return;
+    }
+
     const loadSeq = ++profilesLoadSeq;
     const preservedId = select.value?.trim() || (await getSelectedProfileId());
 
@@ -182,9 +323,8 @@
     select.disabled = true;
 
     try {
-      const { baseUrl, apiKey } = await getBackendConfig();
-      const res = await fetch(`${baseUrl}/api/profiles`, {
-        headers: apiHeaders(apiKey),
+      const res = await fetch(`${config.baseUrl}/api/profiles`, {
+        headers: apiHeaders(config),
         cache: 'no-store'
       });
       const data = await res.json().catch(() => ({}));
@@ -209,15 +349,14 @@
               `<option value="${p.id}">${escapeHtml(p.full_name || 'Profile ' + p.id)}</option>`
           )
           .join('');
-      select.disabled = false;
+      select.disabled = !backendConnected;
       restoreProfileSelection(select, profiles, preservedId);
     } catch (err) {
       if (loadSeq !== profilesLoadSeq) return;
       const msg = err.message || 'Failed to load profiles';
       select.innerHTML = `<option value="">${escapeHtml(msg)}</option>`;
       if (/fetch|network|failed/i.test(msg)) {
-        select.innerHTML =
-          '<option value="">Not connected — set URL in Settings tab</option>';
+        select.innerHTML = '<option value="">Not connected — sign in under Settings</option>';
       }
     }
   }
@@ -380,11 +519,144 @@
     });
   }
 
+  function readRegisterFormFields() {
+    const profileSelect = document.getElementById('regProfileId');
+    const profileId = profileSelect?.value?.trim() || '';
+    const profileOption = profileSelect?.selectedOptions?.[0];
+    const resumeFile = readFileInput(document.getElementById('regResumeFile'));
+    const coverFile = readFileInput(document.getElementById('regCoverFile'));
+
+    return {
+      jobTitle: document.getElementById('regJobTitle')?.value?.trim() || '',
+      companyName: document.getElementById('regCompany')?.value?.trim() || '',
+      jobLink: document.getElementById('regJobLink')?.value?.trim() || '',
+      profileId,
+      profileName: profileOption?.textContent?.trim() || '',
+      resumeIsDefault: Boolean(document.getElementById('regResumeDefault')?.checked),
+      coverLetterIsDefault: Boolean(document.getElementById('regCoverDefault')?.checked),
+      resumeFileName: resumeFile?.name || null,
+      coverFileName: coverFile?.name || null,
+      apply: 'Registered'
+    };
+  }
+
+  async function getOfflineQueue() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([OFFLINE_QUEUE_KEY], (result) => {
+        const queue = Array.isArray(result[OFFLINE_QUEUE_KEY]) ? result[OFFLINE_QUEUE_KEY] : [];
+        resolve(queue);
+      });
+    });
+  }
+
+  async function saveOfflineQueue(queue) {
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ [OFFLINE_QUEUE_KEY]: queue }, resolve);
+    });
+  }
+
+  function newQueueId() {
+    if (global.crypto?.randomUUID) return global.crypto.randomUUID();
+    return 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+  }
+
+  async function renderOfflineQueue() {
+    const listEl = document.getElementById('registerQueueList');
+    const countEl = document.getElementById('registerQueueCount');
+    const queue = await getOfflineQueue();
+
+    if (countEl) {
+      countEl.textContent = queue.length === 1 ? '1 queued' : `${queue.length} queued`;
+    }
+
+    if (!listEl) return;
+
+    if (!queue.length) {
+      listEl.className = 'register-queue-list empty';
+      listEl.textContent = 'No queued jobs yet.';
+      return;
+    }
+
+    listEl.className = 'register-queue-list';
+    listEl.innerHTML = queue
+      .slice()
+      .reverse()
+      .map((entry) => {
+        const title = escapeHtml(entry.jobTitle || 'Untitled');
+        const company = escapeHtml(entry.companyName || '');
+        const when = entry.queuedAt ? new Date(entry.queuedAt).toLocaleString() : '';
+        return `
+          <article class="register-queue-item" data-queue-id="${escapeHtml(entry.id)}">
+            <div>
+              <div class="register-queue-title">${title}</div>
+              <div class="register-queue-company">${company}</div>
+              <div class="register-queue-meta muted small">${escapeHtml(when)}</div>
+            </div>
+            <button type="button" class="btn small danger register-queue-remove">Remove</button>
+          </article>
+        `;
+      })
+      .join('');
+
+    listEl.querySelectorAll('.register-queue-remove').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.closest('.register-queue-item')?.dataset.queueId;
+        if (!id) return;
+        const next = (await getOfflineQueue()).filter((item) => item.id !== id);
+        await saveOfflineQueue(next);
+        await renderOfflineQueue();
+      });
+    });
+  }
+
+  async function saveCurrentJobToQueue(showStatus) {
+    const fields = readRegisterFormFields();
+    if (!fields.jobTitle || !fields.companyName || !fields.jobLink) {
+      throw new Error('Job title, company, and job link are required.');
+    }
+
+    const entry = {
+      id: newQueueId(),
+      queuedAt: new Date().toISOString(),
+      ...fields
+    };
+
+    const queue = await getOfflineQueue();
+    queue.push(entry);
+    await saveOfflineQueue(queue);
+    await renderOfflineQueue();
+    setRegisterStatus(`Saved to offline queue (${queue.length} total).`, 'success');
+    if (showStatus) showStatus('Job saved to offline queue.', 'success');
+  }
+
+  function exportOfflineQueueJson(showStatus) {
+    void getOfflineQueue().then((entries) => {
+      const payload = {
+        version: QUEUE_VERSION,
+        exportedAt: new Date().toISOString(),
+        entries
+      };
+      const d = new Date();
+      const filename = `resume_db_queue_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      chrome.downloads.download({ url, filename, saveAs: true }, () => {
+        URL.revokeObjectURL(url);
+        if (showStatus) showStatus('Queue JSON download started.', 'success');
+      });
+    });
+  }
+
+  async function clearOfflineQueue(showStatus) {
+    await saveOfflineQueue([]);
+    await renderOfflineQueue();
+    setRegisterStatus('Offline queue cleared.', 'info');
+    if (showStatus) showStatus('Offline queue cleared.', 'success');
+  }
+
   async function registerJobToBackend() {
-    const jobTitle = document.getElementById('regJobTitle')?.value?.trim();
-    const companyName = document.getElementById('regCompany')?.value?.trim();
-    const jobLink = document.getElementById('regJobLink')?.value?.trim();
-    const profileId = document.getElementById('regProfileId')?.value?.trim();
+    const fields = readRegisterFormFields();
+    const { jobTitle, companyName, jobLink, profileId } = fields;
     const resumeFile = readFileInput(document.getElementById('regResumeFile'));
     const coverFile = readFileInput(document.getElementById('regCoverFile'));
 
@@ -395,14 +667,14 @@
       throw new Error('Select a candidate profile.');
     }
 
-    const resumeIsDefault = document.getElementById('regResumeDefault')?.checked;
-    const coverIsDefault = document.getElementById('regCoverDefault')?.checked;
+    const resumeIsDefault = fields.resumeIsDefault;
+    const coverIsDefault = fields.coverLetterIsDefault;
 
     if (!resumeIsDefault && !resumeFile) {
       throw new Error('Select a resume file, or check Default and set a link in Settings → Google Drive.');
     }
 
-    const { baseUrl, apiKey } = await getBackendConfig();
+    const config = await getBackendConfig();
 
     if (!global.SmartJobGoogleDrive) {
       throw new Error('Google Drive module failed to load. Reload the extension.');
@@ -412,7 +684,7 @@
       resumeFile,
       coverFile,
       resumeIsDefault,
-      coverIsDefault,
+      coverIsDefault
     });
 
     const formData = new FormData();
@@ -428,9 +700,9 @@
     formData.append('resumeIsDefault', resumeIsDefault ? '1' : '0');
     formData.append('coverLetterIsDefault', coverIsDefault ? '1' : '0');
 
-    const res = await fetch(`${baseUrl}/api/resume-db/register`, {
+    const res = await fetch(`${config.baseUrl}/api/resume-db/register`, {
       method: 'POST',
-      headers: apiHeaders(apiKey),
+      headers: apiHeaders(config),
       body: formData
     });
 
@@ -444,15 +716,48 @@
   function wireBackendSettingsForm(showStatus) {
     const form = document.getElementById('backendSettingsForm');
     const testBtn = document.getElementById('testBackendConnectionBtn');
+    const signOutBtn = document.getElementById('signOutBackendBtn');
 
     if (form) {
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const baseUrl = document.getElementById('backendUrlSetting')?.value;
-        const apiKey = document.getElementById('backendApiKeySetting')?.value;
-        await saveBackendConfig(baseUrl, apiKey);
-        setSettingsHint('Connection settings saved.', 'success');
-        if (showStatus) showStatus('Website connection saved.', 'success');
+        const username = document.getElementById('backendUsernameSetting')?.value?.trim();
+        const password = document.getElementById('backendPasswordSetting')?.value || '';
+
+        if (!username || !password) {
+          setSettingsHint('Username and password are required.', 'error');
+          return;
+        }
+
+        setSettingsHint('Signing in…', '');
+        try {
+          await loginWithCredentials(baseUrl, username, password);
+          await saveBackendUrlOnly(baseUrl);
+          const passwordInput = document.getElementById('backendPasswordSetting');
+          if (passwordInput) passwordInput.value = '';
+          setSettingsHint('Signed in successfully.', 'success');
+          if (showStatus) showStatus('Signed in to Resume DB.', 'success');
+          await checkBackendConnection();
+          await loadBackendSettingsForm();
+          await loadProfilesIntoSelect();
+        } catch (err) {
+          const msg = err.message || String(err);
+          setSettingsHint(msg, 'error');
+          if (showStatus) showStatus(msg, 'error');
+          updateBackendDependentUi(false);
+        }
+      });
+    }
+
+    if (signOutBtn) {
+      signOutBtn.addEventListener('click', async () => {
+        await clearAuthConfig();
+        const passwordInput = document.getElementById('backendPasswordSetting');
+        if (passwordInput) passwordInput.value = '';
+        setSettingsHint('Signed out.', 'success');
+        if (showStatus) showStatus('Signed out of Resume DB.', 'success');
+        await loadBackendSettingsForm();
         await checkBackendConnection();
         await loadProfilesIntoSelect();
       });
@@ -461,8 +766,7 @@
     if (testBtn) {
       testBtn.addEventListener('click', async () => {
         const baseUrl = document.getElementById('backendUrlSetting')?.value;
-        const apiKey = document.getElementById('backendApiKeySetting')?.value;
-        await saveBackendConfig(baseUrl, apiKey);
+        await saveBackendUrlOnly(baseUrl);
         setSettingsHint('Testing connection…', '');
         const ok = await checkBackendConnection();
         if (ok) {
@@ -471,7 +775,7 @@
           await loadProfilesIntoSelect();
         } else {
           setSettingsHint(
-            'Could not reach the backend. Check the URL, deploy status, and API key.',
+            'Not connected. Sign in with your username and password, or check the backend URL.',
             'error'
           );
           if (showStatus) showStatus('Backend connection failed.', 'error');
@@ -480,10 +784,45 @@
     }
   }
 
+  function wireOfflineQueueControls(showStatus) {
+    const saveBtn = document.getElementById('saveToQueueBtn');
+    const exportBtn = document.getElementById('exportQueueBtn');
+    const clearBtn = document.getElementById('clearQueueBtn');
+
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        try {
+          await saveCurrentJobToQueue(showStatus);
+        } catch (err) {
+          const msg = err.message || String(err);
+          setRegisterStatus(msg, 'error');
+          if (showStatus) showStatus(msg, 'error');
+        }
+      });
+    }
+
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => exportOfflineQueueJson(showStatus));
+    }
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        const queue = await getOfflineQueue();
+        if (!queue.length) {
+          setRegisterStatus('Queue is already empty.', 'info');
+          return;
+        }
+        if (!global.confirm(`Clear ${queue.length} queued job(s)?`)) return;
+        await clearOfflineQueue(showStatus);
+      });
+    }
+  }
+
   function startConnectionPolling() {
     if (connectionPollTimer) clearInterval(connectionPollTimer);
     checkBackendConnection();
     loadProfilesIntoSelect();
+    renderOfflineQueue();
     connectionPollTimer = setInterval(() => {
       checkBackendConnection();
     }, 30000);
@@ -495,6 +834,7 @@
 
     loadBackendSettingsForm();
     wireBackendSettingsForm(showStatus);
+    wireOfflineQueueControls(showStatus);
     if (global.SmartJobGoogleDrive) {
       global.SmartJobGoogleDrive.wireGoogleDriveSettings(showStatus);
     }
@@ -506,6 +846,7 @@
       tabBtn.addEventListener('click', () => {
         checkBackendConnection();
         loadProfilesIntoSelect();
+        renderOfflineQueue();
         if (global.SmartJobGoogleDrive) {
           global.SmartJobGoogleDrive.updateRegisterDriveBadge();
         }
@@ -549,7 +890,7 @@
           const connected = await checkBackendConnection();
           if (!connected) {
             throw new Error(
-              'Backend not connected. Open the Settings tab → Website connection, set the URL, and click Test connection.'
+              'Not signed in. Open Settings → Website connection, enter your username and password, and click Sign in.'
             );
           }
           if (global.SmartJobGoogleDrive) {
@@ -564,10 +905,7 @@
               !resumeDefault ||
               (document.getElementById('regCoverFile')?.files?.[0] &&
                 !document.getElementById('regCoverDefault')?.checked);
-            if (
-              needsUpload &&
-              !global.SmartJobGoogleDrive.isDriveConnected(driveCfg)
-            ) {
+            if (needsUpload && !global.SmartJobGoogleDrive.isDriveConnected(driveCfg)) {
               throw new Error(
                 'Connect Google Drive in Settings before uploading tailored files.'
               );
@@ -612,7 +950,7 @@
     checkBackendConnection,
     loadBackendSettingsForm,
     BACKEND_URL_KEY,
-    API_KEY_KEY,
+    EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND
   };
 })(typeof window !== 'undefined' ? window : self);

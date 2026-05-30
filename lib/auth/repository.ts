@@ -106,6 +106,29 @@ export async function verifyAppUserCredentials(
   return mapRow(row);
 }
 
+/** Ensures every member has a per-user extension API key (legacy rows may be null). */
+export async function ensureExtensionApiKey(userId: string): Promise<string> {
+  const supabase = getSupabaseServiceRoleClient();
+  const { data, error } = await supabase
+    .from("app_users")
+    .select("extension_api_key")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw error;
+
+  const row = data as { extension_api_key: string | null } | null;
+  const existing = row?.extension_api_key?.trim();
+  if (existing) return existing;
+
+  const extension_api_key = randomBytes(24).toString("hex");
+  const { error: updateError } = await supabase
+    .from("app_users")
+    .update({ extension_api_key, updated_at: new Date().toISOString() } as never)
+    .eq("id", userId);
+  if (updateError) throw updateError;
+  return extension_api_key;
+}
+
 export async function updateAppUser(
   id: string,
   input: { username?: string; password?: string; role?: UserRole },
