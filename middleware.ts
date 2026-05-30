@@ -6,7 +6,7 @@ import {
   isMemberPath,
   isPublicPath,
 } from "@/lib/auth/constants";
-import { getSessionFromRequest } from "@/lib/auth/session";
+import { getSessionFromRequest } from "@/lib/auth/session-request";
 
 const AUTH_API_PREFIX = "/api/auth";
 const PUBLIC_API_PREFIXES = [

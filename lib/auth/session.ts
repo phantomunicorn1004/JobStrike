@@ -1,7 +1,6 @@
 import "server-only";
 
 import { cookies } from "next/headers";
-import type { NextRequest } from "next/server";
 import type { SessionUser } from "@/lib/auth/types";
 import { SESSION_COOKIE, SESSION_MAX_AGE_SEC } from "@/lib/auth/constants";
 import { signSessionToken, verifySessionToken } from "@/lib/auth/session-core";
@@ -34,14 +33,6 @@ export async function clearSessionCookie(): Promise<void> {
     path: "/",
     maxAge: 0,
   });
-}
-
-export async function getSessionFromRequest(
-  request: NextRequest,
-): Promise<SessionUser | null> {
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
-  return verifySessionToken(token);
 }
 
 export async function requireSessionUser(): Promise<SessionUser> {

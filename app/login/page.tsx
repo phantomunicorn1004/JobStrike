@@ -21,6 +21,7 @@ async function authRequest(
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     body: JSON.stringify({ username, password }),
   });
   const data = await res.json().catch(() => ({}));

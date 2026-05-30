@@ -3,6 +3,7 @@
  *
  *   npm run seed:admin
  *   node scripts/seed-admin-user.mjs
+ *   node scripts/seed-admin-user.mjs --reset-password
  *
  * Reads Supabase vars from `.env.local` / `.env` (same as Next.js).
  * Override password with DEFAULT_ADMIN_PASSWORD env var.
@@ -38,6 +39,8 @@ if (!url || !key) {
   process.exit(1);
 }
 
+const resetPassword = process.argv.includes("--reset-password");
+
 const supabase = createClient(url, key, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -50,7 +53,24 @@ const { data: existing } = await supabase
   .maybeSingle();
 
 if (existing) {
-  console.log("Default admin already exists:", username);
+  if (!resetPassword) {
+    console.log("Default admin already exists:", username);
+    console.log("Run with --reset-password to update the admin password.");
+    process.exit(0);
+  }
+
+  const password_hash = await hashPassword(DEFAULT_PASSWORD);
+  const { error } = await supabase
+    .from("app_users")
+    .update({ password_hash, role: "admin", updated_at: new Date().toISOString() })
+    .eq("id", existing.id);
+
+  if (error) {
+    console.error("Failed to reset admin password:", error.message);
+    process.exit(1);
+  }
+
+  console.log("Reset default admin password:", username);
   process.exit(0);
 }
 

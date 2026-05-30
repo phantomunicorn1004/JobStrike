@@ -45,6 +45,9 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Signup error:", error);
+    if (error instanceof Error && error.message.includes("SUPABASE_SERVICE_ROLE_KEY")) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    }
     return NextResponse.json({ error: "Sign up failed." }, { status: 500 });
   }
 }

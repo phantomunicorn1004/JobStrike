@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getSupabaseServiceRoleClient } from "@/lib/supabase/admin";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { normalizeUsername, DEFAULT_ADMIN_USERNAME } from "@/lib/auth/constants";
 import type { AppUser, UserRole } from "@/lib/auth/types";
@@ -27,7 +27,7 @@ function mapRow(row: AppUserRow): AppUser {
 export async function findUserByUsername(
   username: string,
 ): Promise<AppUserRow | null> {
-  const supabase = getSupabaseAdminClient();
+  const supabase = getSupabaseServiceRoleClient();
   const normalized = normalizeUsername(username);
   const { data, error } = await supabase
     .from("app_users")
@@ -39,7 +39,7 @@ export async function findUserByUsername(
 }
 
 export async function findUserById(id: string): Promise<AppUser | null> {
-  const supabase = getSupabaseAdminClient();
+  const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
     .from("app_users")
     .select("id, username, role, created_at, updated_at")
@@ -50,7 +50,7 @@ export async function findUserById(id: string): Promise<AppUser | null> {
 }
 
 export async function listAppUsers(): Promise<AppUser[]> {
-  const supabase = getSupabaseAdminClient();
+  const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
     .from("app_users")
     .select("id, username, role, created_at, updated_at")
@@ -64,7 +64,7 @@ export async function createAppUser(input: {
   password: string;
   role?: UserRole;
 }): Promise<AppUser> {
-  const supabase = getSupabaseAdminClient();
+  const supabase = getSupabaseServiceRoleClient();
   const username = normalizeUsername(input.username);
   const password_hash = await hashPassword(input.password);
   const role = input.role ?? "member";
@@ -92,7 +92,7 @@ export async function updateAppUser(
   id: string,
   input: { username?: string; password?: string; role?: UserRole },
 ): Promise<AppUser> {
-  const supabase = getSupabaseAdminClient();
+  const supabase = getSupabaseServiceRoleClient();
   const patch: Record<string, string> = {
     updated_at: new Date().toISOString(),
   };
@@ -116,7 +116,7 @@ export async function updateAppUser(
 }
 
 export async function deleteAppUser(id: string): Promise<void> {
-  const supabase = getSupabaseAdminClient();
+  const supabase = getSupabaseServiceRoleClient();
   const { error } = await supabase.from("app_users").delete().eq("id", id);
   if (error) throw error;
 }
