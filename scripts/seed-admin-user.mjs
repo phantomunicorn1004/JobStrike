@@ -1,13 +1,18 @@
 /**
  * Seed default administrator. Run after create-app-users-table.sql
  *
+ *   npm run seed:admin
  *   node scripts/seed-admin-user.mjs
  *
+ * Reads Supabase vars from `.env.local` / `.env` (same as Next.js).
  * Override password with DEFAULT_ADMIN_PASSWORD env var.
  */
 import { createClient } from "@supabase/supabase-js";
 import { scrypt, randomBytes } from "node:crypto";
 import { promisify } from "node:util";
+import { loadEnvFiles, projectRoot } from "./load-env.mjs";
+
+loadEnvFiles();
 
 const scryptAsync = promisify(scrypt);
 const USERNAME = "ideapulse@remote.helper.com";
@@ -23,7 +28,13 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
 if (!url || !key) {
-  console.error("Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
+  console.error(
+    "Missing Supabase env vars: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY\n\n" +
+      `Create ${projectRoot}\\.env.local with:\n\n` +
+      "  NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co\n" +
+      "  SUPABASE_SERVICE_ROLE_KEY=your-service-role-key\n\n" +
+      "Find both in Supabase → Project Settings → API.",
+  );
   process.exit(1);
 }
 

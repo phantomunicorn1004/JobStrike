@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/check-build-path.js && next build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:admin": "node scripts/seed-admin-user.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
