@@ -28,7 +28,7 @@ async function authRequest(
   if (!res.ok) {
     throw new Error(data.error || "Request failed.");
   }
-  return data as { user: { role: UserRole } };
+  return data as { user: { role: UserRole }; existing?: boolean };
 }
 
 export default function LoginPage() {
@@ -98,15 +98,31 @@ function LoginPageContent() {
     }
     setBusy(true);
     try {
-      const { user } = await authRequest(
+      const data = await authRequest(
         "/api/auth/signup",
         signUpUsername,
         signUpPassword,
       );
-      toast.success("Account created.");
-      redirectAfterAuth(user.role);
+      toast.success(data.existing ? "Signed in." : "Account created.");
+      redirectAfterAuth(data.user.role);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Sign up failed.");
+      const message = error instanceof Error ? error.message : "Sign up failed.";
+      if (message === "Username is already taken.") {
+        try {
+          const data = await authRequest(
+            "/api/auth/login",
+            signUpUsername,
+            signUpPassword,
+          );
+          toast.success("Signed in.");
+          redirectAfterAuth(data.user.role);
+          return;
+        } catch {
+          toast.error("Username is already taken. Sign in with your password instead.");
+          return;
+        }
+      }
+      toast.error(message);
     } finally {
       setBusy(false);
     }

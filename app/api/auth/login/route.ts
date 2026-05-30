@@ -1,18 +1,16 @@
 import { NextResponse } from "next/server";
-import {
-  ensureDefaultAdmin,
-  verifyAppUserCredentials,
-} from "@/lib/auth/repository";
-import { normalizeUsername } from "@/lib/auth/constants";
-import { setSessionCookie } from "@/lib/auth/session";
+import { verifyAppUserCredentials } from "@/lib/auth/repository";
+import { authFailureResponse, parseAuthCredentials } from "@/lib/auth/request";
+import { createSessionJsonResponse } from "@/lib/auth/session";
+
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    await ensureDefaultAdmin();
-    const body = await request.json();
-    const username = normalizeUsername(String(body.username ?? ""));
-    const password = String(body.password ?? "");
+    const parsed = await parseAuthCredentials(request);
+    if (parsed instanceof NextResponse) return parsed;
 
+    const { username, password } = parsed;
     if (!username || !password) {
       return NextResponse.json(
         { error: "Username and password are required." },
@@ -25,20 +23,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid username or password." }, { status: 401 });
     }
 
-    await setSessionCookie({
-      id: user.id,
-      username: user.username,
-      role: user.role,
-    });
-
-    return NextResponse.json({
-      user: { id: user.id, username: user.username, role: user.role },
-    });
+    return createSessionJsonResponse(
+      { user: { id: user.id, username: user.username, role: user.role } },
+      { id: user.id, username: user.username, role: user.role },
+    );
   } catch (error) {
     console.error("Login error:", error);
-    if (error instanceof Error && error.message.includes("SUPABASE_SERVICE_ROLE_KEY")) {
-      return NextResponse.json({ error: error.message }, { status: 503 });
-    }
-    return NextResponse.json({ error: "Login failed." }, { status: 500 });
+    return authFailureResponse(error, "Login failed.");
   }
 }

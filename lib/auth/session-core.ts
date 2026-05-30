@@ -1,13 +1,23 @@
 import type { SessionPayload, SessionUser } from "@/lib/auth/types";
 import { SESSION_MAX_AGE_SEC } from "@/lib/auth/constants";
 
+/** Session signing key — derived from existing Supabase service role key (no AUTH_SECRET env needed). */
 function getAuthSecret(): string {
-  const secret = process.env.AUTH_SECRET?.trim();
-  if (secret) return secret;
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("AUTH_SECRET must be set in production.");
+  const override = process.env.AUTH_SECRET?.trim();
+  if (override) return override;
+
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (serviceKey) {
+    return `rwh-session-v1:${serviceKey}`;
   }
-  return "dev-insecure-auth-secret-change-me";
+
+  if (process.env.NODE_ENV !== "production") {
+    return "rwh-dev-insecure-session-secret";
+  }
+
+  throw new Error(
+    "Missing SUPABASE_SERVICE_ROLE_KEY. User authentication requires the service role key.",
+  );
 }
 
 function encodeBase64Url(data: Uint8Array): string {

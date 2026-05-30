@@ -3,17 +3,25 @@ import {
   createAppUser,
   ensureDefaultAdmin,
   findUserByUsername,
+  verifyAppUserCredentials,
 } from "@/lib/auth/repository";
-import { normalizeUsername } from "@/lib/auth/constants";
-import { setSessionCookie } from "@/lib/auth/session";
+import { authFailureResponse, parseAuthCredentials } from "@/lib/auth/request";
+import { createSessionJsonResponse } from "@/lib/auth/session";
+
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    await ensureDefaultAdmin();
-    const body = await request.json();
-    const username = normalizeUsername(String(body.username ?? ""));
-    const password = String(body.password ?? "");
+    try {
+      await ensureDefaultAdmin();
+    } catch (error) {
+      console.warn("ensureDefaultAdmin skipped:", error);
+    }
 
+    const parsed = await parseAuthCredentials(request);
+    if (parsed instanceof NextResponse) return parsed;
+
+    const { username, password } = parsed;
     if (!username || username.length < 3) {
       return NextResponse.json(
         { error: "Username must be at least 3 characters." },
@@ -29,25 +37,27 @@ export async function POST(request: Request) {
 
     const existing = await findUserByUsername(username);
     if (existing) {
+      const user = await verifyAppUserCredentials(username, password);
+      if (user) {
+        return createSessionJsonResponse(
+          {
+            user: { id: user.id, username: user.username, role: user.role },
+            existing: true,
+          },
+          { id: user.id, username: user.username, role: user.role },
+        );
+      }
       return NextResponse.json({ error: "Username is already taken." }, { status: 409 });
     }
 
     const user = await createAppUser({ username, password, role: "member" });
 
-    await setSessionCookie({
-      id: user.id,
-      username: user.username,
-      role: user.role,
-    });
-
-    return NextResponse.json({
-      user: { id: user.id, username: user.username, role: user.role },
-    });
+    return createSessionJsonResponse(
+      { user: { id: user.id, username: user.username, role: user.role } },
+      { id: user.id, username: user.username, role: user.role },
+    );
   } catch (error) {
     console.error("Signup error:", error);
-    if (error instanceof Error && error.message.includes("SUPABASE_SERVICE_ROLE_KEY")) {
-      return NextResponse.json({ error: error.message }, { status: 503 });
-    }
-    return NextResponse.json({ error: "Sign up failed." }, { status: 500 });
+    return authFailureResponse(error, "Sign up failed.");
   }
 }
