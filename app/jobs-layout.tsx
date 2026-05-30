@@ -8,8 +8,11 @@ import {
   FileEdit,
   Database,
   LayoutDashboard,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Sidebar,
@@ -90,6 +93,13 @@ export default function JobsLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+    router.refresh();
+  };
 
   return (
     <SidebarProvider defaultOpen>
@@ -160,7 +170,7 @@ export default function JobsLayout({
         </SidebarContent>
 
         <SidebarFooter className="border-t border-sidebar-border p-2">
-          <SidebarMenu>
+          <SidebarMenu className="gap-1">
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
@@ -177,6 +187,17 @@ export default function JobsLayout({
                   />
                   <span>Profile</span>
                 </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Sign out"
+                size="lg"
+                className="rounded-lg"
+                onClick={handleLogout}
+              >
+                <LogOut className="h-4 w-4 shrink-0" />
+                <span>Sign out</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
