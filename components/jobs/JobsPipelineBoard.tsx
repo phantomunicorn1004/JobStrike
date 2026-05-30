@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -113,6 +113,44 @@ function jobMatchesSearch(job: PipelineCardJob, query: string): boolean {
   return parts.join(" ").toLowerCase().includes(q);
 }
 
+function moveKey(source: string, id: number): string {
+  return `${source}:${id}`;
+}
+
+function relocateTechnicalJobInState(
+  setJobsByStage: React.Dispatch<React.SetStateAction<Record<string, TechnicalJob[]>>>,
+  job: TechnicalJob,
+  targetStageId: string,
+  patch: Partial<TechnicalJob>,
+): void {
+  setJobsByStage((prev) => {
+    const next: Record<string, TechnicalJob[]> = {};
+    for (const [sid, list] of Object.entries(prev)) {
+      next[sid] = list.filter((j) => j.id !== job.id);
+    }
+    const updated: TechnicalJob = {
+      ...job,
+      ...patch,
+      source: "technical_jobs",
+      stage_id: targetStageId,
+    };
+    next[targetStageId] = [updated, ...(next[targetStageId] ?? [])];
+    return next;
+  });
+}
+
+function removeTechnicalJobFromState(
+  setJobsByStage: React.Dispatch<React.SetStateAction<Record<string, TechnicalJob[]>>>,
+  jobId: number,
+): void {
+  setJobsByStage((prev) => {
+    const next: Record<string, TechnicalJob[]> = {};
+    for (const [sid, list] of Object.entries(prev)) {
+      next[sid] = list.filter((j) => j.id !== jobId);
+    }
+    return next;
+  });
+}
 function buildCandidateOptions(
   profiles: ProfileOption[],
   jobs: PipelineCardJob[],
@@ -153,6 +191,7 @@ export function JobsPipelineBoard() {
     stageName: string;
   } | null>(null);
   const supabase = getSupabaseBrowserClient();
+  const moveInFlightRef = useRef<string | null>(null);
 
   const fetchStages = useCallback(async (): Promise<StageConfig[]> => {
     const { data, error } = await supabase
@@ -388,14 +427,34 @@ export function JobsPipelineBoard() {
     async (payload: DragPayload, targetStageId: string) => {
       if (payload.stageId === targetStageId) return;
 
+      const key = moveKey(payload.source, payload.id);
+      if (moveInFlightRef.current === key) return;
+      moveInFlightRef.current = key;
+      setMovingId({ source: payload.source, id: payload.id });
+
+      const finishMove = () => {
+        if (moveInFlightRef.current === key) {
+          moveInFlightRef.current = null;
+        }
+        setMovingId((current) =>
+          current?.source === payload.source && current.id === payload.id ? null : current,
+        );
+      };
+
       const isTargetApplied = targetStageId === "applied";
       const isSourceApplied = payload.source === "jobs";
 
-      if (isSourceApplied && isTargetApplied) return;
+      if (isSourceApplied && isTargetApplied) {
+        finishMove();
+        return;
+      }
+
       if (isSourceApplied) {
         const job = applied.find((j) => j.id === payload.id);
-        if (!job) return;
-        setMovingId({ source: "jobs", id: job.id });
+        if (!job) {
+          finishMove();
+          return;
+        }
         const enteredAt = stageEnteredNow();
         const sourceStageId = payload.stageId;
         const stageDates = mergeStageDate(
@@ -403,6 +462,25 @@ export function JobsPipelineBoard() {
           targetStageId,
           enteredAt,
         );
+        const status = targetStageId === "final" ? "success" : "ongoing";
+        const optimisticTech: TechnicalJob = {
+          id: job.id,
+          source: "technical_jobs",
+          stage_id: targetStageId,
+          name: job.name ?? "",
+          company_name: job.company_name ?? "",
+          title: job.title ?? "",
+          resume_link: job.resume_link ?? "",
+          job_description: cardNotes(job),
+          recruiter_name: job.recruiter_name ?? null,
+          recruiter_contact: job.recruiter_contact ?? null,
+          created_at: job.created_at,
+          stage_entered_at: enteredAt,
+          stage_dates: stageDates,
+          status,
+        };
+        setApplied((prev) => prev.filter((j) => j.id !== job.id));
+        relocateTechnicalJobInState(setJobsByStage, optimisticTech, targetStageId, {});
         try {
           const { data, error } = await supabase
             .from("technical_jobs")
@@ -412,7 +490,7 @@ export function JobsPipelineBoard() {
               title: job.title ?? "",
               resume_link: job.resume_link ?? "",
               stage_id: targetStageId,
-              status: targetStageId === "final" ? "success" : "ongoing",
+              status,
               stage_entered_at: enteredAt,
               stage_dates: stageDates,
               job_description: cardNotes(job),
@@ -424,28 +502,29 @@ export function JobsPipelineBoard() {
           await supabase.from("jobs").delete().eq("id", job.id);
           const newRow = data?.[0] as Record<string, unknown> | undefined;
           if (newRow) {
-            setJobsByStage((prev) => ({
-              ...prev,
-              [targetStageId]: [
-                {
-                  ...job,
-                  id: newRow.id as number,
-                  source: "technical_jobs",
-                  stage_id: targetStageId,
-                  stage_entered_at: enteredAt,
-                  stage_dates: stageDates,
-                  job_description: cardNotes(job),
-                } as TechnicalJob,
-                ...(prev[targetStageId] ?? []),
-              ],
-            }));
+            const newId = newRow.id as number;
+            setJobsByStage((prev) => {
+              const next: Record<string, TechnicalJob[]> = {};
+              for (const [sid, list] of Object.entries(prev)) {
+                next[sid] = list.map((j) =>
+                  j.id === job.id ? { ...j, id: newId } : j,
+                );
+              }
+              return next;
+            });
           }
-          setApplied((prev) => prev.filter((j) => j.id !== job.id));
         } catch (e) {
-          const msg = e instanceof Error ? e.message : (e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e));
+          const msg =
+            e instanceof Error
+              ? e.message
+              : e && typeof e === "object" && "message" in e
+                ? String((e as { message: unknown }).message)
+                : String(e);
           console.error("Move failed:", msg || "Unknown error", e);
+          toast.error("Failed to move card. Refreshing pipeline…");
+          await fetchAll();
         } finally {
-          setMovingId(null);
+          finishMove();
         }
         return;
       }
@@ -453,10 +532,12 @@ export function JobsPipelineBoard() {
       if (isTargetApplied) {
         const allTech = Object.values(jobsByStage).flat();
         const job = allTech.find((j) => j.id === payload.id);
-        if (!job) return;
-        setMovingId({ source: "technical_jobs", id: job.id });
+        if (!job) {
+          finishMove();
+          return;
+        }
         const enteredAt = stageEnteredNow();
-        const sourceStageId = job.stage_id ?? payload.stageId;
+        const sourceStageId = payload.stageId;
         const stageDates = mergeStageDate(
           mergeStageDate(
             job.stage_dates,
@@ -466,76 +547,116 @@ export function JobsPipelineBoard() {
           targetStageId,
           enteredAt,
         );
+        removeTechnicalJobFromState(setJobsByStage, job.id);
+        const optimisticApplied: AppliedJob = {
+          id: job.id,
+          source: "jobs",
+          name: job.name,
+          title: job.title,
+          company_name: job.company_name,
+          job_link: "",
+          resume_link: job.resume_link,
+          note: cardNotes(job),
+          created_at: job.created_at ?? enteredAt,
+          stage_entered_at: enteredAt,
+          stage_dates: stageDates,
+          recruiter_name: job.recruiter_name ?? null,
+          recruiter_contact: job.recruiter_contact ?? null,
+        };
+        setApplied((prev) => [optimisticApplied, ...prev.filter((j) => j.id !== job.id)]);
         try {
-          const { error } = await supabase.from("jobs").insert({
-            name: job.name,
-            title: job.title,
-            company_name: job.company_name,
-            job_link: "",
-            resume_link: job.resume_link,
-            note: cardNotes(job),
-            recruiter_name: job.recruiter_name ?? null,
-            recruiter_contact: job.recruiter_contact ?? null,
-            stage_entered_at: enteredAt,
-            stage_dates: stageDates,
-          });
+          const { data, error } = await supabase
+            .from("jobs")
+            .insert({
+              name: job.name,
+              title: job.title,
+              company_name: job.company_name,
+              job_link: "",
+              resume_link: job.resume_link,
+              note: cardNotes(job),
+              recruiter_name: job.recruiter_name ?? null,
+              recruiter_contact: job.recruiter_contact ?? null,
+              stage_entered_at: enteredAt,
+              stage_dates: stageDates,
+            })
+            .select();
           if (error) throw error;
           await supabase.from("technical_jobs").delete().eq("id", job.id);
-          setJobsByStage((prev) => {
-            const next = { ...prev };
-            const sid = job.stage_id ?? "technical";
-            if (next[sid]) next[sid] = next[sid].filter((j) => j.id !== job.id);
-            return next;
-          });
-          await fetchAll();
+          const newRow = data?.[0] as Record<string, unknown> | undefined;
+          if (newRow) {
+            setApplied((prev) =>
+              prev.map((j) =>
+                j.id === job.id
+                  ? {
+                      ...j,
+                      id: newRow.id as number,
+                    }
+                  : j,
+              ),
+            );
+          }
         } catch (e) {
-          const msg = e instanceof Error ? e.message : (e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e));
+          const msg =
+            e instanceof Error
+              ? e.message
+              : e && typeof e === "object" && "message" in e
+                ? String((e as { message: unknown }).message)
+                : String(e);
           console.error("Move to applied failed:", msg || "Unknown error", e);
+          toast.error("Failed to move card. Refreshing pipeline…");
+          await fetchAll();
         } finally {
-          setMovingId(null);
+          finishMove();
         }
         return;
       }
 
       const allTech = Object.values(jobsByStage).flat();
       const job = allTech.find((j) => j.id === payload.id);
-      if (!job) return;
-      setMovingId({ source: "technical_jobs", id: job.id });
+      if (!job) {
+        finishMove();
+        return;
+      }
       const enteredAt = stageEnteredNow();
-      const fromStage = job.stage_id ?? "technical";
       const stageDates = mergeStageDate(job.stage_dates, targetStageId, enteredAt);
+      const status = targetStageId === "final" ? "success" : "ongoing";
+      relocateTechnicalJobInState(setJobsByStage, job, targetStageId, {
+        stage_entered_at: enteredAt,
+        stage_dates: stageDates,
+        status,
+      });
       try {
-        await supabase
+        const { error } = await supabase
           .from("technical_jobs")
           .update({
             stage_id: targetStageId,
-            status: targetStageId === "final" ? "success" : "ongoing",
+            status,
             stage_entered_at: enteredAt,
             stage_dates: stageDates,
           })
           .eq("id", job.id);
-        setJobsByStage((prev) => {
-          const next = { ...prev };
-          if (next[fromStage]) next[fromStage] = next[fromStage].filter((j) => j.id !== job.id);
-          next[targetStageId] = [
-            { ...job, stage_id: targetStageId, stage_entered_at: enteredAt, stage_dates: stageDates },
-            ...(next[targetStageId] ?? []),
-          ];
-          return next;
-        });
+        if (error) throw error;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : (e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e));
+        const msg =
+          e instanceof Error
+            ? e.message
+            : e && typeof e === "object" && "message" in e
+              ? String((e as { message: unknown }).message)
+              : String(e);
         console.error("Move between stages failed:", msg || "Unknown error", e);
+        toast.error("Failed to move card. Refreshing pipeline…");
+        await fetchAll();
       } finally {
-        setMovingId(null);
+        finishMove();
       }
     },
-    [applied, jobsByStage, supabase, fetchAll]
+    [applied, jobsByStage, supabase, fetchAll],
   );
 
   const handleDrop = useCallback(
     (e: React.DragEvent, targetStageId: string) => {
       e.preventDefault();
+      e.stopPropagation();
       setDragOverColumn(null);
       const raw = e.dataTransfer.getData("application/json");
       if (!raw) return;
@@ -545,18 +666,23 @@ export function JobsPipelineBoard() {
       } catch {
         return;
       }
-      moveCard(payload, targetStageId);
+      void moveCard(payload, targetStageId);
     },
-    [moveCard]
+    [moveCard],
   );
 
   const handleDragOver = useCallback((e: React.DragEvent, stageId: string) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
     setDragOverColumn(stageId);
   }, []);
 
-  const handleDragLeave = useCallback(() => setDragOverColumn(null), []);
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    const related = e.relatedTarget as Node | null;
+    if (related && e.currentTarget.contains(related)) return;
+    setDragOverColumn(null);
+  }, []);
 
   const addStage = useCallback(async () => {
     const name = newStageName.trim();
@@ -927,7 +1053,9 @@ export function JobsPipelineBoard() {
                     key={`${job.source}-${job.id}`}
                     job={job}
                     stageId={stageId}
-                    isDragging={movingId?.source === job.source && movingId?.id === job.id}
+                    isMoving={
+                      movingId?.source === job.source && movingId?.id === job.id
+                    }
                     onDetail={() =>
                       setDetailTarget({ job, stageId, stageName: stage.name })
                     }

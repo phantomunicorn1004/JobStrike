@@ -72,20 +72,25 @@ type JobPipelineCardProps = {
   job: PipelineCardJob;
   stageId: PipelineStageId;
   isDragging?: boolean;
+  isMoving?: boolean;
   onDetail?: () => void;
 };
 
-export function JobPipelineCard({ job, stageId, isDragging, onDetail }: JobPipelineCardProps) {
+export function JobPipelineCard({ job, stageId, isDragging, isMoving, onDetail }: JobPipelineCardProps) {
   const technical = isTechnicalJob(job) ? job : null;
 
   return (
     <Card
       className={cn(
         "cursor-grab active:cursor-grabbing rounded-lg border bg-card p-3 shadow-sm transition-shadow hover:shadow-md",
-        isDragging && "opacity-60 shadow-lg"
+        (isDragging || isMoving) && "pointer-events-none opacity-50",
       )}
-      draggable
+      draggable={!isMoving}
       onDragStart={(e) => {
+        if (isMoving) {
+          e.preventDefault();
+          return;
+        }
         e.dataTransfer.setData(
           "application/json",
           JSON.stringify({

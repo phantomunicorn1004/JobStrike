@@ -4,9 +4,11 @@
 (function (global) {
   const BACKEND_URL_KEY = 'resume_db_backend_url';
   const API_KEY_KEY = 'resume_db_api_key';
+  const SELECTED_PROFILE_KEY = 'resume_db_selected_profile_id';
   const DEFAULT_BACKEND = 'https://remote-work-helper.vercel.app';
 
   let connectionPollTimer = null;
+  let profilesLoadSeq = 0;
 
   function normalizeBackendUrl(url) {
     const trimmed = String(url || '').trim().replace(/\/+$/, '');
@@ -135,20 +137,59 @@
     }
   }
 
+  async function getSelectedProfileId() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([SELECTED_PROFILE_KEY], (result) => {
+        resolve(String(result[SELECTED_PROFILE_KEY] || '').trim());
+      });
+    });
+  }
+
+  async function saveSelectedProfileId(profileId) {
+    const id = String(profileId || '').trim();
+    return new Promise((resolve) => {
+      if (id) {
+        chrome.storage.local.set({ [SELECTED_PROFILE_KEY]: id }, resolve);
+      } else {
+        chrome.storage.local.remove(SELECTED_PROFILE_KEY, resolve);
+      }
+    });
+  }
+
+  function restoreProfileSelection(select, profiles, preferredId) {
+    if (!select || !preferredId) return;
+    const match = profiles.some((p) => String(p.id) === String(preferredId));
+    if (match) select.value = String(preferredId);
+  }
+
+  function wireProfileSelectPersistence() {
+    const select = document.getElementById('regProfileId');
+    if (!select || select.dataset.persistenceWired === '1') return;
+    select.dataset.persistenceWired = '1';
+    select.addEventListener('change', () => {
+      void saveSelectedProfileId(select.value);
+    });
+  }
+
   async function loadProfilesIntoSelect() {
     const select = document.getElementById('regProfileId');
     if (!select) return;
 
-    const { baseUrl, apiKey } = await getBackendConfig();
+    const loadSeq = ++profilesLoadSeq;
+    const preservedId = select.value?.trim() || (await getSelectedProfileId());
+
     select.innerHTML = '<option value="">Loading profiles…</option>';
     select.disabled = true;
 
     try {
+      const { baseUrl, apiKey } = await getBackendConfig();
       const res = await fetch(`${baseUrl}/api/profiles`, {
         headers: apiHeaders(apiKey),
         cache: 'no-store'
       });
       const data = await res.json().catch(() => ({}));
+      if (loadSeq !== profilesLoadSeq) return;
+
       if (!res.ok) {
         throw new Error(data.error || 'Failed to load profiles');
       }
@@ -169,7 +210,9 @@
           )
           .join('');
       select.disabled = false;
+      restoreProfileSelection(select, profiles, preservedId);
     } catch (err) {
+      if (loadSeq !== profilesLoadSeq) return;
       const msg = err.message || 'Failed to load profiles';
       select.innerHTML = `<option value="">${escapeHtml(msg)}</option>`;
       if (/fetch|network|failed/i.test(msg)) {
@@ -456,6 +499,7 @@
       global.SmartJobGoogleDrive.wireGoogleDriveSettings(showStatus);
     }
     wireRegisterFileDrops();
+    wireProfileSelectPersistence();
     startConnectionPolling();
 
     document.querySelectorAll('.tab-main[data-tab="register"]').forEach((tabBtn) => {
@@ -478,11 +522,6 @@
 
     if (scrapeBtn) {
       scrapeBtn.addEventListener('click', () => {
-        const globalRefresh = document.getElementById('globalRefreshBtn');
-        if (globalRefresh) {
-          globalRefresh.click();
-          return;
-        }
         setRegisterStatus('Reading job page…', 'info');
         scrapeJobFromTab()
           .then((job) => {
