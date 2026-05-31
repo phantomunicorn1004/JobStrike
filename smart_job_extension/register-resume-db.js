@@ -144,6 +144,122 @@
     }
   }
 
+  function setAlreadyBusy(busy) {
+    const btn = document.getElementById('regAlreadyBtn');
+    if (btn) {
+      btn.disabled = busy || !backendConnected;
+      btn.textContent = busy ? 'Checking…' : 'Already?';
+    }
+  }
+
+  function normalizeJobLink(url) {
+    const raw = String(url || '').trim();
+    if (!raw) return '';
+    try {
+      const parsed = new URL(raw);
+      parsed.hash = '';
+      ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'source'].forEach(
+        (key) => parsed.searchParams.delete(key)
+      );
+      const path = parsed.pathname.replace(/\/+$/, '') || '/';
+      return `${parsed.protocol}//${parsed.host.toLowerCase()}${path}${parsed.search}`;
+    } catch {
+      return raw.toLowerCase();
+    }
+  }
+
+  function normalizeMatchText(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+  }
+
+  function applicationMatchesCurrentJob(app, job) {
+    const appLink = normalizeJobLink(app.jobLink);
+    const jobLink = normalizeJobLink(job.jobLink);
+    if (appLink && jobLink && appLink === jobLink) return true;
+
+    const companyMatch =
+      normalizeMatchText(app.company) === normalizeMatchText(job.companyName);
+    const titleMatch =
+      normalizeMatchText(app.jobTitle) === normalizeMatchText(job.jobTitle);
+    return (
+      companyMatch &&
+      titleMatch &&
+      Boolean(normalizeMatchText(job.companyName)) &&
+      Boolean(normalizeMatchText(job.jobTitle))
+    );
+  }
+
+  async function fetchResumeDbApplications() {
+    const config = await getBackendConfig();
+    const res = await fetch(`${config.baseUrl}/api/resume-db`, {
+      headers: apiHeaders(config),
+      cache: 'no-store'
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load Resume DB applications');
+    }
+    return Array.isArray(data.resumes) ? data.resumes : [];
+  }
+
+  async function checkAlreadyRegistered(showStatus) {
+    const connected = await checkBackendConnection();
+    if (!connected) {
+      throw new Error(
+        'Not signed in. Open Settings → Website connection and sign in to check Resume DB.'
+      );
+    }
+
+    const profileId = document.getElementById('regProfileId')?.value?.trim();
+    if (!profileId) {
+      throw new Error('Select a candidate first.');
+    }
+
+    const fields = readRegisterFormFields();
+    const hasLink = Boolean(fields.jobLink);
+    const hasTitleCompany = Boolean(fields.jobTitle && fields.companyName);
+    if (!hasLink && !hasTitleCompany) {
+      throw new Error('Scrape or enter job link (or job title + company) first.');
+    }
+
+    setAlreadyBusy(true);
+    setRegisterStatus('Checking Resume DB…', 'info');
+    try {
+      const applications = await fetchResumeDbApplications();
+      const forCandidate = applications.filter(
+        (app) => String(app.profileId) === String(profileId)
+      );
+      const match = forCandidate.find((app) => applicationMatchesCurrentJob(app, fields));
+
+      if (match) {
+        const when = match.appliedAt
+          ? new Date(match.appliedAt).toLocaleDateString()
+          : match.date || '';
+        const detail = [
+          match.jobTitle || fields.jobTitle,
+          match.company || fields.companyName
+        ]
+          .filter(Boolean)
+          .join(' at ');
+        setRegisterStatus(
+          `Already registered (#${match.id}${when ? ', ' + when : ''}) — ${detail}.`,
+          'warn'
+        );
+        if (showStatus) showStatus('This job is already in Resume DB for this candidate.', 'error');
+        return { duplicate: true, match };
+      }
+
+      setRegisterStatus('Not registered yet for this candidate.', 'success');
+      if (showStatus) showStatus('No matching application found in Resume DB.', 'success');
+      return { duplicate: false, match: null };
+    } finally {
+      setAlreadyBusy(false);
+    }
+  }
+
   function setConnectionStatus(state, detail, username) {
     const pairs = [
       ['backendConnectionDot', 'backendConnectionLabel'],
@@ -171,6 +287,7 @@
     backendConnected = connected;
 
     const registerBtn = document.getElementById('registerJobBtn');
+    const alreadyBtn = document.getElementById('regAlreadyBtn');
     const profileSelect = document.getElementById('regProfileId');
     const offlineBanner = document.getElementById('registerOfflineBanner');
     const registerTabBtn = document.getElementById('registerTabBtn');
@@ -178,6 +295,7 @@
     const signedInUser = document.getElementById('backendSignedInUser');
 
     if (registerBtn) registerBtn.disabled = !connected;
+    if (alreadyBtn) alreadyBtn.disabled = !connected;
     if (profileSelect) profileSelect.disabled = !connected;
     if (offlineBanner) offlineBanner.hidden = connected;
     if (registerTabBtn) registerTabBtn.classList.toggle('is-auth-required', !connected);
@@ -837,6 +955,7 @@
 
   function initRegisterResumeDb(showStatus) {
     const scrapeBtn = document.getElementById('regScrapeBtn');
+    const alreadyBtn = document.getElementById('regAlreadyBtn');
     const registerBtn = document.getElementById('registerJobBtn');
 
     loadBackendSettingsForm();
@@ -865,6 +984,18 @@
       headerSettings.addEventListener('click', () => {
         loadBackendSettingsForm();
         checkBackendConnection();
+      });
+    }
+
+    if (alreadyBtn) {
+      alreadyBtn.addEventListener('click', async () => {
+        try {
+          await checkAlreadyRegistered(showStatus);
+        } catch (err) {
+          const msg = err.message || String(err);
+          setRegisterStatus(msg, 'error');
+          if (showStatus) showStatus(msg, 'error');
+        }
       });
     }
 

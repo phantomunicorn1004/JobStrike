@@ -423,6 +423,12 @@ select:focus,
   border: 1px solid rgba(248, 113, 113, 0.25);
 }
 
+.register-status.is-warn {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fde68a;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
 .register-card code {
   background: var(--bg-subtle);
   color: var(--text-secondary);
