@@ -240,7 +240,12 @@
         }.`,
         'warn'
       );
-      return { level: 'same_company', match: sameCompanyMatch, blocked: false };
+      return {
+        level: 'same_company',
+        match: sameCompanyMatch,
+        blocked: false,
+        needsConfirmation: true,
+      };
     }
 
     return { level: 'none', match: null, blocked: false };
@@ -1061,6 +1066,21 @@
           const duplicateCheck = await checkResumeDbDuplicates(showStatus);
           if (duplicateCheck.blocked) {
             return;
+          }
+          if (duplicateCheck.needsConfirmation) {
+            const company =
+              fields.companyName || duplicateCheck.match?.company || 'this company';
+            const existingTitle = duplicateCheck.match?.jobTitle || '';
+            const existingLine = existingTitle
+              ? `\n\nExisting: ${existingTitle} at ${company}`
+              : `\n\nExisting application at ${company}`;
+            const proceed = global.confirm(
+              `Same company — ${company} already has an application in Resume DB for this candidate.${existingLine}\n\nContinue registering this job?`
+            );
+            if (!proceed) {
+              setRegisterStatus('Registration cancelled.', 'info');
+              return;
+            }
           }
 
           const resumeDefault = document.getElementById('regResumeDefault')?.checked;
