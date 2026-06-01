@@ -145,29 +145,6 @@
     }
   }
 
-  function setAlreadyBusy(busy) {
-    const btn = document.getElementById('regAlreadyBtn');
-    if (btn) {
-      btn.disabled = busy || !backendConnected;
-      btn.textContent = busy ? 'Checking…' : 'Already?';
-    }
-  }
-
-  function normalizeJobLink(url) {
-    const raw = String(url || '').trim();
-    if (!raw) return '';
-    try {
-      const parsed = new URL(raw);
-      parsed.hash = '';
-      ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'source'].forEach(
-        (key) => parsed.searchParams.delete(key)
-      );
-      const path = parsed.pathname.replace(/\/+$/, '') || '/';
-      return `${parsed.protocol}//${parsed.host.toLowerCase()}${path}${parsed.search}`;
-    } catch {
-      return raw.toLowerCase();
-    }
-  }
 
   function normalizeMatchText(value) {
     return String(value || '')
@@ -176,21 +153,29 @@
       .replace(/\s+/g, ' ');
   }
 
-  function applicationMatchesCurrentJob(app, job) {
-    const appLink = normalizeJobLink(app.jobLink);
-    const jobLink = normalizeJobLink(job.jobLink);
-    if (appLink && jobLink && appLink === jobLink) return true;
-
-    const companyMatch =
-      normalizeMatchText(app.company) === normalizeMatchText(job.companyName);
-    const titleMatch =
-      normalizeMatchText(app.jobTitle) === normalizeMatchText(job.jobTitle);
+  function applicationSameCompany(app, job) {
     return (
-      companyMatch &&
-      titleMatch &&
-      Boolean(normalizeMatchText(job.companyName)) &&
+      normalizeMatchText(app.company) === normalizeMatchText(job.companyName) &&
+      Boolean(normalizeMatchText(job.companyName))
+    );
+  }
+
+  function applicationSameCompanyAndTitle(app, job) {
+    return (
+      applicationSameCompany(app, job) &&
+      normalizeMatchText(app.jobTitle) === normalizeMatchText(job.jobTitle) &&
       Boolean(normalizeMatchText(job.jobTitle))
     );
+  }
+
+  function formatApplicationSummary(app, fallback) {
+    const when = app.appliedAt
+      ? new Date(app.appliedAt).toLocaleDateString()
+      : app.date || '';
+    const detail = [app.jobTitle || fallback.jobTitle, app.company || fallback.companyName]
+      .filter(Boolean)
+      .join(' at ');
+    return { when, detail };
   }
 
   async function fetchResumeDbApplications() {
@@ -206,7 +191,7 @@
     return Array.isArray(data.resumes) ? data.resumes : [];
   }
 
-  async function checkAlreadyRegistered(showStatus) {
+  async function checkResumeDbDuplicates(showStatus) {
     const connected = await checkBackendConnection();
     if (!connected) {
       throw new Error(
@@ -220,45 +205,45 @@
     }
 
     const fields = readRegisterFormFields();
-    const hasLink = Boolean(fields.jobLink);
-    const hasTitleCompany = Boolean(fields.jobTitle && fields.companyName);
-    if (!hasLink && !hasTitleCompany) {
-      throw new Error('Scrape or enter job link (or job title + company) first.');
+    if (!fields.jobTitle || !fields.companyName) {
+      throw new Error('Job title and company are required to check for duplicates.');
     }
 
-    setAlreadyBusy(true);
     setRegisterStatus('Checking Resume DB…', 'info');
-    try {
-      const applications = await fetchResumeDbApplications();
-      const forCandidate = applications.filter(
-        (app) => String(app.profileId) === String(profileId)
-      );
-      const match = forCandidate.find((app) => applicationMatchesCurrentJob(app, fields));
+    const applications = await fetchResumeDbApplications();
+    const forCandidate = applications.filter(
+      (app) => String(app.profileId) === String(profileId)
+    );
 
-      if (match) {
-        const when = match.appliedAt
-          ? new Date(match.appliedAt).toLocaleDateString()
-          : match.date || '';
-        const detail = [
-          match.jobTitle || fields.jobTitle,
-          match.company || fields.companyName
-        ]
-          .filter(Boolean)
-          .join(' at ');
-        setRegisterStatus(
-          `Already registered (#${match.id}${when ? ', ' + when : ''}) — ${detail}.`,
-          'warn'
-        );
-        if (showStatus) showStatus('This job is already in Resume DB for this candidate.', 'error');
-        return { duplicate: true, match };
-      }
-
-      setRegisterStatus('Not registered yet for this candidate.', 'success');
-      if (showStatus) showStatus('No matching application found in Resume DB.', 'success');
-      return { duplicate: false, match: null };
-    } finally {
-      setAlreadyBusy(false);
+    const duplicateMatch = forCandidate.find((app) =>
+      applicationSameCompanyAndTitle(app, fields)
+    );
+    if (duplicateMatch) {
+      const { when, detail } = formatApplicationSummary(duplicateMatch, fields);
+      const message = `Duplicate — ${detail} is already in Resume DB${
+        when ? ` (${when})` : ''
+      }.`;
+      setRegisterStatus(message, 'error');
+      if (showStatus) showStatus('Duplicate application for this candidate.', 'error');
+      return { level: 'duplicate', match: duplicateMatch, blocked: true };
     }
+
+    const sameCompanyMatch = forCandidate.find((app) =>
+      applicationSameCompany(app, fields)
+    );
+    if (sameCompanyMatch) {
+      const { when, detail } = formatApplicationSummary(sameCompanyMatch, fields);
+      const company = fields.companyName || sameCompanyMatch.company || 'this company';
+      setRegisterStatus(
+        `Same company — ${company} already has an application${
+          when ? ` (${when}: ${detail})` : detail ? ` (${detail})` : ''
+        }.`,
+        'warn'
+      );
+      return { level: 'same_company', match: sameCompanyMatch, blocked: false };
+    }
+
+    return { level: 'none', match: null, blocked: false };
   }
 
   function setConnectionStatus(state, detail, username) {
@@ -288,7 +273,6 @@
     backendConnected = connected;
 
     const registerBtn = document.getElementById('registerJobBtn');
-    const alreadyBtn = document.getElementById('regAlreadyBtn');
     const profileSelect = document.getElementById('regProfileId');
     const offlineBanner = document.getElementById('registerOfflineBanner');
     const registerTabBtn = document.getElementById('registerTabBtn');
@@ -296,7 +280,6 @@
     const signedInUser = document.getElementById('backendSignedInUser');
 
     if (registerBtn) registerBtn.disabled = !connected;
-    if (alreadyBtn) alreadyBtn.disabled = !connected;
     if (profileSelect) profileSelect.disabled = !connected;
     if (offlineBanner) offlineBanner.hidden = connected;
     if (registerTabBtn) registerTabBtn.classList.toggle('is-auth-required', !connected);
@@ -1030,7 +1013,6 @@
 
   function initRegisterResumeDb(showStatus) {
     const scrapeBtn = document.getElementById('regScrapeBtn');
-    const alreadyBtn = document.getElementById('regAlreadyBtn');
     const registerBtn = document.getElementById('registerJobBtn');
 
     loadBackendSettingsForm();
@@ -1057,40 +1039,6 @@
       });
     }
 
-    if (alreadyBtn) {
-      alreadyBtn.addEventListener('click', async () => {
-        try {
-          await checkAlreadyRegistered(showStatus);
-        } catch (err) {
-          const msg = err.message || String(err);
-          setRegisterStatus(msg, 'error');
-          if (showStatus) showStatus(msg, 'error');
-        }
-      });
-    }
-
-    if (scrapeBtn) {
-      scrapeBtn.addEventListener('click', () => {
-        setRegisterStatus('Reading job page…', 'info');
-        scrapeJobFromTab()
-          .then((job) => {
-            document.getElementById('regJobTitle').value = job.jobTitle;
-            document.getElementById('regCompany').value = job.companyName;
-            document.getElementById('regJobLink').value = job.jobLink;
-            setRegisterStatus('Job info loaded from current tab.', 'success');
-            if (showStatus) showStatus('Job info scraped.', 'success');
-          })
-          .catch((err) => {
-            const msg = err.message || String(err);
-            const friendly = /receiving end does not exist/i.test(msg)
-              ? 'Cannot read this tab. Open a job posting page and reload it, then try Scrape again.'
-              : msg;
-            setRegisterStatus(friendly, 'error');
-            if (showStatus) showStatus(friendly, 'error');
-          });
-      });
-    }
-
     if (registerBtn) {
       registerBtn.addEventListener('click', async () => {
         setRegisterBusy(true);
@@ -1101,6 +1049,20 @@
               'Not signed in. Open Settings → Website connection, enter your username and password, and click Sign in.'
             );
           }
+
+          const fields = readRegisterFormFields();
+          if (!fields.jobTitle || !fields.companyName || !fields.jobLink) {
+            throw new Error('Job title, company, and job link are required. Click Scrape first.');
+          }
+          if (!fields.profileId) {
+            throw new Error('Select a candidate profile.');
+          }
+
+          const duplicateCheck = await checkResumeDbDuplicates(showStatus);
+          if (duplicateCheck.blocked) {
+            return;
+          }
+
           const resumeDefault = document.getElementById('regResumeDefault')?.checked;
           const coverDefault = document.getElementById('regCoverDefault')?.checked;
           const resumeFile = document.getElementById('regResumeFile')?.files?.[0];
@@ -1147,6 +1109,28 @@
         } finally {
           setRegisterBusy(false);
         }
+      });
+    }
+
+    if (scrapeBtn) {
+      scrapeBtn.addEventListener('click', () => {
+        setRegisterStatus('Reading job page…', 'info');
+        scrapeJobFromTab()
+          .then((job) => {
+            document.getElementById('regJobTitle').value = job.jobTitle;
+            document.getElementById('regCompany').value = job.companyName;
+            document.getElementById('regJobLink').value = job.jobLink;
+            setRegisterStatus('Job info loaded from current tab.', 'success');
+            if (showStatus) showStatus('Job info scraped.', 'success');
+          })
+          .catch((err) => {
+            const msg = err.message || String(err);
+            const friendly = /receiving end does not exist/i.test(msg)
+              ? 'Cannot read this tab. Open a job posting page and reload it, then try Scrape again.'
+              : msg;
+            setRegisterStatus(friendly, 'error');
+            if (showStatus) showStatus(friendly, 'error');
+          });
       });
     }
   }
