@@ -262,8 +262,7 @@
         );
       }
       resumeUrl = settings.defaultResumeUrl;
-    } else {
-      if (!resumeFile) throw new Error('Select a resume file.');
+    } else if (resumeFile) {
       const token = await getAccessToken(true);
       resumeUrl = await uploadFileToDrive(resumeFile, token, settings.folderId);
     }

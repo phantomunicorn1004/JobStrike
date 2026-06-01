@@ -66,12 +66,6 @@ export async function POST(request: NextRequest) {
     }
 
     const hasResumeFile = Boolean(resumeFile && resumeFile.size > 0);
-    if (!resumeUrlProvided && !hasResumeFile) {
-      return corsJson(
-        { error: "resume file or resumeUrl is required." },
-        { status: 400 },
-      );
-    }
 
     const entryId = newEntryId();
     let resumeUrl = resumeUrlProvided;
@@ -111,10 +105,6 @@ export async function POST(request: NextRequest) {
       coverStoragePath = coverUpload.storagePath;
     }
 
-    if (!resumeUrl) {
-      return corsJson({ error: "resume_url could not be resolved." }, { status: 400 });
-    }
-
     const application = await createApplication(user.id, {
       entryId,
       profileId,
@@ -123,7 +113,7 @@ export async function POST(request: NextRequest) {
       jobTitle,
       company: companyName,
       apply: String(formData.get("apply") ?? "Registered").trim(),
-      resumeUrl,
+      resumeUrl: resumeUrl || "",
       coverLetterUrl,
       resumeStoragePath,
       coverLetterStoragePath: coverStoragePath,

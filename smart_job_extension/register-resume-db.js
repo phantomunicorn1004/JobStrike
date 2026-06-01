@@ -794,23 +794,25 @@
 
     const resumeIsDefault = fields.resumeIsDefault;
     const coverIsDefault = fields.coverLetterIsDefault;
-
-    if (!resumeIsDefault && !resumeFile) {
-      throw new Error('Select a resume file, or check Default and set a link in Settings → Google Drive.');
-    }
+    const hasResumeFile = Boolean(resumeFile);
+    const hasCoverFile = Boolean(coverFile && coverFile.size > 0);
+    const needsDriveResolve =
+      resumeIsDefault || hasResumeFile || coverIsDefault || hasCoverFile;
 
     const config = await getBackendConfig();
 
-    if (!global.SmartJobGoogleDrive) {
-      throw new Error('Google Drive module failed to load. Reload the extension.');
+    let drive = { resumeUrl: '', coverLetterUrl: '' };
+    if (needsDriveResolve) {
+      if (!global.SmartJobGoogleDrive) {
+        throw new Error('Google Drive module failed to load. Reload the extension.');
+      }
+      drive = await global.SmartJobGoogleDrive.resolveUrlsForRegister({
+        resumeFile,
+        coverFile,
+        resumeIsDefault,
+        coverIsDefault
+      });
     }
-
-    const drive = await global.SmartJobGoogleDrive.resolveUrlsForRegister({
-      resumeFile,
-      coverFile,
-      resumeIsDefault,
-      coverIsDefault
-    });
 
     const formData = new FormData();
     formData.append('jobTitle', jobTitle);
@@ -818,7 +820,7 @@
     formData.append('jobLink', jobLink);
     formData.append('profileId', profileId);
     formData.append('apply', 'Registered');
-    formData.append('resumeUrl', drive.resumeUrl);
+    formData.append('resumeUrl', drive.resumeUrl || '');
     if (drive.coverLetterUrl) {
       formData.append('coverLetterUrl', drive.coverLetterUrl);
     }
@@ -1031,28 +1033,45 @@
               'Not signed in. Open Settings → Website connection, enter your username and password, and click Sign in.'
             );
           }
-          if (global.SmartJobGoogleDrive) {
+          const resumeDefault = document.getElementById('regResumeDefault')?.checked;
+          const coverDefault = document.getElementById('regCoverDefault')?.checked;
+          const resumeFile = document.getElementById('regResumeFile')?.files?.[0];
+          const coverFile = document.getElementById('regCoverFile')?.files?.[0];
+          const needsDriveResolve =
+            resumeDefault ||
+            Boolean(resumeFile) ||
+            coverDefault ||
+            Boolean(coverFile?.size);
+          const needsFileUpload =
+            (resumeFile && !resumeDefault) || (coverFile?.size > 0 && !coverDefault);
+
+          if (needsDriveResolve && global.SmartJobGoogleDrive) {
             const driveCfg = await global.SmartJobGoogleDrive.getDriveSettings();
             if (!global.SmartJobGoogleDrive.isDriveConfigured(driveCfg)) {
               throw new Error(
-                'Configure Google Drive in Settings (OAuth Client ID), then Connect Google Drive.'
+                'Configure Google Drive in Settings (OAuth Client ID) when using resume/cover files or Default links.'
               );
             }
-            const resumeDefault = document.getElementById('regResumeDefault')?.checked;
-            const needsUpload =
-              !resumeDefault ||
-              (document.getElementById('regCoverFile')?.files?.[0] &&
-                !document.getElementById('regCoverDefault')?.checked);
-            if (needsUpload && !global.SmartJobGoogleDrive.isDriveConnected(driveCfg)) {
+            if (needsFileUpload && !global.SmartJobGoogleDrive.isDriveConnected(driveCfg)) {
               throw new Error(
                 'Connect Google Drive in Settings before uploading tailored files.'
               );
             }
           }
-          setRegisterStatus('Uploading to Google Drive & saving to Resume DB…', 'info');
-          const result = await registerJobToBackend();
+
           setRegisterStatus(
-            `Registered (#${result.id}, ${result.candidateName || 'candidate'}). Drive links saved.`,
+            needsFileUpload
+              ? 'Uploading to Google Drive & saving to Resume DB…'
+              : 'Saving to Resume DB…',
+            'info'
+          );
+          const result = await registerJobToBackend();
+          const fileNote =
+            result.drive?.resumeUrl || result.drive?.coverLetterUrl
+              ? ' Drive links saved.'
+              : '';
+          setRegisterStatus(
+            `Registered (#${result.id}, ${result.candidateName || 'candidate'}).${fileNote}`,
             'success'
           );
           if (showStatus) showStatus('Job registered in Resume DB.', 'success');
