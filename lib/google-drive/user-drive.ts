@@ -6,7 +6,10 @@ import {
   getUserGoogleDriveSettings,
   type UserGoogleDriveSettings,
 } from "@/lib/auth/google-drive-repository";
-import { oauth2ClientWithRefreshToken } from "@/lib/google-drive/oauth-web";
+import {
+  oauth2ClientWithRefreshToken,
+  resolveGoogleOAuthCredentials,
+} from "@/lib/google-drive/oauth-web";
 import { googleDriveViewUrl } from "@/lib/google-drive/urls";
 import type { DriveUploadResult } from "@/lib/google-drive/upload";
 
@@ -27,8 +30,18 @@ export async function getConnectedUserDriveSettings(
   return settings;
 }
 
-function driveFromRefreshToken(refreshToken: string, origin: string) {
-  const auth = oauth2ClientWithRefreshToken(origin, refreshToken);
+async function driveFromRefreshToken(
+  userId: string,
+  origin: string,
+  refreshToken: string,
+) {
+  const credentials = await resolveGoogleOAuthCredentials(userId, origin);
+  if (!credentials) {
+    throw new Error(
+      "Google OAuth is not configured. Add OAuth Client ID and Secret in Settings.",
+    );
+  }
+  const auth = oauth2ClientWithRefreshToken(credentials, refreshToken);
   return google.drive({ version: "v3", auth });
 }
 
@@ -46,7 +59,11 @@ export async function uploadBufferToUserGoogleDrive(
     );
   }
 
-  const drive = driveFromRefreshToken(settings.refreshToken, origin);
+  const drive = await driveFromRefreshToken(
+    userId,
+    origin,
+    settings.refreshToken,
+  );
   const parents = settings.folderId ? [settings.folderId] : undefined;
 
   const created = await drive.files.create({
@@ -92,7 +109,11 @@ export async function deleteUserGoogleDriveFile(
   const settings = await getConnectedUserDriveSettings(userId);
   if (!settings) return;
 
-  const drive = driveFromRefreshToken(settings.refreshToken, origin);
+  const drive = await driveFromRefreshToken(
+    userId,
+    origin,
+    settings.refreshToken,
+  );
   try {
     await drive.files.delete({ fileId });
   } catch (error) {

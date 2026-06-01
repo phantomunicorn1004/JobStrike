@@ -3,7 +3,8 @@ import { getSessionUser } from "@/lib/auth/session";
 import { createGoogleOAuthState } from "@/lib/auth/google-oauth-state";
 import {
   getAuthorizationUrl,
-  isGoogleOAuthWebConfigured,
+  isGoogleOAuthConfiguredForUser,
+  resolveGoogleOAuthCredentials,
 } from "@/lib/google-drive/oauth-web";
 
 export async function GET(request: NextRequest) {
@@ -14,14 +15,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (!isGoogleOAuthWebConfigured()) {
-    return NextResponse.redirect(
-      new URL("/settings?google=error&reason=not_configured", request.url),
-    );
+  const origin = new URL(request.url).origin;
+  const popup = request.nextUrl.searchParams.get("popup") === "1";
+
+  if (!(await isGoogleOAuthConfiguredForUser(session.id, origin))) {
+    const settingsUrl = new URL("/settings", request.url);
+    settingsUrl.searchParams.set("google", "error");
+    settingsUrl.searchParams.set("reason", "missing_oauth_credentials");
+    return NextResponse.redirect(settingsUrl);
   }
 
-  const origin = new URL(request.url).origin;
-  const state = createGoogleOAuthState(session.id);
-  const url = getAuthorizationUrl(origin, state);
+  const credentials = await resolveGoogleOAuthCredentials(session.id, origin);
+  if (!credentials) {
+    const settingsUrl = new URL("/settings", request.url);
+    settingsUrl.searchParams.set("google", "error");
+    settingsUrl.searchParams.set("reason", "missing_oauth_credentials");
+    return NextResponse.redirect(settingsUrl);
+  }
+
+  const state = createGoogleOAuthState(session.id, popup);
+  const url = getAuthorizationUrl(credentials, state);
   return NextResponse.redirect(url);
 }

@@ -5,9 +5,18 @@ import {
   resolveRequestUser,
   unauthorizedJson,
 } from "@/lib/auth/resolve-request-user";
-import { getUserGoogleDriveSettings } from "@/lib/auth/google-drive-repository";
+import {
+  getUserGoogleDriveConnection,
+  getUserGoogleDriveSettings,
+  getUserGoogleOAuthCredentials,
+  updateUserGoogleOAuthCredentials,
+} from "@/lib/auth/google-drive-repository";
 import { isGoogleDriveConfigured } from "@/lib/google-drive/config";
-import { isGoogleOAuthWebConfigured } from "@/lib/google-drive/oauth-web";
+import {
+  getGoogleOAuthRedirectUri,
+  isGoogleOAuthConfiguredForUser,
+  isGoogleOAuthWebConfigured,
+} from "@/lib/google-drive/oauth-web";
 
 export function OPTIONS() {
   return corsOptions();
@@ -20,15 +29,27 @@ export async function GET(request: NextRequest) {
       return corsJson(unauthorizedJson(), { status: 401 });
     }
 
-    const settings = await getUserGoogleDriveSettings(user.id);
+    const origin = new URL(request.url).origin;
+    const [settings, connection, oauthCreds, oauthReady] = await Promise.all([
+      getUserGoogleDriveSettings(user.id),
+      getUserGoogleDriveConnection(user.id),
+      getUserGoogleOAuthCredentials(user.id),
+      isGoogleOAuthConfiguredForUser(user.id, origin),
+    ]);
 
     return corsJson({
       connected: Boolean(settings?.refreshToken),
-      googleEmail: settings?.googleEmail ?? null,
-      folderId: settings?.folderId ?? "",
-      defaultResumeUrl: settings?.defaultResumeUrl ?? "",
-      defaultCoverUrl: settings?.defaultCoverUrl ?? "",
+      googleEmail: settings?.googleEmail ?? connection?.googleEmail ?? null,
+      folderId: settings?.folderId ?? connection?.folderId ?? "",
+      defaultResumeUrl:
+        settings?.defaultResumeUrl ?? connection?.defaultResumeUrl ?? "",
+      defaultCoverUrl:
+        settings?.defaultCoverUrl ?? connection?.defaultCoverUrl ?? "",
+      oauthReady,
       oauthWebConfigured: isGoogleOAuthWebConfigured(),
+      hasOAuthClientId: Boolean(oauthCreds.clientId),
+      oauthClientId: oauthCreds.clientId,
+      redirectUri: getGoogleOAuthRedirectUri(origin),
       serviceAccountConfigured: isGoogleDriveConfigured(),
     });
   } catch (error) {
@@ -42,30 +63,67 @@ export async function PATCH(request: NextRequest) {
   try {
     const user = await requireRequestUser(request);
     const body = (await request.json()) as Record<string, unknown>;
+    const origin = new URL(request.url).origin;
 
-    const { updateUserGoogleDrivePreferences } = await import(
-      "@/lib/auth/google-drive-repository"
-    );
+    if (
+      body.oauthClientId !== undefined ||
+      body.oauthClientSecret !== undefined
+    ) {
+      await updateUserGoogleOAuthCredentials(user.id, {
+        clientId:
+          body.oauthClientId !== undefined
+            ? String(body.oauthClientId)
+            : undefined,
+        clientSecret:
+          body.oauthClientSecret !== undefined
+            ? String(body.oauthClientSecret)
+            : undefined,
+      });
+    }
 
-    await updateUserGoogleDrivePreferences(user.id, {
-      folderId:
-        body.folderId !== undefined ? String(body.folderId) : undefined,
-      defaultResumeUrl:
-        body.defaultResumeUrl !== undefined
-          ? String(body.defaultResumeUrl)
-          : undefined,
-      defaultCoverUrl:
-        body.defaultCoverUrl !== undefined
-          ? String(body.defaultCoverUrl)
-          : undefined,
-    });
+    if (
+      body.folderId !== undefined ||
+      body.defaultResumeUrl !== undefined ||
+      body.defaultCoverUrl !== undefined
+    ) {
+      const { updateUserGoogleDrivePreferences } = await import(
+        "@/lib/auth/google-drive-repository"
+      );
 
-    const settings = await getUserGoogleDriveSettings(user.id);
+      await updateUserGoogleDrivePreferences(user.id, {
+        folderId:
+          body.folderId !== undefined ? String(body.folderId) : undefined,
+        defaultResumeUrl:
+          body.defaultResumeUrl !== undefined
+            ? String(body.defaultResumeUrl)
+            : undefined,
+        defaultCoverUrl:
+          body.defaultCoverUrl !== undefined
+            ? String(body.defaultCoverUrl)
+            : undefined,
+      });
+    }
+
+    const [settings, connection, oauthCreds, oauthReady] = await Promise.all([
+      getUserGoogleDriveSettings(user.id),
+      getUserGoogleDriveConnection(user.id),
+      getUserGoogleOAuthCredentials(user.id),
+      isGoogleOAuthConfiguredForUser(user.id, origin),
+    ]);
+
     return corsJson({
       ok: true,
-      folderId: settings?.folderId ?? "",
-      defaultResumeUrl: settings?.defaultResumeUrl ?? "",
-      defaultCoverUrl: settings?.defaultCoverUrl ?? "",
+      connected: Boolean(settings?.refreshToken),
+      googleEmail: settings?.googleEmail ?? connection?.googleEmail ?? null,
+      folderId: settings?.folderId ?? connection?.folderId ?? "",
+      defaultResumeUrl:
+        settings?.defaultResumeUrl ?? connection?.defaultResumeUrl ?? "",
+      defaultCoverUrl:
+        settings?.defaultCoverUrl ?? connection?.defaultCoverUrl ?? "",
+      oauthReady,
+      hasOAuthClientId: Boolean(oauthCreds.clientId),
+      oauthClientId: oauthCreds.clientId,
+      redirectUri: getGoogleOAuthRedirectUri(origin),
     });
   } catch (error) {
     console.error("Google Drive preferences error:", error);
