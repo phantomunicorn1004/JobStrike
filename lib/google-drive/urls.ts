@@ -34,3 +34,27 @@ export function googleDriveDirectDownloadUrl(fileId: string): string {
 export function isGoogleDriveUrl(url: string): boolean {
   return Boolean(extractGoogleDriveFileId(url));
 }
+
+/** Accept a folder ID or drive.google.com folder URL; return the bare folder ID. */
+export function normalizeGoogleDriveFolderId(input: string): string {
+  const trimmed = String(input || "").trim().replace(/[.,;]+$/, "");
+  if (!trimmed) return "";
+
+  if (/^[\w-]+$/.test(trimmed)) return trimmed;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (!parsed.hostname.includes("google.com")) return trimmed;
+
+    const folderMatch = parsed.pathname.match(/\/folders\/([^/]+)/);
+    if (folderMatch?.[1]) return folderMatch[1];
+
+    const id = parsed.searchParams.get("id");
+    if (id) return id;
+  } catch {
+    const folderMatch = trimmed.match(/\/folders\/([^/?#]+)/);
+    if (folderMatch?.[1]) return folderMatch[1];
+  }
+
+  return trimmed;
+}

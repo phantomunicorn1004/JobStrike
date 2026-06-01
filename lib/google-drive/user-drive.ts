@@ -10,7 +10,7 @@ import {
   oauth2ClientWithRefreshToken,
   resolveGoogleOAuthCredentials,
 } from "@/lib/google-drive/oauth-web";
-import { googleDriveViewUrl } from "@/lib/google-drive/urls";
+import { googleDriveViewUrl, normalizeGoogleDriveFolderId } from "@/lib/google-drive/urls";
 import type { DriveUploadResult } from "@/lib/google-drive/upload";
 
 export type { DriveUploadResult };
@@ -64,7 +64,8 @@ export async function uploadBufferToUserGoogleDrive(
     origin,
     settings.refreshToken,
   );
-  const parents = settings.folderId ? [settings.folderId] : undefined;
+  const folderId = normalizeGoogleDriveFolderId(settings.folderId || "");
+  const parents = folderId ? [folderId] : undefined;
 
   const created = await drive.files.create({
     requestBody: {

@@ -387,8 +387,13 @@ export function GoogleDriveSettingsCard() {
                   id="driveFolderId"
                   value={folderId}
                   onChange={(e) => setFolderId(e.target.value)}
-                  placeholder="From drive.google.com/.../folders/…"
+                  placeholder="1ABCxyz… or paste a drive.google.com/folders/… link"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Use the ID after <code className="text-xs">/folders/</code>, or leave empty to
+                  upload to your Drive root. The folder must belong to the Google account you
+                  connected.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="defaultResumeUrl">Default resume sharing link</Label>

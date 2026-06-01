@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/admin";
+import { normalizeGoogleDriveFolderId } from "@/lib/google-drive/urls";
 
 export type UserGoogleDriveSettings = {
   refreshToken: string;
@@ -168,7 +169,8 @@ export async function updateUserGoogleDrivePreferences(
     updated_at: new Date().toISOString(),
   };
   if (input.folderId !== undefined) {
-    patch.google_drive_folder_id = input.folderId.trim() || null;
+    const normalized = normalizeGoogleDriveFolderId(input.folderId);
+    patch.google_drive_folder_id = normalized || null;
   }
   if (input.defaultResumeUrl !== undefined) {
     patch.default_resume_url = input.defaultResumeUrl.trim();
