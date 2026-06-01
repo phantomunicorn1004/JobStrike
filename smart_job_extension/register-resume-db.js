@@ -15,6 +15,7 @@
   let connectionPollTimer = null;
   let profilesLoadSeq = 0;
   let backendConnected = false;
+  let websiteDriveStatus = null;
 
   function normalizeBackendUrl(url) {
     const trimmed = String(url || '').trim().replace(/\/+$/, '');
@@ -383,15 +384,102 @@
       const username = data.user?.username || config.username;
       setConnectionStatus('ok', null, username);
       updateBackendDependentUi(true);
-      if (global.SmartJobGoogleDrive) {
-        global.SmartJobGoogleDrive.updateRegisterDriveBadge();
-      }
+      await updateRegisterDriveBadge();
       return true;
     } catch (err) {
       const host = config.baseUrl.replace(/^https?:\/\//, '');
       setConnectionStatus('error', 'Not connected · ' + host);
       updateBackendDependentUi(false);
       return false;
+    }
+  }
+
+  async function fetchWebsiteDriveStatus() {
+    const config = await getBackendConfig();
+    if (!isAuthenticated(config)) {
+      websiteDriveStatus = null;
+      return null;
+    }
+    try {
+      const res = await fetch(`${config.baseUrl}/api/integrations/google-drive/status`, {
+        headers: apiHeaders(config),
+        cache: 'no-store'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to load Drive status');
+      websiteDriveStatus = data;
+      return data;
+    } catch {
+      websiteDriveStatus = null;
+      return null;
+    }
+  }
+
+  async function updateRegisterDriveBadge() {
+    const el = document.getElementById('registerDriveStatus');
+    if (!el) return;
+
+    if (!backendConnected) {
+      el.hidden = true;
+      return;
+    }
+
+    const status = (await fetchWebsiteDriveStatus()) || websiteDriveStatus;
+    el.hidden = false;
+
+    if (!status) {
+      el.textContent = 'Drive status unavailable';
+      el.className = 'register-drive-status is-off';
+      return;
+    }
+
+    if (status.connected) {
+      el.textContent = status.googleEmail
+        ? `Drive ready · ${status.googleEmail}`
+        : 'Drive ready';
+      el.className = 'register-drive-status is-ready';
+      return;
+    }
+
+    if (status.serviceAccountConfigured) {
+      el.textContent = 'Uploads use server Drive (connect personal Drive in website Settings)';
+      el.className = 'register-drive-status is-off';
+      return;
+    }
+
+    el.textContent = 'Connect Google Drive on the website Settings page to upload files';
+    el.className = 'register-drive-status is-off';
+  }
+
+  function registerNeedsFileUpload(resumeIsDefault, coverIsDefault, resumeFile, coverFile) {
+    const hasResumeFile = Boolean(resumeFile);
+    const hasCoverFile = Boolean(coverFile && coverFile.size > 0);
+    return (
+      (hasResumeFile && !resumeIsDefault) || (hasCoverFile && !coverIsDefault)
+    );
+  }
+
+  async function ensureCanUploadFiles(resumeIsDefault, coverIsDefault, resumeFile, coverFile) {
+    const needsUpload = registerNeedsFileUpload(
+      resumeIsDefault,
+      coverIsDefault,
+      resumeFile,
+      coverFile
+    );
+    if (!needsUpload && !resumeIsDefault) return;
+
+    const status = (await fetchWebsiteDriveStatus()) || websiteDriveStatus;
+
+    if (resumeIsDefault && !resumeFile && !status?.defaultResumeUrl) {
+      throw new Error(
+        'Default resume link is not set. Add it on the website under Settings → Google Drive.'
+      );
+    }
+
+    if (needsUpload && !status?.connected && !status?.serviceAccountConfigured) {
+      throw new Error(
+        'Connect Google Drive on the website Settings page before uploading files from the extension.'
+      );
     }
   }
 
@@ -794,25 +882,10 @@
 
     const resumeIsDefault = fields.resumeIsDefault;
     const coverIsDefault = fields.coverLetterIsDefault;
-    const hasResumeFile = Boolean(resumeFile);
-    const hasCoverFile = Boolean(coverFile && coverFile.size > 0);
-    const needsDriveResolve =
-      resumeIsDefault || hasResumeFile || coverIsDefault || hasCoverFile;
+
+    await ensureCanUploadFiles(resumeIsDefault, coverIsDefault, resumeFile, coverFile);
 
     const config = await getBackendConfig();
-
-    let drive = { resumeUrl: '', coverLetterUrl: '' };
-    if (needsDriveResolve) {
-      if (!global.SmartJobGoogleDrive) {
-        throw new Error('Google Drive module failed to load. Reload the extension.');
-      }
-      drive = await global.SmartJobGoogleDrive.resolveUrlsForRegister({
-        resumeFile,
-        coverFile,
-        resumeIsDefault,
-        coverIsDefault
-      });
-    }
 
     const formData = new FormData();
     formData.append('jobTitle', jobTitle);
@@ -820,12 +893,12 @@
     formData.append('jobLink', jobLink);
     formData.append('profileId', profileId);
     formData.append('apply', 'Registered');
-    formData.append('resumeUrl', drive.resumeUrl || '');
-    if (drive.coverLetterUrl) {
-      formData.append('coverLetterUrl', drive.coverLetterUrl);
-    }
     formData.append('resumeIsDefault', resumeIsDefault ? '1' : '0');
     formData.append('coverLetterIsDefault', coverIsDefault ? '1' : '0');
+    if (resumeFile) formData.append('resume', resumeFile, resumeFile.name);
+    if (coverFile && coverFile.size > 0) {
+      formData.append('coverLetter', coverFile, coverFile.name);
+    }
 
     const res = await fetch(`${config.baseUrl}/api/resume-db/register`, {
       method: 'POST',
@@ -837,7 +910,7 @@
     if (!res.ok) {
       throw new Error(data.error || `Registration failed (${res.status})`);
     }
-    return { ...data, drive };
+    return data;
   }
 
   function wireBackendSettingsForm(showStatus) {
@@ -963,9 +1036,6 @@
     loadBackendSettingsForm();
     wireBackendSettingsForm(showStatus);
     wireOfflineQueueControls(showStatus);
-    if (global.SmartJobGoogleDrive) {
-      global.SmartJobGoogleDrive.wireGoogleDriveSettings(showStatus);
-    }
     wireRegisterFileDrops();
     wireProfileSelectPersistence();
     startConnectionPolling();
@@ -975,9 +1045,7 @@
         checkBackendConnection();
         loadProfilesIntoSelect();
         renderOfflineQueue();
-        if (global.SmartJobGoogleDrive) {
-          global.SmartJobGoogleDrive.updateRegisterDriveBadge();
-        }
+        updateRegisterDriveBadge();
       });
     });
 
@@ -1037,39 +1105,22 @@
           const coverDefault = document.getElementById('regCoverDefault')?.checked;
           const resumeFile = document.getElementById('regResumeFile')?.files?.[0];
           const coverFile = document.getElementById('regCoverFile')?.files?.[0];
-          const needsDriveResolve =
-            resumeDefault ||
-            Boolean(resumeFile) ||
-            coverDefault ||
-            Boolean(coverFile?.size);
-          const needsFileUpload =
-            (resumeFile && !resumeDefault) || (coverFile?.size > 0 && !coverDefault);
-
-          if (needsDriveResolve && global.SmartJobGoogleDrive) {
-            const driveCfg = await global.SmartJobGoogleDrive.getDriveSettings();
-            if (!global.SmartJobGoogleDrive.isDriveConfigured(driveCfg)) {
-              throw new Error(
-                'Configure Google Drive in Settings (OAuth Client ID) when using resume/cover files or Default links.'
-              );
-            }
-            if (needsFileUpload && !global.SmartJobGoogleDrive.isDriveConnected(driveCfg)) {
-              throw new Error(
-                'Connect Google Drive in Settings before uploading tailored files.'
-              );
-            }
-          }
+          const needsFileUpload = registerNeedsFileUpload(
+            resumeDefault,
+            coverDefault,
+            resumeFile,
+            coverFile
+          );
 
           setRegisterStatus(
             needsFileUpload
-              ? 'Uploading to Google Drive & saving to Resume DB…'
+              ? 'Uploading files & saving to Resume DB…'
               : 'Saving to Resume DB…',
             'info'
           );
           const result = await registerJobToBackend();
           const fileNote =
-            result.drive?.resumeUrl || result.drive?.coverLetterUrl
-              ? ' Drive links saved.'
-              : '';
+            result.resumeUrl || result.coverLetterUrl ? ' Files saved.' : '';
           setRegisterStatus(
             `Registered (#${result.id}, ${result.candidateName || 'candidate'}).${fileNote}`,
             'success'

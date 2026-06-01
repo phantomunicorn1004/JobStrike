@@ -18,6 +18,7 @@ export const MEMBER_ROUTE_PREFIXES = [
   "/jobs-technical",
   "/jobs-final",
   "/profile",
+  "/settings",
 ] as const;
 
 /** Admin-only routes. */

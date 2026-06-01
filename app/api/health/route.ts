@@ -1,5 +1,6 @@
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
 import { isGoogleDriveConfigured } from "@/lib/google-drive/config";
+import { isGoogleOAuthWebConfigured } from "@/lib/google-drive/oauth-web";
 
 export function OPTIONS() {
   return corsOptions();
@@ -11,7 +12,8 @@ export async function GET() {
     service: "remote-work-helper",
     timestamp: new Date().toISOString(),
     googleDrive: {
-      configured: isGoogleDriveConfigured(),
+      serviceAccountConfigured: isGoogleDriveConfigured(),
+      oauthWebConfigured: isGoogleOAuthWebConfigured(),
     },
   });
 }

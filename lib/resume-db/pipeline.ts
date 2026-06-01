@@ -1,5 +1,6 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { ResumeDbApplication } from "@/lib/resume-db/types";
+import { deleteApplicationFiles } from "@/lib/resume-db/delete-application-files";
 import {
   deleteApplication,
   getApplicationById,
@@ -41,11 +42,13 @@ export async function deletePipelineCardsForApplication(
 export async function deleteApplicationWithPipeline(
   applicationId: number,
   userId: string,
+  origin = process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000",
 ): Promise<void> {
   const app = await getApplicationById(applicationId, userId);
   if (!app) throw new Error("Application not found.");
 
   await deletePipelineCardsForApplication(applicationId, app.pipelineJobId);
+  await deleteApplicationFiles(userId, origin, app);
   await deleteApplication(applicationId, userId);
 }
 

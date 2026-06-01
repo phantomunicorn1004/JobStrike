@@ -22,6 +22,8 @@ type DbRow = {
   pipeline_job_id: number | null;
   resume_storage_path: string | null;
   cover_letter_storage_path: string | null;
+  resume_drive_file_id: string | null;
+  cover_drive_file_id: string | null;
 };
 
 type ProfileRow = {
@@ -61,6 +63,8 @@ function mapRow(row: DbRow): ResumeDbApplication {
     pipelineJobId: row.pipeline_job_id ?? null,
     resumeStoragePath: row.resume_storage_path ?? null,
     coverLetterStoragePath: row.cover_letter_storage_path ?? null,
+    resumeDriveFileId: row.resume_drive_file_id ?? null,
+    coverDriveFileId: row.cover_drive_file_id ?? null,
   };
 }
 
@@ -197,6 +201,8 @@ export async function createApplication(
     cover_letter_url: input.coverLetterUrl ?? "",
     resume_storage_path: input.resumeStoragePath ?? null,
     cover_letter_storage_path: input.coverLetterStoragePath ?? null,
+    resume_drive_file_id: input.resumeDriveFileId ?? null,
+    cover_drive_file_id: input.coverDriveFileId ?? null,
   };
 
   const { data, error } = await supabase
@@ -230,6 +236,12 @@ export async function updateApplication(
   }
   if (input.coverLetterStoragePath !== undefined) {
     patch.cover_letter_storage_path = input.coverLetterStoragePath;
+  }
+  if (input.resumeDriveFileId !== undefined) {
+    patch.resume_drive_file_id = input.resumeDriveFileId;
+  }
+  if (input.coverDriveFileId !== undefined) {
+    patch.cover_drive_file_id = input.coverDriveFileId;
   }
 
   const { error } = await supabase

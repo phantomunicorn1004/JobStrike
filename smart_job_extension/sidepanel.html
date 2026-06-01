@@ -462,40 +462,10 @@
           </form>
           <p class="muted register-settings-hint" id="backendSettingsHint" hidden></p>
         </div>
-        <div class="card register-card" id="googleDriveSettingsCard">
-          <h2>Google Drive (Resume DB uploads)</h2>
-          <p class="muted">Upload resume &amp; cover letter to <strong>your</strong> Google Drive from the extension, then save sharing links to Resume DB. Check <strong>Default</strong> on Register to use the default links below (original files).</p>
-          <div class="backend-connection-row" aria-live="polite">
-            <span class="backend-connection-dot" id="googleDriveConnectionDot"></span>
-            <span class="backend-connection-label" id="googleDriveConnectionLabel">Not configured</span>
-          </div>
-          <form id="googleDriveSettingsForm" class="form-grid register-form" onsubmit="return false">
-            <label class="full">OAuth Client ID
-              <input type="text" id="googleOAuthClientIdSetting" placeholder="123456789-abc.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
-              <small class="muted">Google Cloud → Credentials → OAuth client (Web application). Add redirect URI below.</small>
-            </label>
-            <label class="full">OAuth redirect URI <span class="muted">(copy into Google Cloud)</span>
-              <code class="oauth-redirect-uri" id="googleOAuthRedirectUri">—</code>
-            </label>
-            <label class="full">Upload folder ID (optional)
-              <input type="text" id="googleDriveFolderIdSetting" placeholder="Drive folder ID from folder URL" autocomplete="off" spellcheck="false">
-              <small class="muted">From <code>drive.google.com/.../folders/FOLDER_ID</code>. Leave empty for Drive root.</small>
-            </label>
-            <label class="full">Default resume sharing link
-              <input type="url" id="googleDefaultResumeUrlSetting" placeholder="https://drive.google.com/file/d/…/view?usp=sharing" autocomplete="off" spellcheck="false">
-              <small class="muted">Used when <strong>Default</strong> is checked on Register (original resume).</small>
-            </label>
-            <label class="full">Default cover letter sharing link
-              <input type="url" id="googleDefaultCoverUrlSetting" placeholder="https://drive.google.com/file/d/…/view?usp=sharing" autocomplete="off" spellcheck="false">
-              <small class="muted">Used when <strong>Default</strong> is checked for cover letter.</small>
-            </label>
-            <div class="button-row full wrap">
-              <button class="btn primary" type="submit" id="saveGoogleDriveSettingsBtn">Save Drive settings</button>
-              <button class="btn" type="button" id="connectGoogleDriveBtn">Connect Google Drive</button>
-              <button class="btn" type="button" id="disconnectGoogleDriveBtn">Disconnect</button>
-            </div>
-          </form>
-          <p class="muted register-settings-hint" id="googleDriveSettingsHint" hidden></p>
+        <div class="card register-card">
+          <h2>Google Drive uploads</h2>
+          <p class="muted">Connect Google Drive on the <strong>website Settings</strong> page (same account as Website connection). The extension uploads files through the server—no Gmail sign-in in the extension.</p>
+          <p class="muted small">Open your site → <strong>Settings</strong> → Connect Google Drive. Set default resume/cover links there for the <strong>Default</strong> checkboxes on Register.</p>
         </div>
         <div class="card">
           <h2>AI autofill (hybrid mode)</h2>
@@ -599,7 +569,6 @@
   </div>
   <script src="toast.js"></script>
   <script src="ai-fill.js"></script>
-  <script src="google-drive.js"></script>
   <script src="register-resume-db.js"></script>
   <script src="sidepanel.js"></script>
 </body>

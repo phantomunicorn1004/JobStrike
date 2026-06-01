@@ -14,6 +14,8 @@ export type ResumeDbApplication = {
   pipelineJobId: number | null;
   resumeStoragePath?: string | null;
   coverLetterStoragePath?: string | null;
+  resumeDriveFileId?: string | null;
+  coverDriveFileId?: string | null;
 };
 
 export type ResumeDbApplicationInput = {
@@ -28,6 +30,8 @@ export type ResumeDbApplicationInput = {
   coverLetterUrl?: string;
   resumeStoragePath?: string;
   coverLetterStoragePath?: string;
+  resumeDriveFileId?: string;
+  coverDriveFileId?: string;
   pipelineJobId?: number | null;
 };
 

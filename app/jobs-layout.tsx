@@ -9,6 +9,7 @@ import {
   Database,
   LayoutDashboard,
   LogOut,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -186,6 +187,20 @@ export default function JobsLayout({
                     className="h-8 w-8 shrink-0 rounded-full border-2 border-border object-cover transition hover:border-primary"
                   />
                   <span>Profile</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                tooltip="Settings"
+                size="lg"
+                isActive={pathname.startsWith("/settings")}
+                className="rounded-lg"
+              >
+                <Link href="/settings" className="justify-center md:justify-start">
+                  <Settings className="h-4 w-4 shrink-0" />
+                  <span>Settings</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>

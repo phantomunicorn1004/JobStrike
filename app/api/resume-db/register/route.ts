@@ -2,16 +2,14 @@ import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
 import { requireRequestUser } from "@/lib/auth/resolve-request-user";
 import { isGoogleDriveConfigured } from "@/lib/google-drive/config";
+import { isGoogleOAuthWebConfigured } from "@/lib/google-drive/oauth-web";
+import { isUserGoogleDriveConnected } from "@/lib/google-drive/user-drive";
 import {
   createApplication,
   getProfileById,
 } from "@/lib/resume-db/repository";
-import {
-  buildStoragePath,
-  guessContentType,
-  newEntryId,
-  uploadApplicationFile,
-} from "@/lib/resume-db/storage";
+import { resolveRegisterFiles } from "@/lib/resume-db/resolve-register-files";
+import { newEntryId } from "@/lib/resume-db/storage";
 
 export function OPTIONS() {
   return corsOptions();
@@ -27,6 +25,7 @@ function errorStatus(message: string): number {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireRequestUser(request);
+    const origin = new URL(request.url).origin;
     const formData = await request.formData();
     const jobLink = String(formData.get("jobLink") ?? formData.get("job_link") ?? "").trim();
     const jobTitle = String(formData.get("jobTitle") ?? formData.get("job_title") ?? "").trim();
@@ -48,6 +47,12 @@ export async function POST(request: NextRequest) {
 
     const resumeFile = formData.get("resume") as File | null;
     const coverFile = formData.get("coverLetter") as File | null;
+    const resumeIsDefault =
+      String(formData.get("resumeIsDefault") ?? "") === "1" ||
+      formData.get("resumeIsDefault") === "true";
+    const coverIsDefault =
+      String(formData.get("coverLetterIsDefault") ?? "") === "1" ||
+      formData.get("coverLetterIsDefault") === "true";
 
     if (!jobLink || !jobTitle || !companyName) {
       return corsJson(
@@ -65,45 +70,18 @@ export async function POST(request: NextRequest) {
       return corsJson({ error: "Selected profile not found." }, { status: 400 });
     }
 
-    const hasResumeFile = Boolean(resumeFile && resumeFile.size > 0);
-
     const entryId = newEntryId();
-    let resumeUrl = resumeUrlProvided;
-    let coverLetterUrl = coverUrlProvided;
-    let resumeStoragePath: string | undefined;
-    let coverStoragePath: string | undefined;
-
-    if (!resumeUrl && hasResumeFile && resumeFile) {
-      const resumeBuffer = Buffer.from(await resumeFile.arrayBuffer());
-      const resumePath = buildStoragePath(
-        entryId,
-        "resume",
-        resumeFile.name || "resume.pdf",
-      );
-      const resumeUpload = await uploadApplicationFile(
-        resumeBuffer,
-        resumePath,
-        resumeFile.type || guessContentType(resumeFile.name),
-      );
-      resumeUrl = resumeUpload.publicUrl;
-      resumeStoragePath = resumeUpload.storagePath;
-    }
-
-    if (!coverLetterUrl && coverFile && coverFile.size > 0) {
-      const coverBuffer = Buffer.from(await coverFile.arrayBuffer());
-      const coverPath = buildStoragePath(
-        entryId,
-        "cover",
-        coverFile.name || "cover_letter.pdf",
-      );
-      const coverUpload = await uploadApplicationFile(
-        coverBuffer,
-        coverPath,
-        coverFile.type || guessContentType(coverFile.name),
-      );
-      coverLetterUrl = coverUpload.publicUrl;
-      coverStoragePath = coverUpload.storagePath;
-    }
+    const resolved = await resolveRegisterFiles({
+      userId: user.id,
+      origin,
+      entryId,
+      resumeUrlProvided,
+      coverUrlProvided,
+      resumeFile,
+      coverFile,
+      resumeIsDefault,
+      coverIsDefault,
+    });
 
     const application = await createApplication(user.id, {
       entryId,
@@ -113,11 +91,15 @@ export async function POST(request: NextRequest) {
       jobTitle,
       company: companyName,
       apply: String(formData.get("apply") ?? "Registered").trim(),
-      resumeUrl: resumeUrl || "",
-      coverLetterUrl,
-      resumeStoragePath,
-      coverLetterStoragePath: coverStoragePath,
+      resumeUrl: resolved.resumeUrl || "",
+      coverLetterUrl: resolved.coverLetterUrl,
+      resumeStoragePath: resolved.resumeStoragePath,
+      coverLetterStoragePath: resolved.coverStoragePath,
+      resumeDriveFileId: resolved.resumeDriveFileId,
+      coverDriveFileId: resolved.coverDriveFileId,
     });
+
+    const userDriveConnected = await isUserGoogleDriveConnected(user.id);
 
     return corsJson(
       {
@@ -132,8 +114,12 @@ export async function POST(request: NextRequest) {
         companyName,
         resumeUrl: application.resumeUrl,
         coverLetterUrl: application.coverLetterUrl,
-        storage: resumeUrlProvided ? "google_drive" : "supabase",
-        googleDriveConfigured: isGoogleDriveConfigured(),
+        storage: resolved.storage,
+        googleDrive: {
+          userConnected: userDriveConnected,
+          serviceAccountConfigured: isGoogleDriveConfigured(),
+          oauthWebConfigured: isGoogleOAuthWebConfigured(),
+        },
       },
       { status: 201 },
     );

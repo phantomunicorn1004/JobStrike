@@ -212,7 +212,8 @@ export async function DELETE(request: NextRequest) {
       return corsJson({ error: "Invalid id" }, { status: 400 });
     }
 
-    await deleteApplicationWithPipeline(id, user.id);
+    const origin = new URL(request.url).origin;
+    await deleteApplicationWithPipeline(id, user.id, origin);
     return corsJson({ ok: true, id });
   } catch (error) {
     console.error("Resume DB DELETE error:", error);
