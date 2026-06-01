@@ -146,25 +146,38 @@
   }
 
 
-  function normalizeMatchText(value) {
+  /** Loose compare key: ignores case, spaces, punctuation, accents. */
+  function normalizeMatchKey(value) {
     return String(value || '')
-      .trim()
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
-      .replace(/\s+/g, ' ');
+      .replace(/[^a-z0-9]+/g, '');
+  }
+
+  function hasMatchKey(value) {
+    return normalizeMatchKey(value).length > 0;
+  }
+
+  function matchKeysEqual(a, b) {
+    const left = normalizeMatchKey(a);
+    const right = normalizeMatchKey(b);
+    if (!left || !right) return false;
+    return left === right;
   }
 
   function applicationSameCompany(app, job) {
     return (
-      normalizeMatchText(app.company) === normalizeMatchText(job.companyName) &&
-      Boolean(normalizeMatchText(job.companyName))
+      matchKeysEqual(app.company, job.companyName) &&
+      hasMatchKey(job.companyName)
     );
   }
 
   function applicationSameCompanyAndTitle(app, job) {
     return (
       applicationSameCompany(app, job) &&
-      normalizeMatchText(app.jobTitle) === normalizeMatchText(job.jobTitle) &&
-      Boolean(normalizeMatchText(job.jobTitle))
+      matchKeysEqual(app.jobTitle, job.jobTitle) &&
+      hasMatchKey(job.jobTitle)
     );
   }
 
