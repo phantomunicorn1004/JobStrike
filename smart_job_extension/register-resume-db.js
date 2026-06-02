@@ -145,6 +145,14 @@
     }
   }
 
+  function setAlreadyBusy(busy) {
+    const btn = document.getElementById('regAlreadyBtn');
+    if (btn) {
+      btn.disabled = busy || !backendConnected;
+      btn.textContent = busy ? 'Checking…' : 'Already?';
+    }
+  }
+
 
   /** Loose compare key: ignores case, spaces, punctuation, accents. */
   function normalizeMatchKey(value) {
@@ -238,7 +246,7 @@
       }.`;
       setRegisterStatus(message, 'error');
       if (showStatus) showStatus('Duplicate application for this candidate.', 'error');
-      return { level: 'duplicate', match: duplicateMatch, blocked: true };
+      return { level: 'duplicate', match: duplicateMatch };
     }
 
     const sameCompanyMatch = forCandidate.find((app) =>
@@ -253,15 +261,22 @@
         }.`,
         'warn'
       );
-      return {
-        level: 'same_company',
-        match: sameCompanyMatch,
-        blocked: false,
-        needsConfirmation: true,
-      };
+      if (showStatus) showStatus('Same company already in Resume DB for this candidate.', 'info');
+      return { level: 'same_company', match: sameCompanyMatch };
     }
 
-    return { level: 'none', match: null, blocked: false };
+    setRegisterStatus('Not registered yet for this candidate.', 'success');
+    if (showStatus) showStatus('No matching application found in Resume DB.', 'success');
+    return { level: 'none', match: null };
+  }
+
+  async function runAlreadyCheck(showStatus) {
+    setAlreadyBusy(true);
+    try {
+      return await checkResumeDbDuplicates(showStatus);
+    } finally {
+      setAlreadyBusy(false);
+    }
   }
 
   function setConnectionStatus(state, detail, username) {
@@ -291,6 +306,7 @@
     backendConnected = connected;
 
     const registerBtn = document.getElementById('registerJobBtn');
+    const alreadyBtn = document.getElementById('regAlreadyBtn');
     const profileSelect = document.getElementById('regProfileId');
     const offlineBanner = document.getElementById('registerOfflineBanner');
     const registerTabBtn = document.getElementById('registerTabBtn');
@@ -298,6 +314,7 @@
     const signedInUser = document.getElementById('backendSignedInUser');
 
     if (registerBtn) registerBtn.disabled = !connected;
+    if (alreadyBtn) alreadyBtn.disabled = !connected;
     if (profileSelect) profileSelect.disabled = !connected;
     if (offlineBanner) offlineBanner.hidden = connected;
     if (registerTabBtn) registerTabBtn.classList.toggle('is-auth-required', !connected);
@@ -1031,6 +1048,7 @@
 
   function initRegisterResumeDb(showStatus) {
     const scrapeBtn = document.getElementById('regScrapeBtn');
+    const alreadyBtn = document.getElementById('regAlreadyBtn');
     const registerBtn = document.getElementById('registerJobBtn');
 
     loadBackendSettingsForm();
@@ -1057,6 +1075,18 @@
       });
     }
 
+    if (alreadyBtn) {
+      alreadyBtn.addEventListener('click', async () => {
+        try {
+          await runAlreadyCheck(showStatus);
+        } catch (err) {
+          const msg = err.message || String(err);
+          setRegisterStatus(msg, 'error');
+          if (showStatus) showStatus(msg, 'error');
+        }
+      });
+    }
+
     if (registerBtn) {
       registerBtn.addEventListener('click', async () => {
         setRegisterBusy(true);
@@ -1074,26 +1104,6 @@
           }
           if (!fields.profileId) {
             throw new Error('Select a candidate profile.');
-          }
-
-          const duplicateCheck = await checkResumeDbDuplicates(showStatus);
-          if (duplicateCheck.blocked) {
-            return;
-          }
-          if (duplicateCheck.needsConfirmation) {
-            const company =
-              fields.companyName || duplicateCheck.match?.company || 'this company';
-            const existingTitle = duplicateCheck.match?.jobTitle || '';
-            const existingLine = existingTitle
-              ? `\n\nExisting: ${existingTitle} at ${company}`
-              : `\n\nExisting application at ${company}`;
-            const proceed = global.confirm(
-              `Same company — ${company} already has an application in Resume DB for this candidate.${existingLine}\n\nContinue registering this job?`
-            );
-            if (!proceed) {
-              setRegisterStatus('Registration cancelled.', 'info');
-              return;
-            }
           }
 
           const resumeDefault = document.getElementById('regResumeDefault')?.checked;
