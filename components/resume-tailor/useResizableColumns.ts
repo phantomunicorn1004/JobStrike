@@ -6,6 +6,7 @@ import { COLUMN_ORDER } from "./resumeDbTableConfig";
 export const RESUME_DB_COLUMN_DEFAULTS = {
   select: 44,
   no: 52,
+  profile: 120,
   jobLink: 96,
   company: 132,
   jobTitle: 220,
@@ -22,6 +23,7 @@ export type ResumeDBColumnId = keyof typeof RESUME_DB_COLUMN_DEFAULTS;
 export const RESUME_DB_COLUMN_MIN_PERCENT: Record<ResumeDBColumnId, number> = {
   select: 3,
   no: 3.5,
+  profile: 5,
   jobLink: 5,
   company: 6,
   jobTitle: 8,
@@ -33,7 +35,7 @@ export const RESUME_DB_COLUMN_MIN_PERCENT: Record<ResumeDBColumnId, number> = {
   actions: 5.5,
 };
 
-const STORAGE_KEY = "resume-db-column-widths-v2";
+const STORAGE_KEY = "resume-db-column-widths-v3";
 
 function defaultsToPercent(): Record<ResumeDBColumnId, number> {
   const total = COLUMN_ORDER.reduce((sum, id) => sum + RESUME_DB_COLUMN_DEFAULTS[id], 0);

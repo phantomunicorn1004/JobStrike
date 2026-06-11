@@ -1163,6 +1163,9 @@ export function ResumeDBPageClient() {
                       >
                         No
                       </ResizableTableHead>
+                      <ResizableTableHead {...columnResizeProps("profile")}>
+                        Profile
+                      </ResizableTableHead>
                       <ResizableTableHead {...columnResizeProps("jobLink")}>
                         Job link
                       </ResizableTableHead>
@@ -1239,6 +1242,11 @@ export function ResumeDBPageClient() {
                           className="tabular-nums text-muted-foreground"
                         >
                           {rangeStart + index}
+                        </ResizableTableCell>
+                        <ResizableTableCell widthPercent={percents.profile}>
+                          <span className="block truncate" title={row.candidate || undefined}>
+                            {row.candidate || "—"}
+                          </span>
                         </ResizableTableCell>
                         <ResizableTableCell widthPercent={percents.jobLink}>
                           {row.jobLink ? (

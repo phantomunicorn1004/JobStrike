@@ -1,6 +1,7 @@
 import type { ResumeDBColumnId } from "./useResizableColumns";
 
 type ResumeDbRowForMeasure = {
+  candidate: string;
   company: string;
   jobTitle: string;
   appliedAt: string;
@@ -10,6 +11,7 @@ type ResumeDbRowForMeasure = {
 export const COLUMN_ORDER: ResumeDBColumnId[] = [
   "select",
   "no",
+  "profile",
   "jobLink",
   "company",
   "jobTitle",
@@ -24,6 +26,7 @@ export const COLUMN_ORDER: ResumeDBColumnId[] = [
 export const COLUMN_HEADERS: Record<ResumeDBColumnId, string> = {
   select: "",
   no: "No",
+  profile: "Profile",
   jobLink: "Job link",
   company: "Company",
   jobTitle: "Job title",
@@ -38,6 +41,7 @@ export const COLUMN_HEADERS: Record<ResumeDBColumnId, string> = {
 const FIXED_FIT_PX: Partial<Record<ResumeDBColumnId, number>> = {
   select: 44,
   no: 48,
+  profile: 88,
   jobLink: 72,
   resume: 76,
   coverLetter: 88,
@@ -86,6 +90,9 @@ export function measureColumnFitPx(
     const row = rows[i];
     let text = "";
     switch (columnId) {
+      case "profile":
+        text = row.candidate || "—";
+        break;
       case "company":
         text = row.company || "—";
         break;
@@ -116,4 +123,4 @@ export function getNeighborColumnId(columnId: ResumeDBColumnId): ResumeDBColumnI
 }
 
 /** Columns that absorb shrink/grow when another column is auto-fitted */
-export const FLEX_COLUMN_IDS: ResumeDBColumnId[] = ["jobTitle", "company", "applied"];
+export const FLEX_COLUMN_IDS: ResumeDBColumnId[] = ["jobTitle", "company", "profile", "applied"];
