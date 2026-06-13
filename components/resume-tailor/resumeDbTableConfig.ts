@@ -46,8 +46,8 @@ const FIXED_FIT_PX: Partial<Record<ResumeDBColumnId, number>> = {
   resume: 76,
   coverLetter: 88,
   pipeline: 88,
-  json: 52,
-  actions: 76,
+  json: 56,
+  actions: 88,
 };
 
 let measureCanvas: CanvasRenderingContext2D | null = null;

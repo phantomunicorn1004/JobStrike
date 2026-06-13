@@ -37,6 +37,7 @@ import {
 } from "@/components/resume-tailor/ResumeDBResizableTable";
 import {
   useResizableColumns,
+  RESUME_DB_COLUMN_DEFAULTS,
   type ResumeDBColumnId,
 } from "@/components/resume-tailor/useResizableColumns";
 import {
@@ -1131,12 +1132,17 @@ export function ResumeDBPageClient() {
                 </p>
                 <Table
                   ref={tableRef}
-                  scrollable={false}
-                  className="table-fixed w-full"
+                  scrollable
+                  className="table-fixed w-full min-w-[1280px]"
                 >
                   <colgroup>
                     {COLUMN_ORDER.map((id) => (
-                      <col key={id} style={{ width: `${percents[id]}%` }} />
+                      <col
+                        key={id}
+                        style={{
+                          width: `${percents[id] ?? RESUME_DB_COLUMN_DEFAULTS[id]}%`,
+                        }}
+                      />
                     ))}
                   </colgroup>
                   <TableHeader>
@@ -1333,24 +1339,34 @@ export function ResumeDBPageClient() {
                         >
                           {formatApplied(row.appliedAt, row.date)}
                         </ResizableTableCell>
-                        <ResizableTableCell widthPercent={percents.json} align="center">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 p-0 rounded-lg"
-                            title="Download JSON"
-                            onClick={() => downloadJson(row)}
-                          >
-                            <FileJson className="h-3.5 w-3.5" />
-                            <span className="sr-only">Download JSON</span>
-                          </Button>
+                        <ResizableTableCell
+                          widthPercent={percents.json}
+                          align="center"
+                          className="overflow-hidden"
+                        >
+                          <div className="flex items-center justify-center">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 w-7 shrink-0 p-0 rounded-lg"
+                              title="Download JSON"
+                              onClick={() => downloadJson(row)}
+                            >
+                              <FileJson className="h-3.5 w-3.5" />
+                              <span className="sr-only">Download JSON</span>
+                            </Button>
+                          </div>
                         </ResizableTableCell>
-                        <ResizableTableCell widthPercent={percents.actions} align="center">
+                        <ResizableTableCell
+                          widthPercent={percents.actions}
+                          align="center"
+                          className="overflow-hidden"
+                        >
                           <div className="flex items-center justify-center gap-0.5 opacity-80 group-hover:opacity-100">
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 rounded-lg"
+                              className="h-8 w-8 shrink-0 rounded-lg"
                               title="Edit"
                               onClick={() => {
                                 setEditRow(row);
@@ -1362,7 +1378,7 @@ export function ResumeDBPageClient() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 rounded-lg text-destructive hover:text-destructive"
+                              className="h-8 w-8 shrink-0 rounded-lg text-destructive hover:text-destructive"
                               title="Remove"
                               disabled={removingRow === row.rowIndex}
                               onClick={() => handleDelete(row.rowIndex)}

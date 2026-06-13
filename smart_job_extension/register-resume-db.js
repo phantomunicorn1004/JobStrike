@@ -9,6 +9,8 @@
   const LEGACY_API_KEY_KEY = 'resume_db_api_key';
   const SELECTED_PROFILE_KEY = 'resume_db_selected_profile_id';
   const OFFLINE_QUEUE_KEY = 'resume_db_offline_queue';
+  const DUPLICATE_CHECK_WINDOW_DAYS_KEY = 'resume_db_duplicate_check_window_days';
+  const DEFAULT_DUPLICATE_CHECK_WINDOW_DAYS = 15;
   const DEFAULT_BACKEND = 'https://remote-work-helper.vercel.app';
   const QUEUE_VERSION = 1;
 
@@ -199,6 +201,74 @@
     return { when, detail };
   }
 
+  function normalizeDuplicateWindowDays(value) {
+    const n = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(n) || n < 0) return DEFAULT_DUPLICATE_CHECK_WINDOW_DAYS;
+    return Math.min(n, 365);
+  }
+
+  async function getDuplicateCheckWindowDays() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([DUPLICATE_CHECK_WINDOW_DAYS_KEY], (result) => {
+        const stored = result[DUPLICATE_CHECK_WINDOW_DAYS_KEY];
+        if (stored === undefined || stored === null || stored === '') {
+          resolve(DEFAULT_DUPLICATE_CHECK_WINDOW_DAYS);
+          return;
+        }
+        resolve(normalizeDuplicateWindowDays(stored));
+      });
+    });
+  }
+
+  async function saveDuplicateCheckWindowDays(days) {
+    const normalized = normalizeDuplicateWindowDays(days);
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ [DUPLICATE_CHECK_WINDOW_DAYS_KEY]: normalized }, resolve);
+    });
+  }
+
+  function getApplicationAppliedTime(app) {
+    const raw = app.appliedAt || app.date || '';
+    if (!raw) return null;
+    const time = new Date(raw).getTime();
+    return Number.isNaN(time) ? null : time;
+  }
+
+  /** 0 = all time; otherwise rolling window from now minus N days. */
+  function isWithinDuplicateCheckWindow(app, windowDays) {
+    if (!windowDays || windowDays <= 0) return true;
+    const applied = getApplicationAppliedTime(app);
+    if (applied == null) return true;
+    const cutoff = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+    return applied >= cutoff;
+  }
+
+  function duplicateWindowLabel(windowDays) {
+    if (!windowDays || windowDays <= 0) return ' (all time)';
+    return ` (last ${windowDays} day${windowDays === 1 ? '' : 's'})`;
+  }
+
+  async function loadDuplicateWindowSetting() {
+    const input = document.getElementById('regDuplicateWindowDays');
+    if (!input) return;
+    const days = await getDuplicateCheckWindowDays();
+    input.value = String(days);
+  }
+
+  function wireDuplicateWindowSetting() {
+    const input = document.getElementById('regDuplicateWindowDays');
+    if (!input) return;
+
+    void loadDuplicateWindowSetting();
+
+    const persist = () => {
+      void saveDuplicateCheckWindowDays(input.value);
+    };
+
+    input.addEventListener('change', persist);
+    input.addEventListener('blur', persist);
+  }
+
   async function fetchResumeDbApplications() {
     const config = await getBackendConfig();
     const res = await fetch(`${config.baseUrl}/api/resume-db`, {
@@ -231,22 +301,24 @@
     }
 
     setRegisterStatus('Checking Resume DB…', 'info');
+    const windowDays = await getDuplicateCheckWindowDays();
+    const windowSuffix = duplicateWindowLabel(windowDays);
     const applications = await fetchResumeDbApplications();
-    const forCandidate = applications.filter(
-      (app) => String(app.profileId) === String(profileId)
-    );
+    const forCandidate = applications
+      .filter((app) => String(app.profileId) === String(profileId))
+      .filter((app) => isWithinDuplicateCheckWindow(app, windowDays));
 
     const duplicateMatch = forCandidate.find((app) =>
       applicationSameCompanyAndTitle(app, fields)
     );
     if (duplicateMatch) {
       const { when, detail } = formatApplicationSummary(duplicateMatch, fields);
-      const message = `Duplicate — ${detail} is already in Resume DB${
+      const message = `Duplicate — ${detail} is already in Resume DB${windowSuffix}${
         when ? ` (${when})` : ''
       }.`;
       setRegisterStatus(message, 'error');
       if (showStatus) showStatus('Duplicate application for this candidate.', 'error');
-      return { level: 'duplicate', match: duplicateMatch };
+      return { level: 'duplicate', match: duplicateMatch, windowDays };
     }
 
     const sameCompanyMatch = forCandidate.find((app) =>
@@ -256,18 +328,22 @@
       const { when, detail } = formatApplicationSummary(sameCompanyMatch, fields);
       const company = fields.companyName || sameCompanyMatch.company || 'this company';
       setRegisterStatus(
-        `Same company — ${company} already has an application${
+        `Same company — ${company} already has an application${windowSuffix}${
           when ? ` (${when}: ${detail})` : detail ? ` (${detail})` : ''
         }.`,
         'warn'
       );
       if (showStatus) showStatus('Same company already in Resume DB for this candidate.', 'info');
-      return { level: 'same_company', match: sameCompanyMatch };
+      return { level: 'same_company', match: sameCompanyMatch, windowDays };
     }
 
-    setRegisterStatus('Not registered yet for this candidate.', 'success');
+    const noMatchMessage =
+      windowDays > 0
+        ? `Not registered in the last ${windowDays} day${windowDays === 1 ? '' : 's'} for this candidate.`
+        : 'Not registered yet for this candidate.';
+    setRegisterStatus(noMatchMessage, 'success');
     if (showStatus) showStatus('No matching application found in Resume DB.', 'success');
-    return { level: 'none', match: null };
+    return { level: 'none', match: null, windowDays };
   }
 
   async function runAlreadyCheck(showStatus) {
@@ -1056,6 +1132,7 @@
     wireOfflineQueueControls(showStatus);
     wireRegisterFileDrops();
     wireProfileSelectPersistence();
+    wireDuplicateWindowSetting();
     startConnectionPolling();
 
     document.querySelectorAll('.tab-main[data-tab="register"]').forEach((tabBtn) => {

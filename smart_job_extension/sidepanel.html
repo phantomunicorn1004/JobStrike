@@ -343,7 +343,6 @@
                 <span class="register-drive-status is-off" id="registerDriveStatus" hidden></span>
               </div>
               <div class="register-toolbar-actions">
-                <button class="btn small" type="button" id="regAlreadyBtn" title="Check if this job is already registered in Resume DB for the selected candidate" disabled>Already?</button>
                 <button class="btn small register-scrape-btn" type="button" id="regScrapeBtn" title="Load job title, company, and link from the active tab">Scrape</button>
               </div>
             </div>
@@ -410,6 +409,36 @@
             </form>
           </div>
           <div class="register-action-group">
+            <div class="register-dup-panel">
+              <div class="register-dup-panel-left">
+                <span class="register-dup-panel-title">Duplicate window</span>
+                <label
+                  class="register-dup-stepper"
+                  title="Already? compares only applications registered within this many days. Use 0 for all time."
+                >
+                  <input
+                    type="number"
+                    id="regDuplicateWindowDays"
+                    class="register-dup-window-input"
+                    min="0"
+                    max="365"
+                    step="1"
+                    value="15"
+                    aria-label="Duplicate check window in days"
+                  />
+                  <span class="register-dup-window-suffix">days</span>
+                </label>
+              </div>
+              <button
+                class="btn register-dup-already-btn"
+                type="button"
+                id="regAlreadyBtn"
+                title="Check if this job matches Resume DB entries for the selected candidate within the duplicate window"
+                disabled
+              >
+                Already?
+              </button>
+            </div>
             <div id="registerStatus" class="register-status" hidden></div>
             <div class="register-action-primary">
               <button class="btn primary full-width" type="button" id="registerJobBtn" disabled>Register to DB</button>

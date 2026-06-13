@@ -14,8 +14,8 @@ export const RESUME_DB_COLUMN_DEFAULTS = {
   coverLetter: 112,
   pipeline: 100,
   applied: 156,
-  json: 64,
-  actions: 92,
+  json: 80,
+  actions: 108,
 } as const;
 
 export type ResumeDBColumnId = keyof typeof RESUME_DB_COLUMN_DEFAULTS;
@@ -31,11 +31,41 @@ export const RESUME_DB_COLUMN_MIN_PERCENT: Record<ResumeDBColumnId, number> = {
   coverLetter: 6.5,
   pipeline: 6,
   applied: 8,
-  json: 4,
-  actions: 5.5,
+  json: 5,
+  actions: 7,
 };
 
-const STORAGE_KEY = "resume-db-column-widths-v3";
+const STORAGE_KEY = "resume-db-column-widths-v4";
+
+function fillMissingColumnPercents(
+  raw: Partial<Record<ResumeDBColumnId, number>>,
+): Record<ResumeDBColumnId, number> {
+  const defaults = defaultsToPercent();
+  const filled = {} as Record<ResumeDBColumnId, number>;
+  for (const id of COLUMN_ORDER) {
+    const value = raw[id];
+    filled[id] =
+      typeof value === "number" && value > 0 ? value : defaults[id];
+  }
+
+  const sum = COLUMN_ORDER.reduce((s, id) => s + filled[id], 0);
+  if (Math.abs(sum - 100) < 0.5) return filled;
+
+  let assigned = 0;
+  COLUMN_ORDER.forEach((id, index) => {
+    if (index === COLUMN_ORDER.length - 1) {
+      filled[id] = Math.max(
+        RESUME_DB_COLUMN_MIN_PERCENT[id],
+        Math.round((100 - assigned) * 10) / 10,
+      );
+    } else {
+      const scaled = Math.round((filled[id] / sum) * 1000) / 10;
+      filled[id] = Math.max(RESUME_DB_COLUMN_MIN_PERCENT[id], scaled);
+      assigned += filled[id];
+    }
+  });
+  return filled;
+}
 
 function defaultsToPercent(): Record<ResumeDBColumnId, number> {
   const total = COLUMN_ORDER.reduce((sum, id) => sum + RESUME_DB_COLUMN_DEFAULTS[id], 0);
@@ -78,11 +108,11 @@ function normalizeStoredPercents(
         assigned += value;
       }
     });
-    return percents;
+    return fillMissingColumnPercents(percents);
   }
 
   if (Math.abs(sum - 100) < 0.5) {
-    return raw as Record<ResumeDBColumnId, number>;
+    return fillMissingColumnPercents(raw);
   }
 
   return defaultsToPercent();
