@@ -23,7 +23,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ResumeDBEditDialog } from "@/components/resume-tailor/ResumeDBEditDialog";
 import {
@@ -92,10 +91,17 @@ export type ResumeDbRow = {
   date: string;
   appliedAt: string;
   pipelineJobId: number | null;
+  pipelineStageId: string | null;
   inPipeline: boolean;
 };
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+type PipelineStageOption = {
+  id: string;
+  name: string;
+  sort_order: number;
+};
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 150, 200] as const;
 
 type SortKey = "company" | "jobTitle" | "pipeline" | null;
 type SortDir = "asc" | "desc";
@@ -597,9 +603,10 @@ export function ResumeDBPageClient() {
   const [sortKey, setSortKey] = useState<SortKey>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<number>(10);
+  const [pageSize, setPageSize] = useState<number>(25);
   const [removingRow, setRemovingRow] = useState<number | null>(null);
-  const [togglingRow, setTogglingRow] = useState<number | null>(null);
+  const [updatingStageRow, setUpdatingStageRow] = useState<number | null>(null);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStageOption[]>([]);
   const [preview, setPreview] = useState<{ title: string; url: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [editRow, setEditRow] = useState<ResumeDbRow | null>(null);
@@ -624,6 +631,7 @@ export function ResumeDBPageClient() {
       }
       const data = await resumeRes.json();
       setRows(data.resumes ?? []);
+      setPipelineStages(data.pipelineStages ?? []);
 
       if (profilesRes.ok) {
         const profileData = await profilesRes.json().catch(() => ({}));
@@ -690,13 +698,22 @@ export function ResumeDBPageClient() {
     });
   }, [rows, search, candidateFilter, dateFrom, dateTo]);
 
+  const stageSortIndex = useCallback(
+    (stageId: string | null) => {
+      if (!stageId) return -1;
+      const idx = pipelineStages.findIndex((stage) => stage.id === stageId);
+      return idx >= 0 ? idx : pipelineStages.length + 1;
+    },
+    [pipelineStages],
+  );
+
   const sorted = useMemo(() => {
     const list = [...filtered];
     if (!sortKey) return list;
     list.sort((a, b) => {
       if (sortKey === "pipeline") {
-        const av = a.inPipeline ? 0 : 1;
-        const bv = b.inPipeline ? 0 : 1;
+        const av = stageSortIndex(a.pipelineStageId);
+        const bv = stageSortIndex(b.pipelineStageId);
         const cmp = av - bv;
         return sortDir === "asc" ? cmp : -cmp;
       }
@@ -706,7 +723,7 @@ export function ResumeDBPageClient() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return list;
-  }, [filtered, sortKey, sortDir]);
+  }, [filtered, sortKey, sortDir, stageSortIndex]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -760,42 +777,44 @@ export function ResumeDBPageClient() {
     }
   };
 
-  const handlePipelineToggle = async (row: ResumeDbRow, checked: boolean) => {
-    setTogglingRow(row.rowIndex);
+  const handlePipelineStageChange = async (
+    row: ResumeDbRow,
+    pipelineStageId: string,
+  ) => {
+    setUpdatingStageRow(row.rowIndex);
     try {
       const res = await fetch("/api/resume-db", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ rowIndex: row.rowIndex, inPipeline: checked }),
+        body: JSON.stringify({
+          rowIndex: row.rowIndex,
+          pipelineStageId:
+            pipelineStageId === "registered" ? "" : pipelineStageId,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || "Failed to update pipeline status.");
+        throw new Error(data.error || "Failed to update status.");
       }
       setRows((prev) =>
         prev.map((r) =>
           r.rowIndex === row.rowIndex
             ? {
                 ...r,
-                inPipeline: data.inPipeline ?? checked,
-                apply: data.apply ?? (checked ? "In Pipeline" : "Registered"),
+                pipelineStageId: data.pipelineStageId ?? null,
+                inPipeline: data.inPipeline ?? Boolean(data.pipelineStageId),
+                apply: data.apply ?? r.apply,
                 pipelineJobId: data.pipelineJobId ?? r.pipelineJobId,
               }
             : r,
         ),
       );
-      toast.success(
-        checked
-          ? "Added to job pipeline (Applied stage)."
-          : "Removed from job pipeline.",
-      );
+      toast.success("Status updated.");
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Pipeline update failed.",
-      );
+      toast.error(error instanceof Error ? error.message : "Status update failed.");
     } finally {
-      setTogglingRow(null);
+      setUpdatingStageRow(null);
     }
   };
 
@@ -940,7 +959,7 @@ export function ResumeDBPageClient() {
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Resume DB</h1>
             <p className="text-xs text-muted-foreground sm:text-sm">
               {rows.length} application{rows.length === 1 ? "" : "s"} — register via
-              the Smart Job extension. Toggle status to add jobs to the{" "}
+              the Smart Job extension. Set status to move jobs through the{" "}
               <Link href="/jobs" className="text-primary underline-offset-4 hover:underline">
                 pipeline
               </Link>
@@ -1030,7 +1049,7 @@ export function ResumeDBPageClient() {
               value={String(pageSize)}
               onValueChange={(v) => setPageSize(Number(v))}
             >
-              <SelectTrigger className="h-9 w-[68px] rounded-xl" size="sm">
+              <SelectTrigger className="h-9 w-[76px] rounded-xl" size="sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1203,7 +1222,7 @@ export function ResumeDBPageClient() {
                       </ResizableTableHead>
                       <ResizableSortableHead
                         {...columnResizeProps("pipeline")}
-                        label="Pipeline"
+                        label="Status"
                         active={sortKey === "pipeline"}
                         direction={sortDir}
                         onSort={() => handleSort("pipeline")}
@@ -1310,19 +1329,38 @@ export function ResumeDBPageClient() {
                             <span className="text-muted-foreground">—</span>
                           )}
                         </ResizableTableCell>
-                        <ResizableTableCell widthPercent={percents.pipeline} align="center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <Switch
-                              checked={row.inPipeline}
-                              disabled={togglingRow === row.rowIndex}
-                              onCheckedChange={(checked) =>
-                                handlePipelineToggle(row, checked)
+                        <ResizableTableCell
+                          widthPercent={percents.pipeline}
+                          align="center"
+                          className="overflow-hidden"
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <Select
+                              value={row.pipelineStageId ?? "registered"}
+                              disabled={updatingStageRow === row.rowIndex}
+                              onValueChange={(value) =>
+                                void handlePipelineStageChange(row, value)
                               }
-                              aria-label={`Add ${row.company} to pipeline`}
-                            />
-                            {togglingRow === row.rowIndex ? (
+                            >
+                              <SelectTrigger
+                                className="h-8 min-w-[108px] max-w-full rounded-lg border-border/70 bg-background px-2 text-xs"
+                                size="sm"
+                                aria-label={`Status for ${row.company || "application"}`}
+                              >
+                                <SelectValue placeholder="Status" />
+                              </SelectTrigger>
+                              <SelectContent align="end">
+                                <SelectItem value="registered">Registered</SelectItem>
+                                {pipelineStages.map((stage) => (
+                                  <SelectItem key={stage.id} value={stage.id}>
+                                    {stage.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {updatingStageRow === row.rowIndex ? (
                               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                            ) : row.inPipeline ? (
+                            ) : row.pipelineStageId ? (
                               <Link
                                 href="/jobs"
                                 className="text-primary shrink-0"

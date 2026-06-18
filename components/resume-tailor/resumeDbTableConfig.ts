@@ -32,7 +32,7 @@ export const COLUMN_HEADERS: Record<ResumeDBColumnId, string> = {
   jobTitle: "Job title",
   resume: "Resume",
   coverLetter: "Cover letter",
-  pipeline: "Pipeline",
+  pipeline: "Status",
   applied: "Applied",
   json: "JSON",
   actions: "Actions",
@@ -45,7 +45,7 @@ const FIXED_FIT_PX: Partial<Record<ResumeDBColumnId, number>> = {
   jobLink: 72,
   resume: 76,
   coverLetter: 88,
-  pipeline: 88,
+  pipeline: 104,
   json: 56,
   actions: 88,
 };

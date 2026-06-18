@@ -17,13 +17,21 @@ import {
   deleteApplicationWithPipeline,
   removeApplicationFromPipeline,
 } from "@/lib/resume-db/pipeline";
+import {
+  buildPipelineStageMap,
+  listPipelineStages,
+  setApplicationPipelineStage,
+} from "@/lib/resume-db/pipeline-stages";
 import type { ResumeDbApplicationInput } from "@/lib/resume-db/types";
 
 export function OPTIONS() {
   return corsOptions();
 }
 
-function mapForList(app: Awaited<ReturnType<typeof listApplications>>[number]) {
+function mapForList(
+  app: Awaited<ReturnType<typeof listApplications>>[number],
+  stageMap?: Map<number, string | null>,
+) {
   const applied = new Date(app.appliedAt);
   const date = Number.isNaN(applied.getTime())
     ? ""
@@ -34,6 +42,7 @@ function mapForList(app: Awaited<ReturnType<typeof listApplications>>[number]) {
         hour: "numeric",
         minute: "2-digit",
       });
+  const pipelineStageId = stageMap?.get(app.id) ?? null;
   return {
     id: app.id,
     rowIndex: app.id,
@@ -50,7 +59,8 @@ function mapForList(app: Awaited<ReturnType<typeof listApplications>>[number]) {
     date,
     appliedAt: app.appliedAt,
     pipelineJobId: app.pipelineJobId,
-    inPipeline: app.pipelineJobId != null || app.apply === "In Pipeline",
+    pipelineStageId,
+    inPipeline: pipelineStageId != null,
     roleTitle: app.jobTitle || app.candidateName || `Application ${app.id}`,
   };
 }
@@ -120,7 +130,14 @@ export async function GET(request: NextRequest) {
     }
 
     const entries = await listApplications(user.id);
-    return corsJson({ resumes: entries.map(mapForList) });
+    const [stageMap, pipelineStages] = await Promise.all([
+      buildPipelineStageMap(entries),
+      listPipelineStages(),
+    ]);
+    return corsJson({
+      resumes: entries.map((entry) => mapForList(entry, stageMap)),
+      pipelineStages,
+    });
   } catch (error) {
     console.error("Resume DB GET error:", error);
     const message = error instanceof Error ? error.message : "Failed to load Resume DB.";
@@ -181,7 +198,26 @@ export async function PATCH(request: NextRequest) {
         await removeApplicationFromPipeline(id, user.id);
       }
       const updated = await getApplicationById(id, user.id);
-      return corsJson({ ok: true, ...(updated ? mapForList(updated) : {}) });
+      if (!updated) {
+        return corsJson({ ok: true });
+      }
+      const stageMap = await buildPipelineStageMap([updated]);
+      return corsJson({ ok: true, ...mapForList(updated, stageMap) });
+    }
+
+    if (body.pipelineStageId !== undefined) {
+      const rawStage = body.pipelineStageId;
+      const stageId =
+        rawStage === null || rawStage === ""
+          ? null
+          : String(rawStage).trim();
+      await setApplicationPipelineStage(id, user.id, stageId);
+      const updated = await getApplicationById(id, user.id);
+      if (!updated) {
+        return corsJson({ ok: true });
+      }
+      const stageMap = await buildPipelineStageMap([updated]);
+      return corsJson({ ok: true, ...mapForList(updated, stageMap) });
     }
 
     const entry = parseEntryBody(body);
@@ -189,7 +225,11 @@ export async function PATCH(request: NextRequest) {
 
     await updateApplication(id, user.id, entry);
     const updated = await getApplicationById(id, user.id);
-    return corsJson({ ok: true, ...(updated ? mapForList(updated) : {}) });
+    if (!updated) {
+      return corsJson({ ok: true });
+    }
+    const stageMap = await buildPipelineStageMap([updated]);
+    return corsJson({ ok: true, ...mapForList(updated, stageMap) });
   } catch (error) {
     console.error("Resume DB PATCH error:", error);
     const message = error instanceof Error ? error.message : "Update failed.";

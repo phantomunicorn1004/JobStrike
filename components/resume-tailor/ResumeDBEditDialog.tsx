@@ -72,6 +72,7 @@ export function ResumeDBEditDialog({ row, open, onOpenChange, onSaved }: Props) 
         resumeUrl: data.resumeUrl ?? row.resumeUrl,
         coverLetterUrl: data.coverLetterUrl ?? row.coverLetterUrl,
         inPipeline: data.inPipeline ?? row.inPipeline,
+        pipelineStageId: data.pipelineStageId ?? row.pipelineStageId,
       });
       onOpenChange(false);
     } catch (error) {
