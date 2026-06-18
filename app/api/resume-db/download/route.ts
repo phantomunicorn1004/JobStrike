@@ -32,8 +32,10 @@ export async function GET(request: NextRequest) {
     const fileUrl = kind === "cover" ? app.coverLetterUrl : app.resumeUrl;
     const storagePath =
       kind === "cover" ? app.coverLetterStoragePath : app.resumeStoragePath;
+    const driveFileId =
+      kind === "cover" ? app.coverDriveFileId : app.resumeDriveFileId;
 
-    if (!fileUrl?.trim() && !storagePath?.trim()) {
+    if (!fileUrl?.trim() && !storagePath?.trim() && !driveFileId?.trim()) {
       return NextResponse.json({ error: "No file available for this row." }, { status: 404 });
     }
 
@@ -42,10 +44,16 @@ export async function GET(request: NextRequest) {
         ? `${app.company || "cover"}-cover-letter.docx`
         : `${app.company || "resume"}-resume.docx`;
 
+    const origin = new URL(request.url).origin;
     const { buffer, fileName, contentType } = await downloadFileFromUrl(
       fileUrl,
       fallbackName,
       storagePath,
+      {
+        driveFileId,
+        userId: user.id,
+        origin,
+      },
     );
 
     return new NextResponse(new Uint8Array(buffer), {

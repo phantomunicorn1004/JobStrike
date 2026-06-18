@@ -12,12 +12,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Table,
   TableBody,
   TableHeader,
@@ -204,15 +198,14 @@ function DocActions({
   url,
   label,
   company,
-  onPreview,
 }: {
   applicationId: number;
   url: string;
   label: string;
   company: string;
-  onPreview: (title: string, url: string) => void;
 }) {
   const kind = label.toLowerCase().includes("cover") ? "cover" : "resume";
+  const viewUrl = getDocumentViewUrl(url);
 
   return (
     <div className="flex items-center justify-center gap-1 mx-auto w-fit">
@@ -220,11 +213,11 @@ function DocActions({
         variant="outline"
         size="icon"
         className="h-7 w-7 rounded-md shrink-0"
-        title={`Preview ${label}`}
-        onClick={() => onPreview(`${label} — ${company}`, url)}
+        title={`Open ${label} on Google Drive — ${company}`}
+        onClick={() => window.open(viewUrl, "_blank", "noopener,noreferrer")}
       >
         <Eye className="h-3.5 w-3.5" />
-        <span className="sr-only">Preview {label}</span>
+        <span className="sr-only">Open {label} in new tab</span>
       </Button>
       <Button
         variant="outline"
@@ -280,49 +273,6 @@ function isWithinAppliedDateRange(
     if (d > end) return false;
   }
   return true;
-}
-
-function PreviewDialog({
-  open,
-  onOpenChange,
-  title,
-  url,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  url: string;
-}) {
-  const previewUrl = url.includes("drive.google.com")
-    ? url.replace("/view", "/preview").replace("?usp=sharing", "")
-    : url;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
-        {url ? (
-          <div className="flex flex-col gap-3 flex-1 min-h-0">
-            <iframe
-              src={previewUrl}
-              title={title}
-              className="w-full flex-1 min-h-[480px] rounded-lg border bg-muted/40"
-            />
-            <Button variant="outline" size="sm" asChild className="w-fit">
-              <a href={url} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Open in new tab
-              </a>
-            </Button>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">No link available.</p>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 type CandidateFilterOption = { key: string; label: string };
@@ -607,7 +557,6 @@ export function ResumeDBPageClient() {
   const [removingRow, setRemovingRow] = useState<number | null>(null);
   const [updatingStageRow, setUpdatingStageRow] = useState<number | null>(null);
   const [pipelineStages, setPipelineStages] = useState<PipelineStageOption[]>([]);
-  const [preview, setPreview] = useState<{ title: string; url: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [editRow, setEditRow] = useState<ResumeDbRow | null>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -1323,7 +1272,6 @@ export function ResumeDBPageClient() {
                               url={row.coverLetterUrl}
                               label="Cover letter"
                               company={row.company}
-                              onPreview={(title, url) => setPreview({ title, url })}
                             />
                           ) : (
                             <span className="text-muted-foreground">—</span>
@@ -1437,13 +1385,6 @@ export function ResumeDBPageClient() {
             )}
           </CardContent>
         </Card>
-
-        <PreviewDialog
-          open={preview != null}
-          onOpenChange={(open) => !open && setPreview(null)}
-          title={preview?.title ?? "Preview"}
-          url={preview?.url ?? ""}
-        />
 
         <ResumeDBEditDialog
           row={editRow}

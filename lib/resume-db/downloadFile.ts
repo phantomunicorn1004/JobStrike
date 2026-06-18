@@ -2,12 +2,25 @@ import { isGoogleDriveConfigured } from "@/lib/google-drive/config";
 import { downloadGoogleDrivePublicFile } from "@/lib/google-drive/downloadPublicFile";
 import { downloadDriveFile } from "@/lib/google-drive/upload";
 import {
+  downloadUserDriveFile,
+  isUserGoogleDriveConnected,
+} from "@/lib/google-drive/user-drive";
+import {
   extractGoogleDriveFileId,
   isGoogleDriveUrl,
 } from "@/lib/google-drive/urls";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const BUCKET = "resume-db";
+
+export type DownloadFileOptions = {
+  fileUrl: string;
+  fallbackName: string;
+  storagePath?: string | null;
+  driveFileId?: string | null;
+  userId?: string;
+  origin?: string;
+};
 
 function guessNameFromUrl(url: string, fallback: string): string {
   try {
@@ -22,11 +35,37 @@ function guessNameFromUrl(url: string, fallback: string): string {
   return fallback;
 }
 
+function resolveDriveFileId(
+  driveFileId: string | null | undefined,
+  fileUrl: string,
+): string | null {
+  const stored = driveFileId?.trim();
+  if (stored) return stored;
+  return extractGoogleDriveFileId(fileUrl);
+}
+
 export async function downloadFileFromUrl(
   fileUrl: string,
   fallbackName: string,
   storagePath?: string | null,
+  options?: Pick<DownloadFileOptions, "driveFileId" | "userId" | "origin">,
 ): Promise<{ buffer: Buffer; fileName: string; contentType: string }> {
+  return downloadApplicationDocument({
+    fileUrl,
+    fallbackName,
+    storagePath,
+    driveFileId: options?.driveFileId,
+    userId: options?.userId,
+    origin: options?.origin,
+  });
+}
+
+export async function downloadApplicationDocument(
+  options: DownloadFileOptions,
+): Promise<{ buffer: Buffer; fileName: string; contentType: string }> {
+  const { fileUrl, fallbackName, storagePath, driveFileId, userId, origin } =
+    options;
+
   if (storagePath?.trim()) {
     const supabase = getSupabaseAdminClient();
     const { data, error } = await supabase.storage.from(BUCKET).download(storagePath);
@@ -40,11 +79,34 @@ export async function downloadFileFromUrl(
     };
   }
 
-  const driveId = extractGoogleDriveFileId(fileUrl);
+  const resolvedDriveId = resolveDriveFileId(driveFileId, fileUrl);
 
-  if (driveId && isGoogleDriveConfigured()) {
+  if (resolvedDriveId && userId && origin) {
     try {
-      const fromDrive = await downloadDriveFile(driveId);
+      if (await isUserGoogleDriveConnected(userId)) {
+        const fromDrive = await downloadUserDriveFile(
+          userId,
+          origin,
+          resolvedDriveId,
+        );
+        return {
+          buffer: fromDrive.buffer,
+          fileName: fromDrive.name,
+          contentType: fromDrive.mimeType,
+        };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/not connected|oauth is not configured/i.test(message)) {
+        throw error;
+      }
+      /* Fall through to service account / public download */
+    }
+  }
+
+  if (resolvedDriveId && isGoogleDriveConfigured()) {
+    try {
+      const fromDrive = await downloadDriveFile(resolvedDriveId);
       return {
         buffer: fromDrive.buffer,
         fileName: fromDrive.name,
@@ -55,11 +117,15 @@ export async function downloadFileFromUrl(
     }
   }
 
-  if (driveId) {
+  if (resolvedDriveId) {
     return downloadGoogleDrivePublicFile(
-      driveId,
+      resolvedDriveId,
       guessNameFromUrl(fileUrl, fallbackName),
     );
+  }
+
+  if (!fileUrl?.trim()) {
+    throw new Error("No file available to download.");
   }
 
   const res = await fetch(fileUrl, { redirect: "follow" });

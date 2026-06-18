@@ -123,3 +123,38 @@ export async function deleteUserGoogleDriveFile(
     throw error;
   }
 }
+
+export async function downloadUserDriveFile(
+  userId: string,
+  origin: string,
+  fileId: string,
+): Promise<{ buffer: Buffer; mimeType: string; name: string }> {
+  const settings = await getConnectedUserDriveSettings(userId);
+  if (!settings) {
+    throw new Error(
+      "Google Drive is not connected. Open Settings on the website and connect your Google account.",
+    );
+  }
+
+  const drive = await driveFromRefreshToken(
+    userId,
+    origin,
+    settings.refreshToken,
+  );
+
+  const meta = await drive.files.get({
+    fileId,
+    fields: "name, mimeType",
+  });
+
+  const media = await drive.files.get(
+    { fileId, alt: "media" },
+    { responseType: "arraybuffer" },
+  );
+
+  return {
+    buffer: Buffer.from(media.data as ArrayBuffer),
+    mimeType: meta.data.mimeType || "application/octet-stream",
+    name: meta.data.name || "file",
+  };
+}
