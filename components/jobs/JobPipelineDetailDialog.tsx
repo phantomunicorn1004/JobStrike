@@ -17,8 +17,8 @@ import type { PipelineCardJob } from "./JobPipelineCard";
 import type { StageDates } from "@/lib/jobs/pipelineCardUtils";
 import {
   cardNotes,
-  fromDatetimeLocalValue,
-  toDatetimeLocalValue,
+  fromDateLocalValue,
+  toDateLocalValue,
 } from "@/lib/jobs/pipelineCardUtils";
 
 export type PipelineCardDetailsUpdate = {
@@ -61,10 +61,10 @@ export function JobPipelineDetailDialog({
     const initialDates: Record<string, string> = {};
     for (const stage of stages) {
       const iso = job.stage_dates?.[stage.id] ?? "";
-      initialDates[stage.id] = toDatetimeLocalValue(iso);
+      initialDates[stage.id] = toDateLocalValue(iso);
     }
     if (!initialDates[currentStageId]) {
-      initialDates[currentStageId] = toDatetimeLocalValue(
+      initialDates[currentStageId] = toDateLocalValue(
         job.stage_entered_at || job.created_at,
       );
     }
@@ -79,7 +79,7 @@ export function JobPipelineDetailDialog({
   const handleSave = async () => {
     const parsedDates: StageDates = {};
     for (const stage of stages) {
-      const iso = fromDatetimeLocalValue(stageDates[stage.id] ?? "");
+      const iso = fromDateLocalValue(stageDates[stage.id] ?? "");
       if (iso) parsedDates[stage.id] = iso;
     }
 
@@ -105,10 +105,19 @@ export function JobPipelineDetailDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-1">
-          <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-1">
-            <p className="font-medium">{job.title || "—"}</p>
-            <p className="text-muted-foreground">{job.company_name || "—"}</p>
-            <p className="text-xs text-muted-foreground">{job.name || "—"}</p>
+          <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-1.5">
+            <p>
+              <span className="text-muted-foreground">Profile: </span>
+              <span className="font-medium">{job.name || "—"}</span>
+            </p>
+            <p>
+              <span className="text-muted-foreground">Title: </span>
+              <span className="font-medium">{job.title || "—"}</span>
+            </p>
+            <p>
+              <span className="text-muted-foreground">Company: </span>
+              <span className="font-medium">{job.company_name || "—"}</span>
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -124,7 +133,7 @@ export function JobPipelineDetailDialog({
                 >
                   <span className="truncate text-muted-foreground">{stage.name}</span>
                   <Input
-                    type="datetime-local"
+                    type="date"
                     value={stageDates[stage.id] ?? ""}
                     onChange={(e) =>
                       setStageDates((prev) => ({
@@ -132,7 +141,7 @@ export function JobPipelineDetailDialog({
                         [stage.id]: e.target.value,
                       }))
                     }
-                    className="h-8 w-[190px] text-xs"
+                    className="h-8 w-[150px] text-xs"
                   />
                 </label>
               ))}

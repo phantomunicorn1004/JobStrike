@@ -3,7 +3,8 @@
 CREATE TABLE IF NOT EXISTS pipeline_stages (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  sort_order INT NOT NULL DEFAULT 0
+  sort_order INT NOT NULL DEFAULT 0,
+  is_visible BOOLEAN NOT NULL DEFAULT true
 );
 
 -- Seed default stages (run once; ignore if already present)

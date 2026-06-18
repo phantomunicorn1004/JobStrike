@@ -37,6 +37,24 @@ export function fromDatetimeLocalValue(value: string): string | null {
   return d.toISOString();
 }
 
+export function toDateLocalValue(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+export function fromDateLocalValue(value: string): string | null {
+  if (!value.trim()) return null;
+  const parts = value.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null;
+  const [year, month, day] = parts;
+  const d = new Date(year, month - 1, day, 12, 0, 0, 0);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
 export function cardNotes(job: {
   source: "jobs" | "technical_jobs";
   note?: string;

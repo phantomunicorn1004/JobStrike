@@ -41,6 +41,8 @@ import {
 } from "@/components/ui/select";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
+  Eye,
+  EyeOff,
   ClipboardList,
   Workflow,
   CheckCircle,
@@ -56,13 +58,22 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type StageConfig = { id: string; name: string; sort_order: number };
+export type StageConfig = {
+  id: string;
+  name: string;
+  sort_order: number;
+  is_visible: boolean;
+};
 
 const DEFAULT_STAGES: StageConfig[] = [
-  { id: "applied", name: "Applied", sort_order: 0 },
-  { id: "technical", name: "Technical", sort_order: 1 },
-  { id: "final", name: "Final", sort_order: 2 },
+  { id: "applied", name: "Applied", sort_order: 0, is_visible: true },
+  { id: "technical", name: "Technical", sort_order: 1, is_visible: true },
+  { id: "final", name: "Final", sort_order: 2, is_visible: true },
 ];
+
+function stageIsVisible(stage: StageConfig): boolean {
+  return stage.is_visible !== false;
+}
 
 type DragPayload = {
   source: "jobs" | "technical_jobs";
@@ -196,7 +207,7 @@ export function JobsPipelineBoard() {
   const fetchStages = useCallback(async (): Promise<StageConfig[]> => {
     const { data, error } = await supabase
       .from("pipeline_stages")
-      .select("id, name, sort_order")
+      .select("id, name, sort_order, is_visible")
       .order("sort_order", { ascending: true });
     if (error) {
       console.error("Fetch stages error:", error);
@@ -208,7 +219,10 @@ export function JobsPipelineBoard() {
       setStages(DEFAULT_STAGES);
       return DEFAULT_STAGES;
     }
-    const list = data as StageConfig[];
+    const list = (data as StageConfig[]).map((stage) => ({
+      ...stage,
+      is_visible: stage.is_visible !== false,
+    }));
     setStages(list);
     return list;
   }, [supabase]);
@@ -693,10 +707,14 @@ export function JobsPipelineBoard() {
     let id = slug(name) || `stage-${Date.now()}`;
     const displayStages = stages.length ? stages : DEFAULT_STAGES;
     const maxOrder = displayStages.length ? Math.max(...displayStages.map((s) => s.sort_order)) : 0;
-    let { error } = await supabase.from("pipeline_stages").insert({ id, name, sort_order: maxOrder + 1 });
+    let { error } = await supabase
+      .from("pipeline_stages")
+      .insert({ id, name, sort_order: maxOrder + 1, is_visible: true });
     if (error?.code === "23505") {
       id = `${id}-${Date.now()}`;
-      const res = await supabase.from("pipeline_stages").insert({ id, name, sort_order: maxOrder + 1 });
+      const res = await supabase
+        .from("pipeline_stages")
+        .insert({ id, name, sort_order: maxOrder + 1, is_visible: true });
       error = res.error;
     }
     if (!error) {
@@ -730,6 +748,29 @@ export function JobsPipelineBoard() {
       await fetchStages();
     },
     [supabase, fetchStages]
+  );
+
+  const toggleStageVisibility = useCallback(
+    async (stageId: string, visible: boolean) => {
+      const current = stages.length ? stages : DEFAULT_STAGES;
+      const visibleCount = current.filter(stageIsVisible).length;
+      if (!visible && visibleCount <= 1) {
+        toast.error("At least one stage must remain visible.");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("pipeline_stages")
+        .update({ is_visible: visible })
+        .eq("id", stageId);
+      if (error) {
+        console.error("Toggle stage visibility error:", error);
+        toast.error("Could not update stage visibility.");
+        return;
+      }
+      await fetchStages();
+    },
+    [stages, supabase, fetchStages],
   );
 
   const persistStageOrder = useCallback(
@@ -794,6 +835,10 @@ export function JobsPipelineBoard() {
   };
 
   const displayStages = stages.length ? stages : DEFAULT_STAGES;
+  const visibleStages = useMemo(
+    () => displayStages.filter(stageIsVisible),
+    [displayStages],
+  );
 
   if (isLoading) {
     return (
@@ -819,8 +864,9 @@ export function JobsPipelineBoard() {
               <DialogTitle>Stages</DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
-              Drag stages to reorder. Add, remove, or rename stages. &quot;Applied&quot; is the
-              default and cannot be removed.
+              Drag stages to reorder. Add, remove, or rename stages. Use the eye icon to
+              show or hide a column on the board. &quot;Applied&quot; is the default and
+              cannot be removed.
             </p>
             <div className="space-y-2 py-2">
               {displayStages.map((stage) => (
@@ -832,6 +878,7 @@ export function JobsPipelineBoard() {
                     stageDropTargetId === stage.id &&
                       stageDragId !== stage.id &&
                       "border-primary bg-primary/5",
+                    !stageIsVisible(stage) && "opacity-60 bg-muted/20",
                   )}
                   onDragOver={(e) => handleStageDragOver(e, stage.id)}
                   onDrop={(e) => handleStageDrop(e, stage.id)}
@@ -870,6 +917,26 @@ export function JobsPipelineBoard() {
                   ) : (
                     <>
                       <span className="flex-1 font-medium">{stage.name}</span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        title={stageIsVisible(stage) ? "Hide column" : "Show column"}
+                        aria-label={
+                          stageIsVisible(stage)
+                            ? `Hide ${stage.name} column`
+                            : `Show ${stage.name} column`
+                        }
+                        onClick={() =>
+                          void toggleStageVisibility(stage.id, !stageIsVisible(stage))
+                        }
+                      >
+                        {stageIsVisible(stage) ? (
+                          <Eye className="h-4 w-4" />
+                        ) : (
+                          <EyeOff className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
                       <Button
                         size="icon"
                         variant="ghost"
@@ -1009,11 +1076,30 @@ export function JobsPipelineBoard() {
         )}
       </div>
 
+      {visibleStages.length === 0 ? (
+        <Card className="flex min-h-[320px] flex-col items-center justify-center gap-2 p-8 text-center">
+          <EyeOff className="h-8 w-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            All stages are hidden. Open Manage stages and use the eye icon to show at
+            least one column.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => setManageStagesOpen(true)}
+          >
+            <Settings2 className="h-4 w-4" />
+            Manage stages
+          </Button>
+        </Card>
+      ) : (
       <div
         className="grid min-h-0 w-full flex-1 gap-4"
-        style={{ gridTemplateColumns: `repeat(${displayStages.length}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(${visibleStages.length}, minmax(0, 1fr))` }}
       >
-        {displayStages.map((stage) => {
+        {visibleStages.map((stage) => {
           const stageId = stage.id;
           const jobs = getFilteredJobsForStage(stageId);
           const totalInStage = getJobsForStage(stageId).length;
@@ -1049,6 +1135,17 @@ export function JobsPipelineBoard() {
                       : jobs.length}
                   </span>
                 </div>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                  title={`Hide ${stage.name}`}
+                  aria-label={`Hide ${stage.name} column`}
+                  onClick={() => void toggleStageVisibility(stage.id, false)}
+                >
+                  <EyeOff className="h-3.5 w-3.5" />
+                </Button>
               </div>
               <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
                 {jobs.map((job) => (
@@ -1079,6 +1176,7 @@ export function JobsPipelineBoard() {
           );
         })}
       </div>
+      )}
 
       <JobPipelineDetailDialog
         open={detailTarget != null}
