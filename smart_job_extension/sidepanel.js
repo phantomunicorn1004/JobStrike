@@ -3051,7 +3051,8 @@ async function getJobContextForAi() {
     if (response && response.success) {
       return {
         job_title: response.job_title || '',
-        company_name: response.company_name || ''
+        company_name: response.company_name || '',
+        job_description: response.job_description || ''
       };
     }
   } catch (_) {}

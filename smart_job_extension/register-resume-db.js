@@ -119,8 +119,54 @@
     return {
       jobTitle: response.job_title || '',
       companyName: response.company_name || '',
-      jobLink: response.job_link || tab.url || ''
+      jobLink: response.job_link || tab.url || '',
+      jobDescription: response.job_description || '',
     };
+  }
+
+  function formatJobPostingForClipboard(job) {
+    const lines = [];
+    if (job.jobTitle) lines.push(`Job title: ${job.jobTitle}`);
+    if (job.companyName) lines.push(`Company: ${job.companyName}`);
+    if (job.jobLink) lines.push(`Job link: ${job.jobLink}`);
+    if (job.jobDescription) {
+      if (lines.length) lines.push('');
+      lines.push(job.jobDescription);
+    }
+    return lines.join('\n');
+  }
+
+  async function copyTextToClipboard(text) {
+    const value = String(text || '').trim();
+    if (!value) throw new Error('Nothing to copy.');
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      if (!document.execCommand('copy')) throw new Error('Copy failed.');
+    } finally {
+      textarea.remove();
+    }
+  }
+
+  async function copyJobDescriptionFromTab(showStatus) {
+    const job = await scrapeJobFromTab();
+    const text = formatJobPostingForClipboard(job);
+    if (!text.trim()) throw new Error('No job description found on this page.');
+    await copyTextToClipboard(text);
+    document.getElementById('regJobTitle').value = job.jobTitle;
+    document.getElementById('regCompany').value = job.companyName;
+    document.getElementById('regJobLink').value = job.jobLink;
+    setRegisterStatus('Job description copied to clipboard.', 'success');
+    if (showStatus) showStatus('Job description copied to clipboard.', 'success');
   }
 
   function setRegisterStatus(message, type) {
@@ -1124,6 +1170,7 @@
 
   function initRegisterResumeDb(showStatus) {
     const scrapeBtn = document.getElementById('regScrapeBtn');
+    const copyJdBtn = document.getElementById('regCopyJdBtn');
     const alreadyBtn = document.getElementById('regAlreadyBtn');
     const registerBtn = document.getElementById('registerJobBtn');
 
@@ -1251,6 +1298,20 @@
             setRegisterStatus(friendly, 'error');
             if (showStatus) showStatus(friendly, 'error');
           });
+      });
+    }
+
+    if (copyJdBtn) {
+      copyJdBtn.addEventListener('click', () => {
+        setRegisterStatus('Reading job description…', 'info');
+        copyJobDescriptionFromTab(showStatus).catch((err) => {
+          const msg = err.message || String(err);
+          const friendly = /receiving end does not exist/i.test(msg)
+            ? 'Cannot read this tab. Open a job posting page and reload it, then try Copy JD again.'
+            : msg;
+          setRegisterStatus(friendly, 'error');
+          if (showStatus) showStatus(friendly, 'error');
+        });
       });
     }
   }

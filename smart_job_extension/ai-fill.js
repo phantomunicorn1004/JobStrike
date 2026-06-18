@@ -96,6 +96,11 @@
     const jobLines = [];
     if (trim(job.job_title)) jobLines.push(`Job title: ${trim(job.job_title)}`);
     if (trim(job.company_name)) jobLines.push(`Company: ${trim(job.company_name)}`);
+    const description = trim(job.job_description);
+    if (description) {
+      const clipped = description.length > 12000 ? `${description.slice(0, 11997)}...` : description;
+      jobLines.push(`Job description:\n${clipped}`);
+    }
 
     return [
       jobLines.length ? `## Job posting\n${jobLines.join('\n')}` : '',
