@@ -1350,7 +1350,7 @@ export function ResumeDBPageClient() {
                                 <SelectValue placeholder="Status" />
                               </SelectTrigger>
                               <SelectContent align="end">
-                                <SelectItem value="registered">Registered</SelectItem>
+                                <SelectItem value="registered">Applied</SelectItem>
                                 {pipelineStages.map((stage) => (
                                   <SelectItem key={stage.id} value={stage.id}>
                                     {stage.name}
