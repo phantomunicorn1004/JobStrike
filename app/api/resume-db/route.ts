@@ -131,7 +131,7 @@ export async function GET(request: NextRequest) {
 
     const entries = await listApplications(user.id);
     const [stageMap, pipelineStages] = await Promise.all([
-      buildPipelineStageMap(entries),
+      buildPipelineStageMap(entries, user.id),
       listPipelineStages(),
     ]);
     return corsJson({
@@ -201,7 +201,7 @@ export async function PATCH(request: NextRequest) {
       if (!updated) {
         return corsJson({ ok: true });
       }
-      const stageMap = await buildPipelineStageMap([updated]);
+      const stageMap = await buildPipelineStageMap([updated], user.id);
       return corsJson({ ok: true, ...mapForList(updated, stageMap) });
     }
 
@@ -216,7 +216,7 @@ export async function PATCH(request: NextRequest) {
       if (!updated) {
         return corsJson({ ok: true });
       }
-      const stageMap = await buildPipelineStageMap([updated]);
+      const stageMap = await buildPipelineStageMap([updated], user.id);
       return corsJson({ ok: true, ...mapForList(updated, stageMap) });
     }
 
@@ -228,7 +228,7 @@ export async function PATCH(request: NextRequest) {
     if (!updated) {
       return corsJson({ ok: true });
     }
-    const stageMap = await buildPipelineStageMap([updated]);
+    const stageMap = await buildPipelineStageMap([updated], user.id);
     return corsJson({ ok: true, ...mapForList(updated, stageMap) });
   } catch (error) {
     console.error("Resume DB PATCH error:", error);

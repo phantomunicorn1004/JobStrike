@@ -47,10 +47,12 @@ export async function GET(request: NextRequest) {
         .eq("user_id", user.id),
       supabase
         .from("jobs")
-        .select("created_at, stage_entered_at, stage_dates"),
+        .select("created_at, stage_entered_at, stage_dates")
+        .eq("user_id", user.id),
       supabase
         .from("technical_jobs")
-        .select("created_at, stage_entered_at, stage_dates, stage_id"),
+        .select("created_at, stage_entered_at, stage_dates, stage_id")
+        .eq("user_id", user.id),
       supabase
         .from("pipeline_stages")
         .select("id, name, sort_order")

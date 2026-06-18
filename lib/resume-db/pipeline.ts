@@ -15,18 +15,24 @@ export function resumeDbMarker(applicationId: number): string {
 export async function deletePipelineCardsForApplication(
   applicationId: number,
   pipelineJobId: number | null,
+  userId: string,
 ): Promise<void> {
   const supabase = getSupabaseAdminClient();
   const marker = resumeDbMarker(applicationId);
 
   if (pipelineJobId) {
-    const { error } = await supabase.from("jobs").delete().eq("id", pipelineJobId);
+    const { error } = await supabase
+      .from("jobs")
+      .delete()
+      .eq("id", pipelineJobId)
+      .eq("user_id", userId);
     if (error) throw new Error(error.message);
   }
 
   const { error: techError } = await supabase
     .from("technical_jobs")
     .delete()
+    .eq("user_id", userId)
     .ilike("job_description", `%${marker}%`);
 
   if (techError) throw new Error(techError.message);
@@ -34,6 +40,7 @@ export async function deletePipelineCardsForApplication(
   const { error: jobsNoteError } = await supabase
     .from("jobs")
     .delete()
+    .eq("user_id", userId)
     .ilike("note", `%${marker}%`);
 
   if (jobsNoteError) throw new Error(jobsNoteError.message);
@@ -47,7 +54,7 @@ export async function deleteApplicationWithPipeline(
   const app = await getApplicationById(applicationId, userId);
   if (!app) throw new Error("Application not found.");
 
-  await deletePipelineCardsForApplication(applicationId, app.pipelineJobId);
+  await deletePipelineCardsForApplication(applicationId, app.pipelineJobId, userId);
   await deleteApplicationFiles(userId, origin, app);
   await deleteApplication(applicationId, userId);
 }
@@ -74,6 +81,7 @@ export async function addApplicationToPipeline(
   const { data, error } = await supabase
     .from("jobs")
     .insert({
+      user_id: userId,
       name: app.candidateName || "Candidate",
       title: app.jobTitle || "Role",
       company_name: app.company || "Company",
@@ -104,7 +112,7 @@ export async function removeApplicationFromPipeline(
   const app = await getApplicationById(applicationId, userId);
   if (!app) throw new Error("Application not found.");
 
-  await deletePipelineCardsForApplication(applicationId, app.pipelineJobId);
+  await deletePipelineCardsForApplication(applicationId, app.pipelineJobId, userId);
 
   await updateApplication(applicationId, userId, {
     apply: "Registered",
@@ -139,7 +147,8 @@ export async function syncPipelineJobFromApplication(
       resume_link: app.resumeUrl || "",
       note: noteParts.join("\n"),
     } as never)
-    .eq("id", app.pipelineJobId);
+    .eq("id", app.pipelineJobId)
+    .eq("user_id", userId);
 
   if (error) throw new Error(error.message);
 }

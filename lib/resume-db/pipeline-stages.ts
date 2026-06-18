@@ -84,6 +84,7 @@ export async function listPipelineStages(): Promise<PipelineStage[]> {
 
 export async function buildPipelineStageMap(
   applications: ResumeDbApplication[],
+  userId: string,
 ): Promise<Map<number, string | null>> {
   const map = new Map<number, string | null>();
   for (const app of applications) {
@@ -100,6 +101,7 @@ export async function buildPipelineStageMap(
     const { data: linkedJobs } = await supabase
       .from("jobs")
       .select("id")
+      .eq("user_id", userId)
       .in("id", pipelineJobIds);
     const linkedSet = new Set(
       ((linkedJobs ?? []) as Pick<JobRow, "id">[]).map((row) => row.id),
@@ -112,10 +114,15 @@ export async function buildPipelineStageMap(
   }
 
   const [{ data: markedJobs }, { data: markedTech }] = await Promise.all([
-    supabase.from("jobs").select("id, note").ilike("note", "%Resume DB #%"),
+    supabase
+      .from("jobs")
+      .select("id, note")
+      .eq("user_id", userId)
+      .ilike("note", "%Resume DB #%"),
     supabase
       .from("technical_jobs")
       .select("id, stage_id, job_description")
+      .eq("user_id", userId)
       .ilike("job_description", "%Resume DB #%"),
   ]);
 
@@ -147,6 +154,7 @@ type PipelineCard = {
 
 async function getPipelineCardForApplication(
   app: ResumeDbApplication,
+  userId: string,
 ): Promise<PipelineCard> {
   const supabase = getSupabaseAdminClient();
   const marker = resumeDbMarker(app.id);
@@ -156,6 +164,7 @@ async function getPipelineCardForApplication(
       .from("jobs")
       .select("id")
       .eq("id", app.pipelineJobId)
+      .eq("user_id", userId)
       .maybeSingle();
     if (data) {
       const job = data as Pick<JobRow, "id">;
@@ -166,6 +175,7 @@ async function getPipelineCardForApplication(
   const { data: jobByMarker } = await supabase
     .from("jobs")
     .select("id")
+    .eq("user_id", userId)
     .ilike("note", `%${marker}%`)
     .maybeSingle();
   if (jobByMarker) {
@@ -176,6 +186,7 @@ async function getPipelineCardForApplication(
   const { data: tech } = await supabase
     .from("technical_jobs")
     .select("id, stage_id")
+    .eq("user_id", userId)
     .ilike("job_description", `%${marker}%`)
     .maybeSingle();
   if (tech) {
@@ -206,7 +217,7 @@ export async function setApplicationPipelineStage(
   if (!app) throw new Error("Application not found.");
 
   const target = targetStageId?.trim() || null;
-  const current = await getPipelineCardForApplication(app);
+  const current = await getPipelineCardForApplication(app, userId);
 
   if (!target) {
     if (current.source) {
@@ -242,6 +253,7 @@ export async function setApplicationPipelineStage(
 
     const status = target === "final" ? "success" : "ongoing";
     const { error } = await supabase.from("technical_jobs").insert({
+      user_id: userId,
       name: app.candidateName || "Candidate",
       company_name: app.company || "Company",
       title: app.jobTitle || "Role",
@@ -268,6 +280,7 @@ export async function setApplicationPipelineStage(
       .from("jobs")
       .select("*")
       .eq("id", current.jobId)
+      .eq("user_id", userId)
       .single();
     if (loadError || !job) throw new Error(loadError?.message || "Pipeline job not found.");
 
@@ -283,6 +296,7 @@ export async function setApplicationPipelineStage(
     );
     const status = target === "final" ? "success" : "ongoing";
     const { error: insertError } = await supabase.from("technical_jobs").insert({
+      user_id: userId,
       name: jobRow.name,
       company_name: jobRow.company_name,
       title: jobRow.title,
@@ -300,7 +314,8 @@ export async function setApplicationPipelineStage(
     const { error: deleteError } = await supabase
       .from("jobs")
       .delete()
-      .eq("id", current.jobId);
+      .eq("id", current.jobId)
+      .eq("user_id", userId);
     if (deleteError) throw new Error(deleteError.message);
 
     await updateApplication(applicationId, userId, {
@@ -315,6 +330,7 @@ export async function setApplicationPipelineStage(
       .from("technical_jobs")
       .select("*")
       .eq("id", current.jobId)
+      .eq("user_id", userId)
       .single();
     if (loadError || !job) {
       throw new Error(loadError?.message || "Pipeline job not found.");
@@ -335,6 +351,7 @@ export async function setApplicationPipelineStage(
       const { data: inserted, error: insertError } = await supabase
         .from("jobs")
         .insert({
+          user_id: userId,
           name: jobRow.name,
           title: jobRow.title,
           company_name: jobRow.company_name,
@@ -353,7 +370,8 @@ export async function setApplicationPipelineStage(
       const { error: deleteError } = await supabase
         .from("technical_jobs")
         .delete()
-        .eq("id", current.jobId);
+        .eq("id", current.jobId)
+        .eq("user_id", userId);
       if (deleteError) throw new Error(deleteError.message);
 
       const insertedJob = inserted as Pick<JobRow, "id">;
@@ -375,7 +393,8 @@ export async function setApplicationPipelineStage(
         stage_entered_at: enteredAt,
         stage_dates: stageDates,
       } as never)
-      .eq("id", current.jobId);
+      .eq("id", current.jobId)
+      .eq("user_id", userId);
     if (error) throw new Error(error.message);
   }
 }

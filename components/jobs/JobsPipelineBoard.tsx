@@ -23,7 +23,6 @@ import {
 import { JobPipelineDetailDialog, type PipelineCardDetailsUpdate } from "./JobPipelineDetailDialog";
 import {
   mergeStageDate,
-  normalizeStageDates,
   cardNotes,
 } from "@/lib/jobs/pipelineCardUtils";
 import { toast } from "sonner";
@@ -230,13 +229,17 @@ export function JobsPipelineBoard() {
   const fetchAll = useCallback(async () => {
     try {
       const stageList = await fetchStages();
-      const [jobsRes, techRes, profilesRes] = await Promise.all([
-        supabase.from("jobs").select("*").order("id", { ascending: false }),
-        supabase.from("technical_jobs").select("*").order("id", { ascending: false }),
+      const [pipelineRes, profilesRes] = await Promise.all([
+        fetch("/api/pipeline", { credentials: "same-origin" }),
         fetch("/api/profiles", { credentials: "same-origin" }),
       ]);
-      if (jobsRes.error) throw jobsRes.error;
-      if (techRes.error) throw techRes.error;
+      if (!pipelineRes.ok) {
+        const err = await pipelineRes.json().catch(() => ({}));
+        throw new Error(
+          (err as { error?: string }).error || "Failed to load pipeline.",
+        );
+      }
+      const pipelineData = await pipelineRes.json();
       if (profilesRes.ok) {
         const profileData = await profilesRes.json().catch(() => ({}));
         setProfiles(
@@ -249,53 +252,13 @@ export function JobsPipelineBoard() {
         );
       }
 
-      const appliedRows: AppliedJob[] = (jobsRes.data || []).map((row: Record<string, unknown>) => {
-        const createdAt = row.created_at as string;
-        const stageEnteredAt = (row.stage_entered_at as string | null) ?? createdAt;
-        return {
-          id: row.id as number,
-          source: "jobs",
-          name: row.name as string,
-          title: row.title as string,
-          company_name: row.company_name as string,
-          job_link: row.job_link as string,
-          resume_link: row.resume_link as string,
-          note: (row.note as string) ?? "",
-          created_at: createdAt,
-          stage_entered_at: stageEnteredAt,
-          stage_dates: normalizeStageDates(row.stage_dates, "applied", stageEnteredAt),
-          recruiter_name: (row.recruiter_name as string | null) ?? null,
-          recruiter_contact: (row.recruiter_contact as string | null) ?? null,
-        };
-      });
+      const appliedRows: AppliedJob[] = (pipelineData.applied ?? []).map(
+        (row: AppliedJob) => ({ ...row, source: "jobs" as const }),
+      );
 
-      const techRows: TechnicalJob[] = (techRes.data || []).map((row: Record<string, unknown>) => {
-        const stageId = (row.stage_id as string | null) ?? "technical";
-        const createdAt = row.created_at as string;
-        const stageEnteredAt = (row.stage_entered_at as string | null) ?? createdAt;
-        return {
-          id: row.id as number,
-          source: "technical_jobs",
-          stage_id: stageId,
-          name: row.name as string,
-          company_name: row.company_name as string,
-          title: row.title as string,
-          resume_link: row.resume_link as string,
-          job_description: (row.job_description as string | null) ?? null,
-          recruiter_name: row.recruiter_name as string | null,
-          recruiter_contact: row.recruiter_contact as string | null,
-          first_round_date: row.first_round_date as string | null,
-          first_round_result: row.first_round_result as string | null,
-          second_round_date: row.second_round_date as string | null,
-          second_round_result: row.second_round_result as string | null,
-          third_round_date: row.third_round_date as string | null,
-          third_round_result: row.third_round_result as string | null,
-          status: row.status as string | null,
-          created_at: createdAt,
-          stage_entered_at: stageEnteredAt,
-          stage_dates: normalizeStageDates(row.stage_dates, stageId, stageEnteredAt),
-        };
-      });
+      const techRows: TechnicalJob[] = (pipelineData.technicalJobs ?? []).map(
+        (row: TechnicalJob) => ({ ...row, source: "technical_jobs" as const }),
+      );
 
       setApplied(appliedRows);
 
@@ -315,7 +278,21 @@ export function JobsPipelineBoard() {
     } finally {
       setIsLoading(false);
     }
-  }, [supabase, fetchStages]);
+  }, [fetchStages]);
+
+  const pipelineFetch = useCallback(
+    async (url: string, init?: RequestInit) => {
+      const res = await fetch(url, { credentials: "same-origin", ...init });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          (data as { error?: string }).error || "Pipeline request failed.",
+        );
+      }
+      return data;
+    },
+    [],
+  );
 
   useEffect(() => {
     fetchAll();
@@ -389,18 +366,17 @@ export function JobsPipelineBoard() {
         update.stage_dates[currentStageId] ?? job.stage_entered_at ?? job.created_at;
 
       try {
+        await pipelineFetch("/api/pipeline/cards", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source: job.source,
+            id: job.id,
+            currentStageId,
+            update,
+          }),
+        });
         if (job.source === "jobs") {
-          const { error } = await supabase
-            .from("jobs")
-            .update({
-              stage_dates: update.stage_dates,
-              recruiter_name: update.recruiter_name || null,
-              recruiter_contact: update.recruiter_contact || null,
-              note: update.notes,
-              stage_entered_at: stageEnteredAt,
-            })
-            .eq("id", job.id);
-          if (error) throw error;
           patchJobInState({
             ...job,
             stage_dates: update.stage_dates,
@@ -410,17 +386,6 @@ export function JobsPipelineBoard() {
             stage_entered_at: stageEnteredAt,
           });
         } else {
-          const { error } = await supabase
-            .from("technical_jobs")
-            .update({
-              stage_dates: update.stage_dates,
-              recruiter_name: update.recruiter_name || null,
-              recruiter_contact: update.recruiter_contact || null,
-              job_description: update.notes,
-              stage_entered_at: stageEnteredAt,
-            })
-            .eq("id", job.id);
-          if (error) throw error;
           patchJobInState({
             ...job,
             stage_dates: update.stage_dates,
@@ -437,7 +402,7 @@ export function JobsPipelineBoard() {
         throw e;
       }
     },
-    [supabase, patchJobInState, detailTarget?.stageId],
+    [patchJobInState, detailTarget?.stageId, pipelineFetch],
   );
 
   const moveCard = useCallback(
@@ -499,27 +464,18 @@ export function JobsPipelineBoard() {
         setApplied((prev) => prev.filter((j) => j.id !== job.id));
         relocateTechnicalJobInState(setJobsByStage, optimisticTech, targetStageId, {});
         try {
-          const { data, error } = await supabase
-            .from("technical_jobs")
-            .insert({
-              name: job.name ?? "",
-              company_name: job.company_name ?? "",
-              title: job.title ?? "",
-              resume_link: job.resume_link ?? "",
-              stage_id: targetStageId,
-              status,
-              stage_entered_at: enteredAt,
-              stage_dates: stageDates,
-              job_description: cardNotes(job),
-              recruiter_name: job.recruiter_name ?? null,
-              recruiter_contact: job.recruiter_contact ?? null,
-            })
-            .select();
-          if (error) throw error;
-          await supabase.from("jobs").delete().eq("id", job.id);
-          const newRow = data?.[0] as Record<string, unknown> | undefined;
-          if (newRow) {
-            const newId = newRow.id as number;
+          const result = await pipelineFetch("/api/pipeline/move", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              source: payload.source,
+              id: payload.id,
+              stageId: payload.stageId,
+              targetStageId,
+            }),
+          });
+          const newId = (result as { id?: number }).id;
+          if (newId != null && newId !== job.id) {
             setJobsByStage((prev) => {
               const next: Record<string, TechnicalJob[]> = {};
               for (const [sid, list] of Object.entries(prev)) {
@@ -582,31 +538,24 @@ export function JobsPipelineBoard() {
         };
         setApplied((prev) => [optimisticApplied, ...prev.filter((j) => j.id !== job.id)]);
         try {
-          const { data, error } = await supabase
-            .from("jobs")
-            .insert({
-              name: job.name,
-              title: job.title,
-              company_name: job.company_name,
-              job_link: "",
-              resume_link: job.resume_link,
-              note: cardNotes(job),
-              recruiter_name: job.recruiter_name ?? null,
-              recruiter_contact: job.recruiter_contact ?? null,
-              stage_entered_at: enteredAt,
-              stage_dates: stageDates,
-            })
-            .select();
-          if (error) throw error;
-          await supabase.from("technical_jobs").delete().eq("id", job.id);
-          const newRow = data?.[0] as Record<string, unknown> | undefined;
-          if (newRow) {
+          const result = await pipelineFetch("/api/pipeline/move", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              source: payload.source,
+              id: payload.id,
+              stageId: payload.stageId,
+              targetStageId,
+            }),
+          });
+          const newId = (result as { id?: number }).id;
+          if (newId != null && newId !== job.id) {
             setApplied((prev) =>
               prev.map((j) =>
                 j.id === job.id
                   ? {
                       ...j,
-                      id: newRow.id as number,
+                      id: newId,
                     }
                   : j,
               ),
@@ -643,16 +592,16 @@ export function JobsPipelineBoard() {
         status,
       });
       try {
-        const { error } = await supabase
-          .from("technical_jobs")
-          .update({
-            stage_id: targetStageId,
-            status,
-            stage_entered_at: enteredAt,
-            stage_dates: stageDates,
-          })
-          .eq("id", job.id);
-        if (error) throw error;
+        await pipelineFetch("/api/pipeline/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source: payload.source,
+            id: payload.id,
+            stageId: payload.stageId,
+            targetStageId,
+          }),
+        });
       } catch (e) {
         const msg =
           e instanceof Error
@@ -667,7 +616,7 @@ export function JobsPipelineBoard() {
         finishMove();
       }
     },
-    [applied, jobsByStage, supabase, fetchAll],
+    [applied, jobsByStage, fetchAll, pipelineFetch],
   );
 
   const handleDrop = useCallback(
@@ -728,15 +677,20 @@ export function JobsPipelineBoard() {
     async (stageId: string) => {
       if (stageId === "applied") return;
       const fallback = stages.find((s) => s.id !== "applied" && s.id !== stageId)?.id ?? "technical";
-      const jobsInStage = jobsByStage[stageId] ?? [];
-      for (const job of jobsInStage) {
-        await supabase.from("technical_jobs").update({ stage_id: fallback }).eq("id", job.id);
-      }
+      await pipelineFetch("/api/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reassignStage",
+          fromStageId: stageId,
+          toStageId: fallback,
+        }),
+      });
       await supabase.from("pipeline_stages").delete().eq("id", stageId);
       await fetchStages();
       await fetchAll();
     },
-    [stages, jobsByStage, supabase, fetchStages, fetchAll]
+    [stages, supabase, fetchStages, fetchAll, pipelineFetch],
   );
 
   const renameStage = useCallback(
