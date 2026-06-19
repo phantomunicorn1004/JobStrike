@@ -406,6 +406,42 @@ main {
   border-radius: 8px;
 }
 
+.register-field-with-action {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.register-field-with-action input {
+  flex: 1;
+  min-width: 0;
+}
+
+.register-field-copy-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-elevated, var(--card));
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.register-field-copy-btn:hover {
+  color: var(--text);
+  border-color: var(--primary);
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+}
+
+.register-field-copy-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
 .register-files-row {
   grid-column: 1 / -1;
   display: grid;

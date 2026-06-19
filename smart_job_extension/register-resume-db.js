@@ -1168,6 +1168,24 @@
     }, 30000);
   }
 
+  function wireRegisterFieldCopy(buttonId, inputId, successMessage, errorFallback, showStatus) {
+    const btn = document.getElementById(buttonId);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const value = document.getElementById(inputId)?.value?.trim() || '';
+      copyTextToClipboard(value)
+        .then(() => {
+          setRegisterStatus(successMessage, 'success');
+          if (showStatus) showStatus(successMessage, 'success');
+        })
+        .catch((err) => {
+          const msg = err.message || errorFallback;
+          setRegisterStatus(msg, 'error');
+          if (showStatus) showStatus(msg, 'error');
+        });
+    });
+  }
+
   function initRegisterResumeDb(showStatus) {
     const scrapeBtn = document.getElementById('regScrapeBtn');
     const copyJdBtn = document.getElementById('regCopyJdBtn');
@@ -1300,6 +1318,10 @@
           });
       });
     }
+
+    wireRegisterFieldCopy('regJobTitleCopyBtn', 'regJobTitle', 'Job title copied to clipboard.', 'Could not copy job title.', showStatus);
+    wireRegisterFieldCopy('regCompanyCopyBtn', 'regCompany', 'Company copied to clipboard.', 'Could not copy company name.', showStatus);
+    wireRegisterFieldCopy('regJobLinkCopyBtn', 'regJobLink', 'Job link copied to clipboard.', 'Could not copy job link.', showStatus);
 
     if (copyJdBtn) {
       copyJdBtn.addEventListener('click', () => {
