@@ -9,6 +9,7 @@ import {
   Database,
   LayoutDashboard,
   LogOut,
+  MessageSquareText,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -64,6 +65,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Resume Tailor",
     icon: FileEdit,
     isActive: (pathname) => pathname.startsWith("/resume-tailor"),
+  },
+  {
+    href: "/prompt-builder",
+    label: "Prompt Builder",
+    icon: MessageSquareText,
+    isActive: (pathname) => pathname.startsWith("/prompt-builder"),
   },
 ];
 
