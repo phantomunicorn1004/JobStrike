@@ -35,22 +35,11 @@ function FieldBlock({
   rows?: number;
 }) {
   return (
-    <section className="flex min-h-0 flex-col gap-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <label htmlFor={id} className="text-sm font-medium text-foreground">
-            {label}
-          </label>
-          {hint ? (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          ) : null}
-        </div>
-        {onClear ? (
-          <Button type="button" variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-xs" onClick={onClear}>
-            Clear
-          </Button>
-        ) : null}
-      </div>
+    <div className="flex w-full flex-col gap-1.5">
+      <label htmlFor={id} className="text-sm font-medium text-foreground">
+        {label}
+      </label>
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       <Textarea
         id={id}
         value={value}
@@ -59,9 +48,20 @@ function FieldBlock({
         placeholder={placeholder}
         rows={rows}
         spellCheck={false}
-        className={`min-h-[120px] resize-y text-sm leading-relaxed ${mono ? "font-mono text-xs" : ""}`}
+        className={`field-sizing-fixed w-full min-h-[120px] resize-y text-sm leading-relaxed ${mono ? "font-mono text-xs" : ""}`}
       />
-    </section>
+      {onClear ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 w-fit px-2 text-xs"
+          onClick={onClear}
+        >
+          Clear
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -173,36 +173,15 @@ export function PromptBuilderPageClient() {
 
   return (
     <JobsLayout>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-        <header className="shrink-0">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+        <header>
           <h1 className="text-lg font-semibold">Prompt Builder</h1>
           <p className="text-xs text-muted-foreground">
             Placeholders: {"{resume_template_json}"}, {"{job_description}"}
           </p>
         </header>
 
-        <div className="sticky top-0 z-10 -mx-1 flex flex-wrap gap-1.5 rounded-lg border border-border bg-background/95 p-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <Button type="button" size="sm" onClick={handleBuild}>
-            Build
-          </Button>
-          <Button type="button" size="sm" variant="secondary" onClick={handleBuildAndCopy}>
-            Build + Copy
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={handleCopy} disabled={!output.trim()}>
-            Copy output
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={handleResetTemplate}>
-            Reset template
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={handleClearInputs}>
-            Clear inputs
-          </Button>
-          <Button type="button" size="sm" variant="ghost" onClick={handleClearAll}>
-            Clear all
-          </Button>
-        </div>
-
-        <div className="flex flex-col gap-4">
+        <div className="flex w-full flex-col gap-5">
           <FieldBlock
             id="prompt-template"
             label="Original prompt"
@@ -234,18 +213,39 @@ export function PromptBuilderPageClient() {
             placeholder="Paste job description..."
             rows={8}
           />
-
-          <FieldBlock
-            id="prompt-output"
-            label="Final prompt"
-            hint="Click Build to generate"
-            value={output}
-            readOnly
-            placeholder="Output appears here..."
-            mono
-            rows={12}
-          />
         </div>
+
+        <div className="flex w-full flex-col gap-2">
+          <Button type="button" className="w-full" onClick={handleBuild}>
+            Build
+          </Button>
+          <Button type="button" variant="secondary" className="w-full" onClick={handleBuildAndCopy}>
+            Build + Copy
+          </Button>
+          <Button type="button" variant="outline" className="w-full" onClick={handleCopy} disabled={!output.trim()}>
+            Copy output
+          </Button>
+          <Button type="button" variant="outline" className="w-full" onClick={handleResetTemplate}>
+            Reset template
+          </Button>
+          <Button type="button" variant="outline" className="w-full" onClick={handleClearInputs}>
+            Clear inputs
+          </Button>
+          <Button type="button" variant="ghost" className="w-full" onClick={handleClearAll}>
+            Clear all
+          </Button>
+        </div>
+
+        <FieldBlock
+          id="prompt-output"
+          label="Final prompt"
+          hint="Click Build to generate"
+          value={output}
+          readOnly
+          placeholder="Output appears here..."
+          mono
+          rows={12}
+        />
       </div>
     </JobsLayout>
   );
