@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remote Helper Ext</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="launcher.css">
+  <script src="theme.js"></script>
+</head>
+<body class="launcher-popup">
+  <div class="launcher-shell">
+    <header class="launcher-header">
+      <img src="icons/icon-32.png" alt="" width="28" height="28" class="launcher-icon">
+      <div class="launcher-brand-text">
+        <div class="launcher-eyebrow">Remote Helper Ext</div>
+        <h1 class="launcher-title">Job Assistant</h1>
+      </div>
+    </header>
+
+    <section class="launcher-section" aria-labelledby="preparedLinksHeading">
+      <h2 class="launcher-section-title" id="preparedLinksHeading">Prepared job links</h2>
+      <p class="launcher-hint">Paste one job URL per line (commas also work), then open them as new tabs.</p>
+      <textarea
+        id="preparedLinksInput"
+        class="launcher-textarea"
+        rows="8"
+        spellcheck="false"
+        placeholder="https://company.com/jobs/123&#10;https://boards.greenhouse.io/..."
+      ></textarea>
+      <div class="launcher-meta">
+        <span id="preparedLinksCount" class="launcher-count">0 links</span>
+      </div>
+      <button type="button" class="launcher-btn launcher-btn-primary" id="startApplyBtn">Start to apply</button>
+      <p id="launcherStatus" class="launcher-status" role="status" aria-live="polite"></p>
+    </section>
+
+    <div class="launcher-divider" role="separator" aria-hidden="true"></div>
+
+    <section class="launcher-section launcher-section-compact">
+      <button type="button" class="launcher-btn launcher-sidebar-btn" id="openSidebarBtn">
+        Open Job Assistant sidebar
+      </button>
+    </section>
+  </div>
+  <script src="launcher.js"></script>
+</body>
+</html>
