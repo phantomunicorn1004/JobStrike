@@ -19,6 +19,7 @@ function FieldBlock({
   value,
   onChange,
   onClear,
+  headerActions,
   readOnly = false,
   placeholder,
   mono = false,
@@ -31,6 +32,7 @@ function FieldBlock({
   value: string;
   onChange?: (value: string) => void;
   onClear?: () => void;
+  headerActions?: React.ReactNode;
   readOnly?: boolean;
   placeholder?: string;
   mono?: boolean;
@@ -39,14 +41,18 @@ function FieldBlock({
 }) {
   return (
     <div className={cn("flex min-h-0 w-full flex-col gap-1.5", grow && "h-full flex-1")}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 shrink-0">
           <label htmlFor={id} className="text-sm font-medium text-foreground">
             {label}
           </label>
           {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
         </div>
-        {onClear ? (
+        {headerActions ? (
+          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5">
+            {headerActions}
+          </div>
+        ) : onClear ? (
           <Button
             type="button"
             variant="ghost"
@@ -192,27 +198,6 @@ export function PromptBuilderPageClient() {
           </p>
         </header>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button type="button" size="sm" onClick={handleBuild}>
-            Build
-          </Button>
-          <Button type="button" size="sm" variant="secondary" onClick={handleBuildAndCopy}>
-            Build + Copy
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={handleCopy} disabled={!output.trim()}>
-            Copy output
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={handleResetTemplate}>
-            Reset template
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={handleClearInputs}>
-            Clear inputs
-          </Button>
-          <Button type="button" size="sm" variant="ghost" onClick={handleClearAll}>
-            Clear all
-          </Button>
-        </div>
-
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
           <div className="flex min-h-0 flex-col gap-4">
             <FieldBlock
@@ -259,6 +244,28 @@ export function PromptBuilderPageClient() {
             mono
             rows={20}
             grow
+            headerActions={
+              <>
+                <Button type="button" size="sm" onClick={handleBuild}>
+                  Build
+                </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={handleBuildAndCopy}>
+                  Build + Copy
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={handleCopy} disabled={!output.trim()}>
+                  Copy
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={handleResetTemplate}>
+                  Reset template
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={handleClearInputs}>
+                  Clear inputs
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={handleClearAll}>
+                  Clear all
+                </Button>
+              </>
+            }
           />
         </div>
       </div>
