@@ -5,6 +5,7 @@ import JobsLayout from "@/app/jobs-layout";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
   buildPrompt,
   DEFAULT_PROMPT_TEMPLATE,
@@ -22,6 +23,7 @@ function FieldBlock({
   placeholder,
   mono = false,
   rows = 8,
+  grow = false,
 }: {
   id: string;
   label: string;
@@ -33,13 +35,29 @@ function FieldBlock({
   placeholder?: string;
   mono?: boolean;
   rows?: number;
+  grow?: boolean;
 }) {
   return (
-    <div className="flex w-full flex-col gap-1.5">
-      <label htmlFor={id} className="text-sm font-medium text-foreground">
-        {label}
-      </label>
-      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+    <div className={cn("flex min-h-0 w-full flex-col gap-1.5", grow && "h-full flex-1")}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <label htmlFor={id} className="text-sm font-medium text-foreground">
+            {label}
+          </label>
+          {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+        </div>
+        {onClear ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 px-2 text-xs"
+            onClick={onClear}
+          >
+            Clear
+          </Button>
+        ) : null}
+      </div>
       <Textarea
         id={id}
         value={value}
@@ -48,19 +66,12 @@ function FieldBlock({
         placeholder={placeholder}
         rows={rows}
         spellCheck={false}
-        className={`field-sizing-fixed w-full min-h-[120px] resize-y text-sm leading-relaxed ${mono ? "font-mono text-xs" : ""}`}
+        className={cn(
+          "field-sizing-fixed w-full resize-y text-sm leading-relaxed",
+          mono && "font-mono text-xs",
+          grow ? "min-h-[200px] flex-1" : "min-h-[120px]",
+        )}
       />
-      {onClear ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 w-fit px-2 text-xs"
-          onClick={onClear}
-        >
-          Clear
-        </Button>
-      ) : null}
     </div>
   );
 }
@@ -173,79 +184,83 @@ export function PromptBuilderPageClient() {
 
   return (
     <JobsLayout>
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
-        <header>
+      <div className="flex h-full min-h-0 w-full flex-col gap-4">
+        <header className="shrink-0">
           <h1 className="text-lg font-semibold">Prompt Builder</h1>
           <p className="text-xs text-muted-foreground">
             Placeholders: {"{resume_template_json}"}, {"{job_description}"}
           </p>
         </header>
 
-        <div className="flex w-full flex-col gap-5">
-          <FieldBlock
-            id="prompt-template"
-            label="Original prompt"
-            hint="Template with placeholders"
-            value={template}
-            onChange={setTemplate}
-            onClear={() => setTemplate("")}
-            mono
-            rows={10}
-          />
-
-          <FieldBlock
-            id="resume-template-json"
-            label="resume_template_json"
-            value={resumeTemplateJson}
-            onChange={setResumeTemplateJson}
-            onClear={() => setResumeTemplateJson("")}
-            placeholder='{"profileTitle":"..."}'
-            mono
-            rows={8}
-          />
-
-          <FieldBlock
-            id="job-description"
-            label="job_description"
-            value={jobDescription}
-            onChange={setJobDescription}
-            onClear={() => setJobDescription("")}
-            placeholder="Paste job description..."
-            rows={8}
-          />
-        </div>
-
-        <div className="flex w-full flex-col gap-2">
-          <Button type="button" className="w-full" onClick={handleBuild}>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button type="button" size="sm" onClick={handleBuild}>
             Build
           </Button>
-          <Button type="button" variant="secondary" className="w-full" onClick={handleBuildAndCopy}>
+          <Button type="button" size="sm" variant="secondary" onClick={handleBuildAndCopy}>
             Build + Copy
           </Button>
-          <Button type="button" variant="outline" className="w-full" onClick={handleCopy} disabled={!output.trim()}>
+          <Button type="button" size="sm" variant="outline" onClick={handleCopy} disabled={!output.trim()}>
             Copy output
           </Button>
-          <Button type="button" variant="outline" className="w-full" onClick={handleResetTemplate}>
+          <Button type="button" size="sm" variant="outline" onClick={handleResetTemplate}>
             Reset template
           </Button>
-          <Button type="button" variant="outline" className="w-full" onClick={handleClearInputs}>
+          <Button type="button" size="sm" variant="outline" onClick={handleClearInputs}>
             Clear inputs
           </Button>
-          <Button type="button" variant="ghost" className="w-full" onClick={handleClearAll}>
+          <Button type="button" size="sm" variant="ghost" onClick={handleClearAll}>
             Clear all
           </Button>
         </div>
 
-        <FieldBlock
-          id="prompt-output"
-          label="Final prompt"
-          hint="Click Build to generate"
-          value={output}
-          readOnly
-          placeholder="Output appears here..."
-          mono
-          rows={12}
-        />
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
+          <div className="flex min-h-0 flex-col gap-4">
+            <FieldBlock
+              id="prompt-template"
+              label="Original prompt"
+              hint="Template with placeholders"
+              value={template}
+              onChange={setTemplate}
+              onClear={() => setTemplate("")}
+              mono
+              rows={8}
+              grow
+            />
+
+            <FieldBlock
+              id="resume-template-json"
+              label="resume_template_json"
+              value={resumeTemplateJson}
+              onChange={setResumeTemplateJson}
+              onClear={() => setResumeTemplateJson("")}
+              placeholder='{"profileTitle":"..."}'
+              mono
+              rows={6}
+            />
+
+            <FieldBlock
+              id="job-description"
+              label="job_description"
+              value={jobDescription}
+              onChange={setJobDescription}
+              onClear={() => setJobDescription("")}
+              placeholder="Paste job description..."
+              rows={6}
+            />
+          </div>
+
+          <FieldBlock
+            id="prompt-output"
+            label="Final prompt"
+            hint="Click Build to generate"
+            value={output}
+            readOnly
+            placeholder="Output appears here..."
+            mono
+            rows={20}
+            grow
+          />
+        </div>
       </div>
     </JobsLayout>
   );
