@@ -2,17 +2,68 @@
 
 import React, { useEffect, useState } from "react";
 import JobsLayout from "@/app/jobs-layout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Copy, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   buildPrompt,
   DEFAULT_PROMPT_TEMPLATE,
   PROMPT_BUILDER_STORAGE_KEYS,
 } from "@/lib/promptBuilder";
+
+function FieldBlock({
+  id,
+  label,
+  hint,
+  value,
+  onChange,
+  onClear,
+  readOnly = false,
+  placeholder,
+  mono = false,
+  rows = 8,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  value: string;
+  onChange?: (value: string) => void;
+  onClear?: () => void;
+  readOnly?: boolean;
+  placeholder?: string;
+  mono?: boolean;
+  rows?: number;
+}) {
+  return (
+    <section className="flex min-h-0 flex-col gap-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <label htmlFor={id} className="text-sm font-medium text-foreground">
+            {label}
+          </label>
+          {hint ? (
+            <p className="text-xs text-muted-foreground">{hint}</p>
+          ) : null}
+        </div>
+        {onClear ? (
+          <Button type="button" variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-xs" onClick={onClear}>
+            Clear
+          </Button>
+        ) : null}
+      </div>
+      <Textarea
+        id={id}
+        value={value}
+        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+        readOnly={readOnly}
+        placeholder={placeholder}
+        rows={rows}
+        spellCheck={false}
+        className={`min-h-[120px] resize-y text-sm leading-relaxed ${mono ? "font-mono text-xs" : ""}`}
+      />
+    </section>
+  );
+}
 
 export function PromptBuilderPageClient() {
   const [template, setTemplate] = useState(DEFAULT_PROMPT_TEMPLATE);
@@ -57,158 +108,144 @@ export function PromptBuilderPageClient() {
       resumeTemplateJson,
       jobDescription,
     );
-
     setOutput(prompt);
-
     if (missingPlaceholders.length > 0) {
-      toast.warning(
-        `Built with empty values for: ${missingPlaceholders.join(", ")}`,
-      );
+      toast.warning(`Built with empty: ${missingPlaceholders.join(", ")}`);
       return;
     }
-
     toast.success("Prompt built");
+  };
+
+  const handleBuildAndCopy = async () => {
+    const { prompt, missingPlaceholders } = buildPrompt(
+      template,
+      resumeTemplateJson,
+      jobDescription,
+    );
+    setOutput(prompt);
+    if (!prompt.trim()) {
+      toast.error("Nothing to copy.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(prompt);
+      if (missingPlaceholders.length > 0) {
+        toast.warning(`Copied (empty: ${missingPlaceholders.join(", ")})`);
+      } else {
+        toast.success("Built and copied");
+      }
+    } catch {
+      toast.error("Built, but copy failed");
+    }
   };
 
   const handleCopy = async () => {
     if (!output.trim()) {
-      toast.error("Nothing to copy. Build a prompt first.");
+      toast.error("Build a prompt first.");
       return;
     }
-
     try {
       await navigator.clipboard.writeText(output);
-      toast.success("Copied to clipboard");
+      toast.success("Copied");
     } catch {
-      toast.error("Could not copy to clipboard");
+      toast.error("Copy failed");
     }
   };
 
-  const handleClear = () => {
+  const handleClearAll = () => {
     setTemplate(DEFAULT_PROMPT_TEMPLATE);
     setResumeTemplateJson("");
     setJobDescription("");
     setOutput("");
-    toast.success("Cleared");
+    toast.success("Cleared all");
+  };
+
+  const handleResetTemplate = () => {
+    setTemplate(DEFAULT_PROMPT_TEMPLATE);
+    toast.success("Template reset");
+  };
+
+  const handleClearInputs = () => {
+    setResumeTemplateJson("");
+    setJobDescription("");
+    toast.success("Inputs cleared");
   };
 
   return (
     <JobsLayout>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-4 md:p-6">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Prompt Builder</h1>
-          <p className="text-sm text-muted-foreground">
-            Merge a prompt template with resume JSON and a job description into one copy-ready prompt.
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+        <header className="shrink-0">
+          <h1 className="text-lg font-semibold">Prompt Builder</h1>
+          <p className="text-xs text-muted-foreground">
+            Placeholders: {"{resume_template_json}"}, {"{job_description}"}
           </p>
-        </div>
+        </header>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">1. Original prompt</CardTitle>
-            <CardDescription>
-              Include placeholders{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">{"{resume_template_json}"}</code>{" "}
-              and{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">{"{job_description}"}</code>.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Label htmlFor="prompt-template" className="sr-only">
-              Original prompt
-            </Label>
-            <Textarea
-              id="prompt-template"
-              value={template}
-              onChange={(e) => setTemplate(e.target.value)}
-              rows={14}
-              className="min-h-[220px] font-mono text-xs leading-relaxed md:text-sm"
-              spellCheck={false}
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">2. resume_template_json</CardTitle>
-            <CardDescription>Paste resume JSON exactly as you want it inserted.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Label htmlFor="resume-template-json" className="sr-only">
-              resume_template_json
-            </Label>
-            <Textarea
-              id="resume-template-json"
-              value={resumeTemplateJson}
-              onChange={(e) => setResumeTemplateJson(e.target.value)}
-              rows={12}
-              className="min-h-[180px] font-mono text-xs leading-relaxed md:text-sm"
-              placeholder='{"profileTitle":"...","professionalSummary":"...","experience":[...]}'
-              spellCheck={false}
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">3. job_description</CardTitle>
-            <CardDescription>Paste the full job description text.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Label htmlFor="job-description" className="sr-only">
-              job_description
-            </Label>
-            <Textarea
-              id="job-description"
-              value={jobDescription}
-              onChange={(e) => setJobDescription(e.target.value)}
-              rows={12}
-              className="min-h-[180px] text-sm leading-relaxed"
-              placeholder="Paste job description here..."
-              spellCheck={false}
-            />
-          </CardContent>
-        </Card>
-
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" onClick={handleBuild}>
-            <Sparkles className="mr-2 h-4 w-4" />
-            Build prompt
+        <div className="sticky top-0 z-10 -mx-1 flex flex-wrap gap-1.5 rounded-lg border border-border bg-background/95 p-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <Button type="button" size="sm" onClick={handleBuild}>
+            Build
           </Button>
-          <Button type="button" variant="outline" onClick={handleClear}>
-            <Trash2 className="mr-2 h-4 w-4" />
+          <Button type="button" size="sm" variant="secondary" onClick={handleBuildAndCopy}>
+            Build + Copy
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={handleCopy} disabled={!output.trim()}>
+            Copy output
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={handleResetTemplate}>
+            Reset template
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={handleClearInputs}>
+            Clear inputs
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={handleClearAll}>
             Clear all
           </Button>
         </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
-            <div className="space-y-1.5">
-              <CardTitle className="text-base">Final prompt</CardTitle>
-              <CardDescription>
-                Generated only when you click Build prompt.
-              </CardDescription>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleCopy}
-              disabled={!output.trim()}
-            >
-              <Copy className="mr-2 h-4 w-4" />
-              Copy
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <Textarea
-              readOnly
-              value={output}
-              rows={16}
-              className="min-h-[260px] font-mono text-xs leading-relaxed md:text-sm"
-              placeholder="Your merged prompt will appear here after you click Build prompt."
-            />
-          </CardContent>
-        </Card>
+        <div className="flex flex-col gap-4">
+          <FieldBlock
+            id="prompt-template"
+            label="Original prompt"
+            hint="Template with placeholders"
+            value={template}
+            onChange={setTemplate}
+            onClear={() => setTemplate("")}
+            mono
+            rows={10}
+          />
+
+          <FieldBlock
+            id="resume-template-json"
+            label="resume_template_json"
+            value={resumeTemplateJson}
+            onChange={setResumeTemplateJson}
+            onClear={() => setResumeTemplateJson("")}
+            placeholder='{"profileTitle":"..."}'
+            mono
+            rows={8}
+          />
+
+          <FieldBlock
+            id="job-description"
+            label="job_description"
+            value={jobDescription}
+            onChange={setJobDescription}
+            onClear={() => setJobDescription("")}
+            placeholder="Paste job description..."
+            rows={8}
+          />
+
+          <FieldBlock
+            id="prompt-output"
+            label="Final prompt"
+            hint="Click Build to generate"
+            value={output}
+            readOnly
+            placeholder="Output appears here..."
+            mono
+            rows={12}
+          />
+        </div>
       </div>
     </JobsLayout>
   );

@@ -172,6 +172,7 @@ export default function JobsLayout({
                 <NavLink item={NAV_ITEMS[2]} pathname={pathname} />
                 <SidebarSeparator className="my-2 group-data-[collapsible=icon]:hidden" />
                 <NavLink item={NAV_ITEMS[3]} pathname={pathname} />
+                <NavLink item={NAV_ITEMS[4]} pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
