@@ -48,6 +48,13 @@
         "mac": "Command+Shift+J"
       },
       "description": "Scrape current job and add it to saved jobs"
+    },
+    "start-element-text-picker": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+E",
+        "mac": "Command+Shift+E"
+      },
+      "description": "Extract text from a page element"
     }
   },
   "content_scripts": [

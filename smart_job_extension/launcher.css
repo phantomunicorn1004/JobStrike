@@ -66,11 +66,34 @@ body.launcher-popup {
   color: var(--text);
 }
 
+.launcher-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .launcher-hint {
   margin: 0;
   font-size: 11px;
   line-height: 1.45;
   color: var(--muted);
+}
+
+.launcher-shortcut-btn {
+  flex-shrink: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--muted);
+  font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: pointer;
+}
+
+.launcher-shortcut-btn:hover {
+  border-color: var(--primary);
+  color: var(--text);
 }
 
 .launcher-textarea {
@@ -133,6 +156,19 @@ body.launcher-popup {
 
 .launcher-sidebar-btn {
   background: var(--card);
+}
+
+.launcher-picker-btn {
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    linear-gradient(90deg, #ff1744, #ff9100, #ffea00, #00e676, #00b0ff, #651fff, #f500d4) border-box;
+  border: 2px solid transparent;
+}
+
+.launcher-picker-btn:hover:not(:disabled) {
+  background:
+    linear-gradient(var(--bg-subtle), var(--bg-subtle)) padding-box,
+    linear-gradient(90deg, #ff1744, #ff9100, #ffea00, #00e676, #00b0ff, #651fff, #f500d4) border-box;
 }
 
 .launcher-divider {

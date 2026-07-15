@@ -112,6 +112,43 @@
     }
   }
 
+  async function loadElementPickerShortcut() {
+    const label = document.getElementById('pickerShortcutLabel');
+    if (!label || !chrome.commands?.getAll) return;
+    try {
+      const commands = await chrome.commands.getAll();
+      const pickerCommand = commands.find((command) => command.name === 'start-element-text-picker');
+      label.textContent = pickerCommand?.shortcut || 'Set hotkey';
+    } catch (_) {
+      label.textContent = 'Configure';
+    }
+  }
+
+  async function startElementTextPicker() {
+    const pickerBtn = document.getElementById('startElementPickerBtn');
+    if (pickerBtn) pickerBtn.disabled = true;
+    setStatus('Starting element text picker…', 'info');
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'startElementTextPicker' });
+      if (!response?.success) {
+        throw new Error(response?.error || 'Could not start the text picker.');
+      }
+      window.close();
+    } catch (err) {
+      if (pickerBtn) pickerBtn.disabled = false;
+      setStatus(err.message || 'Could not start the text picker.', 'error');
+    }
+  }
+
+  async function openShortcutSettings() {
+    try {
+      await chrome.tabs.create({ url: 'chrome://extensions/shortcuts', active: true });
+      window.close();
+    } catch (_) {
+      setStatus('Open chrome://extensions/shortcuts to configure the hotkey.', 'info');
+    }
+  }
+
   function initLauncher() {
     if (window.SmartJobTheme?.initTheme) {
       window.SmartJobTheme.initTheme();
@@ -120,8 +157,11 @@
     const input = document.getElementById('preparedLinksInput');
     const startBtn = document.getElementById('startApplyBtn');
     const sidebarBtn = document.getElementById('openSidebarBtn');
+    const pickerBtn = document.getElementById('startElementPickerBtn');
+    const configureShortcutBtn = document.getElementById('configurePickerShortcutBtn');
 
     loadPreparedLinks();
+    loadElementPickerShortcut();
 
     if (input) {
       input.addEventListener('input', () => {
@@ -139,6 +179,18 @@
     if (sidebarBtn) {
       sidebarBtn.addEventListener('click', () => {
         openSidePanel();
+      });
+    }
+
+    if (pickerBtn) {
+      pickerBtn.addEventListener('click', () => {
+        startElementTextPicker();
+      });
+    }
+
+    if (configureShortcutBtn) {
+      configureShortcutBtn.addEventListener('click', () => {
+        openShortcutSettings();
       });
     }
   }

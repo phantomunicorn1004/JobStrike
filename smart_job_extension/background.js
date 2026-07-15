@@ -37,6 +37,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: false, error: 'Chrome sidePanel API is unavailable.' });
     return true;
   }
+  if (request && request.action === 'startElementTextPicker') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
+        sendResponse({ success: false, error: 'Open a regular web page before starting the text picker.' });
+        return;
+      }
+      try {
+        const response = await ensureContentScriptAndSendMessage(tab.id, {
+          action: 'startElementTextPicker'
+        });
+        sendResponse(response?.success ? response : {
+          success: false,
+          error: response?.error || 'Could not start the text picker.'
+        });
+      } catch (error) {
+        sendResponse({ success: false, error: error?.message || String(error) });
+      }
+    });
+    return true;
+  }
   return false;
 });
 
@@ -123,11 +144,22 @@ function ensureContentScriptAndSendMessage(tabId, message) {
 }
 
 chrome.commands.onCommand.addListener((command) => {
-  if (command !== 'refresh-current-tab') return;
-
   chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
     const tab = tabs[0];
     if (!tab || !tab.id || !tab.url || !/^https?:\/\//.test(tab.url)) return;
+
+    if (command === 'start-element-text-picker') {
+      try {
+        await ensureContentScriptAndSendMessage(tab.id, { action: 'startElementTextPicker' });
+      } catch (error) {
+        chrome.action.setBadgeText({ text: '!', tabId: tab.id });
+        chrome.action.setBadgeBackgroundColor({ color: '#dc2626', tabId: tab.id });
+        setTimeout(() => chrome.action.setBadgeText({ text: '', tabId: tab.id }), 2500);
+      }
+      return;
+    }
+
+    if (command !== 'refresh-current-tab') return;
 
     try {
       const response = await ensureContentScriptAndSendMessage(tab.id, { action: 'getJobFields' });

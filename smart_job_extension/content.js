@@ -5696,6 +5696,224 @@
     return { success: true, scrolledFrom: startY, height: maxHeight };
   }
 
+  const ELEMENT_PICKER_LAST_TEXT_KEY = 'element_text_picker_last_text';
+  let elementPickerState = null;
+
+  function normalizeExtractedElementText(value) {
+    return String(value || '')
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function extractElementText(el) {
+    if (!el) return '';
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      return normalizeExtractedElementText(el.value || el.getAttribute('aria-label') || el.title);
+    }
+    if (el instanceof HTMLSelectElement) {
+      const selected = Array.from(el.selectedOptions).map((option) => option.textContent).join('\n');
+      return normalizeExtractedElementText(selected || el.value || el.getAttribute('aria-label'));
+    }
+    return normalizeExtractedElementText(
+      el.innerText
+      || el.textContent
+      || el.getAttribute?.('aria-label')
+      || el.getAttribute?.('title')
+    );
+  }
+
+  async function copyElementPickerText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.cssText = 'position:fixed;left:-9999px;top:0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      if (!document.execCommand('copy')) throw new Error('Copy failed.');
+    } finally {
+      textarea.remove();
+    }
+  }
+
+  function showElementPickerToast(message, kind = 'success') {
+    document.getElementById('__rwh-element-picker-toast')?.remove();
+    const toast = document.createElement('div');
+    toast.id = '__rwh-element-picker-toast';
+    toast.textContent = message;
+    toast.style.cssText = [
+      'all:initial',
+      'position:fixed',
+      'right:18px',
+      'bottom:18px',
+      'z-index:2147483647',
+      'max-width:360px',
+      'padding:10px 14px',
+      'border-radius:9px',
+      'box-shadow:0 8px 30px rgba(0,0,0,.32)',
+      'font:600 13px/1.4 system-ui,-apple-system,Segoe UI,sans-serif',
+      `background:${kind === 'error' ? '#b91c1c' : '#166534'}`,
+      'color:#fff'
+    ].join(';');
+    (document.body || document.documentElement).appendChild(toast);
+    setTimeout(() => toast.remove(), 2600);
+  }
+
+  function positionElementPickerOverlay(target) {
+    if (!elementPickerState || !target) return;
+    const rect = target.getBoundingClientRect();
+    const overlay = elementPickerState.overlay;
+    overlay.style.left = `${Math.max(0, rect.left)}px`;
+    overlay.style.top = `${Math.max(0, rect.top)}px`;
+    overlay.style.width = `${Math.max(0, Math.min(rect.width, window.innerWidth - Math.max(0, rect.left)))}px`;
+    overlay.style.height = `${Math.max(0, Math.min(rect.height, window.innerHeight - Math.max(0, rect.top)))}px`;
+    overlay.style.display = rect.width > 0 && rect.height > 0 ? 'block' : 'none';
+  }
+
+  function stopElementTextPicker({ notify = false } = {}) {
+    if (!elementPickerState) return;
+    const state = elementPickerState;
+    elementPickerState = null;
+    document.removeEventListener('pointermove', state.onPointerMove, true);
+    document.removeEventListener('click', state.onClick, true);
+    document.removeEventListener('keydown', state.onKeyDown, true);
+    window.removeEventListener('scroll', state.onViewportChange, true);
+    window.removeEventListener('resize', state.onViewportChange, true);
+    document.documentElement.classList.remove('__rwh-element-picker-active');
+    state.overlay.remove();
+    state.banner.remove();
+    state.style.remove();
+    if (notify) showElementPickerToast('Element text picker cancelled.', 'error');
+  }
+
+  function startElementTextPicker() {
+    stopElementTextPicker();
+
+    const style = document.createElement('style');
+    style.id = '__rwh-element-picker-style';
+    style.textContent = `
+      @keyframes __rwhRainbowBorder {
+        from { filter: hue-rotate(0deg); }
+        to { filter: hue-rotate(360deg); }
+      }
+      html.__rwh-element-picker-active,
+      html.__rwh-element-picker-active * {
+        cursor: crosshair !important;
+      }
+      #__rwh-element-picker-overlay {
+        position: fixed;
+        display: none;
+        box-sizing: border-box;
+        pointer-events: none;
+        z-index: 2147483646;
+        border: 4px solid;
+        border-image: linear-gradient(90deg, #ff1744, #ff9100, #ffea00, #00e676, #00b0ff, #651fff, #f500d4) 1;
+        background: rgba(102, 102, 255, .08);
+        animation: __rwhRainbowBorder 1.2s linear infinite;
+      }
+    `;
+
+    const overlay = document.createElement('div');
+    overlay.id = '__rwh-element-picker-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+
+    const banner = document.createElement('div');
+    banner.id = '__rwh-element-picker-banner';
+    banner.textContent = 'Hover an element and click to copy its text • Esc to cancel';
+    banner.style.cssText = [
+      'all:initial',
+      'position:fixed',
+      'top:12px',
+      'left:50%',
+      'transform:translateX(-50%)',
+      'z-index:2147483647',
+      'pointer-events:none',
+      'padding:9px 14px',
+      'border-radius:999px',
+      'box-shadow:0 6px 24px rgba(0,0,0,.3)',
+      'font:600 13px/1.3 system-ui,-apple-system,Segoe UI,sans-serif',
+      'background:#1e1e32',
+      'color:#fff'
+    ].join(';');
+
+    (document.head || document.documentElement).appendChild(style);
+    (document.body || document.documentElement).append(overlay, banner);
+    document.documentElement.classList.add('__rwh-element-picker-active');
+
+    const state = {
+      style,
+      overlay,
+      banner,
+      target: null,
+      lastClientX: 0,
+      lastClientY: 0,
+      onPointerMove: null,
+      onClick: null,
+      onKeyDown: null,
+      onViewportChange: null
+    };
+
+    state.onPointerMove = (event) => {
+      state.lastClientX = event.clientX;
+      state.lastClientY = event.clientY;
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      if (!target || target === overlay || target === banner) return;
+      state.target = target;
+      positionElementPickerOverlay(target);
+    };
+
+    state.onViewportChange = () => {
+      if (state.target?.isConnected) positionElementPickerOverlay(state.target);
+    };
+
+    state.onKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      stopElementTextPicker({ notify: true });
+    };
+
+    state.onClick = async (event) => {
+      const target = state.target || document.elementFromPoint(event.clientX, event.clientY);
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const text = extractElementText(target);
+      stopElementTextPicker();
+      if (!text) {
+        showElementPickerToast('No text found in that element.', 'error');
+        return;
+      }
+      try {
+        await copyElementPickerText(text);
+        chrome.storage.local.set({
+          [ELEMENT_PICKER_LAST_TEXT_KEY]: text,
+          element_text_picker_last_url: location.href,
+          element_text_picker_last_at: new Date().toISOString()
+        });
+        showElementPickerToast('Element text copied to clipboard.');
+      } catch (error) {
+        showElementPickerToast(error?.message || 'Could not copy element text.', 'error');
+      }
+    };
+
+    elementPickerState = state;
+    document.addEventListener('pointermove', state.onPointerMove, true);
+    document.addEventListener('click', state.onClick, true);
+    document.addEventListener('keydown', state.onKeyDown, true);
+    window.addEventListener('scroll', state.onViewportChange, true);
+    window.addEventListener('resize', state.onViewportChange, true);
+    return { success: true };
+  }
+
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     try {
       if (!request || !request.action) return false;
@@ -5714,6 +5932,11 @@
         prepareForScan()
           .then((result) => sendResponse(result))
           .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
+        return true;
+      }
+
+      if (request.action === 'startElementTextPicker') {
+        sendResponse(startElementTextPicker());
         return true;
       }
 
