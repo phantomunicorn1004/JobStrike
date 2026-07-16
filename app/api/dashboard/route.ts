@@ -5,6 +5,7 @@ import {
   unauthorizedJson,
 } from "@/lib/auth/resolve-request-user";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { countApplicationsWithFilters } from "@/lib/resume-db/repository";
 import {
   addDaysYmd,
   buildBidSeries,
@@ -40,11 +41,12 @@ export async function GET(request: NextRequest) {
     const stageTo = searchParams.get("stageTo") || today;
 
     const supabase = getSupabaseAdminClient();
-    const [applicationsRes, jobsRes, techRes, stagesRes] = await Promise.all([
+    const [applicationsRes, totalApplications, jobsRes, techRes, stagesRes] = await Promise.all([
       supabase
         .from("resume_db_applications")
         .select("applied_at")
         .eq("user_id", user.id),
+      countApplicationsWithFilters(user.id, {}),
       supabase
         .from("jobs")
         .select("created_at, stage_entered_at, stage_dates")
@@ -88,7 +90,7 @@ export async function GET(request: NextRequest) {
       stageCounts: buildStageCounts(jobs, techJobs, stages, stageFrom, stageTo),
       stageFrom,
       stageTo,
-      totalApplications: applications.length,
+      totalApplications,
       totalPipelineCards: jobs.length + techJobs.length,
     });
   } catch (error) {
