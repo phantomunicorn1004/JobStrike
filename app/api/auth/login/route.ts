@@ -66,10 +66,10 @@ export async function POST(request: Request) {
     return withExtensionCors(
       await createSessionJsonResponse(
         {
-          user: { id: user.id, username: user.username, role: user.role },
+          user: { id: user.id, username: user.username, role: user.role, timezone: user.timezone },
           extensionApiKey,
         },
-        { id: user.id, username: user.username, role: user.role },
+        { id: user.id, username: user.username, role: user.role, timezone: user.timezone },
       ),
     );
   } catch (error) {

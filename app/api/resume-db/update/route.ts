@@ -11,22 +11,23 @@ import {
   uploadApplicationFile,
 } from "@/lib/resume-db/storage";
 import { syncPipelineJobFromApplication } from "@/lib/resume-db/pipeline";
+import { formatIsoInTimeZone, normalizeTimeZone } from "@/lib/timezone";
 
 export function OPTIONS() {
   return corsOptions();
 }
 
-function mapForList(app: NonNullable<Awaited<ReturnType<typeof getApplicationById>>>) {
-  const applied = new Date(app.appliedAt);
-  const date = Number.isNaN(applied.getTime())
-    ? ""
-    : applied.toLocaleString(undefined, {
-        month: "numeric",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
+function mapForList(
+  app: NonNullable<Awaited<ReturnType<typeof getApplicationById>>>,
+  timeZone: string,
+) {
+  const date = formatIsoInTimeZone(app.appliedAt, timeZone, {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
   return {
     id: app.id,
     rowIndex: app.id,
@@ -49,6 +50,7 @@ function mapForList(app: NonNullable<Awaited<ReturnType<typeof getApplicationByI
 export async function POST(request: NextRequest) {
   try {
     const user = await requireRequestUser(request);
+    const timeZone = normalizeTimeZone(user.timezone);
     const formData = await request.formData();
     const id = Number(formData.get("id") ?? formData.get("rowIndex"));
     if (Number.isNaN(id) || id < 1) {
@@ -133,7 +135,7 @@ export async function POST(request: NextRequest) {
       return corsJson({ error: "Update failed" }, { status: 500 });
     }
 
-    return corsJson({ ok: true, ...mapForList(updated) });
+    return corsJson({ ok: true, ...mapForList(updated, timeZone), timezone: timeZone });
   } catch (error) {
     console.error("Resume DB update error:", error);
     const message = error instanceof Error ? error.message : "Update failed.";

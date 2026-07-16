@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS app_users (
   username TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+  timezone TEXT NOT NULL DEFAULT 'America/New_York',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT app_users_username_unique UNIQUE (username)

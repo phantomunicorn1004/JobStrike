@@ -6,17 +6,25 @@ import {
 } from "@/lib/auth/constants";
 import {
   findUserByExtensionApiKey,
+  findUserById,
   findUserByUsername,
 } from "@/lib/auth/repository";
 import { getSessionUser } from "@/lib/auth/session";
 import type { SessionUser } from "@/lib/auth/types";
+import { DEFAULT_TIMEZONE } from "@/lib/timezone";
 
 function toSessionUser(user: {
   id: string;
   username: string;
   role: SessionUser["role"];
+  timezone?: string;
 }): SessionUser {
-  return { id: user.id, username: user.username, role: user.role };
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    timezone: user.timezone || DEFAULT_TIMEZONE,
+  };
 }
 
 async function defaultExtensionOwner(): Promise<SessionUser | null> {
@@ -29,7 +37,10 @@ export async function resolveRequestUser(
   request?: NextRequest | Request,
 ): Promise<SessionUser | null> {
   const session = await getSessionUser();
-  if (session?.role === "member") return session;
+  if (session?.role === "member") {
+    const freshUser = await findUserById(session.id);
+    return freshUser ? toSessionUser(freshUser) : session;
+  }
 
   const envKey = process.env.EXTENSION_API_KEY?.trim();
   const providedKey = request?.headers.get("x-extension-key")?.trim();

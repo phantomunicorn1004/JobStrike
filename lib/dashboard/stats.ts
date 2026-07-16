@@ -1,4 +1,5 @@
 import { normalizeStageDates } from "@/lib/jobs/pipelineCardUtils";
+import { getDayKeyInTimeZone } from "@/lib/timezone";
 
 export type ResumeApplicationRow = {
   applied_at: string;
@@ -28,15 +29,12 @@ export type StageCount = {
   count: number;
 };
 
-export function localYmd(d = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+export function localYmd(d = new Date(), timeZone?: string): string {
+  return getDayKeyInTimeZone(d.toISOString(), timeZone || "UTC");
 }
 
-export function isoToDayKey(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return localYmd(d);
+export function isoToDayKey(iso: string, timeZone: string): string {
+  return getDayKeyInTimeZone(iso, timeZone);
 }
 
 export function isDayInRange(day: string, from: string, to: string): boolean {
@@ -56,18 +54,20 @@ export function addDaysYmd(ymd: string, delta: number): string {
 export function countApplicationsOnDate(
   rows: ResumeApplicationRow[],
   date: string,
+  timeZone: string,
 ): number {
-  return rows.filter((row) => isoToDayKey(row.applied_at) === date).length;
+  return rows.filter((row) => isoToDayKey(row.applied_at, timeZone) === date).length;
 }
 
 export function buildBidSeries(
   rows: ResumeApplicationRow[],
   from: string,
   to: string,
+  timeZone: string,
 ): BidPoint[] {
   const counts = new Map<string, number>();
   for (const row of rows) {
-    const day = isoToDayKey(row.applied_at);
+    const day = isoToDayKey(row.applied_at, timeZone);
     if (!day || !isDayInRange(day, from, to)) continue;
     counts.set(day, (counts.get(day) ?? 0) + 1);
   }
@@ -84,11 +84,12 @@ export function buildBidSeries(
 function stageEntryDay(
   row: PipelineJobRow,
   stageId: string,
+  timeZone: string,
 ): string {
   const fallback = row.stage_entered_at ?? row.created_at;
   const dates = normalizeStageDates(row.stage_dates, stageId, fallback);
   const iso = dates[stageId] ?? fallback;
-  return isoToDayKey(iso);
+  return isoToDayKey(iso, timeZone);
 }
 
 export function buildStageCounts(
@@ -97,6 +98,7 @@ export function buildStageCounts(
   stages: PipelineStageRow[],
   from: string,
   to: string,
+  timeZone: string,
   appliedStageId = "applied",
 ): StageCount[] {
   const counts = new Map<string, number>();
@@ -105,14 +107,14 @@ export function buildStageCounts(
   }
 
   for (const row of jobRows) {
-    const day = stageEntryDay(row, appliedStageId);
+    const day = stageEntryDay(row, appliedStageId, timeZone);
     if (!isDayInRange(day, from, to)) continue;
     counts.set(appliedStageId, (counts.get(appliedStageId) ?? 0) + 1);
   }
 
   for (const row of techRows) {
     const stageId = row.stage_id ?? "technical";
-    const day = stageEntryDay(row, stageId);
+    const day = stageEntryDay(row, stageId, timeZone);
     if (!isDayInRange(day, from, to)) continue;
     counts.set(stageId, (counts.get(stageId) ?? 0) + 1);
   }

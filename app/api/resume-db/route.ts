@@ -25,6 +25,7 @@ import {
 } from "@/lib/resume-db/pipeline-stages";
 import type { ResumeDbApplicationInput } from "@/lib/resume-db/types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { formatIsoInTimeZone, normalizeTimeZone } from "@/lib/timezone";
 
 export function OPTIONS() {
   return corsOptions();
@@ -32,18 +33,16 @@ export function OPTIONS() {
 
 function mapForList(
   app: Awaited<ReturnType<typeof listApplicationsWithFilters>>[number],
+  timeZone: string,
   stageMap?: Map<number, string | null>,
 ) {
-  const applied = new Date(app.appliedAt);
-  const date = Number.isNaN(applied.getTime())
-    ? ""
-    : applied.toLocaleString(undefined, {
-        month: "numeric",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
+  const date = formatIsoInTimeZone(app.appliedAt, timeZone, {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
   const pipelineStageId = stageMap?.get(app.id) ?? null;
   return {
     id: app.id,
@@ -95,6 +94,7 @@ export async function GET(request: NextRequest) {
       return corsJson(unauthorizedJson(), { status: 401 });
     }
     const userId = user.id;
+    const timeZone = normalizeTimeZone(user.timezone);
 
     const { searchParams } = new URL(request.url);
     const idParam = searchParams.get("id");
@@ -242,6 +242,7 @@ export async function GET(request: NextRequest) {
       search,
       dateFrom,
       dateTo,
+      timeZone,
       candidateFilter,
       statusIncludeIds,
       statusExcludeIds,
@@ -265,7 +266,7 @@ export async function GET(request: NextRequest) {
       listPipelineStages(),
     ]);
 
-    const resumes = entries.map((entry) => mapForList(entry, stageMap));
+    const resumes = entries.map((entry) => mapForList(entry, timeZone, stageMap));
 
     // For pipeline ordering we only guarantee ordering within the loaded page.
     if (sortKey === "pipeline" && resumes.length > 0) {
@@ -310,6 +311,7 @@ export async function GET(request: NextRequest) {
     return corsJson({
       resumes,
       pipelineStages,
+      timezone: timeZone,
       total,
       page: resolvedPage,
       pageSize,
@@ -325,6 +327,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireRequestUser(request);
+    const timeZone = normalizeTimeZone(user.timezone);
     const body = await request.json();
     const entry = parseEntryBody(body);
 
@@ -345,7 +348,7 @@ export async function POST(request: NextRequest) {
     }
 
     const application = await createApplication(user.id, entry);
-    return corsJson({ ...mapForList(application) }, { status: 201 });
+    return corsJson({ ...mapForList(application, timeZone) }, { status: 201 });
   } catch (error) {
     console.error("Resume DB POST error:", error);
     const message = error instanceof Error ? error.message : "Create failed.";
@@ -357,6 +360,7 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const user = await requireRequestUser(request);
+    const timeZone = normalizeTimeZone(user.timezone);
     const body = await request.json();
     const id = Number(body.rowIndex ?? body.id);
     if (Number.isNaN(id) || id < 1) {
@@ -379,7 +383,7 @@ export async function PATCH(request: NextRequest) {
         return corsJson({ ok: true });
       }
       const stageMap = await buildPipelineStageMap([updated], user.id);
-      return corsJson({ ok: true, ...mapForList(updated, stageMap) });
+      return corsJson({ ok: true, ...mapForList(updated, timeZone, stageMap) });
     }
 
     if (body.pipelineStageId !== undefined) {
@@ -394,7 +398,7 @@ export async function PATCH(request: NextRequest) {
         return corsJson({ ok: true });
       }
       const stageMap = await buildPipelineStageMap([updated], user.id);
-      return corsJson({ ok: true, ...mapForList(updated, stageMap) });
+      return corsJson({ ok: true, ...mapForList(updated, timeZone, stageMap) });
     }
 
     const entry = parseEntryBody(body);
@@ -406,7 +410,7 @@ export async function PATCH(request: NextRequest) {
       return corsJson({ ok: true });
     }
     const stageMap = await buildPipelineStageMap([updated], user.id);
-    return corsJson({ ok: true, ...mapForList(updated, stageMap) });
+    return corsJson({ ok: true, ...mapForList(updated, timeZone, stageMap) });
   } catch (error) {
     console.error("Resume DB PATCH error:", error);
     const message = error instanceof Error ? error.message : "Update failed.";

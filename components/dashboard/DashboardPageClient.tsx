@@ -24,7 +24,7 @@ import {
 } from "recharts";
 import { CalendarDays, Loader2, RefreshCw, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { localYmd } from "@/lib/dashboard/stats";
+import { DEFAULT_TIMEZONE, formatYmdInTimeZone, todayInTimeZone } from "@/lib/timezone";
 import { toast } from "sonner";
 
 type BidPoint = { date: string; count: number };
@@ -45,6 +45,7 @@ type DashboardData = {
   stageCounts: StageCount[];
   stageFrom: string;
   stageTo: string;
+  timezone: string;
   totalApplications: number;
   totalPipelineCards: number;
 };
@@ -64,16 +65,12 @@ const STAGE_COLORS = [
   "#9944ff",
 ];
 
-function formatChartDate(ymd: string): string {
-  const d = new Date(`${ymd}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return ymd;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+function formatChartDate(ymd: string, timeZone: string): string {
+  return formatYmdInTimeZone(ymd, timeZone, { month: "short", day: "numeric" });
 }
 
-function formatLongDate(ymd: string): string {
-  const d = new Date(`${ymd}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return ymd;
-  return d.toLocaleDateString(undefined, {
+function formatLongDate(ymd: string, timeZone: string): string {
+  return formatYmdInTimeZone(ymd, timeZone, {
     weekday: "short",
     month: "long",
     day: "numeric",
@@ -82,14 +79,11 @@ function formatLongDate(ymd: string): string {
 }
 
 export function DashboardPageClient() {
-  const today = localYmd();
+  const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
+  const today = todayInTimeZone(timezone);
   const [appliedDate, setAppliedDate] = useState(today);
   const [bidRange, setBidRange] = useState<BidRange>("month");
-  const [stageFrom, setStageFrom] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 29);
-    return localYmd(d);
-  });
+  const [stageFrom, setStageFrom] = useState("");
   const [stageTo, setStageTo] = useState(today);
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -110,7 +104,12 @@ export function DashboardPageClient() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Failed to load dashboard.");
       }
-      setData(await res.json());
+      const next = (await res.json()) as DashboardData;
+      setData(next);
+      if (next.timezone) setTimezone(next.timezone);
+      setAppliedDate(next.appliedDate);
+      setStageFrom(next.stageFrom);
+      setStageTo(next.stageTo);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load dashboard.");
     } finally {
@@ -181,7 +180,7 @@ export function DashboardPageClient() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    {formatLongDate(appliedDate)}
+                    {formatLongDate(appliedDate, timezone)}
                   </p>
                   <label className="grid gap-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
@@ -236,7 +235,7 @@ export function DashboardPageClient() {
                       <CardTitle className="text-lg">Applications per day</CardTitle>
                       <CardDescription className="truncate">
                         {data
-                          ? `${bidRangeLabel} (${formatChartDate(data.bidFrom)} – ${formatChartDate(data.bidTo)})`
+                          ? `${bidRangeLabel} (${formatChartDate(data.bidFrom, timezone)} – ${formatChartDate(data.bidTo, timezone)})`
                           : bidRangeLabel}
                       </CardDescription>
                     </div>
@@ -276,13 +275,13 @@ export function DashboardPageClient() {
                         tickMargin={8}
                         interval={bidRange === "month" ? 4 : 0}
                         minTickGap={bidRange === "month" ? 8 : 16}
-                        tickFormatter={formatChartDate}
+                        tickFormatter={(value) => formatChartDate(String(value), timezone)}
                       />
                       <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={28} />
                       <ChartTooltip
                         content={
                           <ChartTooltipContent
-                            labelFormatter={(value) => formatLongDate(String(value))}
+                            labelFormatter={(value) => formatLongDate(String(value), timezone)}
                           />
                         }
                       />

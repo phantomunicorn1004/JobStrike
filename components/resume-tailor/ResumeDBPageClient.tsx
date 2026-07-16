@@ -70,6 +70,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { DEFAULT_TIMEZONE, formatIsoInTimeZone } from "@/lib/timezone";
 
 export type ResumeDbRow = {
   rowIndex: number;
@@ -243,17 +244,16 @@ function DocActions({
   );
 }
 
-function formatApplied(iso: string, fallback: string): string {
+function formatApplied(iso: string, fallback: string, timeZone: string): string {
   if (!iso) return fallback || "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return fallback || "—";
-  return d.toLocaleString(undefined, {
+  const value = formatIsoInTimeZone(iso, timeZone, {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
+  return value || fallback || "—";
 }
 
 function isWithinAppliedDateRange(
@@ -687,6 +687,7 @@ export function ResumeDBPageClient() {
   const [statusFilter, setStatusFilter] = useState<string>("__all__");
   const [orphanCandidateNames, setOrphanCandidateNames] = useState<string[]>([]);
   const [orphanCandidateNamesLoaded, setOrphanCandidateNamesLoaded] = useState(false);
+  const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -732,6 +733,7 @@ export function ResumeDBPageClient() {
       setRows(data.resumes ?? []);
       setPipelineStages(data.pipelineStages ?? []);
       setTotalCount(Number(data.total ?? 0));
+      if (data.timezone) setTimezone(data.timezone);
       if (!orphanCandidateNamesLoaded) {
         setOrphanCandidateNames(data.orphanCandidateNames ?? []);
         setOrphanCandidateNamesLoaded(true);
@@ -1461,7 +1463,7 @@ export function ResumeDBPageClient() {
                           widthPercent={percents.applied}
                           className="text-xs tabular-nums text-muted-foreground whitespace-nowrap"
                         >
-                          {formatApplied(row.appliedAt, row.date)}
+                          {formatApplied(row.appliedAt, row.date, timezone)}
                         </ResizableTableCell>
                         <ResizableTableCell
                           widthPercent={percents.json}

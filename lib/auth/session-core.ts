@@ -1,5 +1,6 @@
 import type { SessionPayload, SessionUser } from "@/lib/auth/types";
 import { SESSION_MAX_AGE_SEC } from "@/lib/auth/constants";
+import { DEFAULT_TIMEZONE, normalizeTimeZone } from "@/lib/timezone";
 
 /** Session signing key — derived from existing Supabase service role key (no AUTH_SECRET env needed). */
 function getAuthSecret(): string {
@@ -74,7 +75,12 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
     const payload = JSON.parse(json) as SessionPayload;
     if (!payload?.id || !payload?.username || !payload?.role) return null;
     if (typeof payload.exp !== "number" || payload.exp < Date.now()) return null;
-    return { id: payload.id, username: payload.username, role: payload.role };
+    return {
+      id: payload.id,
+      username: payload.username,
+      role: payload.role,
+      timezone: normalizeTimeZone(payload.timezone ?? DEFAULT_TIMEZONE),
+    };
   } catch {
     return null;
   }

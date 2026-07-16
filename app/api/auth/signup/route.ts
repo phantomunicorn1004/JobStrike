@@ -41,10 +41,10 @@ export async function POST(request: Request) {
       if (user) {
         return createSessionJsonResponse(
           {
-            user: { id: user.id, username: user.username, role: user.role },
+            user: { id: user.id, username: user.username, role: user.role, timezone: user.timezone },
             existing: true,
           },
-          { id: user.id, username: user.username, role: user.role },
+          { id: user.id, username: user.username, role: user.role, timezone: user.timezone },
         );
       }
       return NextResponse.json({ error: "Username is already taken." }, { status: 409 });
@@ -53,8 +53,8 @@ export async function POST(request: Request) {
     const user = await createAppUser({ username, password, role: "member" });
 
     return createSessionJsonResponse(
-      { user: { id: user.id, username: user.username, role: user.role } },
-      { id: user.id, username: user.username, role: user.role },
+      { user: { id: user.id, username: user.username, role: user.role, timezone: user.timezone } },
+      { id: user.id, username: user.username, role: user.role, timezone: user.timezone },
     );
   } catch (error) {
     console.error("Signup error:", error);

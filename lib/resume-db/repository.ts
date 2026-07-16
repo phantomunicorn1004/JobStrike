@@ -4,6 +4,7 @@ import type {
   ResumeDbApplication,
   ResumeDbApplicationInput,
 } from "@/lib/resume-db/types";
+import { DEFAULT_TIMEZONE, endOfDayUtcIso, normalizeTimeZone, startOfDayUtcIso } from "@/lib/timezone";
 
 type DbRow = {
   id: number;
@@ -170,6 +171,7 @@ export type ResumeDbApplicationsListQuery = {
   search?: string;
   dateFrom?: string; // YYYY-MM-DD
   dateTo?: string; // YYYY-MM-DD
+  timeZone?: string;
   candidateFilter?: string; // "profile-{id}" | "name-{encodedName}"
   statusIncludeIds?: number[]; // only these application ids
   statusExcludeIds?: number[]; // exclude these application ids
@@ -196,15 +198,6 @@ function parseCandidateFilter(
   return null;
 }
 
-function dateToLocalIsoDayStart(dateStr: string): string {
-  // Use local timezone boundaries to match existing client-side filtering.
-  return new Date(`${dateStr}T00:00:00`).toISOString();
-}
-
-function dateToLocalIsoDayEnd(dateStr: string): string {
-  return new Date(`${dateStr}T23:59:59.999`).toISOString();
-}
-
 function applyCommonFilters(
   query: ReturnType<typeof getSupabaseAdminClient>["from"],
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -225,12 +218,13 @@ function applyCommonFilters(
   }
 
   const from = q.dateFrom?.trim();
+  const timeZone = normalizeTimeZone(q.timeZone ?? DEFAULT_TIMEZONE);
   if (from) {
-    builder = builder.gte("applied_at", dateToLocalIsoDayStart(from));
+    builder = builder.gte("applied_at", startOfDayUtcIso(from, timeZone));
   }
   const to = q.dateTo?.trim();
   if (to) {
-    builder = builder.lte("applied_at", dateToLocalIsoDayEnd(to));
+    builder = builder.lte("applied_at", endOfDayUtcIso(to, timeZone));
   }
 
   const candidate = parseCandidateFilter(q.candidateFilter);

@@ -17,6 +17,7 @@ import {
   type PipelineTechRow,
   type ResumeApplicationRow,
 } from "@/lib/dashboard/stats";
+import { normalizeTimeZone } from "@/lib/timezone";
 
 export function OPTIONS() {
   return corsOptions();
@@ -28,9 +29,10 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return corsJson(unauthorizedJson(), { status: 401 });
     }
+    const timezone = normalizeTimeZone(user.timezone);
 
     const { searchParams } = new URL(request.url);
-    const today = localYmd();
+    const today = localYmd(new Date(), timezone);
     const appliedDate = searchParams.get("date") || today;
     const bidDays = Math.min(
       90,
@@ -83,13 +85,14 @@ export async function GET(request: NextRequest) {
 
     return corsJson({
       appliedDate,
-      appliedCount: countApplicationsOnDate(applications, appliedDate),
-      bidsByDate: buildBidSeries(applications, bidFrom, bidTo),
+      appliedCount: countApplicationsOnDate(applications, appliedDate, timezone),
+      bidsByDate: buildBidSeries(applications, bidFrom, bidTo, timezone),
       bidFrom,
       bidTo,
-      stageCounts: buildStageCounts(jobs, techJobs, stages, stageFrom, stageTo),
+      stageCounts: buildStageCounts(jobs, techJobs, stages, stageFrom, stageTo, timezone),
       stageFrom,
       stageTo,
+      timezone,
       totalApplications,
       totalPipelineCards: jobs.length + techJobs.length,
     });

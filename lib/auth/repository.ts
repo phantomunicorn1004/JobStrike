@@ -5,12 +5,14 @@ import { getSupabaseServiceRoleClient } from "@/lib/supabase/admin";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { normalizeUsername, DEFAULT_ADMIN_USERNAME } from "@/lib/auth/constants";
 import type { AppUser, UserRole } from "@/lib/auth/types";
+import { DEFAULT_TIMEZONE, normalizeTimeZone } from "@/lib/timezone";
 
 type AppUserRow = {
   id: string;
   username: string;
   password_hash: string;
   role: UserRole;
+  timezone: string | null;
   extension_api_key: string | null;
   created_at: string;
   updated_at: string;
@@ -21,6 +23,7 @@ function mapRow(row: AppUserRow): AppUser {
     id: row.id,
     username: row.username,
     role: row.role,
+    timezone: normalizeTimeZone(row.timezone),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -88,8 +91,14 @@ export async function createAppUser(input: {
   const extension_api_key = randomBytes(24).toString("hex");
   const { data, error } = await supabase
     .from("app_users")
-    .insert({ username, password_hash, role, extension_api_key } as never)
-    .select("id, username, role, created_at, updated_at")
+    .insert({
+      username,
+      password_hash,
+      role,
+      extension_api_key,
+      timezone: DEFAULT_TIMEZONE,
+    } as never)
+    .select("id, username, role, timezone, created_at, updated_at")
     .single();
   if (error) throw error;
   return mapRow(data as AppUserRow);
@@ -131,7 +140,7 @@ export async function ensureExtensionApiKey(userId: string): Promise<string> {
 
 export async function updateAppUser(
   id: string,
-  input: { username?: string; password?: string; role?: UserRole },
+  input: { username?: string; password?: string; role?: UserRole; timezone?: string },
 ): Promise<AppUser> {
   const supabase = getSupabaseServiceRoleClient();
   const patch: Record<string, string> = {
@@ -146,11 +155,14 @@ export async function updateAppUser(
   if (input.role !== undefined) {
     patch.role = input.role;
   }
+  if (input.timezone !== undefined) {
+    patch.timezone = normalizeTimeZone(input.timezone);
+  }
   const { data, error } = await supabase
     .from("app_users")
     .update(patch as never)
     .eq("id", id)
-    .select("id, username, role, created_at, updated_at")
+    .select("id, username, role, timezone, created_at, updated_at")
     .single();
   if (error) throw error;
   return mapRow(data as AppUserRow);
