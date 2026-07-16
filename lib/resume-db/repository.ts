@@ -166,6 +166,161 @@ export async function listApplications(userId: string): Promise<ResumeDbApplicat
   return ((data ?? []) as DbRow[]).map(mapRow);
 }
 
+export type ResumeDbApplicationsListQuery = {
+  search?: string;
+  dateFrom?: string; // YYYY-MM-DD
+  dateTo?: string; // YYYY-MM-DD
+  candidateFilter?: string; // "profile-{id}" | "name-{encodedName}"
+  statusIncludeIds?: number[]; // only these application ids
+  statusExcludeIds?: number[]; // exclude these application ids
+  sortKey?: "company" | "jobTitle" | "pipeline" | null;
+  sortDir?: "asc" | "desc";
+  page?: number; // 1-based
+  pageSize?: number;
+};
+
+function parseCandidateFilter(
+  candidateFilter?: string,
+): { profileId?: number; nameEquals?: string } | null {
+  if (!candidateFilter) return null;
+  if (candidateFilter.startsWith("profile-")) {
+    const id = Number(candidateFilter.slice(8));
+    if (Number.isNaN(id)) return null;
+    return { profileId: id };
+  }
+  if (candidateFilter.startsWith("name-")) {
+    const name = decodeURIComponent(candidateFilter.slice(5));
+    if (!name.trim()) return null;
+    return { nameEquals: name.trim() };
+  }
+  return null;
+}
+
+function dateToLocalIsoDayStart(dateStr: string): string {
+  // Use local timezone boundaries to match existing client-side filtering.
+  return new Date(`${dateStr}T00:00:00`).toISOString();
+}
+
+function dateToLocalIsoDayEnd(dateStr: string): string {
+  return new Date(`${dateStr}T23:59:59.999`).toISOString();
+}
+
+function applyCommonFilters(
+  query: ReturnType<typeof getSupabaseAdminClient>["from"],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supaQuery: any,
+  userId: string,
+  q: ResumeDbApplicationsListQuery,
+) {
+  let builder = supaQuery.eq("user_id", userId);
+
+  const search = q.search?.trim();
+  if (search) {
+    const safe = search.replace(/[%_*]/g, "").trim();
+    const pattern = `%${safe}%`;
+    // OR across the main user-visible text fields.
+    builder = builder.or(
+      `company.ilike.${pattern},job_title.ilike.${pattern},candidate_name.ilike.${pattern},job_link.ilike.${pattern},apply.ilike.${pattern},entry_id.ilike.${pattern}`,
+    );
+  }
+
+  const from = q.dateFrom?.trim();
+  if (from) {
+    builder = builder.gte("applied_at", dateToLocalIsoDayStart(from));
+  }
+  const to = q.dateTo?.trim();
+  if (to) {
+    builder = builder.lte("applied_at", dateToLocalIsoDayEnd(to));
+  }
+
+  const candidate = parseCandidateFilter(q.candidateFilter);
+  if (candidate?.profileId != null) {
+    builder = builder.eq("profile_id", candidate.profileId);
+  } else if (candidate?.nameEquals != null) {
+    builder = builder.is("profile_id", null).eq(
+      "candidate_name",
+      candidate.nameEquals,
+    );
+  }
+
+  if (q.statusIncludeIds) {
+    if (q.statusIncludeIds.length === 0) builder = builder.eq("id", -1);
+    else builder = builder.in("id", q.statusIncludeIds);
+  }
+
+  if (q.statusExcludeIds && q.statusExcludeIds.length > 0) {
+    builder = builder.not("id", "in", q.statusExcludeIds);
+  }
+
+  return builder;
+}
+
+export async function countApplicationsWithFilters(
+  userId: string,
+  query: ResumeDbApplicationsListQuery,
+): Promise<number> {
+  const supabase = getSupabaseAdminClient();
+
+  let builder = supabase
+    .from("resume_db_applications")
+    .select("id", { count: "exact", head: true });
+
+  builder = applyCommonFilters(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    supabase as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    builder as any,
+    userId,
+    query,
+  );
+
+  const { count, error } = await builder;
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+export async function listApplicationsWithFilters(
+  userId: string,
+  query: ResumeDbApplicationsListQuery,
+): Promise<ResumeDbApplication[]> {
+  const supabase = getSupabaseAdminClient();
+  const page = Math.max(1, query.page ?? 1);
+  const pageSize = Math.max(1, query.pageSize ?? 25);
+  const start = (page - 1) * pageSize;
+  const end = start + pageSize - 1;
+
+  let builder = supabase
+    .from("resume_db_applications")
+    .select("*");
+
+  builder = applyCommonFilters(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    supabase as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    builder as any,
+    userId,
+    query,
+  );
+
+  const sortKey = query.sortKey ?? null;
+  const sortDir = query.sortDir ?? "asc";
+
+  if (sortKey === "company") {
+    builder = builder.order("company", { ascending: sortDir === "asc" });
+    builder = builder.order("id", { ascending: false });
+  } else if (sortKey === "jobTitle") {
+    builder = builder.order("job_title", { ascending: sortDir === "asc" });
+    builder = builder.order("id", { ascending: false });
+  } else {
+    // Default stable sort: most recently created first.
+    builder = builder.order("id", { ascending: false });
+  }
+
+  const { data, error } = await builder.range(start, end);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as DbRow[]).map(mapRow);
+}
+
 export async function getApplicationById(
   id: number,
   userId: string,

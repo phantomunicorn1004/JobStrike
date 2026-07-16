@@ -9,7 +9,8 @@ import { parseResumeFromPublicUrl } from "@/lib/resume-db/parseFromUrl";
 import {
   createApplication,
   getApplicationById,
-  listApplications,
+  countApplicationsWithFilters,
+  listApplicationsWithFilters,
   updateApplication,
 } from "@/lib/resume-db/repository";
 import {
@@ -23,13 +24,14 @@ import {
   setApplicationPipelineStage,
 } from "@/lib/resume-db/pipeline-stages";
 import type { ResumeDbApplicationInput } from "@/lib/resume-db/types";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export function OPTIONS() {
   return corsOptions();
 }
 
 function mapForList(
-  app: Awaited<ReturnType<typeof listApplications>>[number],
+  app: Awaited<ReturnType<typeof listApplicationsWithFilters>>[number],
   stageMap?: Map<number, string | null>,
 ) {
   const applied = new Date(app.appliedAt);
@@ -92,6 +94,7 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return corsJson(unauthorizedJson(), { status: 401 });
     }
+    const userId = user.id;
 
     const { searchParams } = new URL(request.url);
     const idParam = searchParams.get("id");
@@ -129,14 +132,188 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const entries = await listApplications(user.id);
+    const parsePage = (v: string | null) => {
+      const n = Number(v ?? "");
+      if (Number.isNaN(n) || n < 1) return 1;
+      return Math.floor(n);
+    };
+    const parsePageSize = (v: string | null) => {
+      const n = Number(v ?? "");
+      if (Number.isNaN(n) || n < 1) return 25;
+      const max = 200; // keep UI responsive
+      return Math.min(max, Math.floor(n));
+    };
+
+    const page = parsePage(searchParams.get("page"));
+    const pageSize = parsePageSize(searchParams.get("pageSize"));
+
+    const search = (searchParams.get("search") ?? "").toString();
+    const dateFrom = searchParams.get("dateFrom") ?? "";
+    const dateTo = searchParams.get("dateTo") ?? "";
+    const candidateFilter =
+      searchParams.get("candidateFilter") ??
+      searchParams.get("candidate") ??
+      "";
+    const statusFilter =
+      searchParams.get("statusFilter") ??
+      searchParams.get("status") ??
+      "__all__";
+    const sortKeyRaw = searchParams.get("sortKey") ?? "";
+    const sortDir: "asc" | "desc" =
+      (searchParams.get("sortDir") ?? "asc").toString() === "desc"
+        ? "desc"
+        : "asc";
+    const includeOrphans = searchParams.get("includeOrphans") === "1";
+    const sortKey =
+      sortKeyRaw === "company" || sortKeyRaw === "jobTitle" || sortKeyRaw === "pipeline"
+        ? (sortKeyRaw as "company" | "jobTitle" | "pipeline")
+        : null;
+
+    function parseIdsFromMarkerText(text: string | null | undefined): number[] {
+      if (!text) return [];
+      const out: number[] = [];
+      const re = /Resume DB #(\d+)/g;
+      let m: RegExpExecArray | null;
+      // eslint-disable-next-line no-cond-assign
+      while ((m = re.exec(text))) {
+        const id = Number(m[1]);
+        if (!Number.isNaN(id)) out.push(id);
+      }
+      return out;
+    }
+
+    async function getPipelineAppIdSets() {
+      const supabase = getSupabaseAdminClient();
+      const [jobsRes, techRes] = await Promise.all([
+        supabase
+          .from("jobs")
+          .select("note")
+          .eq("user_id", userId)
+          .ilike("note", "%Resume DB #%"),
+        supabase
+          .from("technical_jobs")
+          .select("stage_id, job_description")
+          .eq("user_id", userId)
+          .ilike("job_description", "%Resume DB #%"),
+      ]);
+
+      const appliedIds = new Set<number>();
+      const technicalIdsByStage = new Map<string, Set<number>>();
+
+      for (const row of (jobsRes.data ?? []) as { note?: string | null }[]) {
+        for (const id of parseIdsFromMarkerText(row.note)) {
+          appliedIds.add(id);
+        }
+      }
+
+      for (const row of (techRes.data ?? []) as {
+        stage_id?: string | null;
+        job_description?: string | null;
+      }[]) {
+        const stageId = (row.stage_id ?? "technical").toString();
+        if (!technicalIdsByStage.has(stageId)) technicalIdsByStage.set(stageId, new Set());
+        const set = technicalIdsByStage.get(stageId)!;
+        for (const id of parseIdsFromMarkerText(row.job_description)) {
+          set.add(id);
+        }
+      }
+
+      return { appliedIds, technicalIdsByStage };
+    }
+
+    let statusIncludeIds: number[] | undefined;
+    let statusExcludeIds: number[] | undefined;
+
+    if (statusFilter && statusFilter !== "__all__") {
+      const { appliedIds, technicalIdsByStage } = await getPipelineAppIdSets();
+      const unionIds = new Set<number>(appliedIds);
+      for (const ids of technicalIdsByStage.values()) for (const id of ids) unionIds.add(id);
+
+      if (statusFilter === "registered") {
+        statusExcludeIds = Array.from(unionIds);
+      } else if (statusFilter === "applied") {
+        statusIncludeIds = Array.from(appliedIds);
+      } else {
+        statusIncludeIds = Array.from(technicalIdsByStage.get(statusFilter) ?? new Set());
+      }
+    }
+
+    const listQuery = {
+      search,
+      dateFrom,
+      dateTo,
+      candidateFilter,
+      statusIncludeIds,
+      statusExcludeIds,
+      sortKey,
+      sortDir,
+      page,
+      pageSize,
+    };
+
+    const total = await countApplicationsWithFilters(user.id, listQuery);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const resolvedPage = Math.min(page, totalPages);
+
+    const entries = await listApplicationsWithFilters(user.id, {
+      ...listQuery,
+      page: resolvedPage,
+    });
+
     const [stageMap, pipelineStages] = await Promise.all([
       buildPipelineStageMap(entries, user.id),
       listPipelineStages(),
     ]);
+
+    const resumes = entries.map((entry) => mapForList(entry, stageMap));
+
+    // For pipeline ordering we only guarantee ordering within the loaded page.
+    if (sortKey === "pipeline" && resumes.length > 0) {
+      const stageSortIndex = (stageId: string | null) => {
+        if (!stageId) return -1;
+        const idx = pipelineStages.findIndex((stage) => stage.id === stageId);
+        return idx >= 0 ? idx : pipelineStages.length + 1;
+      };
+
+      resumes.sort((a, b) => {
+        const av = stageSortIndex(a.pipelineStageId);
+        const bv = stageSortIndex(b.pipelineStageId);
+        const cmp = av - bv;
+        if (cmp !== 0) return sortDir === "asc" ? cmp : -cmp;
+        return b.rowIndex - a.rowIndex;
+      });
+    }
+
+    let orphanCandidateNames: string[] = [];
+    if (includeOrphans) {
+      const supabase = getSupabaseAdminClient();
+      const { data: orphanRows } = await supabase
+        .from("resume_db_applications")
+        .select("candidate_name")
+        .eq("user_id", userId)
+        .is("profile_id", null)
+        .neq("candidate_name", "")
+        .order("candidate_name", { ascending: true });
+
+      orphanCandidateNames = Array.from(
+        new Set(
+          (orphanRows ?? [])
+            .map(
+              (r: { candidate_name?: string | null }) =>
+                r.candidate_name?.trim(),
+            )
+            .filter((x): x is string => Boolean(x)),
+        ),
+      );
+    }
+
     return corsJson({
-      resumes: entries.map((entry) => mapForList(entry, stageMap)),
+      resumes,
       pipelineStages,
+      total,
+      page: resolvedPage,
+      pageSize,
+      orphanCandidateNames,
     });
   } catch (error) {
     console.error("Resume DB GET error:", error);

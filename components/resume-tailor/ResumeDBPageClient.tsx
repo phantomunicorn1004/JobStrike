@@ -293,6 +293,7 @@ function matchesCandidateFilter(row: ResumeDbRow, filterKey: string): boolean {
 function buildCandidateFilterOptions(
   profiles: { id: number; full_name: string }[],
   rows: ResumeDbRow[],
+  orphanCandidateNames: string[] = [],
 ): CandidateFilterOption[] {
   const profileNames = new Set(profiles.map((p) => p.full_name.trim().toLowerCase()));
   const profileIdsInOptions = new Set<number>();
@@ -315,6 +316,15 @@ function buildCandidateFilterOptions(
   }
 
   const orphanNames = new Map<string, string>();
+  for (const rawName of orphanCandidateNames) {
+    const name = rawName.trim();
+    if (!name) continue;
+    const normalized = name.toLowerCase();
+    if (profileNames.has(normalized)) continue;
+    orphanNames.set(normalized, name);
+  }
+
+  // Fallback: also consider any orphan candidates present in the current page.
   for (const row of rows) {
     const name = row.candidate.trim();
     if (!name || row.profileId != null) continue;
@@ -544,6 +554,113 @@ function AppliedDateFilter({
   );
 }
 
+function StatusFilter({
+  value,
+  stages,
+  onApply,
+  onClear,
+}: {
+  value: string;
+  stages: PipelineStageOption[];
+  onApply: (v: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const active = value !== "__all__";
+
+  useEffect(() => {
+    if (open) setDraft(value);
+  }, [open, value]);
+
+  const apply = () => {
+    onApply(draft);
+    setOpen(false);
+  };
+
+  const clear = () => {
+    setDraft("__all__");
+    onClear();
+    setOpen(false);
+  };
+
+  const selectedLabel =
+    draft === "__all__"
+      ? "All statuses"
+      : draft === "registered"
+        ? "Registered"
+        : stages.find((s) => s.id === draft)?.name ?? "Status";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={
+                active
+                  ? `Status filter: ${selectedLabel}`
+                  : "Filter by status"
+              }
+              className={cn(
+                "relative h-9 w-9 rounded-xl shrink-0",
+                active && "border-primary/60 bg-primary/5 text-primary",
+              )}
+            >
+              <Workflow className="h-4 w-4" />
+              {active && (
+                <span
+                  className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                  aria-hidden
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {active ? `Status: ${selectedLabel}` : "Filter by status"}
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent className="w-64 p-3" align="start">
+        <p className="text-sm font-medium mb-3">Filter by status</p>
+        <Select
+          value={draft || "__all__"}
+          onValueChange={(v) => setDraft(v)}
+        >
+          <SelectTrigger className="h-9 w-full">
+            <SelectValue placeholder="All statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All statuses</SelectItem>
+            <SelectItem value="registered">Registered</SelectItem>
+            {stages.map((stage) => (
+              <SelectItem key={stage.id} value={stage.id}>
+                {stage.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {stages.length === 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Loading statuses…
+          </p>
+        )}
+        <div className="mt-3 flex justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={clear}>
+            Clear
+          </Button>
+          <Button type="button" size="sm" className="h-8" onClick={apply}>
+            Apply
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function ResumeDBPageClient() {
   const [rows, setRows] = useState<ResumeDbRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -554,6 +671,7 @@ export function ResumeDBPageClient() {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(25);
+  const [totalCount, setTotalCount] = useState<number>(0);
   const [removingRow, setRemovingRow] = useState<number | null>(null);
   const [updatingStageRow, setUpdatingStageRow] = useState<number | null>(null);
   const [pipelineStages, setPipelineStages] = useState<PipelineStageOption[]>([]);
@@ -566,14 +684,46 @@ export function ResumeDBPageClient() {
   const { percents, resizePair, fitColumn } = useResizableColumns();
   const [profiles, setProfiles] = useState<{ id: number; full_name: string }[]>([]);
   const [candidateFilter, setCandidateFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("__all__");
+  const [orphanCandidateNames, setOrphanCandidateNames] = useState<string[]>([]);
+  const [orphanCandidateNamesLoaded, setOrphanCandidateNamesLoaded] = useState(false);
+
+  const loadProfiles = useCallback(async () => {
+    try {
+      const profilesRes = await fetch("/api/profiles", {
+        credentials: "same-origin",
+      });
+      if (!profilesRes.ok) return;
+      const profileData = (await profilesRes.json().catch(() => ({}))) as {
+        profiles?: { id: number; full_name: string }[];
+      };
+      setProfiles(profileData.profiles ?? []);
+    } catch {
+      // ignore profile load errors (table still works)
+    }
+  }, []);
 
   const loadRows = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [resumeRes, profilesRes] = await Promise.all([
-        fetch("/api/resume-db", { credentials: "same-origin" }),
-        fetch("/api/profiles", { credentials: "same-origin" }),
-      ]);
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
+      if (search.trim()) params.set("search", search.trim());
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      if (candidateFilter) params.set("candidateFilter", candidateFilter);
+      if (statusFilter && statusFilter !== "__all__") {
+        params.set("statusFilter", statusFilter);
+      }
+      if (!orphanCandidateNamesLoaded) {
+        params.set("includeOrphans", "1");
+      }
+      if (sortKey) params.set("sortKey", sortKey);
+      params.set("sortDir", sortDir);
+
+      const url = `/api/resume-db?${params.toString()}`;
+      const resumeRes = await fetch(url, { credentials: "same-origin" });
       if (!resumeRes.ok) {
         const err = await resumeRes.json().catch(() => ({}));
         throw new Error(err.error || "Failed to load Resume DB.");
@@ -581,10 +731,10 @@ export function ResumeDBPageClient() {
       const data = await resumeRes.json();
       setRows(data.resumes ?? []);
       setPipelineStages(data.pipelineStages ?? []);
-
-      if (profilesRes.ok) {
-        const profileData = await profilesRes.json().catch(() => ({}));
-        setProfiles(profileData.profiles ?? []);
+      setTotalCount(Number(data.total ?? 0));
+      if (!orphanCandidateNamesLoaded) {
+        setOrphanCandidateNames(data.orphanCandidateNames ?? []);
+        setOrphanCandidateNamesLoaded(true);
       }
     } catch (error) {
       toast.error(
@@ -593,23 +743,52 @@ export function ResumeDBPageClient() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [
+    page,
+    pageSize,
+    search,
+    dateFrom,
+    dateTo,
+    candidateFilter,
+    statusFilter,
+    sortKey,
+    sortDir,
+    orphanCandidateNamesLoaded,
+  ]);
 
   useEffect(() => {
-    loadRows();
+    void loadProfiles();
+  }, [loadProfiles]);
+
+  useEffect(() => {
+    void loadRows();
   }, [loadRows]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, pageSize, dateFrom, dateTo, candidateFilter, sortKey, sortDir]);
+  }, [
+    search,
+    pageSize,
+    dateFrom,
+    dateTo,
+    candidateFilter,
+    statusFilter,
+    sortKey,
+    sortDir,
+  ]);
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [search, dateFrom, dateTo, candidateFilter]);
+  }, [search, dateFrom, dateTo, candidateFilter, statusFilter]);
 
   const candidateFilterOptions = useMemo(
-    () => buildCandidateFilterOptions(profiles, rows),
-    [profiles, rows],
+    () =>
+      buildCandidateFilterOptions(
+        profiles,
+        rows,
+        orphanCandidateNames,
+      ),
+    [profiles, rows, orphanCandidateNames],
   );
 
   const handleSort = (key: Exclude<SortKey, null>) => {
@@ -621,68 +800,19 @@ export function ResumeDBPageClient() {
     }
   };
 
-  const hasActiveFilters = Boolean(search.trim() || dateFrom || dateTo || candidateFilter);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (q) {
-        const haystack = [
-          r.entryId,
-          r.company,
-          r.jobTitle,
-          r.candidate,
-          r.jobLink,
-          r.apply,
-          r.date,
-          r.appliedAt,
-        ]
-          .join(" ")
-          .toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-      if (!matchesCandidateFilter(r, candidateFilter)) return false;
-      if (!isWithinAppliedDateRange(r.appliedAt, dateFrom, dateTo)) return false;
-      return true;
-    });
-  }, [rows, search, candidateFilter, dateFrom, dateTo]);
-
-  const stageSortIndex = useCallback(
-    (stageId: string | null) => {
-      if (!stageId) return -1;
-      const idx = pipelineStages.findIndex((stage) => stage.id === stageId);
-      return idx >= 0 ? idx : pipelineStages.length + 1;
-    },
-    [pipelineStages],
+  const hasActiveFilters = Boolean(
+    search.trim() || dateFrom || dateTo || candidateFilter || (statusFilter && statusFilter !== "__all__"),
   );
 
-  const sorted = useMemo(() => {
-    const list = [...filtered];
-    if (!sortKey) return list;
-    list.sort((a, b) => {
-      if (sortKey === "pipeline") {
-        const av = stageSortIndex(a.pipelineStageId);
-        const bv = stageSortIndex(b.pipelineStageId);
-        const cmp = av - bv;
-        return sortDir === "asc" ? cmp : -cmp;
-      }
-      const av = (sortKey === "company" ? a.company : a.jobTitle).trim().toLowerCase();
-      const bv = (sortKey === "company" ? b.company : b.jobTitle).trim().toLowerCase();
-      const cmp = av.localeCompare(bv, undefined, { sensitivity: "base" });
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return list;
-  }, [filtered, sortKey, sortDir, stageSortIndex]);
-
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  // Server-side pagination/filtering/sorting: `rows` is already the current page.
+  const filtered = rows;
+  const sorted = rows;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const safePage = Math.min(page, totalPages);
-  const pageRows = useMemo(() => {
-    const start = (safePage - 1) * pageSize;
-    return sorted.slice(start, start + pageSize);
-  }, [sorted, safePage, pageSize]);
+  const pageRows = rows;
 
-  const rangeStart = sorted.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const rangeEnd = Math.min(safePage * pageSize, sorted.length);
+  const rangeStart = totalCount === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const rangeEnd = totalCount === 0 ? 0 : Math.min(safePage * pageSize, totalCount);
 
   const handleAutoFitColumn = useCallback(
     (columnId: ResumeDBColumnId) => {
@@ -907,7 +1037,7 @@ export function ResumeDBPageClient() {
           <div className="min-w-0 space-y-0.5">
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Resume DB</h1>
             <p className="text-xs text-muted-foreground sm:text-sm">
-              {rows.length} application{rows.length === 1 ? "" : "s"} — register via
+              {totalCount} application{totalCount === 1 ? "" : "s"} — register via
               the Smart Job extension. Set status to move jobs through the{" "}
               <Link href="/jobs" className="text-primary underline-offset-4 hover:underline">
                 pipeline
@@ -956,6 +1086,13 @@ export function ResumeDBPageClient() {
             }}
           />
 
+          <StatusFilter
+            value={statusFilter}
+            stages={pipelineStages}
+            onApply={setStatusFilter}
+            onClear={() => setStatusFilter("__all__")}
+          />
+
           <CandidateFilter
             value={candidateFilter}
             options={candidateFilterOptions}
@@ -974,6 +1111,7 @@ export function ResumeDBPageClient() {
                 setDateFrom("");
                 setDateTo("");
                 setCandidateFilter("");
+                setStatusFilter("__all__");
               }}
             >
               <X className="h-3.5 w-3.5 mr-1" />
@@ -984,11 +1122,11 @@ export function ResumeDBPageClient() {
           <div className="flex items-center gap-1.5 ml-auto shrink-0">
             {!isLoading && (
               <span className="text-xs text-muted-foreground whitespace-nowrap mr-1 hidden md:inline">
-                {filtered.length === 0
-                  ? rows.length === 0
-                    ? "No applications"
-                    : "No matches"
-                  : `${rangeStart}–${rangeEnd} of ${sorted.length}`}
+                {totalCount === 0
+                  ? hasActiveFilters
+                    ? "No matches"
+                    : "No applications"
+                  : `${rangeStart}–${rangeEnd} of ${totalCount}`}
               </span>
             )}
             <span className="text-xs text-muted-foreground hidden sm:inline whitespace-nowrap">
@@ -1013,20 +1151,20 @@ export function ResumeDBPageClient() {
               variant="outline"
               size="icon"
               className="h-9 w-9 rounded-xl"
-              disabled={safePage <= 1 || sorted.length === 0}
+              disabled={safePage <= 1 || totalCount === 0}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               aria-label="Previous page"
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <span className="text-xs tabular-nums min-w-[72px] text-center text-muted-foreground">
-              {sorted.length === 0 ? "0 / 0" : `${safePage} / ${totalPages}`}
+              {totalCount === 0 ? "0 / 0" : `${safePage} / ${totalPages}`}
             </span>
             <Button
               variant="outline"
               size="icon"
               className="h-9 w-9 rounded-xl"
-              disabled={safePage >= totalPages || sorted.length === 0}
+              disabled={safePage >= totalPages || totalCount === 0}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               aria-label="Next page"
             >
@@ -1089,9 +1227,9 @@ export function ResumeDBPageClient() {
               </div>
             ) : filtered.length === 0 ? (
               <p className="p-4 text-sm text-muted-foreground text-center sm:p-6">
-                {rows.length === 0
-                  ? "No entries yet. Use the extension Register tab on a job posting."
-                  : "No matches for your search or date filters."}
+                {hasActiveFilters
+                  ? "No matches for your search, date, candidate, or status filters."
+                  : "No entries yet. Use the extension Register tab on a job posting."}
               </p>
             ) : (
               <div>
