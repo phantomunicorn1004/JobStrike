@@ -51,7 +51,7 @@ export async function findUserByExtensionApiKey(
   if (!key) return null;
   const { data, error } = await supabase
     .from("app_users")
-    .select("id, username, role, created_at, updated_at")
+    .select("id, username, role, timezone, created_at, updated_at")
     .eq("extension_api_key", key)
     .maybeSingle();
   if (error) throw error;
@@ -62,7 +62,7 @@ export async function findUserById(id: string): Promise<AppUser | null> {
   const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
     .from("app_users")
-    .select("id, username, role, created_at, updated_at")
+    .select("id, username, role, timezone, created_at, updated_at")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
@@ -73,7 +73,7 @@ export async function listAppUsers(): Promise<AppUser[]> {
   const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
     .from("app_users")
-    .select("id, username, role, created_at, updated_at")
+    .select("id, username, role, timezone, created_at, updated_at")
     .order("created_at", { ascending: true });
   if (error) throw error;
   return ((data ?? []) as AppUserRow[]).map(mapRow);

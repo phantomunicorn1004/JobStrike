@@ -17,7 +17,7 @@ function toSessionUser(user: {
   id: string;
   username: string;
   role: SessionUser["role"];
-  timezone?: string;
+  timezone?: string | null;
 }): SessionUser {
   return {
     id: user.id,
