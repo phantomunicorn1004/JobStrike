@@ -2,13 +2,41 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Ban, Download, ExternalLink, Loader2, RefreshCw, Search, Copy } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  Ban,
+  Building2,
+  Copy,
+  Download,
+  ExternalLink,
+  Link2,
+  ListFilter,
+  Loader2,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import JobsLayout from "@/app/jobs-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import {
   Table,
   TableBody,
@@ -64,39 +92,90 @@ type ScrapeResponse = {
 };
 
 const DATE_WINDOW_OPTIONS: Array<{ value: DateWindow; label: string }> = [
-  { value: "1d", label: "Within 24 hours" },
-  { value: "3d", label: "Last 3 days" },
-  { value: "7d", label: "Last 7 days" },
+  { value: "1d", label: "24h" },
+  { value: "3d", label: "3 days" },
+  { value: "7d", label: "7 days" },
 ];
 
-function downloadCsv(csv: string) {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 25;
+
+function downloadTextFile(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "hiring-cafe-jobs.csv";
+  anchor.download = filename;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
 }
 
+function collectLinks(jobs: JobRow[]): string[] {
+  return jobs
+    .map((job) => job.apply_url?.trim())
+    .filter((value): value is string => Boolean(value));
+}
+
 export function JobScraperPageClient() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
+  const pageSizeRaw = Number(searchParams.get("pageSize") ?? DEFAULT_PAGE_SIZE) || DEFAULT_PAGE_SIZE;
+  const pageSize = PAGE_SIZE_OPTIONS.includes(pageSizeRaw as (typeof PAGE_SIZE_OPTIONS)[number])
+    ? pageSizeRaw
+    : DEFAULT_PAGE_SIZE;
+  const search = searchParams.get("q") ?? "";
+
   const [dateWindow, setDateWindow] = useState<DateWindow>("3d");
   const [excludeBlocked, setExcludeBlocked] = useState(true);
   const [excludeResumeDb, setExcludeResumeDb] = useState(true);
   const [candidateFilter, setCandidateFilter] = useState("");
   const [candidates, setCandidates] = useState<CandidateOption[]>([]);
   const [blockedCompanies, setBlockedCompanies] = useState<BlockedCompany[]>([]);
+  const [resumeDbCompanies, setResumeDbCompanies] = useState<string[]>([]);
   const [resumeDbCompanyCount, setResumeDbCompanyCount] = useState(0);
   const [newBlockedCompany, setNewBlockedCompany] = useState("");
   const [bulkBlockedCompanies, setBulkBlockedCompanies] = useState("");
-  const [search, setSearch] = useState("");
+  const [searchDraft, setSearchDraft] = useState(search);
   const [loadingBlocked, setLoadingBlocked] = useState(true);
   const [savingBlocked, setSavingBlocked] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [scraping, setScraping] = useState(false);
   const [result, setResult] = useState<ScrapeResponse | null>(null);
+  const [blockedDialogOpen, setBlockedDialogOpen] = useState(false);
+  const [companiesSheetOpen, setCompaniesSheetOpen] = useState(false);
+
+  const updateParams = useCallback(
+    (patch: Record<string, string | null>) => {
+      const next = new URLSearchParams(searchParams.toString());
+      for (const [key, value] of Object.entries(patch)) {
+        if (!value) next.delete(key);
+        else next.set(key, value);
+      }
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
+
+  useEffect(() => {
+    setSearchDraft(search);
+  }, [search]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (searchDraft === search) return;
+      updateParams({
+        q: searchDraft.trim() || null,
+        page: "1",
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [search, searchDraft, updateParams]);
 
   const loadBlockedCompanies = useCallback(async (selectedCandidate?: string) => {
     const filter = selectedCandidate ?? candidateFilter;
@@ -109,16 +188,17 @@ export function JobScraperPageClient() {
         { credentials: "same-origin" },
       );
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to load blocked companies.");
+      if (!res.ok) throw new Error(data.error || "Failed to load company lists.");
       setBlockedCompanies(data.blockedCompanies ?? []);
       setCandidates(data.candidates ?? []);
+      setResumeDbCompanies(data.resumeDbCompanies ?? []);
       setResumeDbCompanyCount(Number(data.resumeDbCompanyCount ?? 0));
       if (!filter && Array.isArray(data.candidates) && data.candidates.length === 1) {
         setCandidateFilter((data.candidates[0] as CandidateOption).key);
       }
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to load blocked companies.",
+        error instanceof Error ? error.message : "Failed to load company lists.",
       );
     } finally {
       setLoadingBlocked(false);
@@ -152,6 +232,7 @@ export function JobScraperPageClient() {
       };
       if (!res.ok) throw new Error(data.error || "Scrape failed.");
       setResult(data as ScrapeResponse);
+      updateParams({ page: "1" });
       toast.success("Scrape completed.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Scrape failed.");
@@ -188,7 +269,8 @@ export function JobScraperPageClient() {
           jobs: nextJobs,
           stats: {
             ...current.stats,
-            removedBlocked: current.stats.removedBlocked + (current.jobs.length - nextJobs.length),
+            removedBlocked:
+              current.stats.removedBlocked + (current.jobs.length - nextJobs.length),
             remaining: nextJobs.length,
           },
         };
@@ -235,20 +317,27 @@ export function JobScraperPageClient() {
   };
 
   const copyLinks = async () => {
-    const links = (result?.jobs ?? [])
-      .map((job) => job.apply_url?.trim())
-      .filter((value): value is string => Boolean(value))
-      .join("\n");
-    if (!links) {
+    const links = collectLinks(result?.jobs ?? []);
+    if (links.length === 0) {
       toast.error("No links to copy.");
       return;
     }
     try {
-      await navigator.clipboard.writeText(links);
+      await navigator.clipboard.writeText(links.join("\n"));
       toast.success("Job links copied.");
     } catch {
       toast.error("Copy failed.");
     }
+  };
+
+  const downloadLinks = () => {
+    const links = collectLinks(result?.jobs ?? []);
+    if (links.length === 0) {
+      toast.error("No links to download.");
+      return;
+    }
+    downloadTextFile(links.join("\n"), "hiring-cafe-links.txt", "text/plain;charset=utf-8");
+    toast.success("Links downloaded.");
   };
 
   const filteredJobs = useMemo(() => {
@@ -262,318 +351,472 @@ export function JobScraperPageClient() {
     });
   }, [result?.jobs, search]);
 
+  const totalFiltered = filteredJobs.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const rangeStart = totalFiltered === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const rangeEnd = totalFiltered === 0 ? 0 : Math.min(safePage * pageSize, totalFiltered);
+  const pagedJobs = filteredJobs.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  useEffect(() => {
+    if (page !== safePage) {
+      updateParams({ page: String(safePage) });
+    }
+  }, [page, safePage, updateParams]);
+
+  const selectedCandidateLabel =
+    candidates.find((candidate) => candidate.key === candidateFilter)?.label ?? "No candidate";
+
   return (
     <JobsLayout>
-      <div className="flex h-full min-h-0 w-full flex-col gap-4">
-        <header className="space-y-1">
-          <h1 className="text-xl font-semibold">Job Scraper</h1>
-          <p className="text-sm text-muted-foreground">
-            Scrape hiring.cafe with a date-only filter, exclude blocked companies, and review CSV-ready results.
-          </p>
-        </header>
+      <div className="relative flex h-full min-h-0 w-full flex-col gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold">Job Scraper</h1>
+            <p className="text-sm text-muted-foreground">
+              Results-first scrape review for hiring.cafe.
+            </p>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Scrape jobs</CardTitle>
-            <CardDescription>
-              Other hiring.cafe filters stay fixed. Only the date window is configurable here.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {DATE_WINDOW_OPTIONS.map((option) => (
-                <Button
-                  key={option.value}
-                  type="button"
-                  variant={dateWindow === option.value ? "default" : "outline"}
-                  onClick={() => setDateWindow(option.value)}
-                >
-                  {option.label}
+          <div className="flex flex-wrap gap-2">
+            <Dialog open={blockedDialogOpen} onOpenChange={setBlockedDialogOpen}>
+              <DialogTrigger asChild>
+                <Button type="button" variant="outline" size="sm">
+                  <Ban className="mr-2 h-4 w-4" />
+                  Blocked companies
                 </Button>
-              ))}
-            </div>
+              </DialogTrigger>
+              <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>Blocked companies</DialogTitle>
+                  <DialogDescription>
+                    Manage companies you never want in scrape results. Stored separately from Resume DB.
+                  </DialogDescription>
+                </DialogHeader>
 
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,280px)_1fr] sm:items-end">
-              <label className="grid gap-1.5 text-sm">
-                <span className="text-xs font-medium text-muted-foreground">
-                  Candidate (for Resume DB company filter)
-                </span>
-                <select
-                  value={candidateFilter}
-                  onChange={(e) => setCandidateFilter(e.target.value)}
-                  className="border-input bg-card dark:bg-input/30 h-9 w-full rounded-md border px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-                >
-                  <option value="">Select candidate…</option>
-                  {candidates.map((candidate) => (
-                    <option key={candidate.key} value={candidate.key}>
-                      {candidate.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="text-xs text-muted-foreground sm:pb-2">
-                Resume DB exclusion uses only companies registered for this candidate under your account.
-              </p>
-            </div>
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <Input
+                      value={newBlockedCompany}
+                      onChange={(e) => setNewBlockedCompany(e.target.value)}
+                      placeholder="Add one company"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() => addBlockedCompanies("single")}
+                      disabled={savingBlocked || !newBlockedCompany.trim()}
+                    >
+                      Add
+                    </Button>
+                  </div>
 
-            <div className="flex flex-wrap gap-4 text-sm">
-              <label className="flex items-center gap-2">
+                  <div className="space-y-2">
+                    <Textarea
+                      value={bulkBlockedCompanies}
+                      onChange={(e) => setBulkBlockedCompanies(e.target.value)}
+                      placeholder="Bulk add, one company per line"
+                      rows={4}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => addBlockedCompanies("bulk")}
+                      disabled={savingBlocked || !bulkBlockedCompanies.trim()}
+                    >
+                      Bulk add
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">
+                      Current list ({blockedCompanies.length})
+                    </div>
+                    <div className="max-h-[280px] space-y-2 overflow-auto rounded-md border p-2">
+                      {loadingBlocked ? (
+                        <div className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading…
+                        </div>
+                      ) : blockedCompanies.length === 0 ? (
+                        <p className="p-2 text-sm text-muted-foreground">
+                          No blocked companies yet.
+                        </p>
+                      ) : (
+                        blockedCompanies.map((company) => (
+                          <div
+                            key={company.id}
+                            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-medium">{company.companyName}</div>
+                              {company.note ? (
+                                <div className="text-xs text-muted-foreground">{company.note}</div>
+                              ) : null}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeBlockedCompany(company.id)}
+                              disabled={deletingId === company.id}
+                            >
+                              {deletingId === company.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                "Remove"
+                              )}
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Sheet open={companiesSheetOpen} onOpenChange={setCompaniesSheetOpen}>
+              <SheetTrigger asChild>
+                <Button type="button" variant="outline" size="sm">
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Company lists
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-full sm:max-w-md">
+                <SheetHeader>
+                  <SheetTitle>Company lists</SheetTitle>
+                  <SheetDescription>
+                    Registered companies for {selectedCandidateLabel}, plus blocked companies.
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pb-4">
+                  <div className="min-h-0 flex-1 space-y-2 overflow-auto rounded-md border p-3">
+                    <div className="text-sm font-medium">
+                      Resume DB companies ({resumeDbCompanyCount})
+                    </div>
+                    {!candidateFilter ? (
+                      <p className="text-sm text-muted-foreground">
+                        Select a candidate to load registered companies.
+                      </p>
+                    ) : loadingBlocked ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading…
+                      </div>
+                    ) : resumeDbCompanies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No registered companies for this candidate.
+                      </p>
+                    ) : (
+                      <ul className="space-y-1 text-sm">
+                        {resumeDbCompanies.map((company) => (
+                          <li key={company} className="rounded-md px-2 py-1 hover:bg-muted/50">
+                            {company}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="min-h-0 flex-1 space-y-2 overflow-auto rounded-md border p-3">
+                    <div className="text-sm font-medium">
+                      Blocked companies ({blockedCompanies.length})
+                    </div>
+                    {blockedCompanies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No blocked companies yet.</p>
+                    ) : (
+                      <ul className="space-y-1 text-sm">
+                        {blockedCompanies.map((company) => (
+                          <li
+                            key={company.id}
+                            className="rounded-md px-2 py-1 hover:bg-muted/50"
+                          >
+                            {company.companyName}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
+        </div>
+
+        <Card className="shrink-0">
+          <CardContent className="flex flex-col gap-3 p-3 sm:p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                {DATE_WINDOW_OPTIONS.map((option) => (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    size="sm"
+                    variant={dateWindow === option.value ? "default" : "outline"}
+                    onClick={() => setDateWindow(option.value)}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+
+              <select
+                value={candidateFilter}
+                onChange={(e) => setCandidateFilter(e.target.value)}
+                className="border-input bg-card dark:bg-input/30 h-8 min-w-[180px] rounded-md border px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                aria-label="Candidate"
+              >
+                <option value="">Select candidate…</option>
+                {candidates.map((candidate) => (
+                  <option key={candidate.key} value={candidate.key}>
+                    {candidate.label}
+                  </option>
+                ))}
+              </select>
+
+              <label className="flex items-center gap-1.5 text-xs sm:text-sm">
                 <Checkbox
                   checked={excludeBlocked}
                   onCheckedChange={(checked) => setExcludeBlocked(Boolean(checked))}
                 />
-                Exclude blocked companies
+                Blocked
               </label>
-              <label className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs sm:text-sm">
                 <Checkbox
                   checked={excludeResumeDb}
                   onCheckedChange={(checked) => setExcludeResumeDb(Boolean(checked))}
                   disabled={!candidateFilter}
                 />
-                Exclude this candidate&apos;s Resume DB companies ({resumeDbCompanyCount})
+                Resume DB ({resumeDbCompanyCount})
               </label>
-            </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={runScrape} disabled={scraping}>
-                {scraping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                Scrape jobs
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => loadBlockedCompanies(candidateFilter)}
-                disabled={loadingBlocked}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh company lists
-              </Button>
+              <div className="ml-auto flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => loadBlockedCompanies(candidateFilter)}
+                  disabled={loadingBlocked}
+                >
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  Refresh
+                </Button>
+                <Button type="button" size="sm" onClick={runScrape} disabled={scraping}>
+                  {scraping ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Search className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Scrape
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[1.4fr_0.8fr]">
-          <Card className="min-h-0">
-            <CardHeader className="space-y-3">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <CardTitle>Scrape results</CardTitle>
-                  <CardDescription>
-                    Review jobs before exporting or sending links to the extension launcher.
-                  </CardDescription>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => result?.csv && downloadCsv(result.csv)}
-                    disabled={!result?.csv}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Download CSV
-                  </Button>
-                  <Button type="button" variant="outline" onClick={copyLinks} disabled={!result?.jobs?.length}>
-                    <Copy className="mr-2 h-4 w-4" />
-                    Copy links
-                  </Button>
-                </div>
-              </div>
-
-              {result?.stats ? (
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="secondary">Scraped {result.stats.scraped}</Badge>
-                  <Badge variant="secondary">Deduped {result.stats.deduped}</Badge>
-                  <Badge variant="secondary">Blocked removed {result.stats.removedBlocked}</Badge>
-                  <Badge variant="secondary">Resume DB removed {result.stats.removedResumeDb}</Badge>
-                  <Badge>Remaining {result.stats.remaining}</Badge>
-                </div>
-              ) : null}
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search company, title, site..."
-                  className="max-w-sm"
-                />
+        <Card className="flex min-h-0 flex-1 flex-col">
+          <CardHeader className="space-y-3 pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-lg">Scrape results</CardTitle>
                 {result?.stats ? (
-                  <span className="text-xs text-muted-foreground">
-                    Pages fetched: {result.stats.pagesFetched}
-                    {result.stats.reportedTotal != null
-                      ? ` • hiring.cafe total: ${result.stats.reportedTotal}`
-                      : ""}
-                  </span>
-                ) : null}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <Badge variant="secondary">Scraped {result.stats.scraped}</Badge>
+                    <Badge variant="secondary">Deduped {result.stats.deduped}</Badge>
+                    <Badge variant="secondary">Blocked {result.stats.removedBlocked}</Badge>
+                    <Badge variant="secondary">Resume DB {result.stats.removedResumeDb}</Badge>
+                    <Badge>Remaining {result.stats.remaining}</Badge>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Run a scrape to load jobs into this table.
+                  </p>
+                )}
               </div>
-            </CardHeader>
-            <CardContent className="min-h-0">
-              <div className="max-h-[560px] overflow-auto rounded-md border">
-                <Table>
-                  <TableHeader>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    result?.csv &&
+                    downloadTextFile(result.csv, "hiring-cafe-jobs.csv", "text/csv;charset=utf-8")
+                  }
+                  disabled={!result?.csv}
+                >
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  CSV
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={downloadLinks}
+                  disabled={!result?.jobs?.length}
+                >
+                  <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                  Links file
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={copyLinks}
+                  disabled={!result?.jobs?.length}
+                >
+                  <Copy className="mr-1.5 h-3.5 w-3.5" />
+                  Copy links
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[220px] flex-1">
+                <ListFilter className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchDraft}
+                  onChange={(e) => setSearchDraft(e.target.value)}
+                  placeholder="Search company, title, site…"
+                  className="h-8 pl-8"
+                />
+              </div>
+              {result?.stats ? (
+                <span className="text-xs text-muted-foreground">
+                  Pages fetched: {result.stats.pagesFetched}
+                  {result.stats.reportedTotal != null
+                    ? ` · hiring.cafe total: ${result.stats.reportedTotal}`
+                    : ""}
+                </span>
+              ) : null}
+            </div>
+          </CardHeader>
+
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+            <div className="min-h-0 flex-1 overflow-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Company</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>ATS</TableHead>
+                    <TableHead>Published</TableHead>
+                    <TableHead>Link</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pagedJobs.length === 0 ? (
                     <TableRow>
-                      <TableHead>Company</TableHead>
-                      <TableHead>Title</TableHead>
-                      <TableHead>ATS</TableHead>
-                      <TableHead>Published</TableHead>
-                      <TableHead>Link</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                        {scraping ? "Scraping jobs…" : "No jobs on this page."}
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredJobs.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                          {scraping ? "Scraping jobs..." : "No jobs loaded yet."}
+                  ) : (
+                    pagedJobs.map((job, index) => (
+                      <TableRow
+                        key={`${job.apply_url ?? job.company_name ?? "job"}-${rangeStart + index}`}
+                      >
+                        <TableCell className="max-w-[180px] whitespace-normal">
+                          <div className="font-medium">{job.company_name || "—"}</div>
+                          {job.company_tagline ? (
+                            <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                              {job.company_tagline}
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="max-w-[280px] whitespace-normal">
+                          <div>{job.title || "—"}</div>
+                          {job.job_category ? (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {job.job_category}
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>{job.application_site || "Unknown"}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs">
+                          {job.estimated_publish_date || "—"}
+                        </TableCell>
+                        <TableCell>
+                          {job.apply_url ? (
+                            <Link
+                              href={job.apply_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-primary hover:underline"
+                            >
+                              Open <ExternalLink className="h-3.5 w-3.5" />
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => addCompanyFromRow(job.company_name)}
+                            disabled={!job.company_name || savingBlocked}
+                          >
+                            <Ban className="mr-1 h-4 w-4" />
+                            Block
+                          </Button>
                         </TableCell>
                       </TableRow>
-                    ) : (
-                      filteredJobs.map((job, index) => (
-                        <TableRow key={`${job.apply_url ?? job.company_name ?? "job"}-${index}`}>
-                          <TableCell className="max-w-[180px] whitespace-normal">
-                            <div className="font-medium">{job.company_name || "—"}</div>
-                            {job.company_tagline ? (
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {job.company_tagline}
-                              </div>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="max-w-[280px] whitespace-normal">
-                            <div>{job.title || "—"}</div>
-                            {job.job_category ? (
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {job.job_category}
-                              </div>
-                            ) : null}
-                          </TableCell>
-                          <TableCell>{job.application_site || "Unknown"}</TableCell>
-                          <TableCell>{job.estimated_publish_date || "—"}</TableCell>
-                          <TableCell>
-                            {job.apply_url ? (
-                              <Link
-                                href={job.apply_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-primary hover:underline"
-                              >
-                                Open <ExternalLink className="h-3.5 w-3.5" />
-                              </Link>
-                            ) : (
-                              "—"
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => addCompanyFromRow(job.company_name)}
-                              disabled={!job.company_name || savingBlocked}
-                            >
-                              <Ban className="mr-1 h-4 w-4" />
-                              Block
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="flex min-h-0 flex-col gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Blocked companies</CardTitle>
-                <CardDescription>
-                  Add companies you never want to see in Job Scraper results, even if they are not in Resume DB.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex gap-2">
-                  <Input
-                    value={newBlockedCompany}
-                    onChange={(e) => setNewBlockedCompany(e.target.value)}
-                    placeholder="Add one company"
-                  />
-                  <Button
-                    type="button"
-                    onClick={() => addBlockedCompanies("single")}
-                    disabled={savingBlocked || !newBlockedCompany.trim()}
-                  >
-                    Add
-                  </Button>
-                </div>
-
-                <div className="space-y-2">
-                  <Textarea
-                    value={bulkBlockedCompanies}
-                    onChange={(e) => setBulkBlockedCompanies(e.target.value)}
-                    placeholder={"Bulk add, one company per line"}
-                    rows={5}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => addBlockedCompanies("bulk")}
-                    disabled={savingBlocked || !bulkBlockedCompanies.trim()}
-                  >
-                    Bulk add
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="min-h-0">
-              <CardHeader>
-                <CardTitle>Current list</CardTitle>
-                <CardDescription>
-                  Stored separately from Resume DB applications.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="min-h-0">
-                <div className="max-h-[320px] overflow-auto space-y-2">
-                  {loadingBlocked ? (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Loading blocked companies...
-                    </div>
-                  ) : blockedCompanies.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No blocked companies yet.</p>
-                  ) : (
-                    blockedCompanies.map((company) => (
-                      <div
-                        key={company.id}
-                        className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <div className="font-medium">{company.companyName}</div>
-                          {company.note ? (
-                            <div className="text-xs text-muted-foreground">{company.note}</div>
-                          ) : null}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeBlockedCompany(company.id)}
-                          disabled={deletingId === company.id}
-                        >
-                          {deletingId === company.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            "Remove"
-                          )}
-                        </Button>
-                      </div>
                     ))
                   )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+              <div className="text-xs text-muted-foreground">
+                Showing {rangeStart}-{rangeEnd} of {totalFiltered}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={String(pageSize)}
+                  onChange={(e) =>
+                    updateParams({
+                      pageSize: e.target.value,
+                      page: "1",
+                    })
+                  }
+                  className="border-input bg-card dark:bg-input/30 h-8 rounded-md border px-2 text-xs"
+                  aria-label="Page size"
+                >
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size} / page
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={safePage <= 1}
+                  onClick={() => updateParams({ page: String(safePage - 1) })}
+                >
+                  Prev
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Page {safePage} / {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={safePage >= totalPages}
+                  onClick={() => updateParams({ page: String(safePage + 1) })}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </JobsLayout>
   );
