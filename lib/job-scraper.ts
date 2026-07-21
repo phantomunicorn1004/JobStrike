@@ -113,8 +113,40 @@ function normalizeText(value: string | null | undefined): string {
 function buildSearchState(dateWindow: JobScraperDateWindow) {
   return {
     ...DEFAULT_SEARCH_STATE,
-    dateFetchedPastNDays: dateWindow === "1d" ? 1 : dateWindow === "7d" ? 7 : 3,
+    dateFetchedPastNDays: dateWindowDays(dateWindow),
   };
+}
+
+export function dateWindowDays(dateWindow: JobScraperDateWindow): number {
+  return dateWindow === "1d" ? 1 : dateWindow === "7d" ? 7 : 3;
+}
+
+/** Keep jobs whose estimated_publish_date is within the selected rolling window. */
+export function filterJobsByPublishDate(
+  jobs: ScrapedJob[],
+  dateWindow: JobScraperDateWindow,
+  nowMs: number = Date.now(),
+) {
+  const days = dateWindowDays(dateWindow);
+  const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000;
+  let removedByDate = 0;
+  const filtered: ScrapedJob[] = [];
+
+  for (const job of jobs) {
+    const raw = job.estimated_publish_date?.trim();
+    if (!raw) {
+      removedByDate += 1;
+      continue;
+    }
+    const publishedMs = Date.parse(raw);
+    if (Number.isNaN(publishedMs) || publishedMs < cutoffMs) {
+      removedByDate += 1;
+      continue;
+    }
+    filtered.push(job);
+  }
+
+  return { filtered, removedByDate, cutoffIso: new Date(cutoffMs).toISOString() };
 }
 
 export function buildHiringCafeUrl(dateWindow: JobScraperDateWindow, page: number): string {

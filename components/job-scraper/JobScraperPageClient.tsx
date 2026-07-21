@@ -91,12 +91,15 @@ type ScrapeResponse = {
   stats: {
     scraped: number;
     deduped: number;
+    removedByDate: number;
     removedBlocked: number;
     removedAts: number;
     removedResumeDb: number;
     remaining: number;
     pagesFetched: number;
     reportedTotal: number | null;
+    dateCutoff?: string;
+    dateWindow?: DateWindow;
   };
 };
 
@@ -832,6 +835,9 @@ export function JobScraperPageClient() {
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <Badge variant="secondary">Scraped {result.stats.scraped}</Badge>
                     <Badge variant="secondary">Deduped {result.stats.deduped}</Badge>
+                    <Badge variant="secondary">
+                      Outside date {result.stats.removedByDate ?? 0}
+                    </Badge>
                     <Badge variant="secondary">Blocked {result.stats.removedBlocked}</Badge>
                     <Badge variant="secondary">ATS {result.stats.removedAts ?? 0}</Badge>
                     <Badge variant="secondary">Resume DB {result.stats.removedResumeDb}</Badge>

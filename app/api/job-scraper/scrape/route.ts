@@ -4,6 +4,7 @@ import { requireRequestUser } from "@/lib/auth/resolve-request-user";
 import {
   dedupeJobs,
   filterJobsByCompany,
+  filterJobsByPublishDate,
   jobsToCsv,
   scrapeHiringCafeJobs,
   type JobScraperDateWindow,
@@ -49,9 +50,14 @@ export async function POST(request: NextRequest) {
     ]);
 
     const dedupedJobs = dedupeJobs(scraped.jobs);
+    const {
+      filtered: dateFilteredJobs,
+      removedByDate,
+      cutoffIso,
+    } = filterJobsByPublishDate(dedupedJobs, dateWindow as JobScraperDateWindow);
     const { filtered, removedBlockedCount, removedResumeCount, removedAtsCount } =
       filterJobsByCompany(
-        dedupedJobs,
+        dateFilteredJobs,
         blockedCompanies.map((company) => company.companyName),
         resumeDbCompanies,
         blockedAts.map((ats) => ats.atsName),
@@ -63,12 +69,15 @@ export async function POST(request: NextRequest) {
       stats: {
         scraped: scraped.jobs.length,
         deduped: dedupedJobs.length,
+        removedByDate,
         removedBlocked: excludeBlocked ? removedBlockedCount : 0,
         removedAts: excludeBlockedAts ? removedAtsCount : 0,
         removedResumeDb: excludeResumeDb ? removedResumeCount : 0,
         remaining: filtered.length,
         pagesFetched: scraped.pagesFetched,
         reportedTotal: scraped.reportedTotal,
+        dateCutoff: cutoffIso,
+        dateWindow,
       },
     });
   } catch (error) {
