@@ -27,11 +27,22 @@ export async function POST(request: NextRequest) {
       body.dateWindow === "1d" || body.dateWindow === "7d" ? body.dateWindow : "3d";
     const excludeBlocked = body.excludeBlocked !== false;
     const excludeResumeDb = body.excludeResumeDb !== false;
+    const candidateFilter =
+      typeof body.candidateFilter === "string" ? body.candidateFilter.trim() : "";
+
+    if (excludeResumeDb && !candidateFilter) {
+      return corsJson(
+        { error: "Select a candidate to exclude Resume DB companies." },
+        { status: 400 },
+      );
+    }
 
     const [scraped, blockedCompanies, resumeDbCompanies] = await Promise.all([
       scrapeHiringCafeJobs(dateWindow as JobScraperDateWindow),
       excludeBlocked ? listBlockedCompanies(user.id) : Promise.resolve([]),
-      excludeResumeDb ? listDistinctResumeDbCompanies(user.id) : Promise.resolve([]),
+      excludeResumeDb
+        ? listDistinctResumeDbCompanies(user.id, candidateFilter)
+        : Promise.resolve([]),
     ]);
 
     const dedupedJobs = dedupeJobs(scraped.jobs);

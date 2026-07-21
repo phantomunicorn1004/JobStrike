@@ -6,6 +6,7 @@ import {
   deleteBlockedCompany,
   listBlockedCompanies,
   listDistinctResumeDbCompanies,
+  listJobScraperCandidates,
 } from "@/lib/job-scraper-repository";
 
 export function OPTIONS() {
@@ -15,12 +16,17 @@ export function OPTIONS() {
 export async function GET(request: NextRequest) {
   try {
     const user = await requireRequestUser(request);
-    const [blockedCompanies, resumeDbCompanies] = await Promise.all([
+    const candidateFilter =
+      new URL(request.url).searchParams.get("candidateFilter")?.trim() || "";
+    const [blockedCompanies, candidates, resumeDbCompanies] = await Promise.all([
       listBlockedCompanies(user.id),
-      listDistinctResumeDbCompanies(user.id),
+      listJobScraperCandidates(user.id),
+      listDistinctResumeDbCompanies(user.id, candidateFilter),
     ]);
     return corsJson({
       blockedCompanies,
+      candidates,
+      candidateFilter: candidateFilter || null,
       resumeDbCompanies,
       resumeDbCompanyCount: resumeDbCompanies.length,
     });

@@ -77,13 +77,98 @@ export async function deleteBlockedCompany(userId: string, id: string): Promise<
   if (error) throw new Error(error.message);
 }
 
-export async function listDistinctResumeDbCompanies(userId: string): Promise<string[]> {
+export type CandidateOption = {
+  key: string;
+  label: string;
+};
+
+function parseCandidateFilter(
+  candidateFilter?: string | null,
+): { profileId?: number; nameEquals?: string } | null {
+  const raw = candidateFilter?.trim();
+  if (!raw) return null;
+  if (raw.startsWith("profile-")) {
+    const id = Number(raw.slice(8));
+    if (Number.isNaN(id)) return null;
+    return { profileId: id };
+  }
+  if (raw.startsWith("name-")) {
+    const name = decodeURIComponent(raw.slice(5)).trim();
+    if (!name) return null;
+    return { nameEquals: name };
+  }
+  return null;
+}
+
+export async function listJobScraperCandidates(userId: string): Promise<CandidateOption[]> {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
+  const [profilesRes, orphanRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("user_id", userId)
+      .order("full_name", { ascending: true }),
+    supabase
+      .from("resume_db_applications")
+      .select("candidate_name")
+      .eq("user_id", userId)
+      .is("profile_id", null),
+  ]);
+
+  if (profilesRes.error) throw new Error(profilesRes.error.message);
+  if (orphanRes.error) throw new Error(orphanRes.error.message);
+
+  const options: CandidateOption[] = (
+    (profilesRes.data ?? []) as Array<{ id: number; full_name: string }>
+  ).map((profile) => ({
+    key: `profile-${profile.id}`,
+    label: profile.full_name,
+  }));
+
+  const profileNames = new Set(
+    options.map((option) => option.label.trim().toLowerCase()).filter(Boolean),
+  );
+  const orphanNames = new Map<string, string>();
+  for (const row of (orphanRes.data ?? []) as Array<{ candidate_name?: string | null }>) {
+    const name = row.candidate_name?.trim();
+    if (!name) continue;
+    const normalized = name.toLowerCase();
+    if (profileNames.has(normalized)) continue;
+    orphanNames.set(normalized, name);
+  }
+
+  for (const name of orphanNames.values()) {
+    options.push({
+      key: `name-${encodeURIComponent(name)}`,
+      label: name,
+    });
+  }
+
+  return options.sort((a, b) =>
+    a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
+  );
+}
+
+export async function listDistinctResumeDbCompanies(
+  userId: string,
+  candidateFilter?: string | null,
+): Promise<string[]> {
+  const parsed = parseCandidateFilter(candidateFilter);
+  if (!parsed) return [];
+
+  const supabase = getSupabaseAdminClient();
+  let builder = supabase
     .from("resume_db_applications")
     .select("company")
     .eq("user_id", userId);
 
+  if (parsed.profileId != null) {
+    builder = builder.eq("profile_id", parsed.profileId);
+  } else if (parsed.nameEquals != null) {
+    builder = builder.is("profile_id", null).eq("candidate_name", parsed.nameEquals);
+  }
+
+  const { data, error } = await builder;
   if (error) throw new Error(error.message);
 
   const seen = new Set<string>();

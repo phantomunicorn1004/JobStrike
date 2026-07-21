@@ -30,6 +30,11 @@ type BlockedCompany = {
   createdAt: string;
 };
 
+type CandidateOption = {
+  key: string;
+  label: string;
+};
+
 type JobRow = {
   apply_url: string | null;
   title: string | null;
@@ -80,6 +85,8 @@ export function JobScraperPageClient() {
   const [dateWindow, setDateWindow] = useState<DateWindow>("3d");
   const [excludeBlocked, setExcludeBlocked] = useState(true);
   const [excludeResumeDb, setExcludeResumeDb] = useState(true);
+  const [candidateFilter, setCandidateFilter] = useState("");
+  const [candidates, setCandidates] = useState<CandidateOption[]>([]);
   const [blockedCompanies, setBlockedCompanies] = useState<BlockedCompany[]>([]);
   const [resumeDbCompanyCount, setResumeDbCompanyCount] = useState(0);
   const [newBlockedCompany, setNewBlockedCompany] = useState("");
@@ -91,16 +98,24 @@ export function JobScraperPageClient() {
   const [scraping, setScraping] = useState(false);
   const [result, setResult] = useState<ScrapeResponse | null>(null);
 
-  const loadBlockedCompanies = useCallback(async () => {
+  const loadBlockedCompanies = useCallback(async (selectedCandidate?: string) => {
+    const filter = selectedCandidate ?? candidateFilter;
     setLoadingBlocked(true);
     try {
-      const res = await fetch("/api/job-scraper/blocked-companies", {
-        credentials: "same-origin",
-      });
+      const params = new URLSearchParams();
+      if (filter) params.set("candidateFilter", filter);
+      const res = await fetch(
+        `/api/job-scraper/blocked-companies${params.toString() ? `?${params}` : ""}`,
+        { credentials: "same-origin" },
+      );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to load blocked companies.");
       setBlockedCompanies(data.blockedCompanies ?? []);
+      setCandidates(data.candidates ?? []);
       setResumeDbCompanyCount(Number(data.resumeDbCompanyCount ?? 0));
+      if (!filter && Array.isArray(data.candidates) && data.candidates.length === 1) {
+        setCandidateFilter((data.candidates[0] as CandidateOption).key);
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to load blocked companies.",
@@ -108,13 +123,17 @@ export function JobScraperPageClient() {
     } finally {
       setLoadingBlocked(false);
     }
-  }, []);
+  }, [candidateFilter]);
 
   useEffect(() => {
-    void loadBlockedCompanies();
-  }, [loadBlockedCompanies]);
+    void loadBlockedCompanies(candidateFilter);
+  }, [candidateFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runScrape = async () => {
+    if (excludeResumeDb && !candidateFilter) {
+      toast.error("Select a candidate before excluding Resume DB companies.");
+      return;
+    }
     setScraping(true);
     try {
       const res = await fetch("/api/job-scraper/scrape", {
@@ -125,6 +144,7 @@ export function JobScraperPageClient() {
           dateWindow,
           excludeBlocked,
           excludeResumeDb,
+          candidateFilter,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as Partial<ScrapeResponse> & {
@@ -273,6 +293,29 @@ export function JobScraperPageClient() {
               ))}
             </div>
 
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,280px)_1fr] sm:items-end">
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Candidate (for Resume DB company filter)
+                </span>
+                <select
+                  value={candidateFilter}
+                  onChange={(e) => setCandidateFilter(e.target.value)}
+                  className="border-input bg-card dark:bg-input/30 h-9 w-full rounded-md border px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                >
+                  <option value="">Select candidate…</option>
+                  {candidates.map((candidate) => (
+                    <option key={candidate.key} value={candidate.key}>
+                      {candidate.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="text-xs text-muted-foreground sm:pb-2">
+                Resume DB exclusion uses only companies registered for this candidate under your account.
+              </p>
+            </div>
+
             <div className="flex flex-wrap gap-4 text-sm">
               <label className="flex items-center gap-2">
                 <Checkbox
@@ -285,8 +328,9 @@ export function JobScraperPageClient() {
                 <Checkbox
                   checked={excludeResumeDb}
                   onCheckedChange={(checked) => setExcludeResumeDb(Boolean(checked))}
+                  disabled={!candidateFilter}
                 />
-                Exclude companies already in Resume DB ({resumeDbCompanyCount})
+                Exclude this candidate&apos;s Resume DB companies ({resumeDbCompanyCount})
               </label>
             </div>
 
@@ -295,7 +339,12 @@ export function JobScraperPageClient() {
                 {scraping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
                 Scrape jobs
               </Button>
-              <Button type="button" variant="outline" onClick={loadBlockedCompanies} disabled={loadingBlocked}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => loadBlockedCompanies(candidateFilter)}
+                disabled={loadingBlocked}
+              >
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Refresh company lists
               </Button>
