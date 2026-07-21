@@ -695,14 +695,14 @@ export function JobScraperPageClient() {
           <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
             <div className="min-h-0 flex-1 overflow-auto rounded-md border">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Company</TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>ATS</TableHead>
-                    <TableHead>Published</TableHead>
-                    <TableHead>Link</TableHead>
-                    <TableHead>Actions</TableHead>
+                <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_0_hsl(var(--border))] [&_tr]:border-b-0">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="bg-background">Company</TableHead>
+                    <TableHead className="bg-background">Title</TableHead>
+                    <TableHead className="bg-background">ATS</TableHead>
+                    <TableHead className="bg-background">Published</TableHead>
+                    <TableHead className="bg-background">Link</TableHead>
+                    <TableHead className="bg-background">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
