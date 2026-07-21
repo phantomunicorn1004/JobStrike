@@ -2,12 +2,9 @@ import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
 import { requireRequestUser } from "@/lib/auth/resolve-request-user";
 import {
-  addBlockedCompany,
-  deleteBlockedCompany,
+  addBlockedAts,
+  deleteBlockedAts,
   listBlockedAts,
-  listBlockedCompanies,
-  listDistinctResumeDbCompanies,
-  listJobScraperCandidates,
 } from "@/lib/job-scraper-repository";
 
 export function OPTIONS() {
@@ -17,26 +14,11 @@ export function OPTIONS() {
 export async function GET(request: NextRequest) {
   try {
     const user = await requireRequestUser(request);
-    const candidateFilter =
-      new URL(request.url).searchParams.get("candidateFilter")?.trim() || "";
-    const [blockedCompanies, blockedAts, candidates, resumeDbCompanies] =
-      await Promise.all([
-        listBlockedCompanies(user.id),
-        listBlockedAts(user.id),
-        listJobScraperCandidates(user.id),
-        listDistinctResumeDbCompanies(user.id, candidateFilter),
-      ]);
-    return corsJson({
-      blockedCompanies,
-      blockedAts,
-      candidates,
-      candidateFilter: candidateFilter || null,
-      resumeDbCompanies,
-      resumeDbCompanyCount: resumeDbCompanies.length,
-    });
+    const blockedAts = await listBlockedAts(user.id);
+    return corsJson({ blockedAts });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to load blocked companies.";
+      error instanceof Error ? error.message : "Failed to load blocked ATS.";
     const status = message === "Unauthorized" ? 401 : 500;
     return corsJson({ error: message }, { status });
   }
@@ -49,24 +31,23 @@ export async function POST(request: NextRequest) {
     const note = String(body.note ?? "").trim() || null;
 
     const rawNames =
-      typeof body.companiesText === "string"
-        ? body.companiesText
+      typeof body.atsText === "string"
+        ? body.atsText
             .split(/\r?\n/)
             .map((line) => line.trim())
             .filter(Boolean)
         : [];
-    const single =
-      typeof body.companyName === "string" ? body.companyName.trim() : "";
+    const single = typeof body.atsName === "string" ? body.atsName.trim() : "";
     const names = rawNames.length > 0 ? rawNames : single ? [single] : [];
 
     if (names.length === 0) {
-      return corsJson({ error: "Company name is required." }, { status: 400 });
+      return corsJson({ error: "ATS name is required." }, { status: 400 });
     }
 
     const added = [];
     for (const name of names) {
       try {
-        added.push(await addBlockedCompany(user.id, name, note));
+        added.push(await addBlockedAts(user.id, name, note));
       } catch (error) {
         const message = error instanceof Error ? error.message : "Add failed.";
         if (!/duplicate/i.test(message)) {
@@ -75,11 +56,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const blockedCompanies = await listBlockedCompanies(user.id);
-    return corsJson({ ok: true, added, blockedCompanies });
+    const blockedAts = await listBlockedAts(user.id);
+    return corsJson({ ok: true, added, blockedAts });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to save blocked company.";
+      error instanceof Error ? error.message : "Failed to save blocked ATS.";
     const status = message === "Unauthorized" ? 401 : 500;
     return corsJson({ error: message }, { status });
   }
@@ -92,11 +73,11 @@ export async function DELETE(request: NextRequest) {
     if (!id) {
       return corsJson({ error: "Missing id." }, { status: 400 });
     }
-    await deleteBlockedCompany(user.id, id);
+    await deleteBlockedAts(user.id, id);
     return corsJson({ ok: true });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to delete blocked company.";
+      error instanceof Error ? error.message : "Failed to delete blocked ATS.";
     const status = message === "Unauthorized" ? 401 : 500;
     return corsJson({ error: message }, { status });
   }

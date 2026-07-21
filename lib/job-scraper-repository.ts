@@ -182,3 +182,82 @@ export async function listDistinctResumeDbCompanies(
   }
   return result.sort((a, b) => a.localeCompare(b));
 }
+
+export type BlockedAts = {
+  id: string;
+  atsName: string;
+  note: string | null;
+  createdAt: string;
+};
+
+type BlockedAtsRow = {
+  id: string;
+  user_id: string;
+  ats_name: string;
+  ats_name_normalized: string;
+  note: string | null;
+  created_at: string;
+};
+
+function mapBlockedAts(row: BlockedAtsRow): BlockedAts {
+  return {
+    id: row.id,
+    atsName: row.ats_name,
+    note: row.note,
+    createdAt: row.created_at,
+  };
+}
+
+function normalizeAtsForStorage(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export async function listBlockedAts(userId: string): Promise<BlockedAts[]> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("resume_db_blocked_ats")
+    .select("*")
+    .eq("user_id", userId)
+    .order("ats_name", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as BlockedAtsRow[]).map(mapBlockedAts);
+}
+
+export async function addBlockedAts(
+  userId: string,
+  atsName: string,
+  note?: string | null,
+): Promise<BlockedAts> {
+  const trimmed = atsName.trim();
+  const normalized = normalizeAtsForStorage(trimmed);
+  if (!normalized) {
+    throw new Error("ATS name is required.");
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("resume_db_blocked_ats")
+    .insert({
+      user_id: userId,
+      ats_name: trimmed,
+      ats_name_normalized: normalized,
+      note: note?.trim() || null,
+    } as never)
+    .select("*")
+    .single();
+
+  if (error) throw new Error(error.message);
+  return mapBlockedAts(data as BlockedAtsRow);
+}
+
+export async function deleteBlockedAts(userId: string, id: string): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from("resume_db_blocked_ats")
+    .delete()
+    .eq("user_id", userId)
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+}

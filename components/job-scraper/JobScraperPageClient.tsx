@@ -14,6 +14,7 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  ShieldBan,
 } from "lucide-react";
 import JobsLayout from "@/app/jobs-layout";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +47,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { normalizeCompanyName } from "@/lib/job-scraper";
+import { normalizeAtsName, normalizeCompanyName } from "@/lib/job-scraper";
 import { toast } from "sonner";
 
 type DateWindow = "1d" | "3d" | "7d";
@@ -54,6 +55,13 @@ type DateWindow = "1d" | "3d" | "7d";
 type BlockedCompany = {
   id: string;
   companyName: string;
+  note: string | null;
+  createdAt: string;
+};
+
+type BlockedAts = {
+  id: string;
+  atsName: string;
   note: string | null;
   createdAt: string;
 };
@@ -84,6 +92,7 @@ type ScrapeResponse = {
     scraped: number;
     deduped: number;
     removedBlocked: number;
+    removedAts: number;
     removedResumeDb: number;
     remaining: number;
     pagesFetched: number;
@@ -132,21 +141,28 @@ export function JobScraperPageClient() {
 
   const [dateWindow, setDateWindow] = useState<DateWindow>("3d");
   const [excludeBlocked, setExcludeBlocked] = useState(true);
+  const [excludeBlockedAts, setExcludeBlockedAts] = useState(true);
   const [excludeResumeDb, setExcludeResumeDb] = useState(true);
   const [candidateFilter, setCandidateFilter] = useState("");
   const [candidates, setCandidates] = useState<CandidateOption[]>([]);
   const [blockedCompanies, setBlockedCompanies] = useState<BlockedCompany[]>([]);
+  const [blockedAts, setBlockedAts] = useState<BlockedAts[]>([]);
   const [resumeDbCompanies, setResumeDbCompanies] = useState<string[]>([]);
   const [resumeDbCompanyCount, setResumeDbCompanyCount] = useState(0);
   const [newBlockedCompany, setNewBlockedCompany] = useState("");
   const [bulkBlockedCompanies, setBulkBlockedCompanies] = useState("");
+  const [newBlockedAts, setNewBlockedAts] = useState("");
+  const [bulkBlockedAts, setBulkBlockedAts] = useState("");
   const [searchDraft, setSearchDraft] = useState(search);
   const [loadingBlocked, setLoadingBlocked] = useState(true);
   const [savingBlocked, setSavingBlocked] = useState(false);
+  const [savingAts, setSavingAts] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingAtsId, setDeletingAtsId] = useState<string | null>(null);
   const [scraping, setScraping] = useState(false);
   const [result, setResult] = useState<ScrapeResponse | null>(null);
   const [blockedDialogOpen, setBlockedDialogOpen] = useState(false);
+  const [blockedAtsDialogOpen, setBlockedAtsDialogOpen] = useState(false);
   const [companiesSheetOpen, setCompaniesSheetOpen] = useState(false);
 
   const updateParams = useCallback(
@@ -190,6 +206,7 @@ export function JobScraperPageClient() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to load company lists.");
       setBlockedCompanies(data.blockedCompanies ?? []);
+      setBlockedAts(data.blockedAts ?? []);
       setCandidates(data.candidates ?? []);
       setResumeDbCompanies(data.resumeDbCompanies ?? []);
       setResumeDbCompanyCount(Number(data.resumeDbCompanyCount ?? 0));
@@ -223,6 +240,7 @@ export function JobScraperPageClient() {
         body: JSON.stringify({
           dateWindow,
           excludeBlocked,
+          excludeBlockedAts,
           excludeResumeDb,
           candidateFilter,
         }),
@@ -311,9 +329,85 @@ export function JobScraperPageClient() {
     }
   };
 
+  const saveBlockedAts = async (payload: Record<string, unknown>) => {
+    setSavingAts(true);
+    try {
+      const res = await fetch("/api/job-scraper/blocked-ats", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to add blocked ATS.");
+      setBlockedAts(data.blockedAts ?? []);
+      setNewBlockedAts("");
+      setBulkBlockedAts("");
+      setResult((current) => {
+        if (!current) return current;
+        const addedNames = (data.added ?? []) as BlockedAts[];
+        const nextJobs = current.jobs.filter((job) => {
+          const jobAts = normalizeAtsName(job.application_site);
+          return !addedNames.some((ats) => {
+            const blocked = normalizeAtsName(ats.atsName);
+            return (
+              jobAts === blocked ||
+              jobAts.includes(blocked) ||
+              blocked.includes(jobAts)
+            );
+          });
+        });
+        return {
+          ...current,
+          jobs: nextJobs,
+          stats: {
+            ...current.stats,
+            removedAts:
+              (current.stats.removedAts ?? 0) + (current.jobs.length - nextJobs.length),
+            remaining: nextJobs.length,
+          },
+        };
+      });
+      toast.success("Blocked ATS updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to add blocked ATS.");
+    } finally {
+      setSavingAts(false);
+    }
+  };
+
+  const addBlockedAtsItems = async (mode: "single" | "bulk") => {
+    const payload =
+      mode === "bulk" ? { atsText: bulkBlockedAts } : { atsName: newBlockedAts };
+    await saveBlockedAts(payload);
+  };
+
+  const removeBlockedAtsItem = async (id: string) => {
+    setDeletingAtsId(id);
+    try {
+      const res = await fetch(`/api/job-scraper/blocked-ats?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Delete failed.");
+      setBlockedAts((current) => current.filter((ats) => ats.id !== id));
+      toast.success("Blocked ATS removed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingAtsId(null);
+    }
+  };
+
   const addCompanyFromRow = async (companyName: string | null) => {
     if (!companyName?.trim()) return;
     await saveBlockedCompanies({ companyName });
+  };
+
+  const addAtsFromRow = async (atsName: string | null) => {
+    if (!atsName?.trim() || atsName === "Unknown") return;
+    await saveBlockedAts({ atsName });
   };
 
   const copyLinks = async () => {
@@ -475,6 +569,97 @@ export function JobScraperPageClient() {
               </DialogContent>
             </Dialog>
 
+            <Dialog open={blockedAtsDialogOpen} onOpenChange={setBlockedAtsDialogOpen}>
+              <DialogTrigger asChild>
+                <Button type="button" variant="outline" size="sm">
+                  <ShieldBan className="mr-2 h-4 w-4" />
+                  Blocked ATS
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>Blocked ATS</DialogTitle>
+                  <DialogDescription>
+                    Exclude jobs from these application sites during scrape (e.g. Greenhouse, Workday).
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <Input
+                      value={newBlockedAts}
+                      onChange={(e) => setNewBlockedAts(e.target.value)}
+                      placeholder="Add one ATS (e.g. Greenhouse)"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() => addBlockedAtsItems("single")}
+                      disabled={savingAts || !newBlockedAts.trim()}
+                    >
+                      Add
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Textarea
+                      value={bulkBlockedAts}
+                      onChange={(e) => setBulkBlockedAts(e.target.value)}
+                      placeholder="Bulk add, one ATS per line"
+                      rows={4}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => addBlockedAtsItems("bulk")}
+                      disabled={savingAts || !bulkBlockedAts.trim()}
+                    >
+                      Bulk add
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">
+                      Current list ({blockedAts.length})
+                    </div>
+                    <div className="max-h-[280px] space-y-2 overflow-auto rounded-md border p-2">
+                      {loadingBlocked ? (
+                        <div className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading…
+                        </div>
+                      ) : blockedAts.length === 0 ? (
+                        <p className="p-2 text-sm text-muted-foreground">
+                          No blocked ATS yet.
+                        </p>
+                      ) : (
+                        blockedAts.map((ats) => (
+                          <div
+                            key={ats.id}
+                            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
+                          >
+                            <div className="min-w-0 font-medium">{ats.atsName}</div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeBlockedAtsItem(ats.id)}
+                              disabled={deletingAtsId === ats.id}
+                            >
+                              {deletingAtsId === ats.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                "Remove"
+                              )}
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
             <Sheet open={companiesSheetOpen} onOpenChange={setCompaniesSheetOpen}>
               <SheetTrigger asChild>
                 <Button type="button" variant="outline" size="sm">
@@ -537,6 +722,23 @@ export function JobScraperPageClient() {
                       </ul>
                     )}
                   </div>
+
+                  <div className="min-h-0 flex-1 space-y-2 overflow-auto rounded-md border p-3">
+                    <div className="text-sm font-medium">
+                      Blocked ATS ({blockedAts.length})
+                    </div>
+                    {blockedAts.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No blocked ATS yet.</p>
+                    ) : (
+                      <ul className="space-y-1 text-sm">
+                        {blockedAts.map((ats) => (
+                          <li key={ats.id} className="rounded-md px-2 py-1 hover:bg-muted/50">
+                            {ats.atsName}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </div>
               </SheetContent>
             </Sheet>
@@ -583,6 +785,13 @@ export function JobScraperPageClient() {
               </label>
               <label className="flex items-center gap-1.5 text-xs sm:text-sm">
                 <Checkbox
+                  checked={excludeBlockedAts}
+                  onCheckedChange={(checked) => setExcludeBlockedAts(Boolean(checked))}
+                />
+                ATS ({blockedAts.length})
+              </label>
+              <label className="flex items-center gap-1.5 text-xs sm:text-sm">
+                <Checkbox
                   checked={excludeResumeDb}
                   onCheckedChange={(checked) => setExcludeResumeDb(Boolean(checked))}
                   disabled={!candidateFilter}
@@ -624,6 +833,7 @@ export function JobScraperPageClient() {
                     <Badge variant="secondary">Scraped {result.stats.scraped}</Badge>
                     <Badge variant="secondary">Deduped {result.stats.deduped}</Badge>
                     <Badge variant="secondary">Blocked {result.stats.removedBlocked}</Badge>
+                    <Badge variant="secondary">ATS {result.stats.removedAts ?? 0}</Badge>
                     <Badge variant="secondary">Resume DB {result.stats.removedResumeDb}</Badge>
                     <Badge>Remaining {result.stats.remaining}</Badge>
                   </div>
@@ -752,16 +962,32 @@ export function JobScraperPageClient() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => addCompanyFromRow(job.company_name)}
-                            disabled={!job.company_name || savingBlocked}
-                          >
-                            <Ban className="mr-1 h-4 w-4" />
-                            Block
-                          </Button>
+                          <div className="flex flex-col gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => addCompanyFromRow(job.company_name)}
+                              disabled={!job.company_name || savingBlocked}
+                            >
+                              <Ban className="mr-1 h-4 w-4" />
+                              Block
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => addAtsFromRow(job.application_site)}
+                              disabled={
+                                !job.application_site ||
+                                job.application_site === "Unknown" ||
+                                savingAts
+                              }
+                            >
+                              <ShieldBan className="mr-1 h-4 w-4" />
+                              Block ATS
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))

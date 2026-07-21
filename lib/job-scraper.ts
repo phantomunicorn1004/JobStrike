@@ -236,19 +236,37 @@ export function dedupeJobs(jobs: ScrapedJob[]): ScrapedJob[] {
   return unique;
 }
 
+export function normalizeAtsName(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
 export function filterJobsByCompany(
   jobs: ScrapedJob[],
   blockedCompanies: string[],
   resumeDbCompanies: string[],
+  blockedAts: string[] = [],
 ) {
   const blockedSet = new Set(blockedCompanies.map(normalizeCompanyName).filter(Boolean));
   const resumeSet = new Set(resumeDbCompanies.map(normalizeCompanyName).filter(Boolean));
+  const blockedAtsList = blockedAts.map(normalizeAtsName).filter(Boolean);
 
   let removedBlockedCount = 0;
   let removedResumeCount = 0;
+  let removedAtsCount = 0;
   const filtered: ScrapedJob[] = [];
 
   for (const job of jobs) {
+    const atsKey = normalizeAtsName(job.application_site);
+    if (
+      atsKey &&
+      blockedAtsList.some(
+        (blocked) => atsKey === blocked || atsKey.includes(blocked) || blocked.includes(atsKey),
+      )
+    ) {
+      removedAtsCount += 1;
+      continue;
+    }
+
     const companyKey = normalizeCompanyName(job.company_name);
     if (!companyKey) {
       filtered.push(job);
@@ -265,7 +283,7 @@ export function filterJobsByCompany(
     filtered.push(job);
   }
 
-  return { filtered, removedBlockedCount, removedResumeCount };
+  return { filtered, removedBlockedCount, removedResumeCount, removedAtsCount };
 }
 
 export async function scrapeHiringCafeJobs(
