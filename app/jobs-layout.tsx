@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   LogOut,
   MessageSquareText,
+  SearchCode,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -71,6 +72,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Prompt Builder",
     icon: MessageSquareText,
     isActive: (pathname) => pathname.startsWith("/prompt-builder"),
+  },
+  {
+    href: "/job-scraper",
+    label: "Job Scraper",
+    icon: SearchCode,
+    isActive: (pathname) => pathname.startsWith("/job-scraper"),
   },
 ];
 
@@ -173,6 +180,7 @@ export default function JobsLayout({
                 <SidebarSeparator className="my-2 group-data-[collapsible=icon]:hidden" />
                 <NavLink item={NAV_ITEMS[3]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[4]} pathname={pathname} />
+                <NavLink item={NAV_ITEMS[5]} pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

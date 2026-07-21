@@ -14,6 +14,7 @@ export const MEMBER_ROUTE_PREFIXES = [
   "/resume-db",
   "/resume-tailor",
   "/prompt-builder",
+  "/job-scraper",
   "/jobs",
   "/jobs-applied",
   "/jobs-technical",
