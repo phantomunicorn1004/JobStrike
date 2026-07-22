@@ -9,6 +9,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Filter,
   Link2,
   ListFilter,
   Loader2,
@@ -31,6 +32,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -48,6 +54,11 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   applyOptionalScrapeFilters,
   jobsToCsv,
   normalizeAtsName,
@@ -60,6 +71,7 @@ import {
   loadJobScraperSession,
   saveJobScraperSession,
 } from "@/lib/job-scraper-storage";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 type DateWindow = "1d" | "3d" | "7d";
@@ -145,6 +157,140 @@ function collectLinks(jobs: JobRow[]): string[] {
     .filter((value): value is string => Boolean(value));
 }
 
+function getJobKey(job: JobRow): string {
+  return [
+    job.apply_url ?? "",
+    job.company_name ?? "",
+    job.title ?? "",
+    job.estimated_publish_date ?? "",
+    job.application_site ?? "",
+  ].join("||");
+}
+
+const UNCATEGORIZED_CATEGORY = "__uncategorized__";
+
+function getJobCategoryKey(job: JobRow): string {
+  const value = job.job_category?.trim();
+  return value ? value : UNCATEGORIZED_CATEGORY;
+}
+
+function JobCategoryHeaderFilter({
+  options,
+  selected,
+  onChange,
+}: {
+  options: Array<{ key: string; label: string; count: number }>;
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<Set<string>>(() => new Set(selected));
+  const active = selected.size > 0;
+
+  useEffect(() => {
+    if (open) setDraft(new Set(selected));
+  }, [open, selected]);
+
+  const toggleDraft = (key: string, checked: boolean) => {
+    setDraft((current) => {
+      const next = new Set(current);
+      if (checked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+
+  const apply = () => {
+    onChange(new Set(draft));
+    setOpen(false);
+  };
+
+  const clear = () => {
+    setDraft(new Set());
+    onChange(new Set());
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={
+                active
+                  ? `Category filter: ${selected.size} selected`
+                  : "Filter by job category"
+              }
+              className={cn(
+                "relative h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground",
+                active && "text-primary",
+              )}
+            >
+              <Filter className="h-3.5 w-3.5" />
+              {active ? (
+                <span
+                  className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                  aria-hidden
+                />
+              ) : null}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {active
+            ? `${selected.size} categor${selected.size === 1 ? "y" : "ies"} selected`
+            : "Filter by job category"}
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent className="w-72 p-3" align="start">
+        <p className="mb-2 text-sm font-medium">Filter by category</p>
+        {options.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No categories in results.</p>
+        ) : (
+          <div className="max-h-56 space-y-1 overflow-auto pr-1">
+            {options.map((option) => {
+              const checked = draft.has(option.key);
+              return (
+                <label
+                  key={option.key}
+                  className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-muted/60"
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(value) => toggleDraft(option.key, value === true)}
+                    className="mt-0.5"
+                    aria-label={option.label}
+                  />
+                  <span className="min-w-0 flex-1 leading-snug">{option.label}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{option.count}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <div className="mt-3 flex justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={clear}>
+            Clear
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8"
+            onClick={apply}
+            disabled={options.length === 0}
+          >
+            Apply
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function JobScraperPageClient() {
   const router = useRouter();
   const pathname = usePathname();
@@ -190,6 +336,10 @@ export function JobScraperPageClient() {
   const [blockedDialogOpen, setBlockedDialogOpen] = useState(false);
   const [blockedAtsDialogOpen, setBlockedAtsDialogOpen] = useState(false);
   const [companiesSheetOpen, setCompaniesSheetOpen] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   useEffect(() => {
     const saved = loadJobScraperSession();
@@ -263,6 +413,8 @@ export function JobScraperPageClient() {
     setBaseJobs([]);
     setFilterContext(null);
     setScrapeMeta(null);
+    setSelectedKeys(new Set());
+    setSelectedCategories(new Set());
     clearJobScraperSession();
     updateParams({ page: "1", q: null });
     setSearchDraft("");
@@ -362,6 +514,8 @@ export function JobScraperPageClient() {
       };
       if (!res.ok) throw new Error(data.error || "Scrape failed.");
       setBaseJobs(data.baseJobs ?? data.jobs ?? []);
+      setSelectedKeys(new Set());
+      setSelectedCategories(new Set());
       setFilterContext(
         data.filterContext ?? {
           blockedCompanies: blockedCompanies.map((c) => c.companyName),
@@ -600,40 +754,58 @@ export function JobScraperPageClient() {
     scrapeMeta,
   ]);
 
-  const copyLinks = async () => {
-    const links = collectLinks(filteredResult?.jobs ?? []);
-    if (links.length === 0) {
-      toast.error("No links to copy.");
-      return;
+  const jobCategoryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const job of filteredResult?.jobs ?? []) {
+      const key = getJobCategoryKey(job);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    try {
-      await navigator.clipboard.writeText(links.join("\n"));
-      toast.success("Job links copied.");
-    } catch {
-      toast.error("Copy failed.");
-    }
-  };
-
-  const downloadLinks = () => {
-    const links = collectLinks(filteredResult?.jobs ?? []);
-    if (links.length === 0) {
-      toast.error("No links to download.");
-      return;
-    }
-    downloadTextFile(links.join("\n"), "hiring-cafe-links.txt", "text/plain;charset=utf-8");
-    toast.success("Links downloaded.");
-  };
+    return Array.from(counts.entries())
+      .map(([key, count]) => ({
+        key,
+        label: key === UNCATEGORIZED_CATEGORY ? "Uncategorized" : key,
+        count,
+      }))
+      .sort((a, b) => {
+        if (a.key === UNCATEGORIZED_CATEGORY) return 1;
+        if (b.key === UNCATEGORIZED_CATEGORY) return -1;
+        return a.label.localeCompare(b.label);
+      });
+  }, [filteredResult?.jobs]);
 
   const filteredJobs = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return filteredResult?.jobs ?? [];
     return (filteredResult?.jobs ?? []).filter((job) => {
+      if (selectedCategories.size > 0 && !selectedCategories.has(getJobCategoryKey(job))) {
+        return false;
+      }
+      if (!keyword) return true;
       return [job.company_name, job.title, job.application_site, job.job_category]
         .join(" ")
         .toLowerCase()
         .includes(keyword);
     });
-  }, [filteredResult?.jobs, search]);
+  }, [filteredResult?.jobs, search, selectedCategories]);
+
+  const applyCategoryFilter = useCallback(
+    (next: Set<string>) => {
+      setSelectedCategories(next);
+      if (page !== 1) updateParams({ page: "1" });
+    },
+    [page, updateParams],
+  );
+
+  useEffect(() => {
+    setSelectedCategories((current) => {
+      if (current.size === 0) return current;
+      const allowed = new Set(jobCategoryOptions.map((option) => option.key));
+      const next = new Set<string>();
+      for (const key of current) {
+        if (allowed.has(key)) next.add(key);
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [jobCategoryOptions]);
 
   const totalFiltered = filteredJobs.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
@@ -641,6 +813,129 @@ export function JobScraperPageClient() {
   const rangeStart = totalFiltered === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const rangeEnd = totalFiltered === 0 ? 0 : Math.min(safePage * pageSize, totalFiltered);
   const pagedJobs = filteredJobs.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  const filteredJobKeys = useMemo(
+    () => filteredJobs.map((job) => getJobKey(job)),
+    [filteredJobs],
+  );
+  const pagedJobKeys = useMemo(
+    () => pagedJobs.map((job) => getJobKey(job)),
+    [pagedJobs],
+  );
+
+  useEffect(() => {
+    setSelectedKeys((current) => {
+      if (current.size === 0) return current;
+      const allowed = new Set(filteredJobKeys);
+      const next = new Set<string>();
+      for (const key of current) {
+        if (allowed.has(key)) next.add(key);
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [filteredJobKeys]);
+
+  const selectedJobs = useMemo(() => {
+    if (selectedKeys.size === 0) return [];
+    return filteredJobs.filter((job) => selectedKeys.has(getJobKey(job)));
+  }, [filteredJobs, selectedKeys]);
+
+  const actionJobs = selectedKeys.size > 0 ? selectedJobs : filteredJobs;
+  const allPagedSelected =
+    pagedJobKeys.length > 0 && pagedJobKeys.every((key) => selectedKeys.has(key));
+  const somePagedSelected =
+    pagedJobKeys.some((key) => selectedKeys.has(key)) && !allPagedSelected;
+
+  const toggleSelectAllPaged = (checked: boolean) => {
+    setSelectedKeys((current) => {
+      const next = new Set(current);
+      if (checked) {
+        for (const key of pagedJobKeys) next.add(key);
+      } else {
+        for (const key of pagedJobKeys) next.delete(key);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectJob = (key: string, checked: boolean) => {
+    setSelectedKeys((current) => {
+      const next = new Set(current);
+      if (checked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+
+  const downloadSelectedCsv = () => {
+    if (actionJobs.length === 0) {
+      toast.error("No jobs to download.");
+      return;
+    }
+    downloadTextFile(
+      jobsToCsv(actionJobs),
+      selectedKeys.size > 0 ? "hiring-cafe-selected.csv" : "hiring-cafe-jobs.csv",
+      "text/csv;charset=utf-8",
+    );
+    toast.success(
+      selectedKeys.size > 0
+        ? `CSV downloaded (${actionJobs.length} selected).`
+        : "CSV downloaded.",
+    );
+  };
+
+  const copyLinks = async () => {
+    const links = collectLinks(actionJobs);
+    if (links.length === 0) {
+      toast.error("No links to copy.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(links.join("\n"));
+      toast.success(
+        selectedKeys.size > 0
+          ? `Copied ${links.length} selected link(s).`
+          : "Job links copied.",
+      );
+    } catch {
+      toast.error("Copy failed.");
+    }
+  };
+
+  const downloadLinks = () => {
+    const links = collectLinks(actionJobs);
+    if (links.length === 0) {
+      toast.error("No links to download.");
+      return;
+    }
+    downloadTextFile(
+      links.join("\n"),
+      selectedKeys.size > 0 ? "hiring-cafe-selected-links.txt" : "hiring-cafe-links.txt",
+      "text/plain;charset=utf-8",
+    );
+    toast.success(
+      selectedKeys.size > 0
+        ? `Links file downloaded (${links.length} selected).`
+        : "Links downloaded.",
+    );
+  };
+
+  const openLinks = () => {
+    const links = collectLinks(actionJobs);
+    if (links.length === 0) {
+      toast.error("No links to open.");
+      return;
+    }
+    const maxOpen = 20;
+    if (links.length > maxOpen) {
+      toast.error(`Select at most ${maxOpen} jobs to open at once (selected ${links.length}).`);
+      return;
+    }
+    for (const link of links) {
+      window.open(link, "_blank", "noopener,noreferrer");
+    }
+    toast.success(`Opened ${links.length} link(s).`);
+  };
 
   useEffect(() => {
     if (page !== safePage) {
@@ -650,6 +945,8 @@ export function JobScraperPageClient() {
 
   const selectedCandidateLabel =
     candidates.find((candidate) => candidate.key === candidateFilter)?.label ?? "No candidate";
+  const actionScopeLabel =
+    selectedKeys.size > 0 ? `${selectedKeys.size} selected` : "all results";
 
   return (
     <JobsLayout>
@@ -1060,20 +1357,17 @@ export function JobScraperPageClient() {
                 )}
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedKeys.size > 0 ? (
+                  <span className="text-xs text-muted-foreground">{actionScopeLabel}</span>
+                ) : null}
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() =>
-                    filteredResult?.csv &&
-                    downloadTextFile(
-                      filteredResult.csv,
-                      "hiring-cafe-jobs.csv",
-                      "text/csv;charset=utf-8",
-                    )
-                  }
-                  disabled={!filteredResult?.csv}
+                  onClick={downloadSelectedCsv}
+                  disabled={actionJobs.length === 0}
+                  title={`Download CSV for ${actionScopeLabel}`}
                 >
                   <Download className="mr-1.5 h-3.5 w-3.5" />
                   CSV
@@ -1082,8 +1376,20 @@ export function JobScraperPageClient() {
                   type="button"
                   variant="outline"
                   size="sm"
+                  onClick={openLinks}
+                  disabled={actionJobs.length === 0}
+                  title={`Open links for ${actionScopeLabel} (max 20)`}
+                >
+                  <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                  Open links
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={downloadLinks}
-                  disabled={!filteredResult?.jobs?.length}
+                  disabled={actionJobs.length === 0}
+                  title={`Download links file for ${actionScopeLabel}`}
                 >
                   <Link2 className="mr-1.5 h-3.5 w-3.5" />
                   Links file
@@ -1093,11 +1399,22 @@ export function JobScraperPageClient() {
                   variant="outline"
                   size="sm"
                   onClick={copyLinks}
-                  disabled={!filteredResult?.jobs?.length}
+                  disabled={actionJobs.length === 0}
+                  title={`Copy links for ${actionScopeLabel}`}
                 >
                   <Copy className="mr-1.5 h-3.5 w-3.5" />
                   Copy links
                 </Button>
+                {selectedKeys.size > 0 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedKeys(new Set())}
+                  >
+                    Clear selection
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -1148,90 +1465,144 @@ export function JobScraperPageClient() {
               <Table>
                 <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_0_hsl(var(--border))] [&_tr]:border-b-0">
                   <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-10 bg-background px-3">
+                      <Checkbox
+                        aria-label="Select all on this page"
+                        checked={
+                          allPagedSelected
+                            ? true
+                            : somePagedSelected
+                              ? "indeterminate"
+                              : false
+                        }
+                        onCheckedChange={(checked) =>
+                          toggleSelectAllPaged(checked === true)
+                        }
+                        disabled={pagedJobs.length === 0}
+                      />
+                    </TableHead>
                     <TableHead className="bg-background">Company</TableHead>
-                    <TableHead className="bg-background">Title</TableHead>
+                    <TableHead className="bg-background">
+                      <div className="flex items-center gap-1">
+                        <span>Title</span>
+                        <JobCategoryHeaderFilter
+                          options={jobCategoryOptions}
+                          selected={selectedCategories}
+                          onChange={applyCategoryFilter}
+                        />
+                      </div>
+                    </TableHead>
                     <TableHead className="bg-background">ATS</TableHead>
                     <TableHead className="bg-background">Published</TableHead>
                     <TableHead className="bg-background">Link</TableHead>
-                    <TableHead className="bg-background">Actions</TableHead>
+                    <TableHead className="w-[88px] bg-background text-center">
+                      Actions
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pagedJobs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                      <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                         {scraping ? "Scraping jobs…" : "No jobs on this page."}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    pagedJobs.map((job, index) => (
-                      <TableRow
-                        key={`${job.apply_url ?? job.company_name ?? "job"}-${rangeStart + index}`}
-                      >
-                        <TableCell className="max-w-[180px] whitespace-normal">
-                          <div className="font-medium">{job.company_name || "—"}</div>
-                          {job.company_tagline ? (
-                            <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                              {job.company_tagline}
-                            </div>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="max-w-[280px] whitespace-normal">
-                          <div>{job.title || "—"}</div>
-                          {job.job_category ? (
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {job.job_category}
-                            </div>
-                          ) : null}
-                        </TableCell>
-                        <TableCell>{job.application_site || "Unknown"}</TableCell>
-                        <TableCell className="whitespace-nowrap text-xs">
-                          {job.estimated_publish_date || "—"}
-                        </TableCell>
-                        <TableCell>
-                          {job.apply_url ? (
-                            <Link
-                              href={job.apply_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-primary hover:underline"
-                            >
-                              Open <ExternalLink className="h-3.5 w-3.5" />
-                            </Link>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => addCompanyFromRow(job.company_name)}
-                              disabled={!job.company_name || savingBlocked}
-                            >
-                              <Ban className="mr-1 h-4 w-4" />
-                              Block
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => addAtsFromRow(job.application_site)}
-                              disabled={
-                                !job.application_site ||
-                                job.application_site === "Unknown" ||
-                                savingAts
+                    pagedJobs.map((job, index) => {
+                      const jobKey = getJobKey(job);
+                      const selected = selectedKeys.has(jobKey);
+                      return (
+                        <TableRow
+                          key={`${jobKey}-${rangeStart + index}`}
+                          className={cn(selected && "bg-primary/5")}
+                          data-state={selected ? "selected" : undefined}
+                        >
+                          <TableCell className="px-3">
+                            <Checkbox
+                              aria-label={`Select ${job.title || job.company_name || "job"}`}
+                              checked={selected}
+                              onCheckedChange={(checked) =>
+                                toggleSelectJob(jobKey, checked === true)
                               }
-                            >
-                              <ShieldBan className="mr-1 h-4 w-4" />
-                              Block ATS
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                            />
+                          </TableCell>
+                          <TableCell className="max-w-[180px] whitespace-normal">
+                            <div className="font-medium">{job.company_name || "—"}</div>
+                            {job.company_tagline ? (
+                              <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                                {job.company_tagline}
+                              </div>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="max-w-[280px] whitespace-normal">
+                            <div>{job.title || "—"}</div>
+                            {job.job_category ? (
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {job.job_category}
+                              </div>
+                            ) : null}
+                          </TableCell>
+                          <TableCell>{job.application_site || "Unknown"}</TableCell>
+                          <TableCell className="whitespace-nowrap text-xs">
+                            {job.estimated_publish_date || "—"}
+                          </TableCell>
+                          <TableCell>
+                            {job.apply_url ? (
+                              <Link
+                                href={job.apply_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-primary hover:underline"
+                              >
+                                Open <ExternalLink className="h-3.5 w-3.5" />
+                              </Link>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-center gap-0.5">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                    onClick={() => addCompanyFromRow(job.company_name)}
+                                    disabled={!job.company_name || savingBlocked}
+                                    aria-label="Block company"
+                                  >
+                                    <Ban className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Block company</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                    onClick={() => addAtsFromRow(job.application_site)}
+                                    disabled={
+                                      !job.application_site ||
+                                      job.application_site === "Unknown" ||
+                                      savingAts
+                                    }
+                                    aria-label="Block ATS"
+                                  >
+                                    <ShieldBan className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Block ATS</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
@@ -1240,6 +1611,7 @@ export function JobScraperPageClient() {
             <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
               <div className="text-xs text-muted-foreground">
                 Showing {rangeStart}-{rangeEnd} of {totalFiltered}
+                {selectedKeys.size > 0 ? ` · ${selectedKeys.size} selected` : ""}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <select
