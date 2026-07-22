@@ -8,6 +8,11 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { countApplicationsWithFilters } from "@/lib/resume-db/repository";
 import { listJobScraperCandidates } from "@/lib/job-scraper-repository";
 import {
+  listAllApplicationsForDashboard,
+  listAllPipelineJobsForDashboard,
+  listAllTechnicalJobsForDashboard,
+} from "@/lib/dashboard/repository";
+import {
   addDaysYmd,
   buildBidSeries,
   buildCandidateCounts,
@@ -22,7 +27,6 @@ import {
   type PipelineStageRow,
   type PipelineJobRow,
   type PipelineTechRow,
-  type ResumeApplicationRow,
 } from "@/lib/dashboard/stats";
 import { normalizeTimeZone } from "@/lib/timezone";
 
@@ -40,40 +44,28 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const today = localYmd(new Date(), timezone);
-    const appliedDate = searchParams.get("date") || today;
+    const dateParam = searchParams.get("date")?.trim() || "";
     const candidateFilter = searchParams.get("candidateFilter")?.trim() || "";
     const bidDays = Math.min(
       90,
       Math.max(7, Number(searchParams.get("bidDays") ?? 30) || 30),
     );
-    const stageFrom =
-      searchParams.get("stageFrom") || addDaysYmd(today, -(bidDays - 1));
-    const stageTo = searchParams.get("stageTo") || today;
+    const stageFromParam = searchParams.get("stageFrom")?.trim() || "";
+    const stageToParam = searchParams.get("stageTo")?.trim() || "";
 
     const supabase = getSupabaseAdminClient();
     const [
-      applicationsRes,
+      applications,
       totalApplicationsAll,
-      jobsRes,
-      techRes,
+      jobs,
+      techJobs,
       stagesRes,
       candidates,
     ] = await Promise.all([
-      supabase
-        .from("resume_db_applications")
-        .select("applied_at, profile_id, candidate_name")
-        .eq("user_id", user.id),
+      listAllApplicationsForDashboard(user.id),
       countApplicationsWithFilters(user.id, {}),
-      supabase
-        .from("jobs")
-        .select("id, name, title, company_name, created_at, stage_entered_at, stage_dates")
-        .eq("user_id", user.id),
-      supabase
-        .from("technical_jobs")
-        .select(
-          "id, name, title, company_name, created_at, stage_entered_at, stage_dates, stage_id",
-        )
-        .eq("user_id", user.id),
+      listAllPipelineJobsForDashboard(user.id),
+      listAllTechnicalJobsForDashboard(user.id),
       supabase
         .from("pipeline_stages")
         .select("id, name, sort_order")
@@ -81,13 +73,8 @@ export async function GET(request: NextRequest) {
       listJobScraperCandidates(user.id),
     ]);
 
-    if (applicationsRes.error) throw applicationsRes.error;
-    if (jobsRes.error) throw jobsRes.error;
-    if (techRes.error) throw techRes.error;
-
-    const applications = (applicationsRes.data ?? []) as ResumeApplicationRow[];
-    const jobs = (jobsRes.data ?? []) as PipelineJobRow[];
-    const techJobs = (techRes.data ?? []) as PipelineTechRow[];
+    const typedJobs = jobs as PipelineJobRow[];
+    const typedTechJobs = techJobs as PipelineTechRow[];
 
     let stages = (stagesRes.data ?? []) as PipelineStageRow[];
     if (stagesRes.error || stages.length === 0) {
@@ -109,6 +96,28 @@ export async function GET(request: NextRequest) {
       applications,
       candidateFilter,
     );
+
+    const bidTo = today;
+    const bidFrom = addDaysYmd(today, -(bidDays - 1));
+
+    // Prefer an explicit date; otherwise use today, or the most recent day with
+    // applications if today has none (avoids a misleading 0 right after midnight).
+    let appliedDate = dateParam || today;
+    if (!dateParam) {
+      const todayCount = countApplicationsOnDate(filteredApplications, today, timezone);
+      if (todayCount === 0 && filteredApplications.length > 0) {
+        let latest = "";
+        for (const row of filteredApplications) {
+          const day = isoToDayKey(row.applied_at, timezone);
+          if (day && day > latest) latest = day;
+        }
+        if (latest) appliedDate = latest;
+      }
+    }
+
+    const stageFrom = stageFromParam || addDaysYmd(today, -(bidDays - 1));
+    const stageTo = stageToParam || today;
+
     const applicationsByCandidate = buildCandidateCounts(applications, profileLabels);
     const appliedDateRows = filteredApplications.filter(
       (row) => isoToDayKey(row.applied_at, timezone) === appliedDate,
@@ -121,16 +130,16 @@ export async function GET(request: NextRequest) {
         : applicationsByCandidate,
     );
 
-    const bidTo = today;
-    const bidFrom = addDaysYmd(today, -(bidDays - 1));
-
     const totalApplications = candidateFilter
       ? await countApplicationsWithFilters(user.id, { candidateFilter })
       : totalApplicationsAll;
 
+    const bidsByDate = buildBidSeries(filteredApplications, bidFrom, bidTo, timezone);
+    const appliedInBidRange = bidsByDate.reduce((sum, point) => sum + point.count, 0);
+
     const stageCounts = buildStageCounts(
-      jobs,
-      techJobs,
+      typedJobs,
+      typedTechJobs,
       stages,
       stageFrom,
       stageTo,
@@ -139,8 +148,8 @@ export async function GET(request: NextRequest) {
       false,
     );
     const funnelCounts = buildStageCounts(
-      jobs,
-      techJobs,
+      typedJobs,
+      typedTechJobs,
       stages,
       stageFrom,
       stageTo,
@@ -153,7 +162,8 @@ export async function GET(request: NextRequest) {
       appliedDate,
       appliedCount: countApplicationsOnDate(filteredApplications, appliedDate, timezone),
       appliedCountByCandidate,
-      bidsByDate: buildBidSeries(filteredApplications, bidFrom, bidTo, timezone),
+      appliedInBidRange,
+      bidsByDate,
       bidsStackedByDate: buildStackedBidSeries(
         filteredApplications,
         bidFrom,
@@ -172,8 +182,13 @@ export async function GET(request: NextRequest) {
       totalApplications,
       totalApplicationsAll,
       applicationsByCandidate,
-      totalPipelineCards: jobs.length + techJobs.length,
-      stalePipelineCards: buildStalePipelineCards(jobs, techJobs, stages, timezone),
+      totalPipelineCards: typedJobs.length + typedTechJobs.length,
+      stalePipelineCards: buildStalePipelineCards(
+        typedJobs,
+        typedTechJobs,
+        stages,
+        timezone,
+      ),
       candidates,
       candidateFilter: candidateFilter || null,
       pipelineIsAccountWide: true,

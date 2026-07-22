@@ -55,6 +55,7 @@ type DashboardData = {
   appliedDate: string;
   appliedCount: number;
   appliedCountByCandidate: CandidateCount[];
+  appliedInBidRange: number;
   bidsByDate: BidPoint[];
   bidsStackedByDate: Array<Record<string, string | number>>;
   bidSeriesCandidates: CandidateCount[];
@@ -117,10 +118,10 @@ function safeCssKey(key: string): string {
 export function DashboardPageClient() {
   const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
   const today = todayInTimeZone(timezone);
-  const [appliedDate, setAppliedDate] = useState(today);
+  const [appliedDate, setAppliedDate] = useState("");
   const [bidRange, setBidRange] = useState<BidRange>("month");
   const [stageFrom, setStageFrom] = useState("");
-  const [stageTo, setStageTo] = useState(today);
+  const [stageTo, setStageTo] = useState("");
   const [candidateFilter, setCandidateFilter] = useState("");
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -129,11 +130,11 @@ export function DashboardPageClient() {
     setIsLoading(true);
     try {
       const params = new URLSearchParams({
-        date: appliedDate,
         bidDays: String(BID_RANGE_DAYS[bidRange]),
-        stageFrom,
-        stageTo,
       });
+      if (appliedDate) params.set("date", appliedDate);
+      if (stageFrom) params.set("stageFrom", stageFrom);
+      if (stageTo) params.set("stageTo", stageTo);
       if (candidateFilter) params.set("candidateFilter", candidateFilter);
       const res = await fetch(`/api/dashboard?${params}`, {
         credentials: "same-origin",
@@ -271,7 +272,16 @@ export function DashboardPageClient() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    {formatLongDate(appliedDate, timezone)}
+                    {appliedDate
+                      ? formatLongDate(appliedDate, timezone)
+                      : "Pick a date"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {data?.appliedInBidRange ?? 0} applied in the chart range
+                    {data
+                      ? ` (${formatChartDate(data.bidFrom, timezone)} – ${formatChartDate(data.bidTo, timezone)})`
+                      : ""}
+                    .
                   </p>
                   <label className="grid gap-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
@@ -279,7 +289,7 @@ export function DashboardPageClient() {
                     </span>
                     <Input
                       type="date"
-                      value={appliedDate}
+                      value={appliedDate || today}
                       max={today}
                       onChange={(e) => setAppliedDate(e.target.value || today)}
                       className="h-9"

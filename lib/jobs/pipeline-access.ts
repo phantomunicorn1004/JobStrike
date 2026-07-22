@@ -2,6 +2,7 @@ import "server-only";
 
 import { mergeStageDate, normalizeStageDates, type StageDates } from "@/lib/jobs/pipelineCardUtils";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 
 export type PipelineCardSource = "jobs" | "technical_jobs";
 
@@ -154,27 +155,28 @@ export async function listUserPipelineBoard(userId: string): Promise<{
   technicalJobs: PipelineTechnicalRow[];
 }> {
   const supabase = getSupabaseAdminClient();
-  const [jobsRes, techRes] = await Promise.all([
-    supabase
-      .from("jobs")
-      .select("*")
-      .eq("user_id", userId)
-      .order("id", { ascending: false }),
-    supabase
-      .from("technical_jobs")
-      .select("*")
-      .eq("user_id", userId)
-      .order("id", { ascending: false }),
+  const [jobsData, techData] = await Promise.all([
+    fetchAllByRange<JobDbRow>((from, to) =>
+      supabase
+        .from("jobs")
+        .select("*")
+        .eq("user_id", userId)
+        .order("id", { ascending: false })
+        .range(from, to),
+    ),
+    fetchAllByRange<TechDbRow>((from, to) =>
+      supabase
+        .from("technical_jobs")
+        .select("*")
+        .eq("user_id", userId)
+        .order("id", { ascending: false })
+        .range(from, to),
+    ),
   ]);
 
-  if (jobsRes.error) throw new Error(jobsRes.error.message);
-  if (techRes.error) throw new Error(techRes.error.message);
-
   return {
-    applied: (jobsRes.data ?? []).map((row) => mapAppliedRow(row as JobDbRow)),
-    technicalJobs: (techRes.data ?? []).map((row) =>
-      mapTechnicalRow(row as TechDbRow),
-    ),
+    applied: jobsData.map((row) => mapAppliedRow(row)),
+    technicalJobs: techData.map((row) => mapTechnicalRow(row)),
   };
 }
 

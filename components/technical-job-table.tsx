@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/table";
 import { Download, CheckCircle2, XCircle, Clock } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 
 // Status icons
 const StatusIcon = ({ result }: { result?: string }) => {
@@ -85,9 +86,14 @@ export function TechnicalJobTable() {
 
   const fetchJobs = async () => {
     try {
-      const { data, error } = await supabase.from("technical_jobs").select("*");
-      if (error) throw error;
-      setJobs(data || []);
+      const data = await fetchAllByRange<TechnicalJobEntry>((from, to) =>
+        supabase
+          .from("technical_jobs")
+          .select("*")
+          .order("id", { ascending: false })
+          .range(from, to),
+      );
+      setJobs(data);
     } catch (e) {
       console.error("Error fetching technical jobs:", e);
     } finally {

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 import { normalizeCompanyName } from "@/lib/job-scraper";
 
 export type BlockedCompany = {
@@ -102,21 +103,24 @@ function parseCandidateFilter(
 
 export async function listJobScraperCandidates(userId: string): Promise<CandidateOption[]> {
   const supabase = getSupabaseAdminClient();
-  const [profilesRes, orphanRes] = await Promise.all([
+  const [profilesRes, orphanRows] = await Promise.all([
     supabase
       .from("profiles")
       .select("id, full_name")
       .eq("user_id", userId)
       .order("full_name", { ascending: true }),
-    supabase
-      .from("resume_db_applications")
-      .select("candidate_name")
-      .eq("user_id", userId)
-      .is("profile_id", null),
+    fetchAllByRange<{ candidate_name?: string | null }>((from, to) =>
+      supabase
+        .from("resume_db_applications")
+        .select("candidate_name")
+        .eq("user_id", userId)
+        .is("profile_id", null)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   ]);
 
   if (profilesRes.error) throw new Error(profilesRes.error.message);
-  if (orphanRes.error) throw new Error(orphanRes.error.message);
 
   const options: CandidateOption[] = (
     (profilesRes.data ?? []) as Array<{ id: number; full_name: string }>
@@ -129,7 +133,7 @@ export async function listJobScraperCandidates(userId: string): Promise<Candidat
     options.map((option) => option.label.trim().toLowerCase()).filter(Boolean),
   );
   const orphanNames = new Map<string, string>();
-  for (const row of (orphanRes.data ?? []) as Array<{ candidate_name?: string | null }>) {
+  for (const row of orphanRows) {
     const name = row.candidate_name?.trim();
     if (!name) continue;
     const normalized = name.toLowerCase();
@@ -157,23 +161,25 @@ export async function listDistinctResumeDbCompanies(
   if (!parsed) return [];
 
   const supabase = getSupabaseAdminClient();
-  let builder = supabase
-    .from("resume_db_applications")
-    .select("company")
-    .eq("user_id", userId);
+  const data = await fetchAllByRange<{ company?: string | null }>((from, to) => {
+    let builder = supabase
+      .from("resume_db_applications")
+      .select("company")
+      .eq("user_id", userId)
+      .order("id", { ascending: true });
 
-  if (parsed.profileId != null) {
-    builder = builder.eq("profile_id", parsed.profileId);
-  } else if (parsed.nameEquals != null) {
-    builder = builder.is("profile_id", null).eq("candidate_name", parsed.nameEquals);
-  }
+    if (parsed.profileId != null) {
+      builder = builder.eq("profile_id", parsed.profileId);
+    } else if (parsed.nameEquals != null) {
+      builder = builder.is("profile_id", null).eq("candidate_name", parsed.nameEquals);
+    }
 
-  const { data, error } = await builder;
-  if (error) throw new Error(error.message);
+    return builder.range(from, to);
+  });
 
   const seen = new Set<string>();
   const result: string[] = [];
-  for (const row of (data ?? []) as Array<{ company?: string | null }>) {
+  for (const row of data) {
     const raw = row.company?.trim();
     const normalized = normalizeCompanyName(raw);
     if (!raw || !normalized || seen.has(normalized)) continue;
@@ -197,25 +203,27 @@ export async function listRegisteredJobsForCandidate(
   if (!parsed) return [];
 
   const supabase = getSupabaseAdminClient();
-  let builder = supabase
-    .from("resume_db_applications")
-    .select("job_link, job_title, company")
-    .eq("user_id", userId);
-
-  if (parsed.profileId != null) {
-    builder = builder.eq("profile_id", parsed.profileId);
-  } else if (parsed.nameEquals != null) {
-    builder = builder.is("profile_id", null).eq("candidate_name", parsed.nameEquals);
-  }
-
-  const { data, error } = await builder;
-  if (error) throw new Error(error.message);
-
-  return ((data ?? []) as Array<{
+  const data = await fetchAllByRange<{
     job_link?: string | null;
     job_title?: string | null;
     company?: string | null;
-  }>).map((row) => ({
+  }>((from, to) => {
+    let builder = supabase
+      .from("resume_db_applications")
+      .select("job_link, job_title, company")
+      .eq("user_id", userId)
+      .order("id", { ascending: true });
+
+    if (parsed.profileId != null) {
+      builder = builder.eq("profile_id", parsed.profileId);
+    } else if (parsed.nameEquals != null) {
+      builder = builder.is("profile_id", null).eq("candidate_name", parsed.nameEquals);
+    }
+
+    return builder.range(from, to);
+  });
+
+  return data.map((row) => ({
     jobLink: row.job_link?.trim() || "",
     jobTitle: row.job_title?.trim() || "",
     company: row.company?.trim() || "",

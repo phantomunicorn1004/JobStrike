@@ -5,6 +5,7 @@ import type {
   ResumeDbApplicationInput,
 } from "@/lib/resume-db/types";
 import { DEFAULT_TIMEZONE, endOfDayUtcIso, normalizeTimeZone, startOfDayUtcIso } from "@/lib/timezone";
+import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 
 type DbRow = {
   id: number;
@@ -157,14 +158,15 @@ export async function getProfileById(
 
 export async function listApplications(userId: string): Promise<ResumeDbApplication[]> {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from("resume_db_applications")
-    .select("*")
-    .eq("user_id", userId)
-    .order("id", { ascending: false });
-
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as DbRow[]).map(mapRow);
+  const data = await fetchAllByRange<DbRow>((from, to) =>
+    supabase
+      .from("resume_db_applications")
+      .select("*")
+      .eq("user_id", userId)
+      .order("id", { ascending: false })
+      .range(from, to),
+  );
+  return data.map(mapRow);
 }
 
 export type ResumeDbApplicationsListQuery = {

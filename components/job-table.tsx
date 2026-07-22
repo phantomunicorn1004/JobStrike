@@ -17,6 +17,7 @@ import { Download, ExternalLink } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 
 type JobEntry = {
   id: number;
@@ -44,10 +45,14 @@ export function JobTable() {
 
   const fetchJobs = async () => {
     try {
-      const { data, error } = await supabase.from("jobs").select("*");
-
-      if (error) throw error;
-      setJobs(data || []);
+      const data = await fetchAllByRange<JobEntry>((from, to) =>
+        supabase
+          .from("jobs")
+          .select("*")
+          .order("id", { ascending: false })
+          .range(from, to),
+      );
+      setJobs(data);
     } catch (error) {
       console.error("Error fetching jobs:", error);
     } finally {
