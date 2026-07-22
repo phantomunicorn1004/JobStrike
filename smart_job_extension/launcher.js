@@ -91,24 +91,20 @@
     }
   }
 
-  async function openSidePanel() {
+  async function openAssistantDialog() {
     const sidebarBtn = document.getElementById('openSidebarBtn');
     if (sidebarBtn) sidebarBtn.disabled = true;
-    setStatus('Opening sidebar…', 'info');
+    setStatus('Opening Job Assistant…', 'info');
 
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) throw new Error('No active tab found.');
-
-      if (!chrome.sidePanel?.open) {
-        throw new Error('Chrome side panel API is unavailable.');
+      const response = await chrome.runtime.sendMessage({ action: 'openAssistantDialog' });
+      if (!response?.success) {
+        throw new Error(response?.error || 'Could not open Job Assistant.');
       }
-
-      await chrome.sidePanel.open({ tabId: tab.id });
       window.close();
     } catch (err) {
       if (sidebarBtn) sidebarBtn.disabled = false;
-      setStatus(err.message || 'Could not open sidebar.', 'error');
+      setStatus(err.message || 'Could not open Job Assistant.', 'error');
     }
   }
 
@@ -178,7 +174,7 @@
 
     if (sidebarBtn) {
       sidebarBtn.addEventListener('click', () => {
-        openSidePanel();
+        openAssistantDialog();
       });
     }
 

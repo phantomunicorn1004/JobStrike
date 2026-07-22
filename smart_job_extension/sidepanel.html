@@ -8,6 +8,18 @@
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="layout.css">
   <script src="theme.js"></script>
+  <script>
+    (function () {
+      try {
+        if (new URLSearchParams(location.search).get('dialog') === '1') {
+          document.documentElement.classList.add('assistant-dialog');
+          document.addEventListener('DOMContentLoaded', function () {
+            document.body.classList.add('assistant-dialog');
+          });
+        }
+      } catch (_) { /* ignore */ }
+    })();
+  </script>
 </head>
 <body class="sidepanel">
   <div class="app-shell">
@@ -382,49 +394,48 @@
                   <option value="">Loading profiles…</option>
                 </select>
               </label>
-              <div class="register-files-row">
-                <div class="register-file-field">
+              <div class="register-files-row register-files-unified">
+                <div class="register-file-field register-file-unified">
                   <div class="register-file-head">
-                    <span class="register-file-label">Resume <span class="register-file-optional">opt.</span></span>
-                    <label class="register-default-check" title="Original resume (not tailored for this job)">
-                      <input type="checkbox" id="regResumeDefault" aria-label="Default resume">
-                      <span>Default</span>
-                    </label>
+                    <span class="register-file-label">Resume / cover <span class="register-file-optional">opt.</span></span>
                   </div>
-                  <p class="register-file-hint" id="regResumeDefaultHint">Tailored resume. Check Default for original.</p>
-                  <div class="file-drop register-file-drop" id="regResumeDrop" tabindex="0" role="button" aria-label="Drop resume or click to browse">
+                  <div
+                    class="file-drop register-file-drop register-combo-drop"
+                    id="regFilesDrop"
+                    tabindex="0"
+                    role="button"
+                    aria-label="Drop resume or resume and cover letter, or click to browse"
+                  >
+                    <input type="file" id="regFilesPicker" accept=".pdf,.docx,.doc,.txt" multiple hidden>
                     <input type="file" id="regResumeFile" accept=".pdf,.docx,.doc" hidden>
-                    <span class="file-drop-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
-                      </svg>
-                    </span>
-                    <span class="file-drop-cta">Drop or browse</span>
-                    <span class="muted small">PDF · DOCX · DOC</span>
-                    <span class="file-drop-selected" id="regResumeFileName" hidden></span>
-                    <button type="button" class="file-drop-clear" id="regResumeClear" hidden data-clear-file aria-label="Remove resume">Remove</button>
-                  </div>
-                </div>
-                <div class="register-file-field">
-                  <div class="register-file-head">
-                    <span class="register-file-label">Cover <span class="register-file-optional">opt.</span></span>
-                    <label class="register-default-check" title="Original cover letter (not tailored)">
-                      <input type="checkbox" id="regCoverDefault" aria-label="Default cover letter">
-                      <span>Default</span>
-                    </label>
-                  </div>
-                  <p class="register-file-hint" id="regCoverDefaultHint">Tailored cover. Check Default for original.</p>
-                  <div class="file-drop register-file-drop" id="regCoverDrop" tabindex="0" role="button" aria-label="Drop cover letter or click to browse">
                     <input type="file" id="regCoverFile" accept=".pdf,.docx,.doc,.txt" hidden>
                     <span class="file-drop-icon" aria-hidden="true">
                       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
                       </svg>
                     </span>
-                    <span class="file-drop-cta">Drop or browse</span>
-                    <span class="muted small">PDF · DOCX · TXT</span>
-                    <span class="file-drop-selected" id="regCoverFileName" hidden></span>
-                    <button type="button" class="file-drop-clear" id="regCoverClear" hidden data-clear-file aria-label="Remove cover letter">Remove</button>
+                    <span class="file-drop-cta">Drop 1–2 files or browse</span>
+                    <span class="muted small">Resume, or resume + cover · PDF · DOCX · DOC · TXT</span>
+                  </div>
+                  <div class="register-file-chips" id="regFileChips">
+                    <div class="register-file-chip" id="regResumeChip" hidden data-kind="resume">
+                      <span class="register-file-chip-kind">Resume</span>
+                      <span class="register-file-chip-name" id="regResumeFileName"></span>
+                      <label class="register-default-check" title="Original resume (not tailored for this job)">
+                        <input type="checkbox" id="regResumeDefault" aria-label="Default resume">
+                        <span>Default</span>
+                      </label>
+                      <button type="button" class="file-drop-clear register-file-chip-clear" id="regResumeClear" data-clear-file="resume" aria-label="Remove resume">×</button>
+                    </div>
+                    <div class="register-file-chip" id="regCoverChip" hidden data-kind="cover">
+                      <span class="register-file-chip-kind">Cover</span>
+                      <span class="register-file-chip-name" id="regCoverFileName"></span>
+                      <label class="register-default-check" title="Original cover letter (not tailored)">
+                        <input type="checkbox" id="regCoverDefault" aria-label="Default cover letter">
+                        <span>Default</span>
+                      </label>
+                      <button type="button" class="file-drop-clear register-file-chip-clear" id="regCoverClear" data-clear-file="cover" aria-label="Remove cover letter">×</button>
+                    </div>
                   </div>
                 </div>
               </div>

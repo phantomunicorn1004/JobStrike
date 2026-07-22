@@ -1,5 +1,5 @@
 // Background service worker for Smart Job Autofill Assistant.
-// Keeps legacy saved-job behavior and opens the side panel when requested.
+// Opens the movable Job Assistant dialog on the active tab (popup fallback if needed).
 
 const STORAGE_KEYS = {
   jobs: 'scraped_jobs',
@@ -35,6 +35,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     sendResponse({ success: false, error: 'Chrome sidePanel API is unavailable.' });
+    return true;
+  }
+  if (request && request.action === 'openAssistantDialog') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
+        sendResponse({
+          success: false,
+          error: 'Open a regular web page (http/https) before opening Job Assistant.'
+        });
+        return;
+      }
+      try {
+        await chrome.scripting
+          .executeScript({
+            target: { tabId: tab.id },
+            files: ['assistant-overlay.js']
+          })
+          .catch(() => null);
+
+        const response = await ensureContentScriptAndSendMessage(tab.id, {
+          action: 'showAssistantDialog'
+        });
+        if (response?.success) {
+          sendResponse(response);
+          return;
+        }
+        throw new Error(response?.error || 'Could not open Job Assistant overlay.');
+      } catch (error) {
+        try {
+          await chrome.windows.create({
+            url: chrome.runtime.getURL('sidepanel.html?dialog=1'),
+            type: 'popup',
+            width: 400,
+            height: 600,
+            focused: true
+          });
+          sendResponse({ success: true, fallback: 'popup' });
+        } catch (popupError) {
+          sendResponse({
+            success: false,
+            error: error?.message || popupError?.message || String(error)
+          });
+        }
+      }
+    });
     return true;
   }
   if (request && request.action === 'startElementTextPicker') {
@@ -127,18 +173,24 @@ function ensureContentScriptAndSendMessage(tabId, message) {
         return;
       }
 
-      chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }, () => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
+      chrome.scripting.executeScript(
+        {
+          target: { tabId },
+          files: ['field-registry.js', 'content.js', 'assistant-overlay.js']
+        },
+        () => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tabId, message, (response) => {
+              if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+              else resolve(response);
+            });
+          }, 100);
         }
-        setTimeout(() => {
-          chrome.tabs.sendMessage(tabId, message, (response) => {
-            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-            else resolve(response);
-          });
-        }, 100);
-      });
+      );
     });
   });
 }

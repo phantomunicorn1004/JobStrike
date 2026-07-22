@@ -608,6 +608,9 @@ function getKitUploadForCategory(category) {
 window.addEventListener('DOMContentLoaded', init);
 
 function init() {
+  if (document.documentElement.classList.contains('assistant-dialog')) {
+    document.body.classList.add('assistant-dialog');
+  }
   if (window.SmartJobTheme) {
     window.SmartJobTheme.initTheme();
     window.SmartJobTheme.wireThemeToggle();
@@ -1253,7 +1256,29 @@ function tokenSimilarity(a, b) {
 
 function getActiveTab() {
   return new Promise((resolve) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs[0] || null));
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const current = tabs[0] || null;
+      if (current?.id && current.url && /^https?:\/\//i.test(current.url)) {
+        resolve(current);
+        return;
+      }
+      try {
+        const lastFocused = await chrome.windows.getLastFocused({
+          populate: true,
+          windowTypes: ['normal']
+        });
+        const active = lastFocused?.tabs?.find((tab) => tab.active);
+        if (active?.id) {
+          resolve(active);
+          return;
+        }
+      } catch (_) {
+        /* ignore */
+      }
+      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (fallbackTabs) => {
+        resolve(fallbackTabs[0] || current || null);
+      });
+    });
   });
 }
 
@@ -1268,7 +1293,9 @@ function sendMessageToTab(tabId, message) {
         return;
       }
 
-      chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }, () => {
+      chrome.scripting.executeScript(
+        { target: { tabId }, files: ['field-registry.js', 'content.js', 'assistant-overlay.js'] },
+        () => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
           return;

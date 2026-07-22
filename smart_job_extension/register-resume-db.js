@@ -104,8 +104,36 @@
     return headers;
   }
 
+  async function getTargetJobTab() {
+    const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (current?.id && current.url && /^https?:\/\//i.test(current.url)) {
+      return current;
+    }
+
+    try {
+      const lastFocused = await chrome.windows.getLastFocused({
+        populate: true,
+        windowTypes: ['normal']
+      });
+      const active = lastFocused?.tabs?.find((tab) => tab.active);
+      if (active?.id) return active;
+    } catch (_) {
+      /* ignore */
+    }
+
+    const normals = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
+    for (const win of normals) {
+      const active = win.tabs?.find((tab) => tab.active);
+      if (active?.id && active.url && /^https?:\/\//i.test(active.url)) return active;
+    }
+
+    const [fallback] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (fallback?.id) return fallback;
+    throw new Error('No active tab.');
+  }
+
   async function sendToActiveTab(message) {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getTargetJobTab();
     if (!tab?.id) throw new Error('No active tab.');
     const response = await chrome.tabs.sendMessage(tab.id, message);
     return { response, tab };
@@ -739,93 +767,270 @@
     return file || null;
   }
 
-  function updateRegisterDropUi(config) {
-    const { drop, input, nameEl, clearBtn, defaultCheckbox } = config;
-    const file = input?.files?.[0] || null;
-    if (!drop) return;
+  function scoreCoverName(name) {
+    const n = String(name || '').toLowerCase();
+    let score = 0;
+    if (/cover/.test(n)) score += 3;
+    if (/(^|[^a-z])cl([^a-z]|$)/.test(n)) score += 2;
+    if (/letter/.test(n)) score += 2;
+    if (fileExtension(n) === '.txt') score += 4;
+    return score;
+  }
 
-    drop.classList.toggle('has-file', Boolean(file));
-    drop.classList.toggle('is-default-file', Boolean(file && defaultCheckbox?.checked));
+  function scoreResumeName(name) {
+    const n = String(name || '').toLowerCase();
+    let score = 0;
+    if (/resume/.test(n)) score += 3;
+    if (/(^|[^a-z])cv([^a-z]|$)/.test(n)) score += 3;
+    if (/curriculum/.test(n)) score += 2;
+    return score;
+  }
 
-    if (nameEl) {
-      if (file) {
-        nameEl.textContent = file.name;
-        nameEl.hidden = false;
+  /**
+   * Classify 1–2 dropped/browsed files into resume + optional cover letter.
+   * @returns {{ resume: File|null, cover: File|null, error?: string, warning?: string }}
+   */
+  function classifyDroppedFiles(fileList) {
+    const raw = Array.from(fileList || []).filter(Boolean);
+    if (raw.length > 2) {
+      return { resume: null, cover: null, error: 'Drop 1 or 2 files only.' };
+    }
+    if (raw.length === 0) {
+      return { resume: null, cover: null };
+    }
+
+    const valid = [];
+    const rejected = [];
+    for (const file of raw) {
+      const ext = fileExtension(file.name);
+      const resumeOk = RESUME_ACCEPT.includes(ext);
+      const coverOk = COVER_ACCEPT.includes(ext);
+      if (!resumeOk && !coverOk) {
+        rejected.push(file.name);
+        continue;
+      }
+      valid.push(file);
+    }
+
+    if (valid.length === 0) {
+      return {
+        resume: null,
+        cover: null,
+        error: `Invalid file type. Allowed: ${COVER_ACCEPT.join(', ')}`
+      };
+    }
+
+    let resume = null;
+    let cover = null;
+
+    if (valid.length === 1) {
+      const file = valid[0];
+      const ext = fileExtension(file.name);
+      if (RESUME_ACCEPT.includes(ext)) {
+        resume = file;
       } else {
-        nameEl.textContent = '';
-        nameEl.hidden = true;
+        cover = file;
+      }
+    } else {
+      const [a, b] = valid;
+      const aCover = scoreCoverName(a.name);
+      const bCover = scoreCoverName(b.name);
+      const aResume = scoreResumeName(a.name);
+      const bResume = scoreResumeName(b.name);
+
+      if (aCover > bCover || (aCover === bCover && aCover > 0 && aResume < bResume)) {
+        cover = a;
+        resume = b;
+      } else if (bCover > aCover || (aCover === bCover && bCover > 0 && bResume < aResume)) {
+        cover = b;
+        resume = a;
+      } else if (fileExtension(a.name) === '.txt' && fileExtension(b.name) !== '.txt') {
+        cover = a;
+        resume = b;
+      } else if (fileExtension(b.name) === '.txt' && fileExtension(a.name) !== '.txt') {
+        cover = b;
+        resume = a;
+      } else {
+        resume = a;
+        cover = b;
+      }
+
+      // Ensure resume slot only gets resume-allowed types
+      if (resume && !isAllowedFile(resume, RESUME_ACCEPT)) {
+        if (cover && isAllowedFile(cover, RESUME_ACCEPT)) {
+          const swap = resume;
+          resume = cover;
+          cover = swap;
+        } else {
+          cover = resume;
+          resume = null;
+        }
+      }
+      if (cover && !isAllowedFile(cover, COVER_ACCEPT)) {
+        cover = null;
       }
     }
 
-    if (clearBtn) clearBtn.hidden = !file;
+    const warning = rejected.length
+      ? `Skipped invalid file(s): ${rejected.join(', ')}`
+      : undefined;
 
-    const cta = drop.querySelector('.file-drop-cta');
-    const formats = drop.querySelector('.file-drop > .muted.small');
-    const icon = drop.querySelector('.file-drop-icon');
-    if (cta) cta.hidden = Boolean(file);
-    if (formats) formats.hidden = Boolean(file);
-    if (icon) icon.hidden = Boolean(file);
+    return { resume, cover, warning };
   }
 
-  function clearRegisterFileDrop(config) {
-    const { input, defaultCheckbox } = config;
-    if (input) input.value = '';
-    if (defaultCheckbox) defaultCheckbox.checked = false;
-    updateRegisterDropUi(config);
+  function getRegisterFileConfigs() {
+    return {
+      resume: {
+        input: document.getElementById('regResumeFile'),
+        nameEl: document.getElementById('regResumeFileName'),
+        clearBtn: document.getElementById('regResumeClear'),
+        defaultCheckbox: document.getElementById('regResumeDefault'),
+        chip: document.getElementById('regResumeChip')
+      },
+      cover: {
+        input: document.getElementById('regCoverFile'),
+        nameEl: document.getElementById('regCoverFileName'),
+        clearBtn: document.getElementById('regCoverClear'),
+        defaultCheckbox: document.getElementById('regCoverDefault'),
+        chip: document.getElementById('regCoverChip')
+      }
+    };
+  }
+
+  function updateRegisterChipUi(config) {
+    const { input, nameEl, defaultCheckbox, chip } = config;
+    const file = input?.files?.[0] || null;
+    if (!chip) return;
+    chip.hidden = !file;
+    chip.classList.toggle('is-default-file', Boolean(file && defaultCheckbox?.checked));
+    if (nameEl) {
+      nameEl.textContent = file ? file.name : '';
+      nameEl.title = file ? file.name : '';
+    }
+  }
+
+  function updateRegisterComboDropUi() {
+    const drop = document.getElementById('regFilesDrop');
+    const configs = getRegisterFileConfigs();
+    const hasResume = Boolean(configs.resume.input?.files?.[0]);
+    const hasCover = Boolean(configs.cover.input?.files?.[0]);
+    const hasAny = hasResume || hasCover;
+
+    if (drop) {
+      drop.classList.toggle('has-file', hasAny);
+      drop.classList.toggle(
+        'is-default-file',
+        Boolean(
+          (hasResume && configs.resume.defaultCheckbox?.checked) ||
+            (hasCover && configs.cover.defaultCheckbox?.checked)
+        )
+      );
+    }
+
+    updateRegisterChipUi(configs.resume);
+    updateRegisterChipUi(configs.cover);
+  }
+
+  function clearRegisterFileSlot(kind) {
+    const configs = getRegisterFileConfigs();
+    const config = kind === 'cover' ? configs.cover : configs.resume;
+    if (config.input) config.input.value = '';
+    if (config.defaultCheckbox) config.defaultCheckbox.checked = false;
+    updateRegisterComboDropUi();
+  }
+
+  function clearAllRegisterFiles() {
+    clearRegisterFileSlot('resume');
+    clearRegisterFileSlot('cover');
   }
 
   function assignFileToInput(input, file) {
-    if (!input || !file) return;
+    if (!input) return;
+    if (!file) {
+      input.value = '';
+      return;
+    }
     const dt = new DataTransfer();
     dt.items.add(file);
     input.files = dt.files;
   }
 
-  function wireRegisterFileDrop(config) {
-    const { drop, input, nameEl, clearBtn, defaultCheckbox, allowedExts, label } = config;
-    if (!drop || !input) return;
+  function applyClassifiedFiles(result) {
+    const configs = getRegisterFileConfigs();
+    if (result.error) {
+      setRegisterStatus(result.error, 'error');
+      return;
+    }
 
-    const applyFile = (file) => {
-      if (!file) {
-        clearRegisterFileDrop(config);
-        return;
-      }
-      if (!isAllowedFile(file, allowedExts)) {
-        setRegisterStatus(
-          `Invalid ${label} type. Allowed: ${allowedExts.join(', ')}`,
-          'error'
-        );
-        clearRegisterFileDrop(config);
-        return;
-      }
-      assignFileToInput(input, file);
-      updateRegisterDropUi(config);
-    };
+    assignFileToInput(configs.resume.input, result.resume || null);
+    assignFileToInput(configs.cover.input, result.cover || null);
+
+    if (!result.resume && configs.resume.defaultCheckbox) {
+      configs.resume.defaultCheckbox.checked = false;
+    }
+    if (!result.cover && configs.cover.defaultCheckbox) {
+      configs.cover.defaultCheckbox.checked = false;
+    }
+
+    updateRegisterComboDropUi();
+
+    if (result.warning) {
+      setRegisterStatus(result.warning, 'info');
+    } else if (result.resume || result.cover) {
+      const parts = [];
+      if (result.resume) parts.push(`resume: ${result.resume.name}`);
+      if (result.cover) parts.push(`cover: ${result.cover.name}`);
+      setRegisterStatus(`Attached ${parts.join(' · ')}`, 'success');
+    }
+  }
+
+  function wireRegisterFileDrops() {
+    const drop = document.getElementById('regFilesDrop');
+    const picker = document.getElementById('regFilesPicker');
+    const configs = getRegisterFileConfigs();
+    if (!drop || !picker) return;
+
+    const openPicker = () => picker.click();
 
     drop.addEventListener('click', (e) => {
       if (e.target.closest('[data-clear-file]')) return;
-      input.click();
+      if (e.target.closest('.register-default-check')) return;
+      openPicker();
     });
 
     drop.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        input.click();
+        openPicker();
       }
     });
 
-    input.addEventListener('change', () => applyFile(input.files?.[0] || null));
+    picker.addEventListener('change', () => {
+      const files = picker.files;
+      applyClassifiedFiles(classifyDroppedFiles(files));
+      picker.value = '';
+    });
 
-    if (clearBtn) {
-      clearBtn.addEventListener('click', (e) => {
+    if (configs.resume.clearBtn) {
+      configs.resume.clearBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        clearRegisterFileDrop(config);
+        clearRegisterFileSlot('resume');
+      });
+    }
+    if (configs.cover.clearBtn) {
+      configs.cover.clearBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearRegisterFileSlot('cover');
       });
     }
 
-    if (defaultCheckbox) {
-      defaultCheckbox.addEventListener('change', () => updateRegisterDropUi(config));
+    if (configs.resume.defaultCheckbox) {
+      configs.resume.defaultCheckbox.addEventListener('change', updateRegisterComboDropUi);
+    }
+    if (configs.cover.defaultCheckbox) {
+      configs.cover.defaultCheckbox.addEventListener('change', updateRegisterComboDropUi);
     }
 
     drop.addEventListener('dragover', (e) => {
@@ -844,31 +1049,10 @@
       e.preventDefault();
       e.stopPropagation();
       drop.classList.remove('drag-active');
-      applyFile(e.dataTransfer?.files?.[0] || null);
+      applyClassifiedFiles(classifyDroppedFiles(e.dataTransfer?.files));
     });
 
-    updateRegisterDropUi(config);
-  }
-
-  function wireRegisterFileDrops() {
-    wireRegisterFileDrop({
-      drop: document.getElementById('regResumeDrop'),
-      input: document.getElementById('regResumeFile'),
-      nameEl: document.getElementById('regResumeFileName'),
-      clearBtn: document.getElementById('regResumeClear'),
-      defaultCheckbox: document.getElementById('regResumeDefault'),
-      allowedExts: RESUME_ACCEPT,
-      label: 'resume'
-    });
-    wireRegisterFileDrop({
-      drop: document.getElementById('regCoverDrop'),
-      input: document.getElementById('regCoverFile'),
-      nameEl: document.getElementById('regCoverFileName'),
-      clearBtn: document.getElementById('regCoverClear'),
-      defaultCheckbox: document.getElementById('regCoverDefault'),
-      allowedExts: COVER_ACCEPT,
-      label: 'cover letter'
-    });
+    updateRegisterComboDropUi();
   }
 
   function readRegisterFormFields() {
@@ -1273,20 +1457,7 @@
             'success'
           );
           if (showStatus) showStatus('Job registered in Resume DB.', 'success');
-          clearRegisterFileDrop({
-            drop: document.getElementById('regResumeDrop'),
-            input: document.getElementById('regResumeFile'),
-            nameEl: document.getElementById('regResumeFileName'),
-            clearBtn: document.getElementById('regResumeClear'),
-            defaultCheckbox: document.getElementById('regResumeDefault')
-          });
-          clearRegisterFileDrop({
-            drop: document.getElementById('regCoverDrop'),
-            input: document.getElementById('regCoverFile'),
-            nameEl: document.getElementById('regCoverFileName'),
-            clearBtn: document.getElementById('regCoverClear'),
-            defaultCheckbox: document.getElementById('regCoverDefault')
-          });
+          clearAllRegisterFiles();
         } catch (err) {
           const msg = err.message || String(err);
           setRegisterStatus(msg, 'error');

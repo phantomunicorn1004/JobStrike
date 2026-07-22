@@ -405,6 +405,16 @@ select:focus,
   background: rgba(34, 197, 94, 0.12);
 }
 
+[data-theme="dark"] .register-file-chip {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+[data-theme="dark"] .register-file-chip.is-default-file {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
 /* Register */
 .register-status.is-info {
   background: var(--accent-soft);
