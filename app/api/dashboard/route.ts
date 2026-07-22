@@ -18,7 +18,6 @@ import {
   buildCandidateCounts,
   buildStackedBidSeries,
   buildStageCounts,
-  buildStalePipelineCards,
   countApplicationsOnDate,
   filterApplicationsByCandidate,
   isoToDayKey,
@@ -147,16 +146,6 @@ export async function GET(request: NextRequest) {
       "applied",
       false,
     );
-    const funnelCounts = buildStageCounts(
-      typedJobs,
-      typedTechJobs,
-      stages,
-      stageFrom,
-      stageTo,
-      timezone,
-      "applied",
-      true,
-    );
 
     return corsJson({
       appliedDate,
@@ -175,23 +164,14 @@ export async function GET(request: NextRequest) {
       bidFrom,
       bidTo,
       stageCounts,
-      funnelCounts,
       stageFrom,
       stageTo,
       timezone,
       totalApplications,
       totalApplicationsAll,
       applicationsByCandidate,
-      totalPipelineCards: typedJobs.length + typedTechJobs.length,
-      stalePipelineCards: buildStalePipelineCards(
-        typedJobs,
-        typedTechJobs,
-        stages,
-        timezone,
-      ),
       candidates,
       candidateFilter: candidateFilter || null,
-      pipelineIsAccountWide: true,
     });
   } catch (error) {
     console.error("Dashboard stats error:", error);
