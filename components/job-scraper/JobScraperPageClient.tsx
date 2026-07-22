@@ -246,8 +246,8 @@ function JobCategoryHeaderFilter({
             : "Filter by job category"}
         </TooltipContent>
       </Tooltip>
-      <PopoverContent className="w-72 p-3" align="start">
-        <p className="mb-2 text-sm font-medium">Filter by category</p>
+      <PopoverContent className="w-72 p-3 text-sm [&_button]:text-xs" align="start">
+        <p className="mb-2 text-xs font-medium">Filter by category</p>
         {options.length === 0 ? (
           <p className="text-xs text-muted-foreground">No categories in results.</p>
         ) : (
@@ -257,7 +257,7 @@ function JobCategoryHeaderFilter({
               return (
                 <label
                   key={option.key}
-                  className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-muted/60"
+                  className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 text-xs hover:bg-muted/60"
                 >
                   <Checkbox
                     checked={checked}
@@ -950,11 +950,11 @@ export function JobScraperPageClient() {
 
   return (
     <JobsLayout>
-      <div className="relative flex h-full min-h-0 w-full flex-col gap-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="relative flex h-full min-h-0 w-full flex-col gap-2.5 text-sm [&_button]:text-xs [&_input]:text-xs [&_textarea]:text-xs [&_[data-slot=badge]]:text-[11px] [&_[data-slot=table]]:text-xs">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h1 className="text-xl font-semibold">Job Scraper</h1>
-            <p className="text-sm text-muted-foreground">
+            <h1 className="text-lg font-semibold">Job Scraper</h1>
+            <p className="text-xs text-muted-foreground">
               Results-first scrape review for hiring.cafe.
             </p>
           </div>
@@ -967,7 +967,7 @@ export function JobScraperPageClient() {
                   Blocked companies
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+              <DialogContent className="max-h-[85vh] overflow-y-auto text-sm sm:max-w-xl [&_button]:text-xs [&_input]:text-xs [&_textarea]:text-xs">
                 <DialogHeader>
                   <DialogTitle>Blocked companies</DialogTitle>
                   <DialogDescription>
@@ -1063,7 +1063,7 @@ export function JobScraperPageClient() {
                   Blocked ATS
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+              <DialogContent className="max-h-[85vh] overflow-y-auto text-sm sm:max-w-xl [&_button]:text-xs [&_input]:text-xs [&_textarea]:text-xs">
                 <DialogHeader>
                   <DialogTitle>Blocked ATS</DialogTitle>
                   <DialogDescription>
@@ -1154,7 +1154,10 @@ export function JobScraperPageClient() {
                   Company lists
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="w-full sm:max-w-md">
+              <SheetContent
+                side="right"
+                className="w-full text-sm sm:max-w-md [&_button]:text-xs [&_input]:text-xs [&_textarea]:text-xs"
+              >
                 <SheetHeader>
                   <SheetTitle>Company lists</SheetTitle>
                   <SheetDescription>
@@ -1256,7 +1259,7 @@ export function JobScraperPageClient() {
               <select
                 value={candidateFilter}
                 onChange={(e) => setCandidateFilter(e.target.value)}
-                className="border-input bg-card dark:bg-input/30 h-8 min-w-[180px] rounded-md border px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                className="border-input bg-card dark:bg-input/30 h-8 min-w-[180px] rounded-md border px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                 aria-label="Candidate"
               >
                 <option value="">Select candidate…</option>
@@ -1267,21 +1270,21 @@ export function JobScraperPageClient() {
                 ))}
               </select>
 
-              <label className="flex items-center gap-1.5 text-xs sm:text-sm">
+              <label className="flex items-center gap-1.5 text-xs">
                 <Checkbox
                   checked={excludeBlocked}
                   onCheckedChange={(checked) => setExcludeBlocked(Boolean(checked))}
                 />
                 Blocked ({blockedCompanies.length})
               </label>
-              <label className="flex items-center gap-1.5 text-xs sm:text-sm">
+              <label className="flex items-center gap-1.5 text-xs">
                 <Checkbox
                   checked={excludeBlockedAts}
                   onCheckedChange={(checked) => setExcludeBlockedAts(Boolean(checked))}
                 />
                 ATS ({blockedAts.length})
               </label>
-              <label className="flex items-center gap-1.5 text-xs sm:text-sm">
+              <label className="flex items-center gap-1.5 text-xs">
                 <Checkbox
                   checked={excludeRegisteredJobs}
                   onCheckedChange={(checked) => setExcludeRegisteredJobs(Boolean(checked))}
@@ -1289,7 +1292,7 @@ export function JobScraperPageClient() {
                 />
                 Reg. jobs ({registeredJobCount})
               </label>
-              <label className="flex items-center gap-1.5 text-xs sm:text-sm">
+              <label className="flex items-center gap-1.5 text-xs">
                 <Checkbox
                   checked={excludeRegisteredCompanies}
                   onCheckedChange={(checked) =>
@@ -1328,7 +1331,7 @@ export function JobScraperPageClient() {
           <CardHeader className="space-y-3 pb-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <CardTitle className="text-lg">Scrape results</CardTitle>
+                <CardTitle className="text-base">Scrape results</CardTitle>
                 {filteredResult?.stats ? (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <Badge variant="secondary">Scraped {filteredResult.stats.scraped}</Badge>
@@ -1465,7 +1468,7 @@ export function JobScraperPageClient() {
               <Table>
                 <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_0_hsl(var(--border))] [&_tr]:border-b-0">
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-10 bg-background px-3">
+                    <TableHead className="h-9 bg-background px-3">
                       <Checkbox
                         aria-label="Select all on this page"
                         checked={
@@ -1481,8 +1484,8 @@ export function JobScraperPageClient() {
                         disabled={pagedJobs.length === 0}
                       />
                     </TableHead>
-                    <TableHead className="bg-background">Company</TableHead>
-                    <TableHead className="bg-background">
+                    <TableHead className="h-9 bg-background">Company</TableHead>
+                    <TableHead className="h-9 bg-background">
                       <div className="flex items-center gap-1">
                         <span>Title</span>
                         <JobCategoryHeaderFilter
@@ -1492,10 +1495,10 @@ export function JobScraperPageClient() {
                         />
                       </div>
                     </TableHead>
-                    <TableHead className="bg-background">ATS</TableHead>
-                    <TableHead className="bg-background">Published</TableHead>
-                    <TableHead className="bg-background">Link</TableHead>
-                    <TableHead className="w-[88px] bg-background text-center">
+                    <TableHead className="h-9 bg-background">ATS</TableHead>
+                    <TableHead className="h-9 bg-background">Published</TableHead>
+                    <TableHead className="h-9 bg-background">Link</TableHead>
+                    <TableHead className="h-9 w-[88px] bg-background text-center">
                       Actions
                     </TableHead>
                   </TableRow>
@@ -1529,7 +1532,7 @@ export function JobScraperPageClient() {
                           <TableCell className="max-w-[180px] whitespace-normal">
                             <div className="font-medium">{job.company_name || "—"}</div>
                             {job.company_tagline ? (
-                              <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                              <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
                                 {job.company_tagline}
                               </div>
                             ) : null}
@@ -1537,13 +1540,13 @@ export function JobScraperPageClient() {
                           <TableCell className="max-w-[280px] whitespace-normal">
                             <div>{job.title || "—"}</div>
                             {job.job_category ? (
-                              <div className="mt-1 text-xs text-muted-foreground">
+                              <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
                                 {job.job_category}
                               </div>
                             ) : null}
                           </TableCell>
                           <TableCell>{job.application_site || "Unknown"}</TableCell>
-                          <TableCell className="whitespace-nowrap text-xs">
+                          <TableCell className="whitespace-nowrap text-[11px] tabular-nums">
                             {job.estimated_publish_date || "—"}
                           </TableCell>
                           <TableCell>
