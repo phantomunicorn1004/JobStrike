@@ -665,6 +665,7 @@ export function ResumeDBPageClient() {
   const [rows, setRows] = useState<ResumeDbRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>(null);
@@ -766,10 +767,15 @@ export function ResumeDBPageClient() {
     void loadRows();
   }, [loadRows]);
 
+  const applySearch = useCallback(() => {
+    const next = searchDraft.trim();
+    setSearch(next);
+    setPage(1);
+  }, [searchDraft]);
+
   useEffect(() => {
     setPage(1);
   }, [
-    search,
     pageSize,
     dateFrom,
     dateTo,
@@ -1065,14 +1071,33 @@ export function ResumeDBPageClient() {
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-          <div className="relative min-w-[160px] flex-1 sm:max-w-xs lg:max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              className="pl-9 rounded-xl bg-card h-9"
-              placeholder="Search company, role, ID…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+          <div className="flex min-w-[160px] flex-1 items-center gap-1.5 sm:max-w-md">
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                className="pl-9 rounded-xl bg-card h-9"
+                placeholder="Search company, role, ID…"
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    applySearch();
+                  }
+                }}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 shrink-0 rounded-xl"
+              onClick={applySearch}
+              disabled={isLoading}
+            >
+              <Search className="mr-1.5 h-3.5 w-3.5" />
+              Search
+            </Button>
           </div>
 
           <AppliedDateFilter
@@ -1110,6 +1135,7 @@ export function ResumeDBPageClient() {
               className="h-9 rounded-xl text-xs px-2"
               onClick={() => {
                 setSearch("");
+                setSearchDraft("");
                 setDateFrom("");
                 setDateTo("");
                 setCandidateFilter("");
