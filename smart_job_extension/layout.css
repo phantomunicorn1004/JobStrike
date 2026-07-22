@@ -2,12 +2,14 @@
 
 html {
   height: 100%;
+  font-size: 13px;
 }
 
 body.sidepanel {
   height: 100%;
   min-height: 100dvh;
   overflow: hidden;
+  zoom: 0.9;
 }
 
 .app-shell {

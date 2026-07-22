@@ -106,7 +106,12 @@
 }
 
 /* —— Modern base —— */
+html {
+  font-size: 13px;
+}
+
 body.sidepanel {
+  font-size: 12px;
   background:
     radial-gradient(ellipse 120% 80% at 100% -20%, rgba(102, 102, 255, 0.12), transparent 50%),
     radial-gradient(ellipse 80% 60% at -10% 100%, rgba(102, 102, 255, 0.08), transparent 45%),
@@ -141,13 +146,13 @@ body.sidepanel {
 }
 
 h1 {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 800;
   letter-spacing: -0.02em;
 }
 
 h2 {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 800;
   letter-spacing: -0.01em;
 }
