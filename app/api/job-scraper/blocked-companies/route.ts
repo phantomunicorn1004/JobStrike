@@ -8,6 +8,7 @@ import {
   listBlockedCompanies,
   listDistinctResumeDbCompanies,
   listJobScraperCandidates,
+  listRegisteredJobsForCandidate,
 } from "@/lib/job-scraper-repository";
 
 export function OPTIONS() {
@@ -19,12 +20,13 @@ export async function GET(request: NextRequest) {
     const user = await requireRequestUser(request);
     const candidateFilter =
       new URL(request.url).searchParams.get("candidateFilter")?.trim() || "";
-    const [blockedCompanies, blockedAts, candidates, resumeDbCompanies] =
+    const [blockedCompanies, blockedAts, candidates, resumeDbCompanies, registeredJobs] =
       await Promise.all([
         listBlockedCompanies(user.id),
         listBlockedAts(user.id),
         listJobScraperCandidates(user.id),
         listDistinctResumeDbCompanies(user.id, candidateFilter),
+        listRegisteredJobsForCandidate(user.id, candidateFilter),
       ]);
     return corsJson({
       blockedCompanies,
@@ -33,6 +35,8 @@ export async function GET(request: NextRequest) {
       candidateFilter: candidateFilter || null,
       resumeDbCompanies,
       resumeDbCompanyCount: resumeDbCompanies.length,
+      registeredJobs,
+      registeredJobCount: registeredJobs.length,
     });
   } catch (error) {
     const message =

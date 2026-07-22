@@ -183,6 +183,45 @@ export async function listDistinctResumeDbCompanies(
   return result.sort((a, b) => a.localeCompare(b));
 }
 
+export type RegisteredJobRow = {
+  jobLink: string;
+  jobTitle: string;
+  company: string;
+};
+
+export async function listRegisteredJobsForCandidate(
+  userId: string,
+  candidateFilter?: string | null,
+): Promise<RegisteredJobRow[]> {
+  const parsed = parseCandidateFilter(candidateFilter);
+  if (!parsed) return [];
+
+  const supabase = getSupabaseAdminClient();
+  let builder = supabase
+    .from("resume_db_applications")
+    .select("job_link, job_title, company")
+    .eq("user_id", userId);
+
+  if (parsed.profileId != null) {
+    builder = builder.eq("profile_id", parsed.profileId);
+  } else if (parsed.nameEquals != null) {
+    builder = builder.is("profile_id", null).eq("candidate_name", parsed.nameEquals);
+  }
+
+  const { data, error } = await builder;
+  if (error) throw new Error(error.message);
+
+  return ((data ?? []) as Array<{
+    job_link?: string | null;
+    job_title?: string | null;
+    company?: string | null;
+  }>).map((row) => ({
+    jobLink: row.job_link?.trim() || "",
+    jobTitle: row.job_title?.trim() || "",
+    company: row.company?.trim() || "",
+  }));
+}
+
 export type BlockedAts = {
   id: string;
   atsName: string;

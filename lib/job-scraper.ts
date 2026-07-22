@@ -272,50 +272,159 @@ export function normalizeAtsName(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+/** registered.includes(jobCompany) — preferred company match. */
+export function companyMatchesList(
+  jobCompany: string | null | undefined,
+  companyList: string[],
+): boolean {
+  const jobKey = normalizeCompanyName(jobCompany);
+  if (!jobKey) return false;
+  return companyList.some((company) => {
+    const listKey = normalizeCompanyName(company);
+    return Boolean(listKey) && listKey.includes(jobKey);
+  });
+}
+
+export function atsMatchesList(
+  jobAts: string | null | undefined,
+  atsList: string[],
+): boolean {
+  const atsKey = normalizeAtsName(jobAts);
+  if (!atsKey) return false;
+  return atsList.some((ats) => {
+    const blocked = normalizeAtsName(ats);
+    return Boolean(blocked) && (atsKey === blocked || atsKey.includes(blocked) || blocked.includes(atsKey));
+  });
+}
+
+export type RegisteredJobRef = {
+  jobLink: string | null;
+  jobTitle: string | null;
+  company: string | null;
+};
+
+export function jobMatchesRegisteredJobs(
+  job: ScrapedJob,
+  registeredJobs: RegisteredJobRef[],
+): boolean {
+  const jobUrl = normalizeText(job.apply_url);
+  const jobCompany = normalizeCompanyName(job.company_name);
+  const jobTitle = normalizeText(job.title);
+
+  for (const registered of registeredJobs) {
+    const registeredUrl = normalizeText(registered.jobLink);
+    if (jobUrl && registeredUrl && jobUrl === registeredUrl) return true;
+
+    const registeredCompany = normalizeCompanyName(registered.company);
+    const registeredTitle = normalizeText(registered.jobTitle);
+    if (
+      jobCompany &&
+      jobTitle &&
+      registeredCompany &&
+      registeredTitle &&
+      jobCompany === registeredCompany &&
+      jobTitle === registeredTitle
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export type OptionalScrapeFilters = {
+  excludeRegisteredJobs?: boolean;
+  excludeRegisteredCompanies?: boolean;
+  excludeBlockedCompanies?: boolean;
+  excludeBlockedAts?: boolean;
+  registeredJobs?: RegisteredJobRef[];
+  registeredCompanies?: string[];
+  blockedCompanies?: string[];
+  blockedAts?: string[];
+};
+
+export type OptionalFilterStats = {
+  removedRegisteredJobs: number;
+  removedRegisteredCompanies: number;
+  removedBlocked: number;
+  removedAts: number;
+};
+
+export function applyOptionalScrapeFilters(
+  jobs: ScrapedJob[],
+  filters: OptionalScrapeFilters,
+): { filtered: ScrapedJob[]; stats: OptionalFilterStats } {
+  const registeredJobs =
+    filters.excludeRegisteredJobs === true ? filters.registeredJobs ?? [] : [];
+  const registeredCompanies =
+    filters.excludeRegisteredCompanies === true ? filters.registeredCompanies ?? [] : [];
+  const blockedCompanies =
+    filters.excludeBlockedCompanies === true ? filters.blockedCompanies ?? [] : [];
+  const blockedAts = filters.excludeBlockedAts === true ? filters.blockedAts ?? [] : [];
+
+  let removedRegisteredJobs = 0;
+  let removedRegisteredCompanies = 0;
+  let removedBlocked = 0;
+  let removedAts = 0;
+  const filtered: ScrapedJob[] = [];
+
+  for (const job of jobs) {
+    if (registeredJobs.length > 0 && jobMatchesRegisteredJobs(job, registeredJobs)) {
+      removedRegisteredJobs += 1;
+      continue;
+    }
+    if (
+      registeredCompanies.length > 0 &&
+      companyMatchesList(job.company_name, registeredCompanies)
+    ) {
+      removedRegisteredCompanies += 1;
+      continue;
+    }
+    if (blockedAts.length > 0 && atsMatchesList(job.application_site, blockedAts)) {
+      removedAts += 1;
+      continue;
+    }
+    if (
+      blockedCompanies.length > 0 &&
+      companyMatchesList(job.company_name, blockedCompanies)
+    ) {
+      removedBlocked += 1;
+      continue;
+    }
+    filtered.push(job);
+  }
+
+  return {
+    filtered,
+    stats: {
+      removedRegisteredJobs,
+      removedRegisteredCompanies,
+      removedBlocked,
+      removedAts,
+    },
+  };
+}
+
+/** @deprecated Prefer applyOptionalScrapeFilters */
 export function filterJobsByCompany(
   jobs: ScrapedJob[],
   blockedCompanies: string[],
   resumeDbCompanies: string[],
   blockedAts: string[] = [],
 ) {
-  const blockedSet = new Set(blockedCompanies.map(normalizeCompanyName).filter(Boolean));
-  const resumeSet = new Set(resumeDbCompanies.map(normalizeCompanyName).filter(Boolean));
-  const blockedAtsList = blockedAts.map(normalizeAtsName).filter(Boolean);
-
-  let removedBlockedCount = 0;
-  let removedResumeCount = 0;
-  let removedAtsCount = 0;
-  const filtered: ScrapedJob[] = [];
-
-  for (const job of jobs) {
-    const atsKey = normalizeAtsName(job.application_site);
-    if (
-      atsKey &&
-      blockedAtsList.some(
-        (blocked) => atsKey === blocked || atsKey.includes(blocked) || blocked.includes(atsKey),
-      )
-    ) {
-      removedAtsCount += 1;
-      continue;
-    }
-
-    const companyKey = normalizeCompanyName(job.company_name);
-    if (!companyKey) {
-      filtered.push(job);
-      continue;
-    }
-    if (blockedSet.has(companyKey)) {
-      removedBlockedCount += 1;
-      continue;
-    }
-    if (resumeSet.has(companyKey)) {
-      removedResumeCount += 1;
-      continue;
-    }
-    filtered.push(job);
-  }
-
-  return { filtered, removedBlockedCount, removedResumeCount, removedAtsCount };
+  const { filtered, stats } = applyOptionalScrapeFilters(jobs, {
+    excludeBlockedCompanies: true,
+    excludeRegisteredCompanies: true,
+    excludeBlockedAts: true,
+    blockedCompanies,
+    registeredCompanies: resumeDbCompanies,
+    blockedAts,
+  });
+  return {
+    filtered,
+    removedBlockedCount: stats.removedBlocked,
+    removedResumeCount: stats.removedRegisteredCompanies,
+    removedAtsCount: stats.removedAts,
+  };
 }
 
 export async function scrapeHiringCafeJobs(

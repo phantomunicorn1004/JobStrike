@@ -2,8 +2,8 @@ import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
 import { requireRequestUser } from "@/lib/auth/resolve-request-user";
 import {
+  applyOptionalScrapeFilters,
   dedupeJobs,
-  filterJobsByCompany,
   filterJobsByPublishDate,
   jobsToCsv,
   scrapeHiringCafeJobs,
@@ -13,6 +13,7 @@ import {
   listBlockedAts,
   listBlockedCompanies,
   listDistinctResumeDbCompanies,
+  listRegisteredJobsForCandidate,
 } from "@/lib/job-scraper-repository";
 
 export const runtime = "nodejs";
@@ -29,50 +30,75 @@ export async function POST(request: NextRequest) {
       body.dateWindow === "1d" || body.dateWindow === "7d" ? body.dateWindow : "3d";
     const excludeBlocked = body.excludeBlocked !== false;
     const excludeBlockedAts = body.excludeBlockedAts !== false;
-    const excludeResumeDb = body.excludeResumeDb !== false;
+    const excludeRegisteredJobs = body.excludeRegisteredJobs === true;
+    const excludeRegisteredCompanies = body.excludeRegisteredCompanies !== false;
     const candidateFilter =
       typeof body.candidateFilter === "string" ? body.candidateFilter.trim() : "";
 
-    if (excludeResumeDb && !candidateFilter) {
+    const needsCandidateData = excludeRegisteredJobs || excludeRegisteredCompanies;
+    if (needsCandidateData && !candidateFilter) {
       return corsJson(
-        { error: "Select a candidate to exclude Resume DB companies." },
+        { error: "Select a candidate to use Resume DB job/company filters." },
         { status: 400 },
       );
     }
 
-    const [scraped, blockedCompanies, blockedAts, resumeDbCompanies] = await Promise.all([
-      scrapeHiringCafeJobs(dateWindow as JobScraperDateWindow),
-      excludeBlocked ? listBlockedCompanies(user.id) : Promise.resolve([]),
-      excludeBlockedAts ? listBlockedAts(user.id) : Promise.resolve([]),
-      excludeResumeDb
-        ? listDistinctResumeDbCompanies(user.id, candidateFilter)
-        : Promise.resolve([]),
-    ]);
+    const [scraped, blockedCompanies, blockedAts, registeredCompanies, registeredJobs] =
+      await Promise.all([
+        scrapeHiringCafeJobs(dateWindow as JobScraperDateWindow),
+        listBlockedCompanies(user.id),
+        listBlockedAts(user.id),
+        needsCandidateData
+          ? listDistinctResumeDbCompanies(user.id, candidateFilter)
+          : Promise.resolve([] as string[]),
+        excludeRegisteredJobs
+          ? listRegisteredJobsForCandidate(user.id, candidateFilter)
+          : Promise.resolve([]),
+      ]);
 
     const dedupedJobs = dedupeJobs(scraped.jobs);
     const {
-      filtered: dateFilteredJobs,
+      filtered: baseJobs,
       removedByDate,
       cutoffIso,
     } = filterJobsByPublishDate(dedupedJobs, dateWindow as JobScraperDateWindow);
-    const { filtered, removedBlockedCount, removedResumeCount, removedAtsCount } =
-      filterJobsByCompany(
-        dateFilteredJobs,
-        blockedCompanies.map((company) => company.companyName),
-        resumeDbCompanies,
-        blockedAts.map((ats) => ats.atsName),
-      );
+
+    const { filtered, stats: optionalStats } = applyOptionalScrapeFilters(baseJobs, {
+      excludeRegisteredJobs,
+      excludeRegisteredCompanies,
+      excludeBlockedCompanies: excludeBlocked,
+      excludeBlockedAts,
+      registeredJobs,
+      registeredCompanies,
+      blockedCompanies: blockedCompanies.map((company) => company.companyName),
+      blockedAts: blockedAts.map((ats) => ats.atsName),
+    });
 
     return corsJson({
+      baseJobs,
       jobs: filtered,
       csv: jobsToCsv(filtered),
+      filterContext: {
+        blockedCompanies: blockedCompanies.map((company) => company.companyName),
+        blockedAts: blockedAts.map((ats) => ats.atsName),
+        registeredCompanies,
+        registeredJobs,
+        registeredJobCount: registeredJobs.length,
+        registeredCompanyCount: registeredCompanies.length,
+      },
       stats: {
         scraped: scraped.jobs.length,
         deduped: dedupedJobs.length,
         removedByDate,
-        removedBlocked: excludeBlocked ? removedBlockedCount : 0,
-        removedAts: excludeBlockedAts ? removedAtsCount : 0,
-        removedResumeDb: excludeResumeDb ? removedResumeCount : 0,
+        baseRemaining: baseJobs.length,
+        removedRegisteredJobs: excludeRegisteredJobs
+          ? optionalStats.removedRegisteredJobs
+          : 0,
+        removedRegisteredCompanies: excludeRegisteredCompanies
+          ? optionalStats.removedRegisteredCompanies
+          : 0,
+        removedBlocked: excludeBlocked ? optionalStats.removedBlocked : 0,
+        removedAts: excludeBlockedAts ? optionalStats.removedAts : 0,
         remaining: filtered.length,
         pagesFetched: scraped.pagesFetched,
         reportedTotal: scraped.reportedTotal,
