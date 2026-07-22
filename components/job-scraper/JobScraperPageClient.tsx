@@ -55,6 +55,11 @@ import {
   type RegisteredJobRef,
   type ScrapedJob,
 } from "@/lib/job-scraper";
+import {
+  clearJobScraperSession,
+  loadJobScraperSession,
+  saveJobScraperSession,
+} from "@/lib/job-scraper-storage";
 import { toast } from "sonner";
 
 type DateWindow = "1d" | "3d" | "7d";
@@ -175,6 +180,7 @@ export function JobScraperPageClient() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingAtsId, setDeletingAtsId] = useState<string | null>(null);
   const [scraping, setScraping] = useState(false);
+  const [sessionHydrated, setSessionHydrated] = useState(false);
   const [baseJobs, setBaseJobs] = useState<JobRow[]>([]);
   const [filterContext, setFilterContext] = useState<FilterContext | null>(null);
   const [scrapeMeta, setScrapeMeta] = useState<Pick<
@@ -184,6 +190,29 @@ export function JobScraperPageClient() {
   const [blockedDialogOpen, setBlockedDialogOpen] = useState(false);
   const [blockedAtsDialogOpen, setBlockedAtsDialogOpen] = useState(false);
   const [companiesSheetOpen, setCompaniesSheetOpen] = useState(false);
+
+  useEffect(() => {
+    const saved = loadJobScraperSession();
+    if (saved) {
+      setDateWindow(saved.dateWindow || "3d");
+      setCandidateFilter(saved.candidateFilter || "");
+      setExcludeBlocked(saved.excludeBlocked !== false);
+      setExcludeBlockedAts(saved.excludeBlockedAts !== false);
+      setExcludeRegisteredJobs(saved.excludeRegisteredJobs !== false);
+      setExcludeRegisteredCompanies(saved.excludeRegisteredCompanies !== false);
+      setBaseJobs(saved.baseJobs ?? []);
+      setFilterContext(saved.filterContext ?? null);
+      setScrapeMeta(saved.scrapeMeta ?? null);
+      if (saved.filterContext) {
+        setResumeDbCompanies(saved.filterContext.registeredCompanies ?? []);
+        setResumeDbCompanyCount(
+          Number(saved.filterContext.registeredCompanyCount ?? 0),
+        );
+        setRegisteredJobCount(Number(saved.filterContext.registeredJobCount ?? 0));
+      }
+    }
+    setSessionHydrated(true);
+  }, []);
 
   const updateParams = useCallback(
     (patch: Record<string, string | null>) => {
@@ -197,6 +226,48 @@ export function JobScraperPageClient() {
     },
     [pathname, router, searchParams],
   );
+
+  useEffect(() => {
+    if (!sessionHydrated) return;
+    if (!scrapeMeta && baseJobs.length === 0) {
+      clearJobScraperSession();
+      return;
+    }
+    saveJobScraperSession({
+      version: 1,
+      savedAt: new Date().toISOString(),
+      dateWindow,
+      candidateFilter,
+      excludeBlocked,
+      excludeBlockedAts,
+      excludeRegisteredJobs,
+      excludeRegisteredCompanies,
+      baseJobs,
+      filterContext,
+      scrapeMeta,
+    });
+  }, [
+    sessionHydrated,
+    dateWindow,
+    candidateFilter,
+    excludeBlocked,
+    excludeBlockedAts,
+    excludeRegisteredJobs,
+    excludeRegisteredCompanies,
+    baseJobs,
+    filterContext,
+    scrapeMeta,
+  ]);
+
+  const clearSavedResults = () => {
+    setBaseJobs([]);
+    setFilterContext(null);
+    setScrapeMeta(null);
+    clearJobScraperSession();
+    updateParams({ page: "1", q: null });
+    setSearchDraft("");
+    toast.success("Saved scrape results cleared.");
+  };
 
   useEffect(() => {
     setSearchDraft(search);
@@ -1026,6 +1097,15 @@ export function JobScraperPageClient() {
                 >
                   <Copy className="mr-1.5 h-3.5 w-3.5" />
                   Copy links
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearSavedResults}
+                  disabled={!scrapeMeta && baseJobs.length === 0}
+                >
+                  Clear results
                 </Button>
               </div>
             </div>
