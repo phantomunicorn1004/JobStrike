@@ -14,7 +14,6 @@ export const RESUME_DB_COLUMN_DEFAULTS = {
   coverLetter: 112,
   pipeline: 120,
   applied: 156,
-  json: 80,
   actions: 108,
 } as const;
 
@@ -31,11 +30,10 @@ export const RESUME_DB_COLUMN_MIN_PERCENT: Record<ResumeDBColumnId, number> = {
   coverLetter: 6.5,
   pipeline: 7,
   applied: 8,
-  json: 5,
   actions: 7,
 };
 
-const STORAGE_KEY = "resume-db-column-widths-v4";
+const STORAGE_KEY = "resume-db-column-widths-v5";
 
 function fillMissingColumnPercents(
   raw: Partial<Record<ResumeDBColumnId, number>>,

@@ -19,7 +19,6 @@ export const COLUMN_ORDER: ResumeDBColumnId[] = [
   "coverLetter",
   "pipeline",
   "applied",
-  "json",
   "actions",
 ];
 
@@ -34,7 +33,6 @@ export const COLUMN_HEADERS: Record<ResumeDBColumnId, string> = {
   coverLetter: "Cover letter",
   pipeline: "Status",
   applied: "Applied",
-  json: "JSON",
   actions: "Actions",
 };
 
@@ -46,7 +44,6 @@ const FIXED_FIT_PX: Partial<Record<ResumeDBColumnId, number>> = {
   resume: 76,
   coverLetter: 88,
   pipeline: 104,
-  json: 56,
   actions: 88,
 };
 

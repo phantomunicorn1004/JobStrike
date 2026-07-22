@@ -986,26 +986,6 @@ export function ResumeDBPageClient() {
     URL.revokeObjectURL(url);
   };
 
-  const downloadJson = async (row: ResumeDbRow) => {
-    try {
-      const res = await fetch(`/api/resume-db/export?id=${row.rowIndex}`, {
-        credentials: "same-origin",
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Export failed");
-      }
-      const data = await res.json();
-      downloadJsonBlob(
-        `resume-db-${row.entryId || row.rowIndex}.json`,
-        data.job ?? data,
-      );
-      toast.success("JSON downloaded.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Export failed");
-    }
-  };
-
   const downloadSelectedJson = async () => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
@@ -1425,12 +1405,6 @@ export function ResumeDBPageClient() {
                         Applied
                       </ResizableTableHead>
                       <ResizableTableHead
-                        {...columnResizeProps("json")}
-                        align="center"
-                      >
-                        JSON
-                      </ResizableTableHead>
-                      <ResizableTableHead
                         {...columnResizeProps("actions")}
                         align="center"
                       >
@@ -1568,24 +1542,6 @@ export function ResumeDBPageClient() {
                           className="text-xs tabular-nums text-muted-foreground whitespace-nowrap"
                         >
                           {formatApplied(row.appliedAt, row.date, timezone)}
-                        </ResizableTableCell>
-                        <ResizableTableCell
-                          widthPercent={percents.json}
-                          align="center"
-                          className="overflow-hidden"
-                        >
-                          <div className="flex items-center justify-center">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 w-7 shrink-0 p-0 rounded-lg"
-                              title="Download JSON"
-                              onClick={() => downloadJson(row)}
-                            >
-                              <FileJson className="h-3.5 w-3.5" />
-                              <span className="sr-only">Download JSON</span>
-                            </Button>
-                          </div>
                         </ResizableTableCell>
                         <ResizableTableCell
                           widthPercent={percents.actions}
