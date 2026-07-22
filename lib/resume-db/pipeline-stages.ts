@@ -2,7 +2,6 @@ import "server-only";
 
 import { mergeStageDate, type StageDates } from "@/lib/jobs/pipelineCardUtils";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
-import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 import type { ResumeDbApplication } from "@/lib/resume-db/types";
 import {
   addApplicationToPipeline,
@@ -114,39 +113,52 @@ export async function buildPipelineStageMap(
     }
   }
 
-  const [markedJobs, markedTech] = await Promise.all([
-    fetchAllByRange<Pick<JobRow, "id" | "note">>((from, to) =>
+  // Only resolve markers for apps on this page that are still unset.
+  // Avoid scanning every pipeline card (PostgREST 1000+ row trap + latency).
+  const unresolvedIds = applications
+    .filter((app) => map.get(app.id) == null)
+    .map((app) => app.id);
+  if (unresolvedIds.length === 0) return map;
+
+  const unresolvedSet = new Set(unresolvedIds);
+  const chunkSize = 25;
+  for (let i = 0; i < unresolvedIds.length; i += chunkSize) {
+    const chunk = unresolvedIds.slice(i, i + chunkSize);
+    const jobOr = chunk
+      .map((id) => `note.ilike.%${resumeDbMarker(id)}%`)
+      .join(",");
+    const techOr = chunk
+      .map((id) => `job_description.ilike.%${resumeDbMarker(id)}%`)
+      .join(",");
+
+    const [jobsRes, techRes] = await Promise.all([
       supabase
         .from("jobs")
         .select("id, note")
         .eq("user_id", userId)
-        .ilike("note", "%Resume DB #%")
-        .order("id", { ascending: true })
-        .range(from, to),
-    ),
-    fetchAllByRange<Pick<TechnicalJobRow, "id" | "stage_id" | "job_description">>(
-      (from, to) =>
-        supabase
-          .from("technical_jobs")
-          .select("id, stage_id, job_description")
-          .eq("user_id", userId)
-          .ilike("job_description", "%Resume DB #%")
-          .order("id", { ascending: true })
-          .range(from, to),
-    ),
-  ]);
+        .or(jobOr),
+      supabase
+        .from("technical_jobs")
+        .select("id, stage_id, job_description")
+        .eq("user_id", userId)
+        .or(techOr),
+    ]);
 
-  for (const job of markedJobs) {
-    const appId = parseApplicationIdFromMarker(job.note);
-    if (appId != null && map.has(appId)) {
-      map.set(appId, "applied");
+    for (const job of (jobsRes.data ?? []) as Pick<JobRow, "id" | "note">[]) {
+      const appId = parseApplicationIdFromMarker(job.note);
+      if (appId != null && unresolvedSet.has(appId)) {
+        map.set(appId, "applied");
+      }
     }
-  }
 
-  for (const tech of markedTech) {
-    const appId = parseApplicationIdFromMarker(tech.job_description);
-    if (appId != null && map.has(appId)) {
-      map.set(appId, tech.stage_id ?? "technical");
+    for (const tech of (techRes.data ?? []) as Pick<
+      TechnicalJobRow,
+      "id" | "stage_id" | "job_description"
+    >[]) {
+      const appId = parseApplicationIdFromMarker(tech.job_description);
+      if (appId != null && unresolvedSet.has(appId)) {
+        map.set(appId, tech.stage_id ?? "technical");
+      }
     }
   }
 

@@ -297,25 +297,24 @@ export async function GET(request: NextRequest) {
     let orphanCandidateNames: string[] = [];
     if (includeOrphans) {
       const supabase = getSupabaseAdminClient();
-      const orphanRows = await fetchAllByRange<{ candidate_name?: string | null }>(
-        (from, to) =>
-          supabase
-            .from("resume_db_applications")
-            .select("candidate_name")
-            .eq("user_id", userId)
-            .is("profile_id", null)
-            .neq("candidate_name", "")
-            .order("id", { ascending: true })
-            .range(from, to),
-      );
+      // Orphans are uncommon; one capped page is enough for filter labels.
+      const { data: orphanRows, error: orphanError } = await supabase
+        .from("resume_db_applications")
+        .select("candidate_name")
+        .eq("user_id", userId)
+        .is("profile_id", null)
+        .neq("candidate_name", "")
+        .order("candidate_name", { ascending: true })
+        .limit(500);
+      if (orphanError) throw new Error(orphanError.message);
 
       orphanCandidateNames = Array.from(
         new Set(
-          orphanRows
-            .map((r) => r.candidate_name?.trim())
+          (orphanRows ?? [])
+            .map((r: { candidate_name?: string | null }) => r.candidate_name?.trim())
             .filter((x): x is string => Boolean(x)),
         ),
-      ).sort((a, b) => a.localeCompare(b));
+      );
     }
 
     return corsJson({

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import JobsLayout from "@/app/jobs-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -97,6 +98,20 @@ type PipelineStageOption = {
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 150, 200] as const;
+const DEFAULT_PAGE_SIZE = 25;
+
+function parsePage(value: string | null): number {
+  const n = Number(value ?? "");
+  if (Number.isNaN(n) || n < 1) return 1;
+  return Math.floor(n);
+}
+
+function parsePageSize(value: string | null): number {
+  const n = Number(value ?? "") || DEFAULT_PAGE_SIZE;
+  return PAGE_SIZE_OPTIONS.includes(n as (typeof PAGE_SIZE_OPTIONS)[number])
+    ? n
+    : DEFAULT_PAGE_SIZE;
+}
 
 type SortKey = "company" | "jobTitle" | "pipeline" | null;
 type SortDir = "asc" | "desc";
@@ -662,16 +677,27 @@ function StatusFilter({
 }
 
 export function ResumeDBPageClient() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const page = parsePage(searchParams.get("page"));
+  const pageSize = parsePageSize(searchParams.get("pageSize"));
+  const search = searchParams.get("q") ?? "";
+  const dateFrom = searchParams.get("dateFrom") ?? "";
+  const dateTo = searchParams.get("dateTo") ?? "";
+  const candidateFilter = searchParams.get("candidateFilter") ?? "";
+  const statusFilter = searchParams.get("statusFilter") ?? "__all__";
+  const sortKeyRaw = searchParams.get("sortKey") ?? "";
+  const sortKey: SortKey =
+    sortKeyRaw === "company" || sortKeyRaw === "jobTitle" || sortKeyRaw === "pipeline"
+      ? sortKeyRaw
+      : null;
+  const sortDir: SortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
+
   const [rows, setRows] = useState<ResumeDbRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [searchDraft, setSearchDraft] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<number>(25);
+  const [searchDraft, setSearchDraft] = useState(search);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [removingRow, setRemovingRow] = useState<number | null>(null);
   const [updatingStageRow, setUpdatingStageRow] = useState<number | null>(null);
@@ -684,11 +710,22 @@ export function ResumeDBPageClient() {
   const tableRef = useRef<HTMLTableElement>(null);
   const { percents, resizePair, fitColumn } = useResizableColumns();
   const [profiles, setProfiles] = useState<{ id: number; full_name: string }[]>([]);
-  const [candidateFilter, setCandidateFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("__all__");
   const [orphanCandidateNames, setOrphanCandidateNames] = useState<string[]>([]);
   const [orphanCandidateNamesLoaded, setOrphanCandidateNamesLoaded] = useState(false);
   const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
+
+  const updateParams = useCallback(
+    (patch: Record<string, string | null | undefined>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const [key, value] of Object.entries(patch)) {
+        if (value == null || value === "") params.delete(key);
+        else params.set(key, value);
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -739,6 +776,10 @@ export function ResumeDBPageClient() {
         setOrphanCandidateNames(data.orphanCandidateNames ?? []);
         setOrphanCandidateNamesLoaded(true);
       }
+      const resolvedPage = Number(data.page ?? page);
+      if (resolvedPage !== page && Number.isFinite(resolvedPage) && resolvedPage >= 1) {
+        updateParams({ page: String(resolvedPage) });
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to load Resume DB.",
@@ -757,6 +798,7 @@ export function ResumeDBPageClient() {
     sortKey,
     sortDir,
     orphanCandidateNamesLoaded,
+    updateParams,
   ]);
 
   useEffect(() => {
@@ -767,23 +809,17 @@ export function ResumeDBPageClient() {
     void loadRows();
   }, [loadRows]);
 
+  useEffect(() => {
+    setSearchDraft(search);
+  }, [search]);
+
   const applySearch = useCallback(() => {
     const next = searchDraft.trim();
-    setSearch(next);
-    setPage(1);
-  }, [searchDraft]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [
-    pageSize,
-    dateFrom,
-    dateTo,
-    candidateFilter,
-    statusFilter,
-    sortKey,
-    sortDir,
-  ]);
+    updateParams({
+      q: next || null,
+      page: "1",
+    });
+  }, [searchDraft, updateParams]);
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -801,10 +837,16 @@ export function ResumeDBPageClient() {
 
   const handleSort = (key: Exclude<SortKey, null>) => {
     if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      updateParams({
+        sortDir: sortDir === "asc" ? "desc" : "asc",
+        page: "1",
+      });
     } else {
-      setSortKey(key);
-      setSortDir("asc");
+      updateParams({
+        sortKey: key,
+        sortDir: "asc",
+        page: "1",
+      });
     }
   };
 
@@ -1104,27 +1146,53 @@ export function ResumeDBPageClient() {
             dateFrom={dateFrom}
             dateTo={dateTo}
             onApply={(from, to) => {
-              setDateFrom(from);
-              setDateTo(to);
+              updateParams({
+                dateFrom: from || null,
+                dateTo: to || null,
+                page: "1",
+              });
             }}
             onClear={() => {
-              setDateFrom("");
-              setDateTo("");
+              updateParams({
+                dateFrom: null,
+                dateTo: null,
+                page: "1",
+              });
             }}
           />
 
           <StatusFilter
             value={statusFilter}
             stages={pipelineStages}
-            onApply={setStatusFilter}
-            onClear={() => setStatusFilter("__all__")}
+            onApply={(value) => {
+              updateParams({
+                statusFilter: value === "__all__" ? null : value,
+                page: "1",
+              });
+            }}
+            onClear={() => {
+              updateParams({
+                statusFilter: null,
+                page: "1",
+              });
+            }}
           />
 
           <CandidateFilter
             value={candidateFilter}
             options={candidateFilterOptions}
-            onApply={setCandidateFilter}
-            onClear={() => setCandidateFilter("")}
+            onApply={(key) => {
+              updateParams({
+                candidateFilter: key || null,
+                page: "1",
+              });
+            }}
+            onClear={() => {
+              updateParams({
+                candidateFilter: null,
+                page: "1",
+              });
+            }}
           />
 
           {hasActiveFilters && (
@@ -1134,12 +1202,15 @@ export function ResumeDBPageClient() {
               size="sm"
               className="h-9 rounded-xl text-xs px-2"
               onClick={() => {
-                setSearch("");
                 setSearchDraft("");
-                setDateFrom("");
-                setDateTo("");
-                setCandidateFilter("");
-                setStatusFilter("__all__");
+                updateParams({
+                  q: null,
+                  dateFrom: null,
+                  dateTo: null,
+                  candidateFilter: null,
+                  statusFilter: null,
+                  page: "1",
+                });
               }}
             >
               <X className="h-3.5 w-3.5 mr-1" />
@@ -1162,7 +1233,12 @@ export function ResumeDBPageClient() {
             </span>
             <Select
               value={String(pageSize)}
-              onValueChange={(v) => setPageSize(Number(v))}
+              onValueChange={(v) =>
+                updateParams({
+                  pageSize: v,
+                  page: "1",
+                })
+              }
             >
               <SelectTrigger className="h-9 w-[76px] rounded-xl" size="sm">
                 <SelectValue />
@@ -1180,7 +1256,7 @@ export function ResumeDBPageClient() {
               size="icon"
               className="h-9 w-9 rounded-xl"
               disabled={safePage <= 1 || totalCount === 0}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => updateParams({ page: String(Math.max(1, safePage - 1)) })}
               aria-label="Previous page"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -1193,7 +1269,9 @@ export function ResumeDBPageClient() {
               size="icon"
               className="h-9 w-9 rounded-xl"
               disabled={safePage >= totalPages || totalCount === 0}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() =>
+                updateParams({ page: String(Math.min(totalPages, safePage + 1)) })
+              }
               aria-label="Next page"
             >
               <ChevronRight className="h-4 w-4" />
