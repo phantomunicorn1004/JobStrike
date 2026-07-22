@@ -120,6 +120,12 @@ export function getDayKeyInTimeZone(iso: string, timeZone: string): string {
   return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
 }
 
+export function getHourInTimeZone(iso: string, timeZone: string): number {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return -1;
+  return getZonedParts(date, timeZone).hour;
+}
+
 export function todayInTimeZone(timeZone: string): string {
   return getDayKeyInTimeZone(new Date().toISOString(), timeZone);
 }

@@ -1,7 +1,8 @@
 import { normalizeStageDates } from "@/lib/jobs/pipelineCardUtils";
-import { getDayKeyInTimeZone } from "@/lib/timezone";
+import { getDayKeyInTimeZone, getHourInTimeZone } from "@/lib/timezone";
 
 export type ResumeApplicationRow = {
+  id?: number;
   applied_at: string;
   profile_id?: number | null;
   candidate_name?: string | null;
@@ -12,6 +13,7 @@ export type PipelineJobRow = {
   name?: string | null;
   title?: string | null;
   company_name?: string | null;
+  note?: string | null;
   created_at: string;
   stage_entered_at?: string | null;
   stage_dates?: unknown;
@@ -19,6 +21,7 @@ export type PipelineJobRow = {
 
 export type PipelineTechRow = PipelineJobRow & {
   stage_id?: string | null;
+  job_description?: string | null;
 };
 
 export type PipelineStageRow = {
@@ -41,15 +44,9 @@ export type CandidateCount = {
   count: number;
 };
 
-export type StalePipelineCard = {
-  id: number;
-  source: "jobs" | "technical_jobs";
-  title: string;
-  companyName: string;
-  stageId: string;
-  stageName: string;
-  daysInStage: number;
-  enteredAt: string;
+export type HourlyActivityPoint = {
+  hour: number;
+  count: number;
 };
 
 export const UNASSIGNED_CANDIDATE_KEY = "unassigned";
@@ -109,13 +106,23 @@ export function resolveCandidateLabel(
   return key;
 }
 
+export function filterApplicationsByCandidates(
+  rows: ResumeApplicationRow[],
+  candidateKeys?: Iterable<string> | null,
+): ResumeApplicationRow[] {
+  if (!candidateKeys) return rows;
+  const allowed = candidateKeys instanceof Set ? candidateKeys : new Set(candidateKeys);
+  if (allowed.size === 0) return rows;
+  return rows.filter((row) => allowed.has(resolveCandidateKey(row)));
+}
+
 export function filterApplicationsByCandidate(
   rows: ResumeApplicationRow[],
   candidateFilter?: string | null,
 ): ResumeApplicationRow[] {
   const raw = candidateFilter?.trim();
   if (!raw) return rows;
-  return rows.filter((row) => resolveCandidateKey(row) === raw);
+  return filterApplicationsByCandidates(rows, [raw]);
 }
 
 export function countApplicationsOnDate(
@@ -166,10 +173,9 @@ export function buildBidSeries(
   return series;
 }
 
-/** Top N candidates keep their own series; the rest roll into "other". */
 export function pickStackedCandidateKeys(
   candidateCounts: CandidateCount[],
-  maxSeries = 8,
+  maxSeries = 12,
 ): CandidateCount[] {
   if (candidateCounts.length <= maxSeries) return candidateCounts;
   const top = candidateCounts.slice(0, maxSeries - 1);
@@ -230,6 +236,21 @@ export function buildStackedBidSeries(
   return points;
 }
 
+export function buildHourlyActivity(
+  rows: ResumeApplicationRow[],
+  date: string,
+  timeZone: string,
+): HourlyActivityPoint[] {
+  const counts = Array.from({ length: 24 }, () => 0);
+  for (const row of rows) {
+    if (isoToDayKey(row.applied_at, timeZone) !== date) continue;
+    const hour = getHourInTimeZone(row.applied_at, timeZone);
+    if (hour < 0 || hour > 23) continue;
+    counts[hour] += 1;
+  }
+  return counts.map((count, hour) => ({ hour, count }));
+}
+
 function stageEntryDay(
   row: PipelineJobRow,
   stageId: string,
@@ -278,61 +299,127 @@ export function buildStageCounts(
     .filter((item) => includeEmpty || item.count > 0);
 }
 
-function daysBetweenIsoAndToday(iso: string, timeZone: string, today: string): number {
-  const enteredDay = isoToDayKey(iso, timeZone);
-  if (!enteredDay) return 0;
-  const start = new Date(`${enteredDay}T12:00:00`);
-  const end = new Date(`${today}T12:00:00`);
-  const diff = Math.floor((end.getTime() - start.getTime()) / 86_400_000);
-  return Math.max(0, diff);
+function parseResumeDbIds(text: string | null | undefined): number[] {
+  if (!text) return [];
+  const out: number[] = [];
+  const re = /Resume DB #(\d+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const id = Number(match[1]);
+    if (!Number.isNaN(id)) out.push(id);
+  }
+  return out;
 }
 
-export function buildStalePipelineCards(
+/**
+ * Pipeline stage counts per candidate (via Resume DB markers), for line chart.
+ * X = stage, series = candidate.
+ */
+export function buildPipelineCandidateStageSeries(
   jobRows: PipelineJobRow[],
   techRows: PipelineTechRow[],
   stages: PipelineStageRow[],
+  applications: ResumeApplicationRow[],
+  from: string,
+  to: string,
   timeZone: string,
-  staleAfterDays = 7,
-  limit = 8,
-): StalePipelineCard[] {
-  const today = localYmd(new Date(), timeZone);
-  const stageNameById = new Map(stages.map((stage) => [stage.id, stage.name]));
-  const items: StalePipelineCard[] = [];
+  profileLabels: Map<number, string> = new Map(),
+  appliedStageId = "applied",
+): {
+  points: Array<Record<string, string | number>>;
+  candidates: CandidateCount[];
+  stageCounts: StageCount[];
+} {
+  const appById = new Map<number, ResumeApplicationRow>();
+  for (const app of applications) {
+    if (app.id != null) appById.set(app.id, app);
+  }
+
+  const candidateTotals = new Map<string, number>();
+  const stageCandidateCounts = new Map<string, Map<string, number>>();
+  for (const stage of stages) {
+    stageCandidateCounts.set(stage.id, new Map());
+  }
+  const stageTotals = new Map<string, number>();
+  for (const stage of stages) stageTotals.set(stage.id, 0);
+
+  const bump = (stageId: string, candidateKey: string) => {
+    if (!stageCandidateCounts.has(stageId)) return;
+    const bucket = stageCandidateCounts.get(stageId)!;
+    bucket.set(candidateKey, (bucket.get(candidateKey) ?? 0) + 1);
+    candidateTotals.set(candidateKey, (candidateTotals.get(candidateKey) ?? 0) + 1);
+    stageTotals.set(stageId, (stageTotals.get(stageId) ?? 0) + 1);
+  };
 
   for (const row of jobRows) {
-    const enteredAt = row.stage_entered_at ?? row.created_at;
-    const daysInStage = daysBetweenIsoAndToday(enteredAt, timeZone, today);
-    if (daysInStage < staleAfterDays) continue;
-    items.push({
-      id: row.id ?? 0,
-      source: "jobs",
-      title: (row.title || row.name || "Untitled").trim() || "Untitled",
-      companyName: (row.company_name || "").trim() || "—",
-      stageId: "applied",
-      stageName: stageNameById.get("applied") ?? "Applied",
-      daysInStage,
-      enteredAt,
-    });
+    const day = stageEntryDay(row, appliedStageId, timeZone);
+    if (!isDayInRange(day, from, to)) continue;
+    const ids = parseResumeDbIds(row.note);
+    if (ids.length === 0) {
+      bump(appliedStageId, UNASSIGNED_CANDIDATE_KEY);
+      continue;
+    }
+    for (const id of ids) {
+      const app = appById.get(id);
+      bump(appliedStageId, app ? resolveCandidateKey(app) : UNASSIGNED_CANDIDATE_KEY);
+    }
   }
 
   for (const row of techRows) {
     const stageId = row.stage_id ?? "technical";
-    const enteredAt = row.stage_entered_at ?? row.created_at;
-    const daysInStage = daysBetweenIsoAndToday(enteredAt, timeZone, today);
-    if (daysInStage < staleAfterDays) continue;
-    items.push({
-      id: row.id ?? 0,
-      source: "technical_jobs",
-      title: (row.title || row.name || "Untitled").trim() || "Untitled",
-      companyName: (row.company_name || "").trim() || "—",
-      stageId,
-      stageName: stageNameById.get(stageId) ?? stageId,
-      daysInStage,
-      enteredAt,
-    });
+    const day = stageEntryDay(row, stageId, timeZone);
+    if (!isDayInRange(day, from, to)) continue;
+    const ids = parseResumeDbIds(row.job_description);
+    if (ids.length === 0) {
+      bump(stageId, UNASSIGNED_CANDIDATE_KEY);
+      continue;
+    }
+    for (const id of ids) {
+      const app = appById.get(id);
+      bump(stageId, app ? resolveCandidateKey(app) : UNASSIGNED_CANDIDATE_KEY);
+    }
   }
 
-  return items
-    .sort((a, b) => b.daysInStage - a.daysInStage || a.title.localeCompare(b.title))
-    .slice(0, limit);
+  const candidates = Array.from(candidateTotals.entries())
+    .map(([key, count]) => ({
+      key,
+      label: resolveCandidateLabel(key, profileLabels),
+      count,
+    }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  const seriesCandidates = pickStackedCandidateKeys(candidates);
+  const allowed = new Set(seriesCandidates.map((c) => c.key));
+  const hasOther = allowed.has(OTHER_CANDIDATE_KEY);
+
+  const points = stages.map((stage) => {
+    const bucket = stageCandidateCounts.get(stage.id) ?? new Map();
+    const point: Record<string, string | number> = {
+      stageId: stage.id,
+      stageName: stage.name,
+      total: stageTotals.get(stage.id) ?? 0,
+    };
+    for (const candidate of seriesCandidates) {
+      point[candidate.key] = 0;
+    }
+    for (const [key, count] of bucket.entries()) {
+      if (allowed.has(key)) {
+        point[key] = Number(point[key] ?? 0) + count;
+      } else if (hasOther) {
+        point[OTHER_CANDIDATE_KEY] =
+          Number(point[OTHER_CANDIDATE_KEY] ?? 0) + count;
+      }
+    }
+    return point;
+  });
+
+  const stageCounts = stages
+    .map((stage) => ({
+      stageId: stage.id,
+      stageName: stage.name,
+      count: stageTotals.get(stage.id) ?? 0,
+    }))
+    .filter((item) => item.count > 0);
+
+  return { points, candidates: seriesCandidates, stageCounts };
 }

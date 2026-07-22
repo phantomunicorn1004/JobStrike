@@ -7,6 +7,7 @@ import {
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { countApplicationsWithFilters } from "@/lib/resume-db/repository";
 import { listJobScraperCandidates } from "@/lib/job-scraper-repository";
+import { colorForCandidateKey } from "@/lib/dashboard/candidate-colors";
 import {
   listAllApplicationsForDashboard,
   listAllPipelineJobsForDashboard,
@@ -16,21 +17,24 @@ import {
   addDaysYmd,
   buildBidSeries,
   buildCandidateCounts,
+  buildHourlyActivity,
+  buildPipelineCandidateStageSeries,
   buildStackedBidSeries,
-  buildStageCounts,
   countApplicationsOnDate,
-  filterApplicationsByCandidate,
   isoToDayKey,
   localYmd,
   pickStackedCandidateKeys,
   type PipelineStageRow,
-  type PipelineJobRow,
-  type PipelineTechRow,
 } from "@/lib/dashboard/stats";
 import { normalizeTimeZone } from "@/lib/timezone";
 
 export function OPTIONS() {
   return corsOptions();
+}
+
+function parseYmd(value: string | null, fallback: string): string {
+  const raw = value?.trim() || "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : fallback;
 }
 
 export async function GET(request: NextRequest) {
@@ -43,14 +47,32 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const today = localYmd(new Date(), timezone);
-    const dateParam = searchParams.get("date")?.trim() || "";
-    const candidateFilter = searchParams.get("candidateFilter")?.trim() || "";
-    const bidDays = Math.min(
-      90,
-      Math.max(7, Number(searchParams.get("bidDays") ?? 30) || 30),
+    const rangeMode = (searchParams.get("rangeMode") || "month").trim();
+    const bidDays =
+      rangeMode === "week"
+        ? 7
+        : Math.min(90, Math.max(7, Number(searchParams.get("bidDays") ?? 30) || 30));
+
+    let bidTo = parseYmd(searchParams.get("bidTo"), today);
+    let bidFrom = parseYmd(
+      searchParams.get("bidFrom"),
+      addDaysYmd(bidTo, -(bidDays - 1)),
     );
-    const stageFromParam = searchParams.get("stageFrom")?.trim() || "";
-    const stageToParam = searchParams.get("stageTo")?.trim() || "";
+    if (rangeMode === "week") {
+      bidTo = today;
+      bidFrom = addDaysYmd(today, -6);
+    } else if (rangeMode === "month") {
+      bidTo = today;
+      bidFrom = addDaysYmd(today, -29);
+    }
+    if (bidFrom > bidTo) {
+      const swap = bidFrom;
+      bidFrom = bidTo;
+      bidTo = swap;
+    }
+
+    const activityDateParam = searchParams.get("activityDate")?.trim() || "";
+    const appliedDateParam = searchParams.get("date")?.trim() || "";
 
     const supabase = getSupabaseAdminClient();
     const [
@@ -72,9 +94,6 @@ export async function GET(request: NextRequest) {
       listJobScraperCandidates(user.id),
     ]);
 
-    const typedJobs = jobs as PipelineJobRow[];
-    const typedTechJobs = techJobs as PipelineTechRow[];
-
     let stages = (stagesRes.data ?? []) as PipelineStageRow[];
     if (stagesRes.error || stages.length === 0) {
       stages = [
@@ -91,87 +110,92 @@ export async function GET(request: NextRequest) {
       if (!Number.isNaN(id)) profileLabels.set(id, candidate.label);
     }
 
-    const filteredApplications = filterApplicationsByCandidate(
-      applications,
-      candidateFilter,
-    );
+    const applicationsByCandidate = buildCandidateCounts(applications, profileLabels);
+    const seriesCandidates = pickStackedCandidateKeys(applicationsByCandidate);
 
-    const bidTo = today;
-    const bidFrom = addDaysYmd(today, -(bidDays - 1));
-
-    // Prefer an explicit date; otherwise use today, or the most recent day with
-    // applications if today has none (avoids a misleading 0 right after midnight).
-    let appliedDate = dateParam || today;
-    if (!dateParam) {
-      const todayCount = countApplicationsOnDate(filteredApplications, today, timezone);
-      if (todayCount === 0 && filteredApplications.length > 0) {
+    let activityDate = activityDateParam || today;
+    if (!activityDateParam) {
+      const todayCount = countApplicationsOnDate(applications, today, timezone);
+      if (todayCount === 0 && applications.length > 0) {
         let latest = "";
-        for (const row of filteredApplications) {
+        for (const row of applications) {
           const day = isoToDayKey(row.applied_at, timezone);
           if (day && day > latest) latest = day;
         }
-        if (latest) appliedDate = latest;
+        if (latest) activityDate = latest;
       }
     }
 
-    const stageFrom = stageFromParam || addDaysYmd(today, -(bidDays - 1));
-    const stageTo = stageToParam || today;
-
-    const applicationsByCandidate = buildCandidateCounts(applications, profileLabels);
-    const appliedDateRows = filteredApplications.filter(
+    const appliedDate = appliedDateParam || activityDate;
+    const appliedDateRows = applications.filter(
       (row) => isoToDayKey(row.applied_at, timezone) === appliedDate,
     );
-    const appliedCountByCandidate = buildCandidateCounts(appliedDateRows, profileLabels);
 
-    const seriesCandidates = pickStackedCandidateKeys(
-      candidateFilter
-        ? buildCandidateCounts(filteredApplications, profileLabels)
-        : applicationsByCandidate,
-    );
-
-    const totalApplications = candidateFilter
-      ? await countApplicationsWithFilters(user.id, { candidateFilter })
-      : totalApplicationsAll;
-
-    const bidsByDate = buildBidSeries(filteredApplications, bidFrom, bidTo, timezone);
+    const bidsByDate = buildBidSeries(applications, bidFrom, bidTo, timezone);
     const appliedInBidRange = bidsByDate.reduce((sum, point) => sum + point.count, 0);
 
-    const stageCounts = buildStageCounts(
-      typedJobs,
-      typedTechJobs,
+    const pipelineSeries = buildPipelineCandidateStageSeries(
+      jobs,
+      techJobs,
       stages,
-      stageFrom,
-      stageTo,
+      applications,
+      bidFrom,
+      bidTo,
       timezone,
-      "applied",
-      false,
+      profileLabels,
     );
 
+    const candidatesWithColor = candidates.map((candidate) => ({
+      ...candidate,
+      color: colorForCandidateKey(candidate.key),
+    }));
+    for (const item of applicationsByCandidate) {
+      if (candidatesWithColor.some((c) => c.key === item.key)) continue;
+      candidatesWithColor.push({
+        key: item.key,
+        label: item.label,
+        color: colorForCandidateKey(item.key),
+      });
+    }
+
     return corsJson({
+      timezone,
+      today,
+      rangeMode: rangeMode === "week" || rangeMode === "custom" ? rangeMode : "month",
       appliedDate,
-      appliedCount: countApplicationsOnDate(filteredApplications, appliedDate, timezone),
-      appliedCountByCandidate,
+      appliedCount: countApplicationsOnDate(applications, appliedDate, timezone),
+      appliedCountByCandidate: buildCandidateCounts(appliedDateRows, profileLabels),
       appliedInBidRange,
       bidsByDate,
       bidsStackedByDate: buildStackedBidSeries(
-        filteredApplications,
+        applications,
         bidFrom,
         bidTo,
         timezone,
         seriesCandidates,
       ),
-      bidSeriesCandidates: seriesCandidates,
+      bidSeriesCandidates: seriesCandidates.map((c) => ({
+        ...c,
+        color: colorForCandidateKey(c.key),
+      })),
       bidFrom,
       bidTo,
-      stageCounts,
-      stageFrom,
-      stageTo,
-      timezone,
-      totalApplications,
+      activityDate,
+      hourlyActivity: buildHourlyActivity(applications, activityDate, timezone),
+      stageCounts: pipelineSeries.stageCounts,
+      pipelineByStage: pipelineSeries.points,
+      pipelineSeriesCandidates: pipelineSeries.candidates.map((c) => ({
+        ...c,
+        color: colorForCandidateKey(c.key),
+      })),
+      totalApplications: totalApplicationsAll,
       totalApplicationsAll,
-      applicationsByCandidate,
-      candidates,
-      candidateFilter: candidateFilter || null,
+      applicationsByCandidate: applicationsByCandidate.map((c) => ({
+        ...c,
+        color: colorForCandidateKey(c.key),
+      })),
+      candidates: candidatesWithColor,
+      userId: user.id,
     });
   } catch (error) {
     console.error("Dashboard stats error:", error);
