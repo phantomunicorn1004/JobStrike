@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import JobsLayout from "@/app/jobs-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -22,13 +25,25 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { CalendarDays, Loader2, RefreshCw, TrendingUp } from "lucide-react";
+import { AlertTriangle, CalendarDays, Loader2, RefreshCw, TrendingUp, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DEFAULT_TIMEZONE, formatYmdInTimeZone, todayInTimeZone } from "@/lib/timezone";
 import { toast } from "sonner";
 
 type BidPoint = { date: string; count: number };
 type StageCount = { stageId: string; stageName: string; count: number };
+type CandidateCount = { key: string; label: string; count: number };
+type CandidateOption = { key: string; label: string };
+type StalePipelineCard = {
+  id: number;
+  source: "jobs" | "technical_jobs";
+  title: string;
+  companyName: string;
+  stageId: string;
+  stageName: string;
+  daysInStage: number;
+  enteredAt: string;
+};
 type BidRange = "week" | "month";
 
 const BID_RANGE_DAYS: Record<BidRange, number> = {
@@ -39,20 +54,26 @@ const BID_RANGE_DAYS: Record<BidRange, number> = {
 type DashboardData = {
   appliedDate: string;
   appliedCount: number;
+  appliedCountByCandidate: CandidateCount[];
   bidsByDate: BidPoint[];
+  bidsStackedByDate: Array<Record<string, string | number>>;
+  bidSeriesCandidates: CandidateCount[];
   bidFrom: string;
   bidTo: string;
   stageCounts: StageCount[];
+  funnelCounts: StageCount[];
   stageFrom: string;
   stageTo: string;
   timezone: string;
   totalApplications: number;
+  totalApplicationsAll: number;
+  applicationsByCandidate: CandidateCount[];
   totalPipelineCards: number;
+  stalePipelineCards: StalePipelineCard[];
+  candidates: CandidateOption[];
+  candidateFilter: string | null;
+  pipelineIsAccountWide: boolean;
 };
-
-const bidChartConfig = {
-  count: { label: "Applications", color: "var(--chart-1)" },
-} satisfies ChartConfig;
 
 const STAGE_COLORS = [
   "var(--chart-1)",
@@ -63,6 +84,17 @@ const STAGE_COLORS = [
   "#6666ff",
   "#8888ff",
   "#9944ff",
+];
+
+const CANDIDATE_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+  "#7c8cff",
+  "#a78bfa",
+  "#94a3b8",
 ];
 
 function formatChartDate(ymd: string, timeZone: string): string {
@@ -78,6 +110,10 @@ function formatLongDate(ymd: string, timeZone: string): string {
   });
 }
 
+function safeCssKey(key: string): string {
+  return key.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
 export function DashboardPageClient() {
   const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
   const today = todayInTimeZone(timezone);
@@ -85,6 +121,7 @@ export function DashboardPageClient() {
   const [bidRange, setBidRange] = useState<BidRange>("month");
   const [stageFrom, setStageFrom] = useState("");
   const [stageTo, setStageTo] = useState(today);
+  const [candidateFilter, setCandidateFilter] = useState("");
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -97,6 +134,7 @@ export function DashboardPageClient() {
         stageFrom,
         stageTo,
       });
+      if (candidateFilter) params.set("candidateFilter", candidateFilter);
       const res = await fetch(`/api/dashboard?${params}`, {
         credentials: "same-origin",
       });
@@ -115,7 +153,7 @@ export function DashboardPageClient() {
     } finally {
       setIsLoading(false);
     }
-  }, [appliedDate, bidRange, stageFrom, stageTo]);
+  }, [appliedDate, bidRange, candidateFilter, stageFrom, stageTo]);
 
   useEffect(() => {
     loadDashboard();
@@ -132,12 +170,46 @@ export function DashboardPageClient() {
     return config;
   }, [data?.stageCounts]);
 
+  const bidStackedConfig = useMemo(() => {
+    const config: ChartConfig = {};
+    for (const [index, candidate] of (data?.bidSeriesCandidates ?? []).entries()) {
+      config[safeCssKey(candidate.key)] = {
+        label: candidate.label,
+        color: CANDIDATE_COLORS[index % CANDIDATE_COLORS.length],
+      };
+    }
+    return config;
+  }, [data?.bidSeriesCandidates]);
+
+  const stackedChartData = useMemo(() => {
+    return (data?.bidsStackedByDate ?? []).map((point) => {
+      const next: Record<string, string | number> = { date: point.date };
+      for (const candidate of data?.bidSeriesCandidates ?? []) {
+        next[safeCssKey(candidate.key)] = Number(point[candidate.key] ?? 0);
+      }
+      return next;
+    });
+  }, [data?.bidSeriesCandidates, data?.bidsStackedByDate]);
+
+  const resumeDbBarData = useMemo(() => {
+    const rows = data?.applicationsByCandidate ?? [];
+    const max = Math.max(1, ...rows.map((row) => row.count));
+    return rows.map((row) => ({ ...row, pct: Math.round((row.count / max) * 100) }));
+  }, [data?.applicationsByCandidate]);
+
+  const funnelMax = useMemo(
+    () => Math.max(1, ...(data?.funnelCounts ?? []).map((s) => s.count)),
+    [data?.funnelCounts],
+  );
+
   const stageTotal = useMemo(
     () => (data?.stageCounts ?? []).reduce((sum, s) => sum + s.count, 0),
     [data?.stageCounts],
   );
 
   const bidRangeLabel = bidRange === "week" ? "Last 7 days" : "Last 30 days";
+  const selectedCandidateLabel =
+    data?.candidates.find((c) => c.key === candidateFilter)?.label ?? null;
 
   return (
     <JobsLayout>
@@ -149,16 +221,34 @@ export function DashboardPageClient() {
               Applications and pipeline activity at a glance.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-lg"
-            onClick={loadDashboard}
-            disabled={isLoading}
-          >
-            <RefreshCw className={cn("h-4 w-4 sm:mr-2", isLoading && "animate-spin")} />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm">
+              <Users className="h-4 w-4 text-muted-foreground" />
+              <select
+                value={candidateFilter}
+                onChange={(e) => setCandidateFilter(e.target.value)}
+                className="border-input bg-card dark:bg-input/30 h-9 min-w-[180px] rounded-md border px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                aria-label="Filter dashboard by candidate"
+              >
+                <option value="">All candidates</option>
+                {(data?.candidates ?? []).map((candidate) => (
+                  <option key={candidate.key} value={candidate.key}>
+                    {candidate.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-lg"
+              onClick={loadDashboard}
+              disabled={isLoading}
+            >
+              <RefreshCw className={cn("h-4 w-4 sm:mr-2", isLoading && "animate-spin")} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+          </div>
         </div>
 
         {isLoading && !data ? (
@@ -173,6 +263,7 @@ export function DashboardPageClient() {
                   <CardDescription className="flex items-center gap-1.5">
                     <CalendarDays className="h-4 w-4" />
                     Applied jobs
+                    {selectedCandidateLabel ? ` · ${selectedCandidateLabel}` : ""}
                   </CardDescription>
                   <CardTitle className="text-4xl tabular-nums">
                     {data?.appliedCount ?? 0}
@@ -194,20 +285,76 @@ export function DashboardPageClient() {
                       className="h-9"
                     />
                   </label>
+                  {(data?.appliedCountByCandidate.length ?? 0) > 0 ? (
+                    <ul className="max-h-[120px] space-y-1 overflow-y-auto text-xs">
+                      {(data?.appliedCountByCandidate ?? []).map((item) => (
+                        <li
+                          key={item.key}
+                          className="flex items-center justify-between gap-2 rounded-md border px-2 py-1"
+                        >
+                          <span className="truncate">{item.label}</span>
+                          <span className="tabular-nums font-medium">{item.count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </CardContent>
               </Card>
 
               <Card className="rounded-xl md:col-span-1">
                 <CardHeader className="pb-2">
-                  <CardDescription>Resume DB total</CardDescription>
+                  <CardDescription>Resume DB</CardDescription>
                   <CardTitle className="text-3xl tabular-nums">
                     {data?.totalApplications ?? 0}
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    All registered applications in Resume DB.
+                    {candidateFilter
+                      ? `Registered applications for ${selectedCandidateLabel ?? "selected candidate"}.`
+                      : `All registered applications (${data?.totalApplicationsAll ?? 0} total).`}
                   </p>
+                  {resumeDbBarData.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Per candidate</p>
+                      <ul className="max-h-[160px] space-y-2 overflow-y-auto">
+                        {resumeDbBarData.map((row) => (
+                          <li key={row.key} className="space-y-1">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span
+                                className={cn(
+                                  "truncate",
+                                  candidateFilter === row.key && "font-medium text-foreground",
+                                )}
+                              >
+                                {row.label}
+                              </span>
+                              <span className="shrink-0 tabular-nums text-muted-foreground">
+                                {row.count}
+                                {data?.totalApplicationsAll
+                                  ? ` · ${Math.round((row.count / data.totalApplicationsAll) * 100)}%`
+                                  : ""}
+                              </span>
+                            </div>
+                            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full",
+                                  candidateFilter === row.key ? "bg-primary" : "bg-primary/80",
+                                )}
+                                style={{ width: `${row.pct}%` }}
+                              />
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                      <Button asChild variant="link" className="h-auto px-0 text-xs">
+                        <Link href="/resume-db">Open Resume DB</Link>
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No registered applications yet.</p>
+                  )}
                 </CardContent>
               </Card>
 
@@ -222,6 +369,11 @@ export function DashboardPageClient() {
                   <p className="text-sm text-muted-foreground">
                     Active cards across all Job Pipeline stages.
                   </p>
+                  {candidateFilter ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Pipeline is account-wide and is not filtered by candidate.
+                    </p>
+                  ) : null}
                 </CardContent>
               </Card>
             </div>
@@ -229,7 +381,7 @@ export function DashboardPageClient() {
             <div className="grid min-w-0 gap-4 xl:grid-cols-2 xl:items-start">
               <Card className="min-w-0 rounded-xl">
                 <CardHeader className="gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex items-start gap-2 min-w-0">
+                  <div className="flex min-w-0 items-start gap-2">
                     <TrendingUp className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
                     <div className="min-w-0">
                       <CardTitle className="text-lg">Applications per day</CardTitle>
@@ -237,6 +389,7 @@ export function DashboardPageClient() {
                         {data
                           ? `${bidRangeLabel} (${formatChartDate(data.bidFrom, timezone)} – ${formatChartDate(data.bidTo, timezone)})`
                           : bidRangeLabel}
+                        {selectedCandidateLabel ? ` · ${selectedCandidateLabel}` : " · stacked by candidate"}
                       </CardDescription>
                     </div>
                   </div>
@@ -259,35 +412,83 @@ export function DashboardPageClient() {
                   </ToggleGroup>
                 </CardHeader>
                 <CardContent className="min-w-0">
-                  <ChartContainer
-                    config={bidChartConfig}
-                    className="aspect-auto h-[200px] w-full min-h-0 min-w-0 sm:h-[220px]"
-                  >
-                    <BarChart
-                      data={data?.bidsByDate ?? []}
-                      margin={{ left: 0, right: 4, top: 8, bottom: 0 }}
+                  {(data?.bidSeriesCandidates.length ?? 0) === 0 ? (
+                    <ChartContainer
+                      config={{ count: { label: "Applications", color: "var(--chart-1)" } }}
+                      className="aspect-auto h-[220px] w-full min-h-0 min-w-0 sm:h-[260px]"
                     >
-                      <CartesianGrid vertical={false} />
-                      <XAxis
-                        dataKey="date"
-                        tickLine={false}
-                        axisLine={false}
-                        tickMargin={8}
-                        interval={bidRange === "month" ? 4 : 0}
-                        minTickGap={bidRange === "month" ? 8 : 16}
-                        tickFormatter={(value) => formatChartDate(String(value), timezone)}
-                      />
-                      <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={28} />
-                      <ChartTooltip
-                        content={
-                          <ChartTooltipContent
-                            labelFormatter={(value) => formatLongDate(String(value), timezone)}
+                      <BarChart
+                        data={data?.bidsByDate ?? []}
+                        margin={{ left: 0, right: 4, top: 8, bottom: 0 }}
+                      >
+                        <CartesianGrid vertical={false} />
+                        <XAxis
+                          dataKey="date"
+                          tickLine={false}
+                          axisLine={false}
+                          tickMargin={8}
+                          interval={bidRange === "month" ? 4 : 0}
+                          minTickGap={bidRange === "month" ? 8 : 16}
+                          tickFormatter={(value) => formatChartDate(String(value), timezone)}
+                        />
+                        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={28} />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              labelFormatter={(value) => formatLongDate(String(value), timezone)}
+                            />
+                          }
+                        />
+                        <Bar dataKey="count" fill="var(--color-count)" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ChartContainer>
+                  ) : (
+                    <ChartContainer
+                      config={bidStackedConfig}
+                      className="aspect-auto h-[220px] w-full min-h-0 min-w-0 sm:h-[260px]"
+                    >
+                      <BarChart
+                        data={stackedChartData}
+                        margin={{ left: 0, right: 4, top: 8, bottom: 0 }}
+                      >
+                        <CartesianGrid vertical={false} />
+                        <XAxis
+                          dataKey="date"
+                          tickLine={false}
+                          axisLine={false}
+                          tickMargin={8}
+                          interval={bidRange === "month" ? 4 : 0}
+                          minTickGap={bidRange === "month" ? 8 : 16}
+                          tickFormatter={(value) => formatChartDate(String(value), timezone)}
+                        />
+                        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={28} />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              labelFormatter={(value) => formatLongDate(String(value), timezone)}
+                            />
+                          }
+                        />
+                        {(data?.bidSeriesCandidates.length ?? 0) > 1 ? (
+                          <ChartLegend content={<ChartLegendContent />} />
+                        ) : null}
+                        {(data?.bidSeriesCandidates ?? []).map((candidate, index) => (
+                          <Bar
+                            key={candidate.key}
+                            dataKey={safeCssKey(candidate.key)}
+                            name={candidate.label}
+                            stackId="applications"
+                            fill={CANDIDATE_COLORS[index % CANDIDATE_COLORS.length]}
+                            radius={
+                              index === (data?.bidSeriesCandidates.length ?? 0) - 1
+                                ? [4, 4, 0, 0]
+                                : [0, 0, 0, 0]
+                            }
                           />
-                        }
-                      />
-                      <Bar dataKey="count" fill="var(--color-count)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ChartContainer>
+                        ))}
+                      </BarChart>
+                    </ChartContainer>
+                  )}
                 </CardContent>
               </Card>
 
@@ -324,9 +525,9 @@ export function DashboardPageClient() {
                     </label>
                   </div>
                 </CardHeader>
-                <CardContent className="min-w-0">
+                <CardContent className="min-w-0 space-y-4">
                   {(data?.stageCounts.length ?? 0) === 0 || stageTotal === 0 ? (
-                    <p className="py-10 text-center text-sm text-muted-foreground">
+                    <p className="py-6 text-center text-sm text-muted-foreground">
                       No pipeline cards entered a stage in this date range.
                     </p>
                   ) : (
@@ -380,9 +581,78 @@ export function DashboardPageClient() {
                       </ul>
                     </div>
                   )}
+
+                  {(data?.funnelCounts.length ?? 0) > 0 ? (
+                    <div className="space-y-2 border-t pt-3">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Funnel snapshot (same date range)
+                      </p>
+                      <ul className="space-y-2">
+                        {(data?.funnelCounts ?? []).map((stage, index) => (
+                          <li key={stage.stageId} className="space-y-1">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="truncate">{stage.stageName}</span>
+                              <span className="tabular-nums text-muted-foreground">
+                                {stage.count}
+                              </span>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${Math.round((stage.count / funnelMax) * 100)}%`,
+                                  backgroundColor: STAGE_COLORS[index % STAGE_COLORS.length],
+                                }}
+                              />
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
             </div>
+
+            <Card className="rounded-xl">
+              <CardHeader className="pb-2">
+                <CardDescription className="flex items-center gap-1.5">
+                  <AlertTriangle className="h-4 w-4" />
+                  Stale pipeline cards
+                </CardDescription>
+                <CardTitle className="text-lg">Needs attention</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(data?.stalePipelineCards.length ?? 0) === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No cards have sat in the same stage for 7+ days.
+                  </p>
+                ) : (
+                  <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    {(data?.stalePipelineCards ?? []).map((card) => (
+                      <li
+                        key={`${card.source}-${card.id}`}
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      >
+                        <div className="font-medium leading-snug">{card.title}</div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {card.companyName}
+                        </div>
+                        <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+                          <span className="rounded-md bg-muted px-1.5 py-0.5">{card.stageName}</span>
+                          <span className="tabular-nums text-muted-foreground">
+                            {card.daysInStage}d
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Button asChild variant="link" className="mt-2 h-auto px-0 text-xs">
+                  <Link href="/jobs">Open Job Pipeline</Link>
+                </Button>
+              </CardContent>
+            </Card>
           </>
         )}
       </div>
