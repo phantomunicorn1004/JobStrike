@@ -1,8 +1,10 @@
 (function () {
   const PREPARED_LINKS_KEY = 'prepared_job_links';
+  const ASSISTANT_MODE_KEY = 'assistant_dialog_mode';
   const SAVE_DEBOUNCE_MS = 400;
 
   let saveTimer = null;
+  let assistantMode = 'movable';
 
   function parsePreparedLinks(text) {
     const parts = String(text || '')
@@ -91,13 +93,32 @@
     }
   }
 
+  function setAssistantMode(mode, persist = true) {
+    assistantMode = mode === 'left' || mode === 'right' ? mode : 'movable';
+    document.querySelectorAll('[data-assistant-mode]').forEach((button) => {
+      const active = button.dataset.assistantMode === assistantMode;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    if (persist) chrome.storage.local.set({ [ASSISTANT_MODE_KEY]: assistantMode });
+  }
+
+  function loadAssistantMode() {
+    chrome.storage.local.get([ASSISTANT_MODE_KEY], (result) => {
+      setAssistantMode(result?.[ASSISTANT_MODE_KEY], false);
+    });
+  }
+
   async function openAssistantDialog() {
     const sidebarBtn = document.getElementById('openSidebarBtn');
     if (sidebarBtn) sidebarBtn.disabled = true;
     setStatus('Opening Job Assistant…', 'info');
 
     try {
-      const response = await chrome.runtime.sendMessage({ action: 'openAssistantDialog' });
+      const response = await chrome.runtime.sendMessage({
+        action: 'openAssistantDialog',
+        mode: assistantMode
+      });
       if (!response?.success) {
         throw new Error(response?.error || 'Could not open Job Assistant.');
       }
@@ -108,15 +129,24 @@
     }
   }
 
-  async function loadElementPickerShortcut() {
+  async function loadCommandShortcuts() {
     const label = document.getElementById('pickerShortcutLabel');
-    if (!label || !chrome.commands?.getAll) return;
+    if (!chrome.commands?.getAll) return;
     try {
       const commands = await chrome.commands.getAll();
       const pickerCommand = commands.find((command) => command.name === 'start-element-text-picker');
-      label.textContent = pickerCommand?.shortcut || 'Set hotkey';
+      if (label) label.textContent = pickerCommand?.shortcut || 'Set hotkey';
+      document.querySelectorAll('[data-command-shortcut]').forEach((element) => {
+        const command = commands.find(
+          (item) => item.name === element.dataset.commandShortcut
+        );
+        element.textContent = command?.shortcut || 'Set hotkey';
+        element.title = command?.shortcut
+          ? `${command.description}: ${command.shortcut}`
+          : `Set shortcut for ${command?.description || element.dataset.commandShortcut}`;
+      });
     } catch (_) {
-      label.textContent = 'Configure';
+      if (label) label.textContent = 'Set hotkey';
     }
   }
 
@@ -155,9 +185,19 @@
     const sidebarBtn = document.getElementById('openSidebarBtn');
     const pickerBtn = document.getElementById('startElementPickerBtn');
     const configureShortcutBtn = document.getElementById('configurePickerShortcutBtn');
+    const configureAssistantShortcutsBtn = document.getElementById(
+      'configureAssistantShortcutsBtn'
+    );
 
     loadPreparedLinks();
-    loadElementPickerShortcut();
+    loadCommandShortcuts();
+    loadAssistantMode();
+
+    document.querySelectorAll('[data-assistant-mode]').forEach((button) => {
+      button.addEventListener('click', () => {
+        setAssistantMode(button.dataset.assistantMode);
+      });
+    });
 
     if (input) {
       input.addEventListener('input', () => {
@@ -186,6 +226,12 @@
 
     if (configureShortcutBtn) {
       configureShortcutBtn.addEventListener('click', () => {
+        openShortcutSettings();
+      });
+    }
+
+    if (configureAssistantShortcutsBtn) {
+      configureAssistantShortcutsBtn.addEventListener('click', () => {
         openShortcutSettings();
       });
     }

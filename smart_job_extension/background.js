@@ -9,7 +9,72 @@ const STORAGE_KEYS = {
   dailyLimit: 'job_scraper_daily_limit'
 };
 
+const ASSISTANT_DIALOG_TABS_KEY = 'assistant_dialog_open_tabs';
 const DEFAULT_DAILY_LIMIT = 10;
+
+/** In-memory fallback if session storage is unavailable. */
+const assistantDialogOpenTabs = new Set();
+
+async function getAssistantDialogTabs() {
+  try {
+    if (chrome.storage?.session) {
+      const result = await chrome.storage.session.get(ASSISTANT_DIALOG_TABS_KEY);
+      const raw = result?.[ASSISTANT_DIALOG_TABS_KEY];
+      if (raw && typeof raw === 'object') {
+        return new Set(
+          Object.keys(raw)
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id) && raw[String(id)])
+        );
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return new Set(assistantDialogOpenTabs);
+}
+
+async function setAssistantDialogOpen(tabId, open) {
+  if (!tabId) return;
+  const tabs = await getAssistantDialogTabs();
+  if (open) tabs.add(tabId);
+  else tabs.delete(tabId);
+
+  assistantDialogOpenTabs.clear();
+  for (const id of tabs) assistantDialogOpenTabs.add(id);
+
+  try {
+    if (!chrome.storage?.session) return;
+    const payload = {};
+    for (const id of tabs) payload[String(id)] = true;
+    await chrome.storage.session.set({ [ASSISTANT_DIALOG_TABS_KEY]: payload });
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+async function isAssistantDialogOpenForTab(tabId) {
+  if (!tabId) return false;
+  if (assistantDialogOpenTabs.has(tabId)) return true;
+  const tabs = await getAssistantDialogTabs();
+  return tabs.has(tabId);
+}
+
+async function restoreAssistantDialogOnTab(tabId, url) {
+  if (!tabId || !url || !/^https?:\/\//i.test(url)) return;
+  if (!(await isAssistantDialogOpenForTab(tabId))) return;
+  try {
+    await chrome.scripting
+      .executeScript({
+        target: { tabId },
+        files: ['assistant-overlay.js']
+      })
+      .catch(() => null);
+    await ensureContentScriptAndSendMessage(tabId, { action: 'showAssistantDialog' });
+  } catch (error) {
+    console.warn('Could not restore Job Assistant dialog:', error?.message || error);
+  }
+}
 
 function configureSidePanelBehavior() {
   if (!chrome.sidePanel?.setPanelBehavior) return;
@@ -25,6 +90,15 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onStartup.addListener(configureSidePanelBehavior);
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') return;
+  void restoreAssistantDialogOnTab(tabId, tab?.url || '');
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void setAssistantDialogOpen(tabId, false);
+});
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request && request.action === 'openSidePanel') {
     const tabId = request.tabId || (sender.tab && sender.tab.id);
@@ -35,6 +109,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     sendResponse({ success: false, error: 'Chrome sidePanel API is unavailable.' });
+    return true;
+  }
+  if (request && request.action === 'setAssistantDialogOpen') {
+    const tabId = request.tabId || sender.tab?.id;
+    void setAssistantDialogOpen(tabId, Boolean(request.open)).then(() => {
+      sendResponse({ success: true });
+    });
+    return true;
+  }
+  if (request && request.action === 'getAssistantDialogShouldOpen') {
+    const tabId = sender.tab?.id;
+    void isAssistantDialogOpenForTab(tabId).then((open) => {
+      sendResponse({ success: true, open: Boolean(open) });
+    });
     return true;
   }
   if (request && request.action === 'openAssistantDialog') {
@@ -56,9 +144,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           .catch(() => null);
 
         const response = await ensureContentScriptAndSendMessage(tab.id, {
-          action: 'showAssistantDialog'
+          action: 'showAssistantDialog',
+          mode:
+            request.mode === 'left' || request.mode === 'right'
+              ? request.mode
+              : 'movable'
         });
         if (response?.success) {
+          await setAssistantDialogOpen(tab.id, true);
           sendResponse(response);
           return;
         }
@@ -68,8 +161,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await chrome.windows.create({
             url: chrome.runtime.getURL('sidepanel.html?dialog=1'),
             type: 'popup',
-            width: 400,
-            height: 600,
+            width: 380,
+            height: 680,
             focused: true
           });
           sendResponse({ success: true, fallback: 'popup' });
@@ -199,6 +292,36 @@ chrome.commands.onCommand.addListener((command) => {
   chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
     const tab = tabs[0];
     if (!tab || !tab.id || !tab.url || !/^https?:\/\//.test(tab.url)) return;
+
+    const assistantModeByCommand = {
+      'open-assistant-left': 'left',
+      'open-assistant-movable': 'movable',
+      'open-assistant-right': 'right'
+    };
+    const assistantMode = assistantModeByCommand[command];
+    if (assistantMode) {
+      try {
+        await chrome.scripting
+          .executeScript({
+            target: { tabId: tab.id },
+            files: ['assistant-overlay.js']
+          })
+          .catch(() => null);
+        const response = await ensureContentScriptAndSendMessage(tab.id, {
+          action: 'showAssistantDialog',
+          mode: assistantMode
+        });
+        if (!response?.success) {
+          throw new Error(response?.error || 'Could not open Job Assistant.');
+        }
+        await setAssistantDialogOpen(tab.id, true);
+      } catch (error) {
+        chrome.action.setBadgeText({ text: '!', tabId: tab.id });
+        chrome.action.setBadgeBackgroundColor({ color: '#dc2626', tabId: tab.id });
+        setTimeout(() => chrome.action.setBadgeText({ text: '', tabId: tab.id }), 2500);
+      }
+      return;
+    }
 
     if (command === 'start-element-text-picker') {
       try {

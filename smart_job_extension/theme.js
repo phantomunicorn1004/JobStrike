@@ -36,6 +36,24 @@
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       applyTheme(prefersDark ? 'dark' : 'light');
     });
+
+    try {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local' || !changes[THEME_KEY]) return;
+        const next = changes[THEME_KEY].newValue;
+        if (next === 'dark' || next === 'light') applyTheme(next);
+      });
+    } catch (_) {
+      /* ignore */
+    }
+
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data || data.source !== 'remote-helper-assistant' || data.action !== 'setTheme') {
+        return;
+      }
+      if (data.theme === 'dark' || data.theme === 'light') applyTheme(data.theme);
+    });
   }
 
   function setTheme(theme) {

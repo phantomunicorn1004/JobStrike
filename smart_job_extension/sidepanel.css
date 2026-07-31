@@ -2079,7 +2079,7 @@ input[type="range"] { padding: 0; height: 24px; }
 }
 
 .register-card .register-form {
-  margin-top: 10px;
+  margin-top: 0;
 }
 
 .register-file-field {

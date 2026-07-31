@@ -1021,7 +1021,10 @@ function activateExtensionTab(tabId, options = {}) {
   });
 
   document.querySelectorAll('.tab-sub').forEach((btn) => {
-    btn.classList.toggle('active', !isSettings && tier === 'sub' && btn.dataset.tab === tabId);
+    btn.classList.toggle(
+      'active',
+      btn.dataset.tab === tabId && (tier === 'sub' || tier === 'settings')
+    );
   });
 }
 

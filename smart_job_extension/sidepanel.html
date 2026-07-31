@@ -35,19 +35,7 @@
       </div>
       <div class="header-actions">
         <div class="header-count"><span id="dailyCount">0</span> today</div>
-        <button type="button" class="header-icon-btn theme-toggle-btn" id="themeToggleBtn" aria-label="Switch to dark mode" title="Dark mode">
-          <span class="icon-moon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-            </svg>
-          </span>
-          <span class="icon-sun" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
-            </svg>
-          </span>
-        </button>
-        <button type="button" class="header-icon-btn" id="globalRefreshBtn" aria-label="Refresh current tab" title="Refresh scan and job info from the active tab">
+        <button type="button" class="header-icon-btn" id="globalRefreshBtn" aria-label="Refresh job info and scan from the active tab" title="Refresh job info and scan from the active tab">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
           </svg>
@@ -75,7 +63,7 @@
             <path d="M14 2v6h6M12 18v-6M9 15h6"/>
           </svg>
         </span>
-        <span class="tab-label">Job Register</span>
+        <span class="tab-label">Register</span>
       </button>
     </nav>
 
@@ -104,6 +92,15 @@
           </svg>
         </span>
         <span class="tab-label">Saved Jobs</span>
+      </button>
+      <button class="tab-sub dialog-only" data-tab="settings" data-tier="settings" type="button" title="Settings" aria-label="Settings">
+        <span class="tab-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06-2.83 2.83-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21h-4v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06-2.83-2.83.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3v-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06 2.83-2.83.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3h4v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06 2.83 2.83-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21v4h-.09A1.65 1.65 0 0 0 19.4 15z"/>
+          </svg>
+        </span>
+        <span class="tab-label">Settings</span>
       </button>
     </nav>
 
@@ -355,43 +352,52 @@
                 <span class="register-drive-status is-off" id="registerDriveStatus" hidden></span>
               </div>
               <div class="register-toolbar-actions">
-                <button class="btn small register-scrape-btn" type="button" id="regScrapeBtn" title="Load job title, company, and link from the active tab">Scrape</button>
                 <button class="btn small register-scrape-btn" type="button" id="regCopyJdBtn" title="Copy job title, company, and full description to clipboard">Copy JD</button>
               </div>
             </div>
-            <p class="register-offline-banner" id="registerOfflineBanner" hidden>
-              Sign in under Settings → Website connection to register on the server.
-            </p>
+            <p class="register-offline-banner" id="registerOfflineBanner" hidden></p>
           </div>
           <div class="register-body" id="registerBackendPanel">
             <form class="form-grid register-form" id="registerForm" onsubmit="return false">
-              <label>Job title
+              <label class="full">Job title
                 <span class="register-field-with-action">
-                  <input id="regJobTitle" type="text" placeholder="e.g. Senior Engineer">
-                  <button type="button" class="register-field-copy-btn" id="regJobTitleCopyBtn" title="Copy job title" aria-label="Copy job title">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  </button>
+                  <input id="regJobTitle" type="text" placeholder="Job title">
+                  <span class="register-field-actions">
+                    <button type="button" class="register-field-action-btn" id="regJobTitleCopyBtn" title="Copy job title" aria-label="Copy job title">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    </button>
+                  </span>
                 </span>
               </label>
-              <label>Company
+              <label class="full">Company
                 <span class="register-field-with-action">
-                  <input id="regCompany" type="text" placeholder="Company name">
-                  <button type="button" class="register-field-copy-btn" id="regCompanyCopyBtn" title="Copy company name" aria-label="Copy company name">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  </button>
+                  <input id="regCompany" type="text" placeholder="Company">
+                  <span class="register-field-actions">
+                    <button type="button" class="register-field-action-btn" id="regCompanyCopyBtn" title="Copy company name" aria-label="Copy company name">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    </button>
+                    <button type="button" class="register-field-action-btn register-field-dup-btn" id="regCompanyDupBtn" title="Check if this company exists for the selected candidate (uses Settings → Duplicate check window)" aria-label="Check company duplicate" disabled>
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
+                    </button>
+                  </span>
                 </span>
               </label>
               <label class="full">Job link
                 <span class="register-field-with-action">
-                  <input id="regJobLink" type="url" placeholder="https://…">
-                  <button type="button" class="register-field-copy-btn" id="regJobLinkCopyBtn" title="Copy job link" aria-label="Copy job link">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  </button>
+                  <input id="regJobLink" type="url" placeholder="Job link">
+                  <span class="register-field-actions">
+                    <button type="button" class="register-field-action-btn" id="regJobLinkCopyBtn" title="Copy job link" aria-label="Copy job link">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    </button>
+                    <button type="button" class="register-field-action-btn register-field-dup-btn" id="regJobLinkDupBtn" title="Check if this job link exists for the selected candidate (uses Settings → Duplicate check window)" aria-label="Check job link duplicate" disabled>
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
+                    </button>
+                  </span>
                 </span>
               </label>
               <label class="full">Candidate
-                <select id="regProfileId" class="register-select">
-                  <option value="">Loading profiles…</option>
+                <select id="regProfileId" class="register-select" aria-label="Candidate">
+                  <option value="">Candidate…</option>
                 </select>
               </label>
               <div class="register-files-row register-files-unified">
@@ -414,71 +420,21 @@
                         <path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
                       </svg>
                     </span>
-                    <span class="file-drop-cta">Drop 1–2 files or browse</span>
-                    <span class="muted small">Resume, or resume + cover · PDF · DOCX · DOC · TXT</span>
-                  </div>
-                  <div class="register-file-chips" id="regFileChips">
-                    <div class="register-file-chip" id="regResumeChip" hidden data-kind="resume">
-                      <span class="register-file-chip-kind">Resume</span>
-                      <span class="register-file-chip-name" id="regResumeFileName"></span>
-                      <label class="register-default-check" title="Original resume (not tailored for this job)">
-                        <input type="checkbox" id="regResumeDefault" aria-label="Default resume">
-                        <span>Default</span>
-                      </label>
-                      <button type="button" class="file-drop-clear register-file-chip-clear" id="regResumeClear" data-clear-file="resume" aria-label="Remove resume">×</button>
-                    </div>
-                    <div class="register-file-chip" id="regCoverChip" hidden data-kind="cover">
-                      <span class="register-file-chip-kind">Cover</span>
-                      <span class="register-file-chip-name" id="regCoverFileName"></span>
-                      <label class="register-default-check" title="Original cover letter (not tailored)">
-                        <input type="checkbox" id="regCoverDefault" aria-label="Default cover letter">
-                        <span>Default</span>
-                      </label>
-                      <button type="button" class="file-drop-clear register-file-chip-clear" id="regCoverClear" data-clear-file="cover" aria-label="Remove cover letter">×</button>
-                    </div>
+                    <span class="file-drop-cta">Drop files or browse</span>
+                    <span class="muted small">1–2 files · PDF · DOCX · DOC · TXT</span>
+                    <span class="file-drop-selected" id="regFilesSummary" hidden></span>
+                    <button type="button" class="file-drop-clear" id="regFilesClear" hidden data-clear-file aria-label="Remove files">Clear</button>
                   </div>
                 </div>
               </div>
             </form>
           </div>
           <div class="register-action-group">
-            <div class="register-dup-panel">
-              <div class="register-dup-panel-left">
-                <span class="register-dup-panel-title">Duplicate window</span>
-                <label
-                  class="register-dup-stepper"
-                  title="Already? compares only applications registered within this many days. Use 0 for all time."
-                >
-                  <input
-                    type="number"
-                    id="regDuplicateWindowDays"
-                    class="register-dup-window-input"
-                    min="0"
-                    max="365"
-                    step="1"
-                    value="15"
-                    aria-label="Duplicate check window in days"
-                  />
-                  <span class="register-dup-window-suffix">days</span>
-                </label>
-              </div>
-              <button
-                class="btn register-dup-already-btn"
-                type="button"
-                id="regAlreadyBtn"
-                title="Check if this job matches Resume DB entries for the selected candidate within the duplicate window"
-                disabled
-              >
-                Already?
-              </button>
-            </div>
             <div id="registerStatus" class="register-status" hidden></div>
-            <div class="register-action-primary">
-              <button class="btn primary full-width" type="button" id="registerJobBtn" disabled>Register to DB</button>
-            </div>
-            <div class="register-action-secondary">
+            <div class="register-actions-row">
+              <button class="btn primary register-submit-btn" type="button" id="registerJobBtn" disabled>Register</button>
               <button class="btn" type="button" id="saveToQueueBtn">Save</button>
-              <button class="btn" type="button" id="exportQueueBtn">Export JSON</button>
+              <button class="btn" type="button" id="exportQueueBtn">Export</button>
               <button class="btn danger" type="button" id="clearQueueBtn">Clear</button>
             </div>
             <p class="register-queue-count" id="registerQueueCount" aria-live="polite">0 saved</p>
@@ -523,6 +479,23 @@
             </div>
           </form>
           <p class="muted register-settings-hint" id="backendSettingsHint" hidden></p>
+        </div>
+        <div class="card register-card">
+          <h2>Duplicate check</h2>
+          <p class="muted">Controls how far back company and job-link duplicate checks look on Register.</p>
+          <label class="full" title="Duplicate checks compare only applications within this many days. Use 0 for all time.">
+            Window (days)
+            <input
+              type="number"
+              id="duplicateWindowDaysSetting"
+              min="0"
+              max="365"
+              step="1"
+              value="45"
+              aria-label="Duplicate check window in days"
+            />
+            <small class="muted"><code>0</code> = all time. Default is 45 days.</small>
+          </label>
         </div>
         <div class="card register-card">
           <h2>Google Drive uploads</h2>

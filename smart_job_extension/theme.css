@@ -192,6 +192,29 @@ h2 {
   box-shadow: 0 0 0 3px rgba(102, 102, 255, 0.15);
 }
 
+#globalRefreshBtn {
+  width: 36px;
+  height: 34px;
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(102, 102, 255, 0.28);
+}
+
+#globalRefreshBtn:hover {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(102, 102, 255, 0.38);
+}
+
+#globalRefreshBtn:disabled {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #ffffff;
+  opacity: 0.72;
+}
+
 .theme-toggle-btn .icon-sun,
 .theme-toggle-btn .icon-moon {
   display: none;

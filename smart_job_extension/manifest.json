@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Remote Helper Ext",
-  "version": "4.6.0",
+  "version": "4.8.0",
   "description": "Chrome extension for Remote Helper — autofill job applications, custom Q&A, and Resume DB registration.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -55,6 +55,15 @@
         "mac": "Command+Shift+E"
       },
       "description": "Extract text from a page element"
+    },
+    "open-assistant-left": {
+      "description": "Open Job Assistant docked on the left"
+    },
+    "open-assistant-movable": {
+      "description": "Open Job Assistant as a movable dialog"
+    },
+    "open-assistant-right": {
+      "description": "Open Job Assistant docked on the right"
     }
   },
   "content_scripts": [

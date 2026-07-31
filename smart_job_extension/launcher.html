@@ -10,58 +10,74 @@
 </head>
 <body class="launcher-popup">
   <div class="launcher-shell">
-    <header class="launcher-hero">
-      <div class="launcher-header">
-        <img src="icons/icon-32.png" alt="" width="28" height="28" class="launcher-icon">
-        <div class="launcher-brand-text">
-          <div class="launcher-eyebrow">Remote Helper Ext</div>
-          <h1 class="launcher-title">Job Assistant</h1>
-        </div>
-      </div>
-      <div class="launcher-hero-meta">
-        <span class="launcher-badge">Quick launcher</span>
-        <p class="launcher-hero-copy">Open prepared job tabs, extract text from any page element, or open the movable Job Assistant.</p>
-      </div>
+    <header class="launcher-header-simple">
+      <img src="icons/icon-32.png" alt="" width="26" height="26" class="launcher-icon">
+      <h1 class="launcher-title">Job Assistant</h1>
     </header>
 
     <main class="launcher-grid">
-      <section class="launcher-panel launcher-panel-feature" aria-labelledby="preparedLinksHeading">
-        <div class="launcher-section-heading">
+      <section class="launcher-panel launcher-primary-panel" aria-labelledby="openAssistantHeading">
+        <div class="launcher-section-heading launcher-primary-heading">
           <div>
-            <h2 class="launcher-section-title" id="preparedLinksHeading">Prepared job links</h2>
-            <p class="launcher-hint">Paste one job URL per line or comma-separated, then launch them as tabs.</p>
+            <h2 class="launcher-section-title" id="openAssistantHeading">Open Job Assistant</h2>
+            <p class="launcher-hint">Choose how it opens on the current page.</p>
           </div>
-          <span id="preparedLinksCount" class="launcher-count">0 links</span>
+          <button type="button" class="launcher-shortcut-btn" id="configureAssistantShortcutsBtn" title="Configure opening shortcuts">
+            Set shortcuts
+          </button>
         </div>
-        <textarea
-          id="preparedLinksInput"
-          class="launcher-textarea"
-          rows="8"
-          spellcheck="false"
-          placeholder="https://company.com/jobs/123&#10;https://boards.greenhouse.io/..."
-        ></textarea>
-        <button type="button" class="launcher-btn launcher-btn-primary" id="startApplyBtn">Start to apply</button>
+
+        <div class="launcher-open-modes" role="group" aria-label="Job Assistant opening mode">
+          <button type="button" class="launcher-mode-btn" data-assistant-mode="left" title="Dock on the left">
+            <span>Left</span>
+            <kbd data-command-shortcut="open-assistant-left">Set hotkey</kbd>
+          </button>
+          <button type="button" class="launcher-mode-btn active" data-assistant-mode="movable" title="Movable and resizable dialog">
+            <span>Movable</span>
+            <kbd data-command-shortcut="open-assistant-movable">Set hotkey</kbd>
+          </button>
+          <button type="button" class="launcher-mode-btn" data-assistant-mode="right" title="Dock on the right">
+            <span>Right</span>
+            <kbd data-command-shortcut="open-assistant-right">Set hotkey</kbd>
+          </button>
+        </div>
+
+        <button type="button" class="launcher-btn launcher-btn-primary" id="openSidebarBtn">
+          Open Job Assistant
+        </button>
       </section>
 
-      <section class="launcher-panel" aria-labelledby="elementPickerHeading">
-        <div class="launcher-section-heading">
+      <section class="launcher-panel launcher-secondary-panel" aria-labelledby="elementPickerHeading">
+        <div class="launcher-secondary-row">
           <div>
-            <h2 class="launcher-section-title" id="elementPickerHeading">Extract element text</h2>
-            <p class="launcher-hint">Highlight any element on the page, then click it to copy its text.</p>
+            <h2 class="launcher-section-title" id="elementPickerHeading">Element text picker</h2>
+            <p class="launcher-hint">Pick an element and copy its text.</p>
           </div>
           <button type="button" class="launcher-shortcut-btn" id="configurePickerShortcutBtn" title="Configure extension shortcuts">
             <span id="pickerShortcutLabel">Ctrl+Shift+E</span>
           </button>
         </div>
-        <button type="button" class="launcher-btn launcher-picker-btn" id="startElementPickerBtn">
-          Start element text picker
+        <button type="button" class="launcher-btn launcher-secondary-action" id="startElementPickerBtn">
+          Start picker
         </button>
       </section>
 
-      <section class="launcher-panel launcher-panel-compact">
-        <button type="button" class="launcher-btn launcher-sidebar-btn" id="openSidebarBtn">
-          Open Job Assistant
-        </button>
+      <section class="launcher-panel launcher-secondary-panel" aria-labelledby="preparedLinksHeading">
+        <div class="launcher-secondary-row">
+          <div>
+            <h2 class="launcher-section-title" id="preparedLinksHeading">Open job links</h2>
+            <p class="launcher-hint">One URL per line or comma-separated.</p>
+          </div>
+          <span id="preparedLinksCount" class="launcher-count">0 links</span>
+        </div>
+        <textarea
+          id="preparedLinksInput"
+          class="launcher-textarea launcher-textarea-compact"
+          rows="3"
+          spellcheck="false"
+          placeholder="https://company.com/jobs/123"
+        ></textarea>
+        <button type="button" class="launcher-btn launcher-secondary-action" id="startApplyBtn">Open links</button>
       </section>
     </main>
 

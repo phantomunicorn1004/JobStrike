@@ -217,16 +217,27 @@
     const btn = document.getElementById('registerJobBtn');
     if (btn) {
       btn.disabled = busy || !backendConnected;
-      btn.textContent = busy ? 'Registering…' : 'Register to DB';
+      btn.textContent = busy ? '…' : 'Register';
     }
   }
 
-  function setAlreadyBusy(busy) {
-    const btn = document.getElementById('regAlreadyBtn');
-    if (btn) {
-      btn.disabled = busy || !backendConnected;
-      btn.textContent = busy ? 'Checking…' : 'Already?';
-    }
+  const FIELD_DUP_BUTTON_IDS = [
+    'regCompanyDupBtn',
+    'regJobLinkDupBtn'
+  ];
+
+  function setFieldDupBusy(buttonId, busy) {
+    FIELD_DUP_BUTTON_IDS.forEach((id) => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      if (busy) {
+        btn.disabled = true;
+        btn.classList.toggle('is-busy', id === buttonId);
+      } else {
+        btn.disabled = !backendConnected;
+        btn.classList.remove('is-busy');
+      }
+    });
   }
 
 
@@ -257,12 +268,23 @@
     );
   }
 
-  function applicationSameCompanyAndTitle(app, job) {
-    return (
-      applicationSameCompany(app, job) &&
-      matchKeysEqual(app.jobTitle, job.jobTitle) &&
-      hasMatchKey(job.jobTitle)
-    );
+  function normalizeJobLinkKey(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+      const u = new URL(raw);
+      const path = u.pathname.replace(/\/+$/, '') || '';
+      return `${u.hostname}${path}${u.search}`.toLowerCase();
+    } catch {
+      return normalizeMatchKey(raw);
+    }
+  }
+
+  function applicationSameJobLink(app, jobLink) {
+    const left = normalizeJobLinkKey(app.jobLink);
+    const right = normalizeJobLinkKey(jobLink);
+    if (!left || !right) return false;
+    return left === right;
   }
 
   function formatApplicationSummary(app, fallback) {
@@ -323,20 +345,22 @@
   }
 
   async function loadDuplicateWindowSetting() {
-    const input = document.getElementById('regDuplicateWindowDays');
+    const input = document.getElementById('duplicateWindowDaysSetting');
     if (!input) return;
     const days = await getDuplicateCheckWindowDays();
     input.value = String(days);
   }
 
   function wireDuplicateWindowSetting() {
-    const input = document.getElementById('regDuplicateWindowDays');
+    const input = document.getElementById('duplicateWindowDaysSetting');
     if (!input) return;
 
     void loadDuplicateWindowSetting();
 
     const persist = () => {
-      void saveDuplicateCheckWindowDays(input.value);
+      void saveDuplicateCheckWindowDays(input.value).then(() => {
+        input.value = String(normalizeDuplicateWindowDays(input.value));
+      });
     };
 
     input.addEventListener('change', persist);
@@ -356,7 +380,7 @@
     return Array.isArray(data.resumes) ? data.resumes : [];
   }
 
-  async function checkResumeDbDuplicates(showStatus) {
+  async function checkFieldDuplicate(field, showStatus) {
     const connected = await checkBackendConnection();
     if (!connected) {
       throw new Error(
@@ -370,11 +394,27 @@
     }
 
     const fields = readRegisterFormFields();
-    if (!fields.jobTitle || !fields.companyName) {
-      throw new Error('Job title and company are required to check for duplicates.');
+    const configs = {
+      company: {
+        value: fields.companyName,
+        emptyError: 'Enter a company to check.',
+        label: 'Company',
+        matches: (app) => applicationSameCompany(app, fields)
+      },
+      link: {
+        value: fields.jobLink,
+        emptyError: 'Enter a job link to check.',
+        label: 'Job link',
+        matches: (app) => applicationSameJobLink(app, fields.jobLink)
+      }
+    };
+    const config = configs[field];
+    if (!config) throw new Error('Unknown field for duplicate check.');
+    if (!String(config.value || '').trim()) {
+      throw new Error(config.emptyError);
     }
 
-    setRegisterStatus('Checking Resume DB…', 'info');
+    setRegisterStatus(`Checking ${config.label.toLowerCase()} in Resume DB…`, 'info');
     const windowDays = await getDuplicateCheckWindowDays();
     const windowSuffix = duplicateWindowLabel(windowDays);
     const applications = await fetchResumeDbApplications();
@@ -382,51 +422,26 @@
       .filter((app) => String(app.profileId) === String(profileId))
       .filter((app) => isWithinDuplicateCheckWindow(app, windowDays));
 
-    const duplicateMatch = forCandidate.find((app) =>
-      applicationSameCompanyAndTitle(app, fields)
-    );
-    if (duplicateMatch) {
-      const { when, detail } = formatApplicationSummary(duplicateMatch, fields);
-      const message = `Duplicate — ${detail} is already in Resume DB${windowSuffix}${
-        when ? ` (${when})` : ''
+    const match = forCandidate.find((app) => config.matches(app));
+    if (match) {
+      const { when, detail } = formatApplicationSummary(match, fields);
+      const message = `Duplicate ${config.label.toLowerCase()} — already in Resume DB for this candidate${windowSuffix}${
+        when ? ` (${when}${detail ? `: ${detail}` : ''})` : detail ? ` (${detail})` : ''
       }.`;
       setRegisterStatus(message, 'error');
-      if (showStatus) showStatus('Duplicate application for this candidate.', 'error');
-      return { level: 'duplicate', match: duplicateMatch, windowDays };
-    }
-
-    const sameCompanyMatch = forCandidate.find((app) =>
-      applicationSameCompany(app, fields)
-    );
-    if (sameCompanyMatch) {
-      const { when, detail } = formatApplicationSummary(sameCompanyMatch, fields);
-      const company = fields.companyName || sameCompanyMatch.company || 'this company';
-      setRegisterStatus(
-        `Same company — ${company} already has an application${windowSuffix}${
-          when ? ` (${when}: ${detail})` : detail ? ` (${detail})` : ''
-        }.`,
-        'warn'
-      );
-      if (showStatus) showStatus('Same company already in Resume DB for this candidate.', 'info');
-      return { level: 'same_company', match: sameCompanyMatch, windowDays };
+      if (showStatus) showStatus(`Duplicate ${config.label.toLowerCase()} for this candidate.`, 'error');
+      return { level: 'duplicate', match, windowDays, field };
     }
 
     const noMatchMessage =
       windowDays > 0
-        ? `Not registered in the last ${windowDays} day${windowDays === 1 ? '' : 's'} for this candidate.`
-        : 'Not registered yet for this candidate.';
+        ? `No matching ${config.label.toLowerCase()} in the last ${windowDays} day${
+            windowDays === 1 ? '' : 's'
+          } for this candidate.`
+        : `No matching ${config.label.toLowerCase()} for this candidate.`;
     setRegisterStatus(noMatchMessage, 'success');
-    if (showStatus) showStatus('No matching application found in Resume DB.', 'success');
-    return { level: 'none', match: null, windowDays };
-  }
-
-  async function runAlreadyCheck(showStatus) {
-    setAlreadyBusy(true);
-    try {
-      return await checkResumeDbDuplicates(showStatus);
-    } finally {
-      setAlreadyBusy(false);
-    }
+    if (showStatus) showStatus(noMatchMessage, 'success');
+    return { level: 'none', match: null, windowDays, field };
   }
 
   function setConnectionStatus(state, detail, username) {
@@ -456,7 +471,6 @@
     backendConnected = connected;
 
     const registerBtn = document.getElementById('registerJobBtn');
-    const alreadyBtn = document.getElementById('regAlreadyBtn');
     const profileSelect = document.getElementById('regProfileId');
     const offlineBanner = document.getElementById('registerOfflineBanner');
     const registerTabBtn = document.getElementById('registerTabBtn');
@@ -464,9 +478,12 @@
     const signedInUser = document.getElementById('backendSignedInUser');
 
     if (registerBtn) registerBtn.disabled = !connected;
-    if (alreadyBtn) alreadyBtn.disabled = !connected;
+    FIELD_DUP_BUTTON_IDS.forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.disabled = !connected;
+    });
     if (profileSelect) profileSelect.disabled = !connected;
-    if (offlineBanner) offlineBanner.hidden = connected;
+    if (offlineBanner) offlineBanner.hidden = true;
     if (registerTabBtn) registerTabBtn.classList.toggle('is-auth-required', !connected);
 
     void getBackendConfig().then((config) => {
@@ -533,7 +550,7 @@
     const config = await getBackendConfig();
 
     if (!isAuthenticated(config)) {
-      setConnectionStatus('error', 'Not signed in — Settings → Website connection');
+      setConnectionStatus('error', 'Not signed in — open Settings');
       updateBackendDependentUi(false);
       return false;
     }
@@ -878,70 +895,58 @@
     return { resume, cover, warning };
   }
 
-  function getRegisterFileConfigs() {
+  function getRegisterFileInputs() {
     return {
-      resume: {
-        input: document.getElementById('regResumeFile'),
-        nameEl: document.getElementById('regResumeFileName'),
-        clearBtn: document.getElementById('regResumeClear'),
-        defaultCheckbox: document.getElementById('regResumeDefault'),
-        chip: document.getElementById('regResumeChip')
-      },
-      cover: {
-        input: document.getElementById('regCoverFile'),
-        nameEl: document.getElementById('regCoverFileName'),
-        clearBtn: document.getElementById('regCoverClear'),
-        defaultCheckbox: document.getElementById('regCoverDefault'),
-        chip: document.getElementById('regCoverChip')
-      }
+      resume: document.getElementById('regResumeFile'),
+      cover: document.getElementById('regCoverFile')
     };
-  }
-
-  function updateRegisterChipUi(config) {
-    const { input, nameEl, defaultCheckbox, chip } = config;
-    const file = input?.files?.[0] || null;
-    if (!chip) return;
-    chip.hidden = !file;
-    chip.classList.toggle('is-default-file', Boolean(file && defaultCheckbox?.checked));
-    if (nameEl) {
-      nameEl.textContent = file ? file.name : '';
-      nameEl.title = file ? file.name : '';
-    }
   }
 
   function updateRegisterComboDropUi() {
     const drop = document.getElementById('regFilesDrop');
-    const configs = getRegisterFileConfigs();
-    const hasResume = Boolean(configs.resume.input?.files?.[0]);
-    const hasCover = Boolean(configs.cover.input?.files?.[0]);
-    const hasAny = hasResume || hasCover;
+    const summary = document.getElementById('regFilesSummary');
+    const clearBtn = document.getElementById('regFilesClear');
+    const { resume, cover } = getRegisterFileInputs();
+    const resumeFile = resume?.files?.[0] || null;
+    const coverFile = cover?.files?.[0] || null;
+    const hasAny = Boolean(resumeFile || coverFile);
 
     if (drop) {
       drop.classList.toggle('has-file', hasAny);
-      drop.classList.toggle(
-        'is-default-file',
-        Boolean(
-          (hasResume && configs.resume.defaultCheckbox?.checked) ||
-            (hasCover && configs.cover.defaultCheckbox?.checked)
-        )
-      );
+      drop.classList.remove('is-default-file');
     }
 
-    updateRegisterChipUi(configs.resume);
-    updateRegisterChipUi(configs.cover);
-  }
+    const parts = [];
+    if (resumeFile) parts.push(resumeFile.name);
+    if (coverFile) parts.push(coverFile.name);
 
-  function clearRegisterFileSlot(kind) {
-    const configs = getRegisterFileConfigs();
-    const config = kind === 'cover' ? configs.cover : configs.resume;
-    if (config.input) config.input.value = '';
-    if (config.defaultCheckbox) config.defaultCheckbox.checked = false;
-    updateRegisterComboDropUi();
+    if (summary) {
+      if (parts.length) {
+        summary.textContent = parts.join(' · ');
+        summary.title = parts.join('\n');
+        summary.hidden = false;
+      } else {
+        summary.textContent = '';
+        summary.title = '';
+        summary.hidden = true;
+      }
+    }
+
+    if (clearBtn) clearBtn.hidden = !hasAny;
+
+    const cta = drop?.querySelector('.file-drop-cta');
+    const formats = drop?.querySelector('.file-drop > .muted.small');
+    const icon = drop?.querySelector('.file-drop-icon');
+    if (cta) cta.hidden = hasAny;
+    if (formats) formats.hidden = hasAny;
+    if (icon) icon.hidden = hasAny;
   }
 
   function clearAllRegisterFiles() {
-    clearRegisterFileSlot('resume');
-    clearRegisterFileSlot('cover');
+    const { resume, cover } = getRegisterFileInputs();
+    if (resume) resume.value = '';
+    if (cover) cover.value = '';
+    updateRegisterComboDropUi();
   }
 
   function assignFileToInput(input, file) {
@@ -956,22 +961,14 @@
   }
 
   function applyClassifiedFiles(result) {
-    const configs = getRegisterFileConfigs();
+    const { resume, cover } = getRegisterFileInputs();
     if (result.error) {
       setRegisterStatus(result.error, 'error');
       return;
     }
 
-    assignFileToInput(configs.resume.input, result.resume || null);
-    assignFileToInput(configs.cover.input, result.cover || null);
-
-    if (!result.resume && configs.resume.defaultCheckbox) {
-      configs.resume.defaultCheckbox.checked = false;
-    }
-    if (!result.cover && configs.cover.defaultCheckbox) {
-      configs.cover.defaultCheckbox.checked = false;
-    }
-
+    assignFileToInput(resume, result.resume || null);
+    assignFileToInput(cover, result.cover || null);
     updateRegisterComboDropUi();
 
     if (result.warning) {
@@ -987,14 +984,13 @@
   function wireRegisterFileDrops() {
     const drop = document.getElementById('regFilesDrop');
     const picker = document.getElementById('regFilesPicker');
-    const configs = getRegisterFileConfigs();
+    const clearBtn = document.getElementById('regFilesClear');
     if (!drop || !picker) return;
 
     const openPicker = () => picker.click();
 
     drop.addEventListener('click', (e) => {
       if (e.target.closest('[data-clear-file]')) return;
-      if (e.target.closest('.register-default-check')) return;
       openPicker();
     });
 
@@ -1006,31 +1002,16 @@
     });
 
     picker.addEventListener('change', () => {
-      const files = picker.files;
-      applyClassifiedFiles(classifyDroppedFiles(files));
+      applyClassifiedFiles(classifyDroppedFiles(picker.files));
       picker.value = '';
     });
 
-    if (configs.resume.clearBtn) {
-      configs.resume.clearBtn.addEventListener('click', (e) => {
+    if (clearBtn) {
+      clearBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        clearRegisterFileSlot('resume');
+        clearAllRegisterFiles();
       });
-    }
-    if (configs.cover.clearBtn) {
-      configs.cover.clearBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        clearRegisterFileSlot('cover');
-      });
-    }
-
-    if (configs.resume.defaultCheckbox) {
-      configs.resume.defaultCheckbox.addEventListener('change', updateRegisterComboDropUi);
-    }
-    if (configs.cover.defaultCheckbox) {
-      configs.cover.defaultCheckbox.addEventListener('change', updateRegisterComboDropUi);
     }
 
     drop.addEventListener('dragover', (e) => {
@@ -1068,8 +1049,8 @@
       jobLink: document.getElementById('regJobLink')?.value?.trim() || '',
       profileId,
       profileName: profileOption?.textContent?.trim() || '',
-      resumeIsDefault: Boolean(document.getElementById('regResumeDefault')?.checked),
-      coverLetterIsDefault: Boolean(document.getElementById('regCoverDefault')?.checked),
+      resumeIsDefault: false,
+      coverLetterIsDefault: false,
       resumeFileName: resumeFile?.name || null,
       coverFileName: coverFile?.name || null,
       apply: 'Registered'
@@ -1198,7 +1179,7 @@
     const coverFile = readFileInput(document.getElementById('regCoverFile'));
 
     if (!jobTitle || !companyName || !jobLink) {
-      throw new Error('Job title, company, and job link are required. Click Scrape first.');
+      throw new Error('Job title, company, and job link are required. Use Refresh in the header first.');
     }
     if (!profileId) {
       throw new Error('Select a candidate profile.');
@@ -1370,10 +1351,25 @@
     });
   }
 
+  function wireRegisterFieldDup(buttonId, field, showStatus) {
+    const btn = document.getElementById(buttonId);
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      setFieldDupBusy(buttonId, true);
+      try {
+        await checkFieldDuplicate(field, showStatus);
+      } catch (err) {
+        const msg = err.message || String(err);
+        setRegisterStatus(msg, 'error');
+        if (showStatus) showStatus(msg, 'error');
+      } finally {
+        setFieldDupBusy(buttonId, false);
+      }
+    });
+  }
+
   function initRegisterResumeDb(showStatus) {
-    const scrapeBtn = document.getElementById('regScrapeBtn');
     const copyJdBtn = document.getElementById('regCopyJdBtn');
-    const alreadyBtn = document.getElementById('regAlreadyBtn');
     const registerBtn = document.getElementById('registerJobBtn');
 
     loadBackendSettingsForm();
@@ -1393,23 +1389,20 @@
       });
     });
 
+    document.querySelectorAll('[data-tab="settings"]').forEach((tabBtn) => {
+      tabBtn.addEventListener('click', () => {
+        loadBackendSettingsForm();
+        loadDuplicateWindowSetting();
+        checkBackendConnection();
+      });
+    });
+
     const headerSettings = document.getElementById('headerSettingsBtn');
     if (headerSettings) {
       headerSettings.addEventListener('click', () => {
         loadBackendSettingsForm();
+        loadDuplicateWindowSetting();
         checkBackendConnection();
-      });
-    }
-
-    if (alreadyBtn) {
-      alreadyBtn.addEventListener('click', async () => {
-        try {
-          await runAlreadyCheck(showStatus);
-        } catch (err) {
-          const msg = err.message || String(err);
-          setRegisterStatus(msg, 'error');
-          if (showStatus) showStatus(msg, 'error');
-        }
       });
     }
 
@@ -1426,22 +1419,15 @@
 
           const fields = readRegisterFormFields();
           if (!fields.jobTitle || !fields.companyName || !fields.jobLink) {
-            throw new Error('Job title, company, and job link are required. Click Scrape first.');
+            throw new Error('Job title, company, and job link are required. Use Refresh in the header first.');
           }
           if (!fields.profileId) {
             throw new Error('Select a candidate profile.');
           }
 
-          const resumeDefault = document.getElementById('regResumeDefault')?.checked;
-          const coverDefault = document.getElementById('regCoverDefault')?.checked;
           const resumeFile = document.getElementById('regResumeFile')?.files?.[0];
           const coverFile = document.getElementById('regCoverFile')?.files?.[0];
-          const needsFileUpload = registerNeedsFileUpload(
-            resumeDefault,
-            coverDefault,
-            resumeFile,
-            coverFile
-          );
+          const needsFileUpload = registerNeedsFileUpload(false, false, resumeFile, coverFile);
 
           setRegisterStatus(
             needsFileUpload
@@ -1468,31 +1454,11 @@
       });
     }
 
-    if (scrapeBtn) {
-      scrapeBtn.addEventListener('click', () => {
-        setRegisterStatus('Reading job page…', 'info');
-        scrapeJobFromTab()
-          .then((job) => {
-            document.getElementById('regJobTitle').value = job.jobTitle;
-            document.getElementById('regCompany').value = job.companyName;
-            document.getElementById('regJobLink').value = job.jobLink;
-            setRegisterStatus('Job info loaded from current tab.', 'success');
-            if (showStatus) showStatus('Job info scraped.', 'success');
-          })
-          .catch((err) => {
-            const msg = err.message || String(err);
-            const friendly = /receiving end does not exist/i.test(msg)
-              ? 'Cannot read this tab. Open a job posting page and reload it, then try Scrape again.'
-              : msg;
-            setRegisterStatus(friendly, 'error');
-            if (showStatus) showStatus(friendly, 'error');
-          });
-      });
-    }
-
     wireRegisterFieldCopy('regJobTitleCopyBtn', 'regJobTitle', 'Job title copied to clipboard.', 'Could not copy job title.', showStatus);
     wireRegisterFieldCopy('regCompanyCopyBtn', 'regCompany', 'Company copied to clipboard.', 'Could not copy company name.', showStatus);
     wireRegisterFieldCopy('regJobLinkCopyBtn', 'regJobLink', 'Job link copied to clipboard.', 'Could not copy job link.', showStatus);
+    wireRegisterFieldDup('regCompanyDupBtn', 'company', showStatus);
+    wireRegisterFieldDup('regJobLinkDupBtn', 'link', showStatus);
 
     if (copyJdBtn) {
       copyJdBtn.addEventListener('click', () => {
