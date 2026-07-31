@@ -19,6 +19,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ResumeDBEditDialog } from "@/components/resume-tailor/ResumeDBEditDialog";
 import {
   extractGoogleDriveFileId,
@@ -706,6 +713,7 @@ export function ResumeDBPageClient() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [editRow, setEditRow] = useState<ResumeDbRow | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [noteViewRow, setNoteViewRow] = useState<ResumeDbRow | null>(null);
   const [bulkRemoving, setBulkRemoving] = useState(false);
   const [bulkExporting, setBulkExporting] = useState(false);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -1472,9 +1480,18 @@ export function ResumeDBPageClient() {
                           )}
                         </ResizableTableCell>
                         <ResizableTableCell widthPercent={percents.note}>
-                          <span className="block truncate" title={row.note || undefined}>
-                            {row.note || "—"}
-                          </span>
+                          {row.note ? (
+                            <button
+                              type="button"
+                              className="block w-full max-w-full truncate text-left text-primary hover:underline"
+                              onClick={() => setNoteViewRow(row)}
+                              aria-label={`View note for ${row.company || row.jobTitle || "application"}`}
+                            >
+                              {row.note}
+                            </button>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </ResizableTableCell>
                         <ResizableTableCell widthPercent={percents.company} className="font-medium text-primary">
                           <span className="block truncate" title={row.company || undefined}>
@@ -1609,6 +1626,51 @@ export function ResumeDBPageClient() {
           }}
           onSaved={handleEditSaved}
         />
+
+        <Dialog
+          open={Boolean(noteViewRow)}
+          onOpenChange={(open) => {
+            if (!open) setNoteViewRow(null);
+          }}
+        >
+          <DialogContent className="max-w-lg rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>Note</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2">
+              {(noteViewRow?.company || noteViewRow?.jobTitle) && (
+                <p className="text-sm text-muted-foreground">
+                  {[noteViewRow?.jobTitle, noteViewRow?.company]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              )}
+              <div className="max-h-[50vh] overflow-y-auto rounded-xl border border-border/60 bg-muted/30 p-3">
+                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                  {noteViewRow?.note || "—"}
+                </p>
+              </div>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                onClick={() => setNoteViewRow(null)}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!noteViewRow) return;
+                  setEditRow(noteViewRow);
+                  setEditOpen(true);
+                  setNoteViewRow(null);
+                }}
+              >
+                Edit
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </JobsLayout>
   );
