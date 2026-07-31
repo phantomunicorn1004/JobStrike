@@ -79,6 +79,7 @@ export type ResumeDbRow = {
   candidate: string;
   profileId: number | null;
   jobLink: string;
+  note: string;
   apply: string;
   jobTitle: string;
   company: string;
@@ -768,7 +769,12 @@ export function ResumeDBPageClient() {
         throw new Error(err.error || "Failed to load Resume DB.");
       }
       const data = await resumeRes.json();
-      setRows(data.resumes ?? []);
+      setRows(
+        (data.resumes ?? []).map((row: ResumeDbRow) => ({
+          ...row,
+          note: row.note ?? "",
+        })),
+      );
       setPipelineStages(data.pipelineStages ?? []);
       setTotalCount(Number(data.total ?? 0));
       if (data.timezone) setTimezone(data.timezone);
@@ -1367,6 +1373,9 @@ export function ResumeDBPageClient() {
                       <ResizableTableHead {...columnResizeProps("jobLink")}>
                         Job link
                       </ResizableTableHead>
+                      <ResizableTableHead {...columnResizeProps("note")}>
+                        Note
+                      </ResizableTableHead>
                       <ResizableSortableHead
                         {...columnResizeProps("company")}
                         label="Company"
@@ -1461,6 +1470,11 @@ export function ResumeDBPageClient() {
                           ) : (
                             "—"
                           )}
+                        </ResizableTableCell>
+                        <ResizableTableCell widthPercent={percents.note}>
+                          <span className="block truncate" title={row.note || undefined}>
+                            {row.note || "—"}
+                          </span>
                         </ResizableTableCell>
                         <ResizableTableCell widthPercent={percents.company} className="font-medium text-primary">
                           <span className="block truncate" title={row.company || undefined}>

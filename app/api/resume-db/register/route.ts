@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
     const companyName = String(
       formData.get("companyName") ?? formData.get("company") ?? "",
     ).trim();
+    const note = String(formData.get("note") ?? "").trim();
     const profileIdRaw = formData.get("profileId") ?? formData.get("profile_id");
     const profileId =
       profileIdRaw != null && String(profileIdRaw).trim() !== ""
@@ -90,6 +91,7 @@ export async function POST(request: NextRequest) {
       jobLink,
       jobTitle,
       company: companyName,
+      note,
       apply: String(formData.get("apply") ?? "Registered").trim(),
       resumeUrl: resolved.resumeUrl || "",
       coverLetterUrl: resolved.coverLetterUrl,
@@ -112,6 +114,7 @@ export async function POST(request: NextRequest) {
         jobLink,
         jobTitle,
         companyName,
+        note: application.note ?? note,
         resumeUrl: application.resumeUrl,
         coverLetterUrl: application.coverLetterUrl,
         storage: resolved.storage,

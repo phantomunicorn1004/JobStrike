@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
       jobLink: entry.jobLink,
       jobTitle: entry.jobTitle,
       company: entry.company,
+      note: entry.note ?? "",
       resumeUrl: entry.resumeUrl,
       coverLetterUrl: entry.coverLetterUrl,
       apply: entry.apply,

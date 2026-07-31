@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS resume_db_applications (
   job_link TEXT NOT NULL,
   job_title TEXT NOT NULL,
   company TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
   apply TEXT DEFAULT 'Registered',
   resume_url TEXT NOT NULL,
   cover_letter_url TEXT DEFAULT '',

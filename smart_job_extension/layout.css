@@ -342,11 +342,20 @@ main {
 }
 
 .register-form input,
-.register-form .register-select {
+.register-form .register-select,
+.register-form .register-note {
   padding: 5px 7px;
   font-size: 12px;
   border-radius: 7px;
   min-height: 28px;
+}
+
+.register-form .register-note {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.35;
 }
 
 .register-field-with-action {
@@ -807,11 +816,17 @@ body.sidepanel.assistant-dialog {
 }
 
 .assistant-dialog .register-form input,
-.assistant-dialog .register-form .register-select {
+.assistant-dialog .register-form .register-select,
+.assistant-dialog .register-form .register-note {
   padding: 4px 6px;
   font-size: 11px;
   min-height: 26px;
   border-radius: 6px;
+}
+
+.assistant-dialog .register-form .register-note {
+  min-height: 36px;
+  max-height: 64px;
 }
 
 .assistant-dialog .register-file-head {

@@ -16,6 +16,8 @@
   const MIN_WIDTH = 300;
   const MIN_HEIGHT = 460;
   const MAX_DOCK_WIDTH = 560;
+  /** Keep the page scrollbar reachable when docked on the right. */
+  const RIGHT_DOCK_MIN_GUTTER = 14;
 
   let hostEl = null;
   let shadow = null;
@@ -154,11 +156,25 @@
     }
   }
 
+  /**
+   * Width of the page's vertical scrollbar, with a minimum so overlay-style
+   * scrollbars stay clickable next to a right-docked panel.
+   */
+  function rightDockGutter() {
+    const doc = document.documentElement;
+    if (!doc) return 0;
+    const scrollbarWidth = Math.max(0, window.innerWidth - doc.clientWidth);
+    const scrollable = doc.scrollHeight > doc.clientHeight + 1;
+    if (!scrollable) return scrollbarWidth;
+    return Math.max(scrollbarWidth, RIGHT_DOCK_MIN_GUTTER);
+  }
+
   function applyGeom(geom, mode = currentMode) {
     if (!panelEl || !geom) return;
     const normalizedMode = normalizeMode(mode);
     const docked = normalizedMode !== 'movable';
-    const availableWidth = Math.max(240, window.innerWidth - (docked ? 0 : 8));
+    const gutter = normalizedMode === 'right' ? rightDockGutter() : 0;
+    const availableWidth = Math.max(240, window.innerWidth - (docked ? gutter : 8));
     const availableHeight = Math.max(320, window.innerHeight - (docked ? 0 : 8));
     const minimumWidth = Math.min(MIN_WIDTH, availableWidth);
     const minimumHeight = Math.min(MIN_HEIGHT, availableHeight);
@@ -173,7 +189,7 @@
       normalizedMode === 'left'
         ? 0
         : normalizedMode === 'right'
-          ? Math.max(0, window.innerWidth - width)
+          ? Math.max(0, window.innerWidth - width - gutter)
           : clamp(geom.left ?? 4, 0, Math.max(0, window.innerWidth - width));
     const top =
       docked ? 0 : clamp(geom.top ?? 4, 0, Math.max(0, window.innerHeight - height));
@@ -274,7 +290,7 @@
           box-shadow: 10px 0 32px rgba(15, 23, 42, 0.24);
         }
         .rh-panel[data-mode="right"] {
-          border-radius: 14px 0 0 14px;
+          border-radius: 14px;
           box-shadow: -10px 0 32px rgba(15, 23, 42, 0.24);
         }
         .rh-panel[hidden] { display: none !important; }

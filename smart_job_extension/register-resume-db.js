@@ -1047,6 +1047,7 @@
       jobTitle: document.getElementById('regJobTitle')?.value?.trim() || '',
       companyName: document.getElementById('regCompany')?.value?.trim() || '',
       jobLink: document.getElementById('regJobLink')?.value?.trim() || '',
+      note: document.getElementById('regNote')?.value?.trim() || '',
       profileId,
       profileName: profileOption?.textContent?.trim() || '',
       resumeIsDefault: false,
@@ -1174,7 +1175,7 @@
 
   async function registerJobToBackend() {
     const fields = readRegisterFormFields();
-    const { jobTitle, companyName, jobLink, profileId } = fields;
+    const { jobTitle, companyName, jobLink, note, profileId } = fields;
     const resumeFile = readFileInput(document.getElementById('regResumeFile'));
     const coverFile = readFileInput(document.getElementById('regCoverFile'));
 
@@ -1196,6 +1197,7 @@
     formData.append('jobTitle', jobTitle);
     formData.append('companyName', companyName);
     formData.append('jobLink', jobLink);
+    formData.append('note', note || '');
     formData.append('profileId', profileId);
     formData.append('apply', 'Registered');
     formData.append('resumeIsDefault', resumeIsDefault ? '1' : '0');

@@ -16,6 +16,7 @@ type DbRow = {
   job_link: string;
   job_title: string;
   company: string;
+  note: string | null;
   apply: string;
   resume_url: string;
   cover_letter_url: string;
@@ -57,6 +58,7 @@ function mapRow(row: DbRow): ResumeDbApplication {
     jobLink: row.job_link,
     jobTitle: row.job_title,
     company: row.company,
+    note: row.note ?? "",
     apply: row.apply,
     resumeUrl: row.resume_url,
     coverLetterUrl: row.cover_letter_url ?? "",
@@ -215,7 +217,7 @@ function applyCommonFilters(
     const pattern = `%${safe}%`;
     // OR across the main user-visible text fields.
     builder = builder.or(
-      `company.ilike.${pattern},job_title.ilike.${pattern},candidate_name.ilike.${pattern},job_link.ilike.${pattern},apply.ilike.${pattern},entry_id.ilike.${pattern}`,
+      `company.ilike.${pattern},job_title.ilike.${pattern},candidate_name.ilike.${pattern},job_link.ilike.${pattern},note.ilike.${pattern},apply.ilike.${pattern},entry_id.ilike.${pattern}`,
     );
   }
 
@@ -347,6 +349,7 @@ export async function createApplication(
     job_link: input.jobLink,
     job_title: input.jobTitle,
     company: input.company,
+    note: input.note ?? "",
     apply: input.apply ?? "Registered",
     resume_url: input.resumeUrl,
     cover_letter_url: input.coverLetterUrl ?? "",
@@ -378,6 +381,7 @@ export async function updateApplication(
   if (input.jobLink !== undefined) patch.job_link = input.jobLink;
   if (input.jobTitle !== undefined) patch.job_title = input.jobTitle;
   if (input.company !== undefined) patch.company = input.company;
+  if (input.note !== undefined) patch.note = input.note;
   if (input.apply !== undefined) patch.apply = input.apply;
   if (input.resumeUrl !== undefined) patch.resume_url = input.resumeUrl;
   if (input.coverLetterUrl !== undefined) patch.cover_letter_url = input.coverLetterUrl;

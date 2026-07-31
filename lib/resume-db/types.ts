@@ -6,6 +6,7 @@ export type ResumeDbApplication = {
   jobLink: string;
   jobTitle: string;
   company: string;
+  note: string;
   apply: string;
   resumeUrl: string;
   coverLetterUrl: string;
@@ -25,6 +26,7 @@ export type ResumeDbApplicationInput = {
   jobLink: string;
   jobTitle: string;
   company: string;
+  note?: string;
   apply?: string;
   resumeUrl: string;
   coverLetterUrl?: string;
@@ -43,6 +45,7 @@ export type ResumeDbJobExport = {
   jobLink: string;
   jobTitle: string;
   company: string;
+  note: string;
   resumeUrl: string;
   coverLetterUrl: string;
   apply: string;

@@ -56,6 +56,7 @@ function mapForList(
     apply: app.apply,
     jobTitle: app.jobTitle,
     company: app.company,
+    note: app.note ?? "",
     resumeUrl: app.resumeUrl,
     coverLetterUrl: app.coverLetterUrl,
     date,
@@ -81,6 +82,7 @@ function parseEntryBody(body: Record<string, unknown>): ResumeDbApplicationInput
     apply: String(body.apply ?? body.status ?? "Registered").trim(),
     jobTitle: String(body.jobTitle ?? body.job_title ?? "").trim(),
     company: String(body.company ?? body.company_name ?? "").trim(),
+    note: String(body.note ?? "").trim(),
     resumeUrl: String(body.resumeUrl ?? body.resume_url ?? "").trim(),
     coverLetterUrl: String(
       body.coverLetterUrl ?? body.cover_letter_url ?? "",

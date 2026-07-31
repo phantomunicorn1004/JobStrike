@@ -4,6 +4,7 @@ type ResumeDbRowForMeasure = {
   candidate: string;
   company: string;
   jobTitle: string;
+  note?: string;
   appliedAt: string;
   date: string;
 };
@@ -13,6 +14,7 @@ export const COLUMN_ORDER: ResumeDBColumnId[] = [
   "no",
   "profile",
   "jobLink",
+  "note",
   "company",
   "jobTitle",
   "resume",
@@ -27,6 +29,7 @@ export const COLUMN_HEADERS: Record<ResumeDBColumnId, string> = {
   no: "No",
   profile: "Profile",
   jobLink: "Job link",
+  note: "Note",
   company: "Company",
   jobTitle: "Job title",
   resume: "Resume",
@@ -99,6 +102,9 @@ export function measureColumnFitPx(
       case "jobLink":
         text = "Open";
         break;
+      case "note":
+        text = row.note || "—";
+        break;
       case "applied":
         text = formatAppliedShort(row.appliedAt, row.date);
         break;
@@ -120,4 +126,10 @@ export function getNeighborColumnId(columnId: ResumeDBColumnId): ResumeDBColumnI
 }
 
 /** Columns that absorb shrink/grow when another column is auto-fitted */
-export const FLEX_COLUMN_IDS: ResumeDBColumnId[] = ["jobTitle", "company", "profile", "applied"];
+export const FLEX_COLUMN_IDS: ResumeDBColumnId[] = [
+  "jobTitle",
+  "company",
+  "profile",
+  "note",
+  "applied",
+];

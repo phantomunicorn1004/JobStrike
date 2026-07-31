@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ResumeDbRow } from "./ResumeDBPageClient";
@@ -26,6 +27,7 @@ export function ResumeDBEditDialog({ row, open, onOpenChange, onSaved }: Props) 
   const [company, setCompany] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [jobLink, setJobLink] = useState("");
+  const [note, setNote] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -35,6 +37,7 @@ export function ResumeDBEditDialog({ row, open, onOpenChange, onSaved }: Props) 
     setCompany(row.company || "");
     setJobTitle(row.jobTitle || "");
     setJobLink(row.jobLink || "");
+    setNote(row.note || "");
     setResumeFile(null);
     setCoverFile(null);
   }, [row, open]);
@@ -52,6 +55,7 @@ export function ResumeDBEditDialog({ row, open, onOpenChange, onSaved }: Props) 
       formData.append("companyName", company.trim());
       formData.append("jobTitle", jobTitle.trim());
       formData.append("jobLink", jobLink.trim());
+      formData.append("note", note.trim());
       if (resumeFile) formData.append("resume", resumeFile, resumeFile.name);
       if (coverFile) formData.append("coverLetter", coverFile, coverFile.name);
 
@@ -69,6 +73,7 @@ export function ResumeDBEditDialog({ row, open, onOpenChange, onSaved }: Props) 
         company: data.company ?? company.trim(),
         jobTitle: data.jobTitle ?? jobTitle.trim(),
         jobLink: data.jobLink ?? jobLink.trim(),
+        note: data.note ?? note.trim(),
         resumeUrl: data.resumeUrl ?? row.resumeUrl,
         coverLetterUrl: data.coverLetterUrl ?? row.coverLetterUrl,
         inPipeline: data.inPipeline ?? row.inPipeline,
@@ -113,6 +118,16 @@ export function ResumeDBEditDialog({ row, open, onOpenChange, onSaved }: Props) 
               value={jobLink}
               onChange={(e) => setJobLink(e.target.value)}
               placeholder="https://…"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="edit-note">Note</Label>
+            <Textarea
+              id="edit-note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Extra job description or notes…"
+              rows={4}
             />
           </div>
           <div className="grid gap-2">

@@ -38,6 +38,7 @@ function mapForList(
     apply: app.apply,
     jobTitle: app.jobTitle,
     company: app.company,
+    note: app.note ?? "",
     resumeUrl: app.resumeUrl,
     coverLetterUrl: app.coverLetterUrl,
     date,
@@ -71,6 +72,7 @@ export async function POST(request: NextRequest) {
     const jobLink = String(
       formData.get("jobLink") ?? formData.get("job_link") ?? existing.jobLink,
     ).trim();
+    const note = String(formData.get("note") ?? existing.note ?? "").trim();
 
     if (!company || !jobTitle) {
       return corsJson(
@@ -122,6 +124,7 @@ export async function POST(request: NextRequest) {
       company,
       jobTitle,
       jobLink,
+      note,
       resumeUrl,
       coverLetterUrl,
       resumeStoragePath: resumeStoragePath ?? undefined,

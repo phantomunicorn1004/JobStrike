@@ -8,6 +8,7 @@ export const RESUME_DB_COLUMN_DEFAULTS = {
   no: 52,
   profile: 120,
   jobLink: 96,
+  note: 160,
   company: 132,
   jobTitle: 220,
   resume: 92,
@@ -24,6 +25,7 @@ export const RESUME_DB_COLUMN_MIN_PERCENT: Record<ResumeDBColumnId, number> = {
   no: 3.5,
   profile: 5,
   jobLink: 5,
+  note: 6,
   company: 6,
   jobTitle: 8,
   resume: 5.5,
@@ -33,7 +35,7 @@ export const RESUME_DB_COLUMN_MIN_PERCENT: Record<ResumeDBColumnId, number> = {
   actions: 7,
 };
 
-const STORAGE_KEY = "resume-db-column-widths-v5";
+const STORAGE_KEY = "resume-db-column-widths-v6";
 
 function fillMissingColumnPercents(
   raw: Partial<Record<ResumeDBColumnId, number>>,
