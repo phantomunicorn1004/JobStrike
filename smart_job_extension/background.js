@@ -99,16 +99,57 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void setAssistantDialogOpen(tabId, false);
 });
 
+async function preparePinnedSidePanel(tabId) {
+  if (!tabId) return { success: true };
+  await setAssistantDialogOpen(tabId, false);
+  try {
+    await ensureContentScriptAndSendMessage(tabId, { action: 'hideAssistantDialog' });
+  } catch (_) {
+    /* ignore */
+  }
+  if (chrome.sidePanel?.setOptions) {
+    try {
+      await chrome.sidePanel.setOptions({
+        tabId,
+        path: 'sidepanel.html',
+        enabled: true
+      });
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  return { success: true, mode: 'panel' };
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request && request.action === 'openSidePanel') {
     const tabId = request.tabId || (sender.tab && sender.tab.id);
-    if (chrome.sidePanel && chrome.sidePanel.open && tabId) {
-      chrome.sidePanel.open({ tabId }).then(() => sendResponse({ success: true })).catch((error) => {
-        sendResponse({ success: false, error: error.message });
+    if (!tabId || !chrome.sidePanel?.open) {
+      sendResponse({
+        success: false,
+        error: !tabId
+          ? 'No active tab.'
+          : 'Chrome side panel is unavailable in this browser.'
       });
-      return true;
+      return false;
     }
-    sendResponse({ success: false, error: 'Chrome sidePanel API is unavailable.' });
+    // Start open synchronously in the message turn to preserve the gesture.
+    const openPromise = chrome.sidePanel.open({ tabId });
+    void openPromise
+      .then(() => preparePinnedSidePanel(tabId))
+      .then((result) => sendResponse(result))
+      .catch((error) => {
+        sendResponse({ success: false, error: error?.message || String(error) });
+      });
+    return true;
+  }
+  if (request && request.action === 'preparePinnedSidePanel') {
+    const tabId = request.tabId || sender.tab?.id;
+    void preparePinnedSidePanel(tabId)
+      .then((result) => sendResponse(result))
+      .catch((error) => {
+        sendResponse({ success: false, error: error?.message || String(error) });
+      });
     return true;
   }
   if (request && request.action === 'setAssistantDialogOpen') {
@@ -135,6 +176,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return;
       }
+
+      const mode =
+        request.mode === 'left' || request.mode === 'right' || request.mode === 'panel'
+          ? request.mode
+          : 'movable';
+
+      if (mode === 'panel') {
+        // Open immediately inside this callback — do not await cleanup first.
+        try {
+          if (chrome.sidePanel?.setOptions) {
+            void chrome.sidePanel.setOptions({
+              tabId: tab.id,
+              path: 'sidepanel.html',
+              enabled: true
+            });
+          }
+          if (!chrome.sidePanel?.open) {
+            throw new Error('Chrome side panel is unavailable in this browser.');
+          }
+          await chrome.sidePanel.open({ tabId: tab.id });
+          void preparePinnedSidePanel(tab.id);
+          sendResponse({ success: true, mode: 'panel' });
+        } catch (error) {
+          sendResponse({
+            success: false,
+            error: error?.message || 'Could not open the pinned side panel.'
+          });
+        }
+        return;
+      }
+
       try {
         await chrome.scripting
           .executeScript({
@@ -145,10 +217,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         const response = await ensureContentScriptAndSendMessage(tab.id, {
           action: 'showAssistantDialog',
-          mode:
-            request.mode === 'left' || request.mode === 'right'
-              ? request.mode
-              : 'movable'
+          mode
         });
         if (response?.success) {
           await setAssistantDialogOpen(tab.id, true);
@@ -296,11 +365,27 @@ chrome.commands.onCommand.addListener((command) => {
     const assistantModeByCommand = {
       'open-assistant-left': 'left',
       'open-assistant-movable': 'movable',
-      'open-assistant-right': 'right'
+      'open-assistant-right': 'right',
+      'open-assistant-panel': 'panel'
     };
     const assistantMode = assistantModeByCommand[command];
     if (assistantMode) {
       try {
+        if (assistantMode === 'panel') {
+          if (chrome.sidePanel?.setOptions) {
+            void chrome.sidePanel.setOptions({
+              tabId: tab.id,
+              path: 'sidepanel.html',
+              enabled: true
+            });
+          }
+          if (!chrome.sidePanel?.open) {
+            throw new Error('Chrome side panel is unavailable in this browser.');
+          }
+          await chrome.sidePanel.open({ tabId: tab.id });
+          void preparePinnedSidePanel(tab.id);
+          return;
+        }
         await chrome.scripting
           .executeScript({
             target: { tabId: tab.id },

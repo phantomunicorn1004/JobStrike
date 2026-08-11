@@ -5727,9 +5727,13 @@
   }
 
   async function copyElementPickerText(text) {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+    } catch (_) {
+      /* fall through to execCommand */
     }
     const textarea = document.createElement('textarea');
     textarea.value = text;

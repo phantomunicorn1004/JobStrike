@@ -89,11 +89,11 @@ export function ResumeDBEditDialog({ row, open, onOpenChange, onSaved }: Props) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md rounded-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[min(85vh,720px)] max-w-md flex-col gap-0 overflow-hidden rounded-2xl p-0">
+        <DialogHeader className="shrink-0 border-b border-border/60 px-6 py-4 pr-12">
           <DialogTitle>Edit application</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-4 py-2">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
           <div className="grid gap-2">
             <Label htmlFor="edit-company">Company</Label>
             <Input
@@ -127,7 +127,8 @@ export function ResumeDBEditDialog({ row, open, onOpenChange, onSaved }: Props) 
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Extra job description or notes…"
-              rows={4}
+              rows={5}
+              className="field-sizing-fixed h-36 max-h-36 min-h-36 resize-none overflow-y-auto break-words"
             />
           </div>
           <div className="grid gap-2">
@@ -159,7 +160,7 @@ export function ResumeDBEditDialog({ row, open, onOpenChange, onSaved }: Props) 
             )}
           </div>
         </div>
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="shrink-0 gap-2 border-t border-border/60 px-6 py-4 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>

@@ -1635,25 +1635,25 @@ export function ResumeDBPageClient() {
             if (!open) setNoteViewRow(null);
           }}
         >
-          <DialogContent className="max-w-lg rounded-2xl">
-            <DialogHeader>
+          <DialogContent className="flex max-h-[min(85vh,720px)] max-w-lg flex-col gap-0 overflow-hidden rounded-2xl p-0">
+            <DialogHeader className="shrink-0 border-b border-border/60 px-6 py-4 pr-12">
               <DialogTitle>Note</DialogTitle>
             </DialogHeader>
-            <div className="space-y-2">
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-6 py-4">
               {(noteViewRow?.company || noteViewRow?.jobTitle) && (
-                <p className="text-sm text-muted-foreground">
+                <p className="shrink-0 text-sm text-muted-foreground">
                   {[noteViewRow?.jobTitle, noteViewRow?.company]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
               )}
-              <div className="max-h-[50vh] overflow-y-auto rounded-xl border border-border/60 bg-muted/30 p-3">
+              <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border/60 bg-muted/30 p-3">
                 <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
                   {noteViewRow?.note || "—"}
                 </p>
               </div>
             </div>
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="shrink-0 gap-2 border-t border-border/60 px-6 py-4 sm:gap-0">
               <Button
                 variant="outline"
                 onClick={() => setNoteViewRow(null)}

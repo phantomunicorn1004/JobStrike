@@ -165,11 +165,18 @@
   }
 
   async function copyTextToClipboard(text) {
+    if (typeof global.copyTextToClipboard === 'function' && global.copyTextToClipboard !== copyTextToClipboard) {
+      return global.copyTextToClipboard(text);
+    }
     const value = String(text || '').trim();
     if (!value) throw new Error('Nothing to copy.');
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-      return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return;
+      }
+    } catch (_) {
+      /* fall through */
     }
     const textarea = document.createElement('textarea');
     textarea.value = value;

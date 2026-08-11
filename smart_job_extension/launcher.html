@@ -20,7 +20,7 @@
         <div class="launcher-section-heading launcher-primary-heading">
           <div>
             <h2 class="launcher-section-title" id="openAssistantHeading">Open Job Assistant</h2>
-            <p class="launcher-hint">Choose how it opens on the current page.</p>
+            <p class="launcher-hint">Choose overlay dock, movable dialog, or Chrome’s pinned side panel.</p>
           </div>
           <button type="button" class="launcher-shortcut-btn" id="configureAssistantShortcutsBtn" title="Configure opening shortcuts">
             Set shortcuts
@@ -28,7 +28,7 @@
         </div>
 
         <div class="launcher-open-modes" role="group" aria-label="Job Assistant opening mode">
-          <button type="button" class="launcher-mode-btn" data-assistant-mode="left" title="Dock on the left">
+          <button type="button" class="launcher-mode-btn" data-assistant-mode="left" title="Dock overlay on the left">
             <span>Left</span>
             <kbd data-command-shortcut="open-assistant-left">Set hotkey</kbd>
           </button>
@@ -36,9 +36,13 @@
             <span>Movable</span>
             <kbd data-command-shortcut="open-assistant-movable">Set hotkey</kbd>
           </button>
-          <button type="button" class="launcher-mode-btn" data-assistant-mode="right" title="Dock on the right">
+          <button type="button" class="launcher-mode-btn" data-assistant-mode="right" title="Dock overlay on the right">
             <span>Right</span>
             <kbd data-command-shortcut="open-assistant-right">Set hotkey</kbd>
+          </button>
+          <button type="button" class="launcher-mode-btn" data-assistant-mode="panel" title="Chrome right-side pinned panel">
+            <span>Panel</span>
+            <kbd data-command-shortcut="open-assistant-panel">Set hotkey</kbd>
           </button>
         </div>
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Remote Helper Ext",
-  "version": "4.8.0",
+  "version": "4.9.0",
   "description": "Chrome extension for Remote Helper — autofill job applications, custom Q&A, and Resume DB registration.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -64,6 +64,9 @@
     },
     "open-assistant-right": {
       "description": "Open Job Assistant docked on the right"
+    },
+    "open-assistant-panel": {
+      "description": "Open Job Assistant in Chrome right-side pinned panel"
     }
   },
   "content_scripts": [
@@ -82,6 +85,7 @@
         "theme.css",
         "theme.js",
         "toast.js",
+        "clipboard.js",
         "ai-fill.js",
         "register-resume-db.js",
         "sidepanel.js",

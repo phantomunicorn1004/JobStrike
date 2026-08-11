@@ -93,8 +93,13 @@
     }
   }
 
+  function normalizeAssistantMode(mode) {
+    if (mode === 'left' || mode === 'right' || mode === 'panel') return mode;
+    return 'movable';
+  }
+
   function setAssistantMode(mode, persist = true) {
-    assistantMode = mode === 'left' || mode === 'right' ? mode : 'movable';
+    assistantMode = normalizeAssistantMode(mode);
     document.querySelectorAll('[data-assistant-mode]').forEach((button) => {
       const active = button.dataset.assistantMode === assistantMode;
       button.classList.toggle('active', active);
@@ -109,12 +114,64 @@
     });
   }
 
+  function openPinnedPanelFromLauncher() {
+    return new Promise((resolve, reject) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs?.[0];
+        if (!tab?.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
+          reject(
+            new Error(
+              'Open a regular web page (http/https) before opening Job Assistant.'
+            )
+          );
+          return;
+        }
+        if (!chrome.sidePanel?.open) {
+          reject(new Error('Chrome side panel is unavailable in this browser.'));
+          return;
+        }
+
+        // Must call open() in this user-gesture turn (popup click). Routing
+        // through the service worker with awaits drops the gesture token.
+        if (chrome.sidePanel.setOptions) {
+          void chrome.sidePanel.setOptions({
+            tabId: tab.id,
+            path: 'sidepanel.html',
+            enabled: true
+          });
+        }
+        chrome.sidePanel
+          .open({ tabId: tab.id })
+          .then(() => {
+            chrome.runtime.sendMessage(
+              { action: 'preparePinnedSidePanel', tabId: tab.id },
+              () => void chrome.runtime.lastError
+            );
+            resolve({ success: true, mode: 'panel' });
+          })
+          .catch((error) => {
+            reject(
+              error instanceof Error
+                ? error
+                : new Error(String(error || 'Could not open pinned panel.'))
+            );
+          });
+      });
+    });
+  }
+
   async function openAssistantDialog() {
     const sidebarBtn = document.getElementById('openSidebarBtn');
     if (sidebarBtn) sidebarBtn.disabled = true;
     setStatus('Opening Job Assistant…', 'info');
 
     try {
+      if (assistantMode === 'panel') {
+        await openPinnedPanelFromLauncher();
+        window.close();
+        return;
+      }
+
       const response = await chrome.runtime.sendMessage({
         action: 'openAssistantDialog',
         mode: assistantMode

@@ -47,6 +47,25 @@
     return VALID_MODES.has(mode) ? mode : 'movable';
   }
 
+  async function openPinnedPanelFromOverlay() {
+    hideAssistantDialog();
+    try {
+      chrome.storage.local.set({ [MODE_KEY]: 'panel' });
+    } catch (_) {
+      /* ignore */
+    }
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ action: 'openSidePanel' }, (response) => {
+          void chrome.runtime.lastError;
+          resolve(response || { success: false, error: 'Could not open pinned panel.' });
+        });
+      } catch (error) {
+        resolve({ success: false, error: error?.message || String(error) });
+      }
+    });
+  }
+
   function loadMode() {
     return new Promise((resolve) => {
       try {
@@ -226,6 +245,9 @@
   }
 
   async function setMode(mode, persist = true) {
+    if (mode === 'panel') {
+      return openPinnedPanelFromOverlay();
+    }
     const nextMode = normalizeMode(mode);
     if (currentMode === 'movable' && panelEl && !panelEl.hidden) {
       floatingGeom = readCurrentGeom();
@@ -445,10 +467,11 @@
               <button type="button" class="rh-mode" data-mode="left" title="Dock left" aria-label="Dock left">L</button>
               <button type="button" class="rh-mode" data-mode="movable" title="Movable dialog" aria-label="Movable dialog">◇</button>
               <button type="button" class="rh-mode" data-mode="right" title="Dock right" aria-label="Dock right">R</button>
+              <button type="button" class="rh-mode" data-mode="panel" id="rhPanelMode" title="Open Chrome pinned side panel" aria-label="Open pinned side panel">P</button>
             </div>
             <button type="button" class="rh-close" id="rhClose" aria-label="Close">×</button>
           </div>
-          <iframe class="rh-frame" id="rhFrame" title="Job Assistant"></iframe>
+          <iframe class="rh-frame" id="rhFrame" title="Job Assistant" allow="clipboard-write"></iframe>
           <div class="rh-resize" id="rhResize" aria-hidden="true"></div>
         </div>
       </div>
@@ -479,6 +502,10 @@
       button.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (button.dataset.mode === 'panel') {
+          void openPinnedPanelFromOverlay();
+          return;
+        }
         void setMode(button.dataset.mode);
       });
     });
@@ -661,6 +688,61 @@
   function isAssistantDialogOpen() {
     return Boolean(panelEl && !panelEl.hidden);
   }
+
+  async function copyTextOnHostPage(text) {
+    const value = String(text ?? '');
+    if (!value.trim()) throw new Error('Nothing to copy.');
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return;
+      }
+    } catch (_) {
+      /* fall through */
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', '');
+    textarea.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    try {
+      if (!document.execCommand('copy')) throw new Error('Copy failed.');
+    } finally {
+      textarea.remove();
+    }
+  }
+
+  window.addEventListener('message', (event) => {
+    const data = event.data;
+    if (!data || data.source !== 'remote-helper-sidepanel' || data.action !== 'copyText') {
+      return;
+    }
+    if (iframeEl && event.source && event.source !== iframeEl.contentWindow) {
+      return;
+    }
+    const reply = (ok, error) => {
+      try {
+        iframeEl?.contentWindow?.postMessage(
+          {
+            source: 'remote-helper-assistant',
+            action: 'copyTextResult',
+            id: data.id,
+            ok,
+            error: error || null
+          },
+          '*'
+        );
+      } catch (_) {
+        /* ignore */
+      }
+    };
+    copyTextOnHostPage(data.text)
+      .then(() => reply(true))
+      .catch((err) => reply(false, err?.message || 'Copy failed.'));
+  });
 
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (!request || !request.action) return false;

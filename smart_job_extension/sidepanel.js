@@ -1808,7 +1808,13 @@ async function copyProfileText(text) {
     return;
   }
   try {
-    await navigator.clipboard.writeText(value);
+    if (typeof copyTextToClipboard === 'function') {
+      await copyTextToClipboard(value);
+    } else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      throw new Error('Clipboard unavailable');
+    }
     showStatus('Copied to clipboard!', 'success', 2000);
   } catch (_) {
     const ta = document.createElement('textarea');
@@ -1818,7 +1824,7 @@ async function copyProfileText(text) {
     document.body.appendChild(ta);
     ta.select();
     try {
-      document.execCommand('copy');
+      if (!document.execCommand('copy')) throw new Error('Copy failed.');
       showStatus('Copied to clipboard!', 'success', 2000);
     } catch (err) {
       showStatus('Copy failed.', 'error');
