@@ -1586,6 +1586,8 @@ export function ResumeDBPageClient() {
                               className="h-8 w-8 shrink-0 rounded-lg"
                               title="Edit"
                               onClick={() => {
+                                // Avoid Radix dialog stacking artifacts when another dialog is open.
+                                setNoteViewRow(null);
                                 setEditRow(row);
                                 setEditOpen(true);
                               }}
@@ -1661,9 +1663,14 @@ export function ResumeDBPageClient() {
               <Button
                 onClick={() => {
                   if (!noteViewRow) return;
-                  setEditRow(noteViewRow);
-                  setEditOpen(true);
+                  const target = noteViewRow;
+                  // Close the note dialog first, then open the edit dialog on next tick.
+                  // This prevents the "over-floating / stacked" dialog positioning issue.
                   setNoteViewRow(null);
+                  setTimeout(() => {
+                    setEditRow(target);
+                    setEditOpen(true);
+                  }, 0);
                 }}
               >
                 Edit
