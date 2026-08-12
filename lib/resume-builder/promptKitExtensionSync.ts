@@ -79,7 +79,7 @@ function waitForBridgeResult<T extends { requestId: string; type: string }>(
 export async function syncPromptKitToExtension(
   profileId: number,
   kit: ProfilePromptKit,
-  timeoutMs = 1200,
+  timeoutMs = 2000,
 ): Promise<{ ok: boolean; synced: boolean; error?: string; kit?: ProfilePromptKit }> {
   if (typeof window === "undefined") {
     return { ok: false, synced: false, error: "Not in browser." };
@@ -122,7 +122,7 @@ export async function syncPromptKitToExtension(
 /** Read kit from extension storage when the bridge is present. */
 export async function fetchPromptKitFromExtension(
   profileId: number,
-  timeoutMs = 1200,
+  timeoutMs = 2000,
 ): Promise<{ available: boolean; exists: boolean; kit: ProfilePromptKit | null }> {
   if (typeof window === "undefined") {
     return { available: false, exists: false, kit: null };

@@ -16,11 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  buildPrompt,
-  DEFAULT_PROMPT_TEMPLATE,
-  REQUIRED_BUILT_RESUME_JSON_FIELDS,
-} from "@/lib/promptBuilder";
+import { REQUIRED_BUILT_RESUME_JSON_FIELDS } from "@/lib/promptBuilder";
 import {
   emptyProfilePromptKit,
   readProfilePromptKit,
@@ -55,8 +51,6 @@ function FieldBlock({
   value,
   onChange,
   onClear,
-  headerActions,
-  readOnly = false,
   placeholder,
   mono = false,
   rows = 8,
@@ -69,8 +63,6 @@ function FieldBlock({
   value: string;
   onChange?: (value: string) => void;
   onClear?: () => void;
-  headerActions?: React.ReactNode;
-  readOnly?: boolean;
   placeholder?: string;
   mono?: boolean;
   rows?: number;
@@ -86,11 +78,7 @@ function FieldBlock({
           </label>
           {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
         </div>
-        {headerActions ? (
-          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5">
-            {headerActions}
-          </div>
-        ) : onClear ? (
+        {onClear ? (
           <Button
             type="button"
             variant="ghost"
@@ -107,7 +95,6 @@ function FieldBlock({
         id={id}
         value={value}
         onChange={onChange ? (e) => onChange(e.target.value) : undefined}
-        readOnly={readOnly}
         disabled={disabled}
         placeholder={placeholder}
         rows={rows}
@@ -115,7 +102,7 @@ function FieldBlock({
         className={cn(
           "field-sizing-fixed w-full resize-y text-sm leading-relaxed",
           mono && "font-mono text-xs",
-          grow ? "min-h-[200px] flex-1" : "min-h-[120px]",
+          grow ? "min-h-[220px] flex-1" : "min-h-[160px]",
         )}
       />
     </div>
@@ -124,10 +111,7 @@ function FieldBlock({
 
 function kitEquals(a: ProfilePromptKit, b: ProfilePromptKit): boolean {
   return (
-    a.template === b.template &&
-    a.resumeTemplateJson === b.resumeTemplateJson &&
-    a.jobDescription === b.jobDescription &&
-    a.output === b.output
+    a.template === b.template && a.resumeTemplateJson === b.resumeTemplateJson
   );
 }
 
@@ -156,7 +140,6 @@ export function ResumeBuilderPageClient() {
       setKit(merged);
       setSavedKit(merged);
 
-      // If this browser's kit is newer (or extension empty), push it into the extension.
       const localIsNewer = merged === local && Boolean(local.updatedAt);
       const extensionMissing = !fromExt.exists;
       if (localIsNewer || (extensionMissing && Boolean(local.updatedAt))) {
@@ -273,7 +256,12 @@ export function ResumeBuilderPageClient() {
     }
     setSaving(true);
     try {
-      const next = writeProfilePromptKit(profileId, kit);
+      // Preserve JD / output for extension compatibility; this page no longer edits them.
+      const next = writeProfilePromptKit(profileId, {
+        ...kit,
+        jobDescription: kit.jobDescription || savedKit.jobDescription || "",
+        output: kit.output || savedKit.output || "",
+      });
       setKit(next);
       setSavedKit(next);
       const sync = await syncPromptKitToExtension(profileId, next);
@@ -302,79 +290,6 @@ export function ResumeBuilderPageClient() {
     }
   };
 
-  const handleBuild = () => {
-    if (profileId == null) {
-      toast.error("Select a profile first.");
-      return;
-    }
-    const { prompt, missingPlaceholders } = buildPrompt(
-      kit.template,
-      kit.resumeTemplateJson,
-      kit.jobDescription,
-    );
-    patchKit({ output: prompt });
-    if (missingPlaceholders.length > 0) {
-      toast.warning(`Built with empty: ${missingPlaceholders.join(", ")}`);
-      return;
-    }
-    toast.success("Prompt built");
-  };
-
-  const handleBuildAndCopy = async () => {
-    if (profileId == null) {
-      toast.error("Select a profile first.");
-      return;
-    }
-    const { prompt, missingPlaceholders } = buildPrompt(
-      kit.template,
-      kit.resumeTemplateJson,
-      kit.jobDescription,
-    );
-    patchKit({ output: prompt });
-    if (!prompt.trim()) {
-      toast.error("Nothing to copy.");
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(prompt);
-      if (missingPlaceholders.length > 0) {
-        toast.warning(`Copied (empty: ${missingPlaceholders.join(", ")})`);
-      } else {
-        toast.success("Built and copied");
-      }
-    } catch {
-      toast.error("Built, but copy failed");
-    }
-  };
-
-  const handleCopy = async () => {
-    if (!kit.output.trim()) {
-      toast.error("Build a prompt first.");
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(kit.output);
-      toast.success("Copied");
-    } catch {
-      toast.error("Copy failed");
-    }
-  };
-
-  const handleResetTemplate = () => {
-    patchKit({ template: DEFAULT_PROMPT_TEMPLATE });
-    toast.success("Template reset");
-  };
-
-  const handleClearInputs = () => {
-    patchKit({ resumeTemplateJson: "", jobDescription: "" });
-    toast.success("Inputs cleared");
-  };
-
-  const handleClearAll = () => {
-    setKit(emptyProfilePromptKit());
-    toast.success("Cleared all");
-  };
-
   const healthLabel = (() => {
     switch (health.status) {
       case "checking":
@@ -399,8 +314,9 @@ export function ResumeBuilderPageClient() {
           <div>
             <h1 className="text-lg font-semibold">Resume Builder</h1>
             <p className="text-xs text-muted-foreground">
-              Per-profile prompt kit for the GPT-assisted JSON path. Built JSON must
-              include{" "}
+              Edit and save the per-profile prompt kit (synced to the extension). Build
+              &amp; Copy and job description live in the extension Register tab. Built JSON
+              must include{" "}
               {REQUIRED_BUILT_RESUME_JSON_FIELDS.map((field) => (
                 <code key={field} className="mx-0.5">
                   {field}
@@ -480,7 +396,7 @@ export function ResumeBuilderPageClient() {
               ) : dirty ? (
                 "Unsaved changes for this profile."
               ) : savedKit.updatedAt ? (
-                `Last saved ${new Date(savedKit.updatedAt).toLocaleString()} (local).`
+                `Last saved ${new Date(savedKit.updatedAt).toLocaleString()}.`
               ) : (
                 "No saved kit yet for this profile (uses default template)."
               )}
@@ -489,7 +405,7 @@ export function ResumeBuilderPageClient() {
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
-              onClick={handleSave}
+              onClick={() => void handleSave()}
               disabled={editorsDisabled || saving || !dirty}
             >
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -498,118 +414,32 @@ export function ResumeBuilderPageClient() {
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
-          <div className="flex min-h-0 flex-col gap-4">
-            <FieldBlock
-              id="rb-prompt-template"
-              label="Original prompt"
-              hint="Template with placeholders {resume_template_json} and {job_description}."
-              value={kit.template}
-              onChange={(value) => patchKit({ template: value })}
-              onClear={() => patchKit({ template: "" })}
-              mono
-              rows={8}
-              grow
-              disabled={editorsDisabled}
-            />
-
-            <FieldBlock
-              id="rb-resume-template-json"
-              label="resume_template_json"
-              hint='Include "resume_template" (e.g. Jose / Oscar) in the base JSON when possible.'
-              value={kit.resumeTemplateJson}
-              onChange={(value) => patchKit({ resumeTemplateJson: value })}
-              onClear={() => patchKit({ resumeTemplateJson: "" })}
-              placeholder='{"resume_template":"Jose","profile_title":{...}}'
-              mono
-              rows={6}
-              disabled={editorsDisabled}
-            />
-
-            <FieldBlock
-              id="rb-job-description"
-              label="job_description"
-              value={kit.jobDescription}
-              onChange={(value) => patchKit({ jobDescription: value })}
-              onClear={() => patchKit({ jobDescription: "" })}
-              placeholder="Paste job description..."
-              rows={6}
-              disabled={editorsDisabled}
-            />
-          </div>
-
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
           <FieldBlock
-            id="rb-prompt-output"
-            label="Final prompt"
-            hint="Build for the selected profile, then copy into GPT."
-            value={kit.output}
-            readOnly
-            placeholder={
-              editorsDisabled
-                ? "Select a profile to build a prompt…"
-                : "Output appears here..."
-            }
+            id="rb-prompt-template"
+            label="Original prompt"
+            hint="Template with placeholders {resume_template_json} and {job_description}. The extension fills job description from Note when building."
+            value={kit.template}
+            onChange={(value) => patchKit({ template: value })}
+            onClear={() => patchKit({ template: "" })}
             mono
-            rows={20}
+            rows={12}
             grow
             disabled={editorsDisabled}
-            headerActions={
-              <>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleBuild}
-                  disabled={editorsDisabled}
-                >
-                  Build
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void handleBuildAndCopy()}
-                  disabled={editorsDisabled}
-                >
-                  Build + Copy
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void handleCopy()}
-                  disabled={editorsDisabled || !kit.output.trim()}
-                >
-                  Copy
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleResetTemplate}
-                  disabled={editorsDisabled}
-                >
-                  Reset template
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleClearInputs}
-                  disabled={editorsDisabled}
-                >
-                  Clear inputs
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={handleClearAll}
-                  disabled={editorsDisabled}
-                >
-                  Clear all
-                </Button>
-              </>
-            }
+          />
+
+          <FieldBlock
+            id="rb-resume-template-json"
+            label="resume_template_json"
+            hint='Include "resume_template" (e.g. Jose / Oscar) in the base JSON when possible.'
+            value={kit.resumeTemplateJson}
+            onChange={(value) => patchKit({ resumeTemplateJson: value })}
+            onClear={() => patchKit({ resumeTemplateJson: "" })}
+            placeholder='{"resume_template":"Jose","profile_title":{...}}'
+            mono
+            rows={10}
+            grow
+            disabled={editorsDisabled}
           />
         </div>
       </div>

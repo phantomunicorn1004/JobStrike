@@ -1845,6 +1845,27 @@
     }
   }
 
+  function wirePromptKitStorageSync() {
+    if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return;
+    if (wirePromptKitStorageSync._wired) return;
+    wirePromptKitStorageSync._wired = true;
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      const selected = getSelectedRegisterProfileId();
+      if (!selected) return;
+
+      const api = global.SmartJobPromptKit;
+      const key = api?.kitStorageKey?.(selected) || `promptKit_v1_${selected}`;
+      if (!changes[key]) return;
+
+      const kitDetails = document.getElementById('regPromptKitBlock');
+      const fillEditor = Boolean(kitDetails?.open);
+      void refreshPromptKitUi({ fillEditor });
+      setRegisterStatus('Prompt kit updated from website sync.', 'info');
+    });
+  }
+
   function wirePromptKitControls(showStatus) {
     const buildBtn = document.getElementById('regBuildCopyPromptBtn');
     const saveBtn = document.getElementById('regPromptKitSaveBtn');
@@ -1903,6 +1924,7 @@
     wireResumeJsonLiveFill(showStatus);
     wireJson2docxGenerate(showStatus);
     wirePromptKitControls(showStatus);
+    wirePromptKitStorageSync();
     startConnectionPolling();
     syncResumeBuilderActionButtons();
     setGenerateProgress({ hidden: true, percent: 0, message: '' });

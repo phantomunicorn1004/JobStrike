@@ -33,15 +33,6 @@ Instructions:
 
 Return valid JSON only. No markdown fences, no commentary.`;
 
-  function isLikelyAppOrigin() {
-    const host = String(location.hostname || '').toLowerCase();
-    if (host === 'localhost' || host === '127.0.0.1') return true;
-    if (host.endsWith('.vercel.app')) return true;
-    return false;
-  }
-
-  if (!isLikelyAppOrigin()) return;
-
   function kitStorageKey(profileId) {
     return `${KIT_PREFIX}${profileId}`;
   }

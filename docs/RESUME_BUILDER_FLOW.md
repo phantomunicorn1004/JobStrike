@@ -10,7 +10,7 @@ This doc covers the Chrome extension Register tab, website Resume Builder / Sett
 
 | Piece | Role |
 |-------|------|
-| Website `/resume-builder` | Per-profile prompt kit (browser `localStorage` + sync to extension) |
+| Website `/resume-builder` | Edit/save per-profile prompt kit (template + resume JSON); syncs to extension |
 | Website `/settings` | Enable json2docx URL + output mode; Test connection |
 | Website `/prompt-builder`, `/resume-tailor` | Original tools (unchanged) |
 | Extension Register | Prompt kit (`chrome.storage`), Build & Copy Prompt, paste JSON, Generate Files, Register |
@@ -18,6 +18,18 @@ This doc covers the Chrome extension Register tab, website Resume Builder / Sett
 | `json2docx/server.py` | Local API on `127.0.0.1:8765` → writes files to Downloads |
 
 **Note:** Prompt kits sync between website Resume Builder and the extension when the extension is installed and this site is open (content-script bridge → `chrome.storage` key `promptKit_v1_{profileId}`). Without the extension, the website keeps a localStorage cache only.
+
+### How to sync (website → extension)
+
+1. Reload the unpacked extension in `chrome://extensions` (needed after code updates).
+2. Open `/resume-builder` in a normal Chrome tab **with the extension enabled** (refresh the page after reload).
+3. Select the same **Profile** you use in the extension.
+4. Click **Save prompt kit**.
+5. Toast should say **“Prompt kit saved and synced to the extension.”**  
+   If it says it only saved in the browser, the bridge is not active — refresh the page / check the extension is enabled.
+6. In the extension Register tab, select that profile (or re-open Prompt kit). Status should update; Build & Copy uses the synced kit.
+
+Extension → website: open `/resume-builder` again (or keep it open); newer kits merge by `updatedAt`.
 
 ---
 
@@ -99,8 +111,8 @@ Reload the extension after code updates.
 
 1. Sign in as a member.
 2. **Settings → json2docx local server:** enable + Test (browser calls localhost; CORS is open on the Python server).
-3. **Resume Builder:** select Profile, edit/save kit, Build + Copy.
-4. Keep **Resume Tailor** for the workflow-canvas path.
+3. **Resume Builder:** select Profile, edit Original prompt / resume JSON, Save kit (syncs to extension).
+4. Keep **Resume Tailor** for the workflow-canvas path. Build & Copy runs in the extension.
 
 ---
 
@@ -135,7 +147,7 @@ Reload the extension after code updates.
 ### B. Website
 
 - [ ] `/settings` → enable json2docx → Test connection succeeds while server runs
-- [ ] `/resume-builder` → select Profile → Save kit → Build + Copy
+- [ ] `/resume-builder` → select Profile → edit kit → Save (sync toast)
 - [ ] `/prompt-builder` and `/resume-tailor` still open (unchanged)
 
 ### C. Extension Register
