@@ -349,6 +349,10 @@
                   <span class="backend-connection-dot" id="backendConnectionDot"></span>
                   <span class="backend-connection-label" id="backendConnectionLabel">Checking connection…</span>
                 </div>
+                <div class="backend-connection-row" id="json2docxConnectionRow" aria-live="polite" title="Local json2docx server">
+                  <span class="backend-connection-dot" id="json2docxConnectionDot"></span>
+                  <span class="backend-connection-label" id="json2docxConnectionLabel">json2docx…</span>
+                </div>
                 <span class="register-drive-status is-off" id="registerDriveStatus" hidden></span>
               </div>
               <div class="register-toolbar-actions">
@@ -497,6 +501,42 @@
           <p class="muted register-settings-hint" id="backendSettingsHint" hidden></p>
         </div>
         <div class="card register-card">
+          <h2>json2docx local server</h2>
+          <p class="muted">Convert built resume JSON to DOCX/PDF via the local Python server (<code>json2docx/server.py</code>). Used later for Generate Files on Register.</p>
+          <div class="backend-connection-row" id="settingsJson2docxConnectionRow" aria-live="polite">
+            <span class="backend-connection-dot" id="settingsJson2docxConnectionDot"></span>
+            <span class="backend-connection-label" id="settingsJson2docxConnectionLabel">Checking json2docx…</span>
+          </div>
+          <form id="json2docxSettingsForm" class="form-grid register-form" onsubmit="return false">
+            <label class="toggle-row full" for="json2docxEnabledSetting">
+              <span class="toggle-text">
+                <strong>Enable local json2docx</strong>
+                <small class="muted">Requires server running on this machine</small>
+              </span>
+              <span class="toggle-switch">
+                <input type="checkbox" id="json2docxEnabledSetting" role="switch" aria-label="Enable local json2docx">
+                <span class="toggle-slider" aria-hidden="true"></span>
+              </span>
+            </label>
+            <label class="full">Server URL
+              <input type="url" id="json2docxBaseUrlSetting" placeholder="http://127.0.0.1:8765" autocomplete="off" spellcheck="false">
+              <small class="muted">Default: <code>http://127.0.0.1:8765</code></small>
+            </label>
+            <label class="full">Default output mode
+              <select id="json2docxOutputModeSetting" aria-label="json2docx output mode">
+                <option value="docx">DOCX only</option>
+                <option value="pdf">PDF only</option>
+                <option value="both">DOCX + PDF</option>
+              </select>
+            </label>
+            <div class="button-row full wrap">
+              <button class="btn primary" type="submit" id="saveJson2docxSettingsBtn">Save</button>
+              <button class="btn" type="button" id="testJson2docxConnectionBtn">Test connection</button>
+            </div>
+          </form>
+          <p class="muted register-settings-hint" id="json2docxSettingsHint" hidden></p>
+        </div>
+        <div class="card register-card">
           <h2>Duplicate check</h2>
           <p class="muted">Controls how far back company and job-link duplicate checks look on Register.</p>
           <label class="full" title="Duplicate checks compare only applications within this many days. Use 0 for all time.">
@@ -622,6 +662,7 @@
   <script src="clipboard.js"></script>
   <script src="ai-fill.js"></script>
   <script src="resume-json-mapper.js"></script>
+  <script src="json2docx-client.js"></script>
   <script src="register-resume-db.js"></script>
   <script src="sidepanel.js"></script>
 </body>

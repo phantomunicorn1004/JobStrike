@@ -620,6 +620,9 @@ function init() {
   if (window.SmartJobRegisterResumeDb) {
     window.SmartJobRegisterResumeDb.initRegisterResumeDb(showStatus);
   }
+  if (window.SmartJobJson2Docx) {
+    window.SmartJobJson2Docx.initJson2docxClient(showStatus);
+  }
   renderProfileForm();
   wireProfileDemographicForm();
   wireProfileEducationForm();
