@@ -100,6 +100,153 @@
     }
   }
 
+  function pickPreferredGeneratedFiles(files, outputMode) {
+    const list = Array.isArray(files) ? files : [];
+    const mode = normalizeOutputMode(outputMode);
+    const preferPdf = mode === 'pdf';
+
+    function pickKind(kind) {
+      const matches = list.filter((f) => f && f.kind === kind && f.file);
+      if (!matches.length) return null;
+      const preferredExt = preferPdf ? 'pdf' : 'docx';
+      return (
+        matches.find((f) => String(f.format || '').toLowerCase() === preferredExt) ||
+        matches.find((f) => String(f.format || '').toLowerCase() === 'docx') ||
+        matches.find((f) => String(f.format || '').toLowerCase() === 'pdf') ||
+        matches[0]
+      );
+    }
+
+    return {
+      resume: pickKind('resume'),
+      coverLetter: pickKind('cover_letter'),
+    };
+  }
+
+  async function downloadGeneratedFile(baseUrl, fileInfo, { timeoutMs = 60000 } = {}) {
+    const params = new URLSearchParams();
+    if (fileInfo?.path) params.set('path', fileInfo.path);
+    else if (fileInfo?.filename) params.set('filename', fileInfo.filename);
+    else throw new Error('Missing download path/filename');
+
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const response = await fetch(`${apiUrl(baseUrl, '/download')}?${params.toString()}`, {
+        method: 'GET',
+        signal: controller?.signal,
+      });
+      if (!response.ok) {
+        let message = `Download failed (${response.status})`;
+        try {
+          const errBody = await response.json();
+          if (errBody?.error) message = errBody.error;
+        } catch (_) {
+          // ignore
+        }
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      const filename = fileInfo.filename || 'download.docx';
+      const type =
+        blob.type ||
+        (String(filename).toLowerCase().endsWith('.pdf')
+          ? 'application/pdf'
+          : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      const file = new File([blob], filename, { type });
+      return {
+        kind: fileInfo.kind || 'resume',
+        format: fileInfo.format || '',
+        path: fileInfo.path || '',
+        filename,
+        file,
+      };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * POST /generate then download each returned file as a File object.
+   * @param {object|string} resumeJson
+   * @param {{ outputMode?: string, onProgress?: Function }} [options]
+   */
+  async function generateAndDownloadFiles(resumeJson, options = {}) {
+    const config = await getJson2docxConfig();
+    if (!config.enabled) {
+      throw new Error('Enable local json2docx in Settings first.');
+    }
+
+    const outputMode = normalizeOutputMode(options.outputMode || config.outputMode);
+    const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+    const baseUrl = config.baseUrl;
+
+    onProgress?.({ stage: 'health', percent: 5, message: 'Checking json2docx server…' });
+    await fetchHealth(baseUrl, { timeoutMs: 3000 });
+
+    onProgress?.({ stage: 'generate', percent: 20, message: 'Converting resume JSON…' });
+    const generateController =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const generateTimer = generateController
+      ? setTimeout(() => generateController.abort(), options.generateTimeoutMs || 180000)
+      : null;
+
+    let generatePayload;
+    try {
+      const response = await fetch(apiUrl(baseUrl, '/generate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          json: resumeJson,
+          output_mode: outputMode,
+        }),
+        signal: generateController?.signal,
+      });
+      generatePayload = await response.json().catch(() => ({}));
+      if (!response.ok || !generatePayload?.ok) {
+        throw new Error(
+          generatePayload?.error || `Generate failed (${response.status})`
+        );
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        throw new Error('Generate timed out. Check the json2docx server console.');
+      }
+      throw err;
+    } finally {
+      if (generateTimer) clearTimeout(generateTimer);
+    }
+
+    const remoteFiles = Array.isArray(generatePayload.files) ? generatePayload.files : [];
+    if (!remoteFiles.length) {
+      throw new Error('Generate succeeded but returned no files.');
+    }
+
+    const downloaded = [];
+    for (let i = 0; i < remoteFiles.length; i += 1) {
+      const info = remoteFiles[i];
+      const percent = 40 + Math.round(((i + 1) / remoteFiles.length) * 55);
+      onProgress?.({
+        stage: 'download',
+        percent,
+        message: `Downloading ${info.filename || info.kind || 'file'}…`,
+      });
+      downloaded.push(await downloadGeneratedFile(baseUrl, info));
+    }
+
+    const preferred = pickPreferredGeneratedFiles(downloaded, outputMode);
+    onProgress?.({ stage: 'done', percent: 100, message: 'Files ready.' });
+
+    return {
+      ok: true,
+      template: generatePayload.template || '',
+      outputMode,
+      files: downloaded,
+      preferred,
+      downloads: generatePayload.downloads || '',
+    };
+  }
+
   function setConnectionUi({ enabled, online, label }) {
     const rows = [
       {
@@ -298,6 +445,9 @@
     checkJson2docxHealth,
     loadJson2docxSettingsForm,
     initJson2docxClient,
+    pickPreferredGeneratedFiles,
+    downloadGeneratedFile,
+    generateAndDownloadFiles,
     getLastHealth: () => ({ ...lastHealth }),
   };
 })(typeof window !== 'undefined' ? window : self);

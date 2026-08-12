@@ -373,8 +373,18 @@
                 ></textarea>
                 <span class="register-resume-json-meta">
                   <small class="muted" id="regResumeJsonHint">Fills job title, company, and note from JSON. Job link stays from the current tab / Refresh.</small>
-                  <button type="button" class="btn small" id="regResumeJsonClearBtn" hidden>Clear JSON</button>
+                  <span class="register-resume-json-actions">
+                    <button type="button" class="btn small primary" id="regGenerateFilesBtn" title="Convert JSON via local json2docx and attach files">Generate Files</button>
+                    <button type="button" class="btn small" id="regResumeJsonClearBtn" hidden>Clear JSON</button>
+                  </span>
                 </span>
+                <div class="register-generate-progress" id="regGenerateProgress" hidden>
+                  <div class="register-progress-track" aria-hidden="true">
+                    <div class="register-progress-fill" id="regGenerateProgressFill"></div>
+                  </div>
+                  <small class="muted" id="regGenerateProgressLabel">Generating…</small>
+                </div>
+                <div class="register-generated-attachments" id="regGeneratedAttachments" hidden></div>
               </label>
               <label class="full">Job title
                 <span class="register-field-with-action">

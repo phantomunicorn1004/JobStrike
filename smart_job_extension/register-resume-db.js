@@ -18,6 +18,7 @@
   let profilesLoadSeq = 0;
   let backendConnected = false;
   let websiteDriveStatus = null;
+  let autoAttachedFromJson2docx = { resume: false, cover: false };
 
   function normalizeBackendUrl(url) {
     const trimmed = String(url || '').trim().replace(/\/+$/, '');
@@ -955,7 +956,9 @@
     const { resume, cover } = getRegisterFileInputs();
     if (resume) resume.value = '';
     if (cover) cover.value = '';
+    autoAttachedFromJson2docx = { resume: false, cover: false };
     updateRegisterComboDropUi();
+    renderGeneratedAttachmentChips();
   }
 
   function assignFileToInput(input, file) {
@@ -978,7 +981,12 @@
 
     assignFileToInput(resume, result.resume || null);
     assignFileToInput(cover, result.cover || null);
+    autoAttachedFromJson2docx = {
+      resume: false,
+      cover: false,
+    };
     updateRegisterComboDropUi();
+    renderGeneratedAttachmentChips();
 
     if (result.warning) {
       setRegisterStatus(result.warning, 'info');
@@ -1510,6 +1518,173 @@
     }
   }
 
+  function setGenerateProgress({ hidden = false, percent = 0, message = '' } = {}) {
+    const wrap = document.getElementById('regGenerateProgress');
+    const fill = document.getElementById('regGenerateProgressFill');
+    const label = document.getElementById('regGenerateProgressLabel');
+    if (wrap) wrap.hidden = Boolean(hidden);
+    if (fill) fill.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
+    if (label) label.textContent = message || 'Working…';
+  }
+
+  function renderGeneratedAttachmentChips() {
+    const host = document.getElementById('regGeneratedAttachments');
+    if (!host) return;
+    const { resume, cover } = getRegisterFileInputs();
+    const resumeFile = resume?.files?.[0] || null;
+    const coverFile = cover?.files?.[0] || null;
+    const chips = [];
+
+    if (resumeFile && autoAttachedFromJson2docx.resume) {
+      chips.push({
+        slot: 'resume',
+        label: `Resume · ${resumeFile.name}`,
+      });
+    }
+    if (coverFile && autoAttachedFromJson2docx.cover) {
+      chips.push({
+        slot: 'cover',
+        label: `Cover · ${coverFile.name}`,
+      });
+    }
+
+    if (!chips.length) {
+      host.hidden = true;
+      host.innerHTML = '';
+      return;
+    }
+
+    host.hidden = false;
+    host.innerHTML = chips
+      .map(
+        (chip) => `
+      <span class="register-attach-chip" data-slot="${chip.slot}">
+        <span class="register-attach-chip-label" title="${escapeHtml(chip.label)}">${escapeHtml(chip.label)}</span>
+        <button type="button" class="register-attach-chip-remove" data-remove-slot="${chip.slot}" aria-label="Remove ${chip.slot}">×</button>
+      </span>`
+      )
+      .join('');
+
+    host.querySelectorAll('[data-remove-slot]').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const slot = btn.getAttribute('data-remove-slot');
+        const inputs = getRegisterFileInputs();
+        if (slot === 'resume') {
+          assignFileToInput(inputs.resume, null);
+          autoAttachedFromJson2docx.resume = false;
+        } else if (slot === 'cover') {
+          assignFileToInput(inputs.cover, null);
+          autoAttachedFromJson2docx.cover = false;
+        }
+        updateRegisterComboDropUi();
+        renderGeneratedAttachmentChips();
+        setRegisterStatus(`Removed ${slot} attachment.`, 'info');
+      });
+    });
+  }
+
+  function attachGeneratedFilesToRegister(preferred) {
+    const inputs = getRegisterFileInputs();
+    const resumeFile = preferred?.resume?.file || null;
+    const coverFile = preferred?.coverLetter?.file || null;
+
+    // Re-generate replaces previous auto-attached set.
+    assignFileToInput(inputs.resume, resumeFile);
+    assignFileToInput(inputs.cover, coverFile);
+    autoAttachedFromJson2docx = {
+      resume: Boolean(resumeFile),
+      cover: Boolean(coverFile),
+    };
+    updateRegisterComboDropUi();
+    renderGeneratedAttachmentChips();
+    return { resumeFile, coverFile };
+  }
+
+  async function generateFilesFromResumeJson(showStatus) {
+    const api = global.SmartJobJson2Docx;
+    const mapper = global.SmartJobResumeJsonMapper;
+    const btn = document.getElementById('regGenerateFilesBtn');
+    const ta = document.getElementById('regResumeJson');
+    const raw = String(ta?.value || '').trim();
+
+    if (!api?.generateAndDownloadFiles) {
+      throw new Error('json2docx client is not loaded.');
+    }
+    if (!raw) {
+      throw new Error('Paste built resume JSON first.');
+    }
+
+    const parsed = mapper?.extractRegisterFieldsFromResumeJsonText?.(raw);
+    if (!parsed?.ok) {
+      throw new Error(parsed?.error || 'Invalid resume JSON.');
+    }
+    if (!parsed.fields?.resumeTemplate) {
+      throw new Error('JSON must include resume_template (template folder name).');
+    }
+
+    // Keep Register draft in sync before generate.
+    applyResumeJsonToRegisterForm(raw, { silent: true });
+
+    if (btn) btn.disabled = true;
+    setGenerateProgress({ hidden: false, percent: 8, message: 'Starting…' });
+    setRegisterStatus('Generating resume files via json2docx…', 'info');
+
+    try {
+      const result = await api.generateAndDownloadFiles(parsed.data, {
+        onProgress: ({ percent, message }) => {
+          setGenerateProgress({
+            hidden: false,
+            percent: percent ?? 0,
+            message: message || 'Working…',
+          });
+        },
+      });
+
+      const attached = attachGeneratedFilesToRegister(result.preferred);
+      const names = [];
+      if (attached.resumeFile) names.push(attached.resumeFile.name);
+      if (attached.coverFile) names.push(attached.coverFile.name);
+      if (!names.length) {
+        throw new Error('No resume/cover files were returned to attach.');
+      }
+
+      const msg = `Generated and attached: ${names.join(' · ')}`;
+      setGenerateProgress({ hidden: false, percent: 100, message: msg });
+      setRegisterStatus(msg, 'success');
+      if (showStatus) showStatus(msg, 'success');
+      return result;
+    } catch (err) {
+      const message = err?.message || String(err);
+      setGenerateProgress({ hidden: false, percent: 100, message: message });
+      setRegisterStatus(message, 'error');
+      updateResumeJsonHint(message, 'error');
+      if (showStatus) showStatus(message, 'error');
+      throw err;
+    } finally {
+      if (btn) btn.disabled = false;
+      setTimeout(() => {
+        const label = document.getElementById('regGenerateProgressLabel');
+        const isError = document.getElementById('registerStatus')?.classList.contains('is-error');
+        if (!isError) setGenerateProgress({ hidden: true, percent: 0, message: '' });
+        else if (label) {
+          // keep error visible briefly; user can generate again
+        }
+      }, 1200);
+    }
+  }
+
+  function wireJson2docxGenerate(showStatus) {
+    const btn = document.getElementById('regGenerateFilesBtn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      generateFilesFromResumeJson(showStatus).catch(() => {
+        // errors already surfaced in UI
+      });
+    });
+  }
+
   function initRegisterResumeDb(showStatus) {
     const copyJdBtn = document.getElementById('regCopyJdBtn');
     const registerBtn = document.getElementById('registerJobBtn');
@@ -1521,6 +1696,7 @@
     wireProfileSelectPersistence();
     wireDuplicateWindowSetting();
     wireResumeJsonLiveFill(showStatus);
+    wireJson2docxGenerate(showStatus);
     startConnectionPolling();
 
     document.querySelectorAll('.tab-main[data-tab="register"]').forEach((tabBtn) => {

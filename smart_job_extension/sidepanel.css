@@ -2098,6 +2098,76 @@ input[type="range"] { padding: 0; height: 24px; }
   margin-top: 4px;
 }
 
+.register-resume-json-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.register-generate-progress {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.register-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 25%, transparent);
+  overflow: hidden;
+}
+
+.register-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--accent, #2563eb);
+  transition: width 0.2s ease;
+}
+
+.register-generated-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.register-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border, #cbd5e1) 80%, transparent);
+  background: color-mix(in srgb, var(--surface, #fff) 92%, var(--muted));
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.register-attach-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.register-attach-chip-remove {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.register-attach-chip-remove:hover {
+  color: var(--danger);
+}
+
 #regResumeJsonHint.is-error {
   color: var(--danger);
 }
