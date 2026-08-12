@@ -2082,6 +2082,30 @@ input[type="range"] { padding: 0; height: 24px; }
   margin-top: 0;
 }
 
+.register-resume-json {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  min-height: 88px;
+  resize: vertical;
+}
+
+.register-resume-json-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+#regResumeJsonHint.is-error {
+  color: var(--danger);
+}
+
+#regResumeJsonHint.is-success {
+  color: var(--success, #1a7f4b);
+}
+
 .register-file-field {
   display: grid;
   gap: 6px;

@@ -2425,6 +2425,9 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
   const company = response.company_name || '';
   const jobLink = response.job_link || tab.url || '';
   const jobDescription = response.job_description || '';
+  const preferResumeJson = Boolean(
+    window.SmartJobRegisterResumeDb?.hasActiveResumeJsonOverride?.()
+  );
 
   const setValue = (id, value) => {
     const el = document.getElementById(id);
@@ -2434,22 +2437,35 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
   setValue('jobCompany', company);
   setValue('jobTitle', jobTitle);
   setValue('jobLink', jobLink);
-  setValue('regJobTitle', jobTitle);
-  setValue('regCompany', company);
+
+  // Job link always comes from the tab. Title/company/note prefer built resume JSON when active.
   setValue('regJobLink', jobLink);
-  setValue('regNote', jobDescription);
+  if (!preferResumeJson) {
+    setValue('regJobTitle', jobTitle);
+    setValue('regCompany', company);
+    setValue('regNote', jobDescription);
+  }
 
   const urlEl = document.getElementById('currentUrl');
   if (urlEl) urlEl.textContent = jobLink;
 
   const regStatus = document.getElementById('registerStatus');
   if (regStatus) {
-    regStatus.textContent = 'Job info loaded from current tab.';
+    regStatus.textContent = preferResumeJson
+      ? 'Job link refreshed from tab. Title/company/note kept from resume JSON.'
+      : 'Job info loaded from current tab.';
     regStatus.className = 'register-status is-success';
     regStatus.hidden = false;
   }
 
-  if (showSuccess) showStatus('Job info refreshed from current tab.', 'success');
+  if (showSuccess) {
+    showStatus(
+      preferResumeJson
+        ? 'Job link refreshed. Register title/company/note kept from resume JSON.'
+        : 'Job info refreshed from current tab.',
+      'success'
+    );
+  }
   return { jobTitle, company, jobLink };
 }
 

@@ -359,9 +359,22 @@
           </div>
           <div class="register-body" id="registerBackendPanel">
             <form class="form-grid register-form" id="registerForm" onsubmit="return false">
+              <label class="full">Built resume JSON
+                <textarea
+                  id="regResumeJson"
+                  class="register-resume-json"
+                  rows="4"
+                  spellcheck="false"
+                  placeholder='Paste built resume JSON (must include job_title, company_name, job_description, resume_template)…'
+                ></textarea>
+                <span class="register-resume-json-meta">
+                  <small class="muted" id="regResumeJsonHint">Fills job title, company, and note from JSON. Job link stays from the current tab / Refresh.</small>
+                  <button type="button" class="btn small" id="regResumeJsonClearBtn" hidden>Clear JSON</button>
+                </span>
+              </label>
               <label class="full">Job title
                 <span class="register-field-with-action">
-                  <input id="regJobTitle" type="text" placeholder="Job title">
+                  <input id="regJobTitle" type="text" placeholder="Job title" data-fill-source="">
                   <span class="register-field-actions">
                     <button type="button" class="register-field-action-btn" id="regJobTitleCopyBtn" title="Copy job title" aria-label="Copy job title">
                       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -608,6 +621,7 @@
   <script src="toast.js"></script>
   <script src="clipboard.js"></script>
   <script src="ai-fill.js"></script>
+  <script src="resume-json-mapper.js"></script>
   <script src="register-resume-db.js"></script>
   <script src="sidepanel.js"></script>
 </body>

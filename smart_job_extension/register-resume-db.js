@@ -1379,6 +1379,137 @@
     });
   }
 
+  let resumeJsonOverrideActive = false;
+  let resumeJsonApplyTimer = null;
+
+  function setRegisterFieldValue(id, value, source) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = value == null ? '' : String(value);
+    if (source) el.dataset.fillSource = source;
+    else delete el.dataset.fillSource;
+  }
+
+  function updateResumeJsonHint(message, type) {
+    const hint = document.getElementById('regResumeJsonHint');
+    if (!hint) return;
+    hint.textContent = message;
+    hint.classList.toggle('is-error', type === 'error');
+    hint.classList.toggle('is-success', type === 'success');
+  }
+
+  function hasActiveResumeJsonOverride() {
+    return Boolean(resumeJsonOverrideActive);
+  }
+
+  function clearResumeJsonOverride({ clearTextarea = true } = {}) {
+    resumeJsonOverrideActive = false;
+    if (clearTextarea) {
+      const ta = document.getElementById('regResumeJson');
+      if (ta) ta.value = '';
+    }
+    const clearBtn = document.getElementById('regResumeJsonClearBtn');
+    if (clearBtn) clearBtn.hidden = true;
+    ['regJobTitle', 'regCompany', 'regNote'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) delete el.dataset.fillSource;
+    });
+    updateResumeJsonHint(
+      'Fills job title, company, and note from JSON. Job link stays from the current tab / Refresh.',
+      ''
+    );
+  }
+
+  /**
+   * Apply built resume JSON to Register draft fields (title/company/note).
+   * Does not change job link.
+   */
+  function applyResumeJsonToRegisterForm(rawText, { silent = false } = {}) {
+    const mapper = global.SmartJobResumeJsonMapper;
+    const clearBtn = document.getElementById('regResumeJsonClearBtn');
+    const text = String(rawText || '').trim();
+
+    if (!text) {
+      clearResumeJsonOverride({ clearTextarea: false });
+      if (clearBtn) clearBtn.hidden = true;
+      return { ok: false, empty: true };
+    }
+
+    if (clearBtn) clearBtn.hidden = false;
+
+    if (!mapper?.extractRegisterFieldsFromResumeJsonText) {
+      updateResumeJsonHint('Resume JSON mapper is not loaded.', 'error');
+      resumeJsonOverrideActive = false;
+      return { ok: false, error: 'mapper missing' };
+    }
+
+    const result = mapper.extractRegisterFieldsFromResumeJsonText(text);
+    if (!result.ok) {
+      resumeJsonOverrideActive = false;
+      updateResumeJsonHint(result.error || 'Invalid JSON', 'error');
+      if (!silent) setRegisterStatus(result.error || 'Invalid resume JSON', 'error');
+      return result;
+    }
+
+    const fields = result.fields || {};
+    if (!fields.hasRegisterFields) {
+      resumeJsonOverrideActive = false;
+      updateResumeJsonHint(
+        'JSON parsed, but no job_title / company_name / job_description found yet.',
+        'error'
+      );
+      return { ok: false, error: 'missing register fields', fields };
+    }
+
+    if (fields.jobTitle) setRegisterFieldValue('regJobTitle', fields.jobTitle, 'resume-json');
+    if (fields.companyName) setRegisterFieldValue('regCompany', fields.companyName, 'resume-json');
+    if (fields.jobDescription) setRegisterFieldValue('regNote', fields.jobDescription, 'resume-json');
+
+    resumeJsonOverrideActive = true;
+    const templateNote = fields.resumeTemplate ? ` · template ${fields.resumeTemplate}` : '';
+    updateResumeJsonHint(
+      `Register fields updated from resume JSON${templateNote}. Job link unchanged.`,
+      'success'
+    );
+    if (!silent) {
+      setRegisterStatus('Register fields filled from built resume JSON.', 'success');
+    }
+
+    return { ok: true, fields, data: result.data };
+  }
+
+  function wireResumeJsonLiveFill(showStatus) {
+    const ta = document.getElementById('regResumeJson');
+    const clearBtn = document.getElementById('regResumeJsonClearBtn');
+    if (!ta) return;
+
+    const scheduleApply = () => {
+      if (resumeJsonApplyTimer) clearTimeout(resumeJsonApplyTimer);
+      resumeJsonApplyTimer = setTimeout(() => {
+        applyResumeJsonToRegisterForm(ta.value, { silent: true });
+      }, 250);
+    };
+
+    ta.addEventListener('input', scheduleApply);
+    ta.addEventListener('paste', () => {
+      setTimeout(scheduleApply, 0);
+    });
+    ta.addEventListener('change', () => {
+      const result = applyResumeJsonToRegisterForm(ta.value, { silent: false });
+      if (result.ok && showStatus) {
+        showStatus('Register fields filled from built resume JSON.', 'success');
+      }
+    });
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        clearResumeJsonOverride({ clearTextarea: true });
+        setRegisterStatus('Cleared built resume JSON override.', 'info');
+        if (showStatus) showStatus('Cleared built resume JSON.', 'info');
+      });
+    }
+  }
+
   function initRegisterResumeDb(showStatus) {
     const copyJdBtn = document.getElementById('regCopyJdBtn');
     const registerBtn = document.getElementById('registerJobBtn');
@@ -1389,6 +1520,7 @@
     wireRegisterFileDrops();
     wireProfileSelectPersistence();
     wireDuplicateWindowSetting();
+    wireResumeJsonLiveFill(showStatus);
     startConnectionPolling();
 
     document.querySelectorAll('.tab-main[data-tab="register"]').forEach((tabBtn) => {
@@ -1492,6 +1624,9 @@
     saveBackendConfig,
     checkBackendConnection,
     loadBackendSettingsForm,
+    hasActiveResumeJsonOverride,
+    applyResumeJsonToRegisterForm,
+    clearResumeJsonOverride,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND
