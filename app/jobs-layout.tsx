@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   LogOut,
   MessageSquareText,
+  NotebookPen,
   SearchCode,
   Settings,
   type LucideIcon,
@@ -66,6 +67,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Resume Tailor",
     icon: FileEdit,
     isActive: (pathname) => pathname.startsWith("/resume-tailor"),
+  },
+  {
+    href: "/resume-builder",
+    label: "Resume Builder",
+    icon: NotebookPen,
+    isActive: (pathname) => pathname.startsWith("/resume-builder"),
   },
   {
     href: "/prompt-builder",
