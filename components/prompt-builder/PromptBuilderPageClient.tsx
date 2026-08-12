@@ -10,6 +10,7 @@ import {
   buildPrompt,
   DEFAULT_PROMPT_TEMPLATE,
   PROMPT_BUILDER_STORAGE_KEYS,
+  REQUIRED_BUILT_RESUME_JSON_FIELDS,
 } from "@/lib/promptBuilder";
 
 function FieldBlock({
@@ -194,7 +195,13 @@ export function PromptBuilderPageClient() {
         <header className="shrink-0">
           <h1 className="text-lg font-semibold">Prompt Builder</h1>
           <p className="text-xs text-muted-foreground">
-            Placeholders: {"{resume_template_json}"}, {"{job_description}"}
+            Placeholders: {"{resume_template_json}"}, {"{job_description}"}. Built JSON must include{" "}
+            {REQUIRED_BUILT_RESUME_JSON_FIELDS.map((field) => (
+              <code key={field} className="mx-0.5">
+                {field}
+              </code>
+            ))}
+            .
           </p>
         </header>
 
@@ -203,7 +210,7 @@ export function PromptBuilderPageClient() {
             <FieldBlock
               id="prompt-template"
               label="Original prompt"
-              hint="Template with placeholders"
+              hint="Template with placeholders. Reset template loads the latest default (includes required job fields)."
               value={template}
               onChange={setTemplate}
               onClear={() => setTemplate("")}
@@ -215,10 +222,11 @@ export function PromptBuilderPageClient() {
             <FieldBlock
               id="resume-template-json"
               label="resume_template_json"
+              hint='Include "resume_template" (e.g. Jose / Oscar) in the base JSON when possible.'
               value={resumeTemplateJson}
               onChange={setResumeTemplateJson}
               onClear={() => setResumeTemplateJson("")}
-              placeholder='{"profileTitle":"..."}'
+              placeholder='{"resume_template":"Jose","profile_title":{...}}'
               mono
               rows={6}
             />

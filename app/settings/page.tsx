@@ -2,6 +2,7 @@
 
 import JobsLayout from "@/app/jobs-layout";
 import { GoogleDriveSettingsCard } from "@/components/settings/GoogleDriveSettingsCard";
+import { Json2DocxSettingsCard } from "@/components/settings/Json2DocxSettingsCard";
 import { TimezoneSettingsCard } from "@/components/settings/TimezoneSettingsCard";
 import { Suspense } from "react";
 
@@ -21,6 +22,7 @@ export default function SettingsPage() {
         <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
           <GoogleDriveSettingsCard />
         </Suspense>
+        <Json2DocxSettingsCard />
       </div>
     </JobsLayout>
   );
