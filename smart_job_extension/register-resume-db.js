@@ -19,6 +19,8 @@
   let backendConnected = false;
   let websiteDriveStatus = null;
   let autoAttachedFromJson2docx = { resume: false, cover: false };
+  let resumeJsonOverrideActive = false;
+  let resumeJsonApplyTimer = null;
 
   function normalizeBackendUrl(url) {
     const trimmed = String(url || '').trim().replace(/\/+$/, '');
@@ -1075,6 +1077,90 @@
     };
   }
 
+  /**
+   * Build the live Register draft for Save/Register.
+   * Re-applies built resume JSON onto title/company/note when present.
+   * Never scrapes the tab at submit time.
+   */
+  function prepareRegisterDraftForSubmit() {
+    const mapper = global.SmartJobResumeJsonMapper;
+    const formFields = readRegisterFormFields();
+    const resumeJsonText = document.getElementById('regResumeJson')?.value || '';
+    const resumeFile = readFileInput(document.getElementById('regResumeFile'));
+    const coverFile = readFileInput(document.getElementById('regCoverFile'));
+
+    if (!mapper?.mergeRegisterDraftFromResumeJson || !mapper?.validateRegisterDraft) {
+      const validation = {
+        ok: Boolean(formFields.jobTitle && formFields.companyName && formFields.jobLink && formFields.profileId),
+        errors: [],
+        warnings: [],
+        fields: formFields,
+      };
+      if (!formFields.jobTitle || !formFields.companyName || !formFields.jobLink) {
+        validation.errors.push(
+          'Job title, company, and job link are required. Paste resume JSON or use Refresh for the job link.'
+        );
+      }
+      if (!formFields.profileId) validation.errors.push('Select a profile.');
+      validation.ok = validation.errors.length === 0;
+      return {
+        ...validation,
+        fromJson: hasActiveResumeJsonOverride(),
+        resumeFile,
+        coverFile,
+      };
+    }
+
+    const merged = mapper.mergeRegisterDraftFromResumeJson(formFields, resumeJsonText);
+    if (!merged.ok) {
+      return {
+        ok: false,
+        fromJson: false,
+        errors: [merged.error || 'Invalid resume JSON'],
+        warnings: [],
+        fields: formFields,
+        resumeFile,
+        coverFile,
+      };
+    }
+
+    // Keep the visible form in sync with JSON before submit (link unchanged).
+    if (merged.fromJson) {
+      if (merged.fields.jobTitle) setRegisterFieldValue('regJobTitle', merged.fields.jobTitle, 'resume-json');
+      if (merged.fields.companyName) setRegisterFieldValue('regCompany', merged.fields.companyName, 'resume-json');
+      if (merged.fields.note) setRegisterFieldValue('regNote', merged.fields.note, 'resume-json');
+      resumeJsonOverrideActive = true;
+    }
+
+    const draftFields = {
+      ...formFields,
+      ...merged.fields,
+      // Re-read profile labels after merge (unchanged)
+      profileId: formFields.profileId,
+      profileName: formFields.profileName,
+      resumeFileName: resumeFile?.name || null,
+      coverFileName: coverFile?.name || null,
+    };
+
+    const validated = mapper.validateRegisterDraft(draftFields, {
+      fromJson: merged.fromJson || hasActiveResumeJsonOverride(),
+      hasResumeFile: Boolean(resumeFile),
+      hasCoverFile: Boolean(coverFile),
+    });
+
+    return {
+      ...validated,
+      fromJson: merged.fromJson || hasActiveResumeJsonOverride(),
+      resumeTemplate: merged.resumeTemplate || '',
+      resumeFile,
+      coverFile,
+      fields: {
+        ...draftFields,
+        ...validated.fields,
+      },
+    };
+  }
+
   async function getOfflineQueue() {
     return new Promise((resolve) => {
       chrome.storage.local.get([OFFLINE_QUEUE_KEY], (result) => {
@@ -1146,15 +1232,20 @@
   }
 
   async function saveCurrentJobToQueue(showStatus) {
-    const fields = readRegisterFormFields();
-    if (!fields.jobTitle || !fields.companyName || !fields.jobLink) {
-      throw new Error('Job title, company, and job link are required.');
+    const draft = prepareRegisterDraftForSubmit();
+    if (!draft.ok) {
+      throw new Error(draft.errors[0] || 'Register draft is incomplete.');
+    }
+    if (draft.warnings?.length) {
+      setRegisterStatus(draft.warnings[0], 'warn');
     }
 
+    const fields = draft.fields;
     const entry = {
       id: newQueueId(),
       queuedAt: new Date().toISOString(),
-      ...fields
+      ...fields,
+      draftSource: draft.fromJson ? 'resume-json' : 'form',
     };
 
     const queue = await getOfflineQueue();
@@ -1191,17 +1282,15 @@
   }
 
   async function registerJobToBackend() {
-    const fields = readRegisterFormFields();
-    const { jobTitle, companyName, jobLink, note, profileId } = fields;
-    const resumeFile = readFileInput(document.getElementById('regResumeFile'));
-    const coverFile = readFileInput(document.getElementById('regCoverFile'));
+    const draft = prepareRegisterDraftForSubmit();
+    if (!draft.ok) {
+      throw new Error(draft.errors[0] || 'Register draft is incomplete.');
+    }
 
-    if (!jobTitle || !companyName || !jobLink) {
-      throw new Error('Job title, company, and job link are required. Use Refresh in the header first.');
-    }
-    if (!profileId) {
-      throw new Error('Select a candidate profile.');
-    }
+    const fields = draft.fields;
+    const { jobTitle, companyName, jobLink, note, profileId } = fields;
+    const resumeFile = draft.resumeFile || readFileInput(document.getElementById('regResumeFile'));
+    const coverFile = draft.coverFile || readFileInput(document.getElementById('regCoverFile'));
 
     const resumeIsDefault = fields.resumeIsDefault;
     const coverIsDefault = fields.coverLetterIsDefault;
@@ -1234,7 +1323,7 @@
     if (!res.ok) {
       throw new Error(data.error || `Registration failed (${res.status})`);
     }
-    return data;
+    return { ...data, _draftWarnings: draft.warnings || [], _draftFromJson: Boolean(draft.fromJson) };
   }
 
   function wireBackendSettingsForm(showStatus) {
@@ -1387,8 +1476,9 @@
     });
   }
 
-  let resumeJsonOverrideActive = false;
-  let resumeJsonApplyTimer = null;
+  function hasActiveResumeJsonOverride() {
+    return Boolean(resumeJsonOverrideActive);
+  }
 
   function setRegisterFieldValue(id, value, source) {
     const el = document.getElementById(id);
@@ -1404,10 +1494,6 @@
     hint.textContent = message;
     hint.classList.toggle('is-error', type === 'error');
     hint.classList.toggle('is-success', type === 'success');
-  }
-
-  function hasActiveResumeJsonOverride() {
-    return Boolean(resumeJsonOverrideActive);
   }
 
   function clearResumeJsonOverride({ clearTextarea = true } = {}) {
@@ -1736,16 +1822,16 @@
             );
           }
 
-          const fields = readRegisterFormFields();
-          if (!fields.jobTitle || !fields.companyName || !fields.jobLink) {
-            throw new Error('Job title, company, and job link are required. Use Refresh in the header first.');
+          const draft = prepareRegisterDraftForSubmit();
+          if (!draft.ok) {
+            throw new Error(draft.errors[0] || 'Register draft is incomplete.');
           }
-          if (!fields.profileId) {
-            throw new Error('Select a candidate profile.');
+          if (draft.warnings?.length) {
+            setRegisterStatus(draft.warnings.join(' '), 'warn');
           }
 
-          const resumeFile = document.getElementById('regResumeFile')?.files?.[0];
-          const coverFile = document.getElementById('regCoverFile')?.files?.[0];
+          const resumeFile = draft.resumeFile;
+          const coverFile = draft.coverFile;
           const needsFileUpload = registerNeedsFileUpload(false, false, resumeFile, coverFile);
 
           setRegisterStatus(
@@ -1755,10 +1841,11 @@
             'info'
           );
           const result = await registerJobToBackend();
+          const sourceNote = result._draftFromJson ? ' (from resume JSON draft)' : '';
           const fileNote =
             result.resumeUrl || result.coverLetterUrl ? ' Files saved.' : '';
           setRegisterStatus(
-            `Registered (#${result.id}, ${result.candidateName || 'candidate'}).${fileNote}`,
+            `Registered (#${result.id}, ${result.candidateName || 'profile'})${sourceNote}.${fileNote}`,
             'success'
           );
           if (showStatus) showStatus('Job registered in Resume DB.', 'success');
@@ -1803,6 +1890,7 @@
     hasActiveResumeJsonOverride,
     applyResumeJsonToRegisterForm,
     clearResumeJsonOverride,
+    prepareRegisterDraftForSubmit,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND

@@ -148,9 +148,101 @@
     return { ok: true, fields, data: parsed.data };
   }
 
+  /**
+   * Merge live form fields with built resume JSON (JSON wins for title/company/note).
+   * Job link is never taken from JSON.
+   * @param {{ jobTitle?: string, companyName?: string, jobLink?: string, note?: string, profileId?: string, [key: string]: any }} formFields
+   * @param {string} resumeJsonText
+   */
+  function mergeRegisterDraftFromResumeJson(formFields, resumeJsonText) {
+    const base = {
+      jobTitle: trim(formFields?.jobTitle),
+      companyName: trim(formFields?.companyName),
+      jobLink: trim(formFields?.jobLink),
+      note: trim(formFields?.note),
+      profileId: trim(formFields?.profileId),
+      ...formFields,
+    };
+
+    const raw = trim(resumeJsonText);
+    if (!raw) {
+      return { ok: true, fromJson: false, fields: base };
+    }
+
+    const parsed = extractRegisterFieldsFromResumeJsonText(raw);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        fromJson: false,
+        fields: base,
+        error: parsed.error || 'Invalid resume JSON',
+      };
+    }
+
+    const fields = { ...base };
+    if (parsed.fields.jobTitle) fields.jobTitle = parsed.fields.jobTitle;
+    if (parsed.fields.companyName) fields.companyName = parsed.fields.companyName;
+    if (parsed.fields.jobDescription) fields.note = parsed.fields.jobDescription;
+
+    return {
+      ok: true,
+      fromJson: Boolean(parsed.fields.hasRegisterFields),
+      fields,
+      resumeTemplate: parsed.fields.resumeTemplate || '',
+      data: parsed.data,
+    };
+  }
+
+  /**
+   * Validate a Register draft before queue/submit. Does not scrape.
+   */
+  function validateRegisterDraft(fields, options = {}) {
+    const errors = [];
+    const warnings = [];
+    const jobTitle = trim(fields?.jobTitle);
+    const companyName = trim(fields?.companyName);
+    const jobLink = trim(fields?.jobLink);
+    const profileId = trim(fields?.profileId);
+    const fromJson = Boolean(options.fromJson);
+    const hasResumeFile = Boolean(options.hasResumeFile);
+    const hasCoverFile = Boolean(options.hasCoverFile);
+
+    if (!jobTitle || !companyName || !jobLink) {
+      errors.push(
+        fromJson
+          ? 'Job title, company, and job link are required. Check resume JSON fields and job link.'
+          : 'Job title, company, and job link are required. Paste resume JSON or use Refresh for the job link.'
+      );
+    }
+    if (!profileId) {
+      errors.push('Select a profile.');
+    }
+    if (fromJson && !hasResumeFile) {
+      warnings.push('No resume file attached — registering without a resume upload.');
+    }
+    if (fromJson && !hasCoverFile) {
+      warnings.push('No cover letter attached — registering without a cover letter upload.');
+    }
+
+    return {
+      ok: errors.length === 0,
+      errors,
+      warnings,
+      fields: {
+        ...fields,
+        jobTitle,
+        companyName,
+        jobLink,
+        profileId,
+      },
+    };
+  }
+
   return {
     extractRegisterFieldsFromResumeJson,
     extractRegisterFieldsFromResumeJsonText,
     parseResumeJsonText,
+    mergeRegisterDraftFromResumeJson,
+    validateRegisterDraft,
   };
 });
