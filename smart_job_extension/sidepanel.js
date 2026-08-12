@@ -2424,6 +2424,7 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
   const jobTitle = response.job_title || '';
   const company = response.company_name || '';
   const jobLink = response.job_link || tab.url || '';
+  const jobDescription = response.job_description || '';
 
   const setValue = (id, value) => {
     const el = document.getElementById(id);
@@ -2436,6 +2437,7 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
   setValue('regJobTitle', jobTitle);
   setValue('regCompany', company);
   setValue('regJobLink', jobLink);
+  setValue('regNote', jobDescription);
 
   const urlEl = document.getElementById('currentUrl');
   if (urlEl) urlEl.textContent = jobLink;

@@ -108,11 +108,12 @@
     getJobInfo() {
       const postingInfo = getGreenhouseJobPostingInfo();
       if (postingInfo.job_title || postingInfo.job_description) return postingInfo;
-      const titleEl = document.querySelector('.app-title, .posting-headline h2, h1.app-title, h1');
-      const companyEl = document.querySelector('.company-name, .company, [class*="company"]');
+      const titleEl = document.querySelector(
+        '.job__title h1, .job__header h1, .app-title, .posting-headline h2, h1.app-title, h1'
+      );
       return {
-        job_title: titleEl ? trim(titleEl.textContent) : '',
-        company_name: companyEl ? trim(companyEl.textContent) : resolveGreenhouseCompanyName()
+        job_title: titleEl ? cleanTitle(trim(titleEl.textContent || '')) : '',
+        company_name: resolveGreenhouseCompanyName()
       };
     },
     mapNameToCategory(nameAttr) {
@@ -162,7 +163,7 @@
 
   function isWorkdayHost() {
     const host = location.hostname.toLowerCase();
-    return /\.workday\.com$/i.test(host) || host.includes('myworkdayjobs.com');
+    return /\.workday\.com$/i.test(host) || host.includes('myworkdayjobs.com') || isWorkdayPageContext();
   }
 
   function isUnreliableWorkdayCompanyName(name) {
@@ -217,8 +218,42 @@
     return trim(logoMatch?.[1] || alt);
   }
 
+  function parseWorkdayCompanyFromSidebar() {
+    const headings = document.querySelectorAll(
+      '[data-automation-id="jobSidebar"] h3, [data-automation-id="sidebar"] h3, [data-automation-id="textSection"] h3'
+    );
+    for (const h3 of headings) {
+      const text = trim(h3.textContent || '');
+      const aboutMatch = /^about\s+(.+)$/i.exec(text);
+      if (aboutMatch?.[1]) return trim(aboutMatch[1]);
+    }
+    return '';
+  }
+
+  function parseWorkdayCompanyFromJobDescription() {
+    const desc = document.querySelector(
+      '[data-automation-id="jobPostingPage"] [data-automation-id="jobPostingDescription"], [data-automation-id="jobPostingDescription"]'
+    );
+    if (!desc) return '';
+    for (const node of desc.querySelectorAll('b, strong, h2, h3, p')) {
+      const text = trim(node.textContent || '');
+      const aboutMatch = /^about\s+(.+)$/i.exec(text);
+      if (aboutMatch?.[1] && aboutMatch[1].length < 80) return trim(aboutMatch[1]);
+    }
+    return '';
+  }
+
+  function cleanWorkdayCompanyLabel(value) {
+    let name = cleanCompany(value);
+    if (!name) return '';
+    name = name.replace(/\s+careers?\s*$/i, '').trim();
+    return cleanCompany(name);
+  }
+
   function resolveWorkdayCompanyName() {
     const candidates = [
+      parseWorkdayCompanyFromSidebar(),
+      parseWorkdayCompanyFromJobDescription(),
       parseWorkdayCompanyFromLogo(),
       parseWorkdayCompanyFromHost(),
       parseWorkdayCompanyFromTitle(document.querySelector('meta[property="og:title"]')?.content || ''),
@@ -244,12 +279,69 @@
     } catch (_) {}
 
     for (const candidate of candidates) {
-      const cleaned = cleanCompany(candidate);
+      const cleaned = cleanWorkdayCompanyLabel(candidate);
       if (cleaned && !isUnreliableWorkdayCompanyName(cleaned)) return cleaned;
     }
 
     const fallback = formatWorkdayCompanySlug(parseWorkdayCompanyFromHost());
     return fallback || '';
+  }
+
+  function isWorkdayPageContext() {
+    return Boolean(
+      document.querySelector('[data-automation-id="jobPostingPage"], [data-automation-id="jobPostingDescription"], [data-automation-id="job-posting-details"]')
+    );
+  }
+
+  function getWorkdayPostingDetailsRoot(page) {
+    const scope = page || document.querySelector('[data-automation-id="jobPostingPage"]') || document;
+    return scope.querySelector('[data-automation-id="job-posting-details"]') || scope;
+  }
+
+  function getWorkdayDetailValue(detailsRoot, automationId) {
+    const block = detailsRoot.querySelector(`[data-automation-id="${automationId}"]`);
+    if (!block) return '';
+    const dd = block.querySelector('dd');
+    return trim(dd?.textContent || block.textContent || '');
+  }
+
+  function findWorkdayPostingTitle(page) {
+    const scope = page || document.querySelector('[data-automation-id="jobPostingPage"]') || document;
+    const titleEl = scope.querySelector(
+      '[data-automation-id="jobPostingHeader"], [data-automation-id="jobTitleHeading"], h2[data-automation-id="jobPostingHeader"]'
+    );
+    if (titleEl) {
+      const fromHeader = cleanTitle(trim(titleEl.textContent || ''));
+      if (fromHeader) return fromHeader;
+    }
+    const alertTitle = scope.querySelector('[role="alert"]');
+    if (alertTitle) {
+      const alertText = trim(alertTitle.textContent || '');
+      const m = /^(.+?)\s+page is loaded$/i.exec(alertText);
+      if (m?.[1]) return cleanTitle(trim(m[1]));
+    }
+    const jsonLd = readJobPostingJsonLd();
+    if (jsonLd?.title) {
+      const fromJson = cleanTitle(trim(jsonLd.title));
+      if (fromJson) return fromJson;
+    }
+    return '';
+  }
+
+  function getWorkdayPostingMetaParts(page) {
+    const detailsRoot = getWorkdayPostingDetailsRoot(page);
+    const parts = [];
+    const remote = getWorkdayDetailValue(detailsRoot, 'remoteType');
+    const location = getWorkdayDetailValue(detailsRoot, 'locations');
+    const timeType = getWorkdayDetailValue(detailsRoot, 'time');
+    const postedOn = getWorkdayDetailValue(detailsRoot, 'postedOn');
+    const requisition = getWorkdayDetailValue(detailsRoot, 'requisitionId');
+    if (remote) parts.push(`Remote type: ${remote}`);
+    if (location) parts.push(`Location: ${location}`);
+    if (timeType) parts.push(`Employment type: ${timeType}`);
+    if (postedOn) parts.push(`Posted: ${postedOn}`);
+    if (requisition) parts.push(`Requisition: ${requisition}`);
+    return parts.slice(0, 5);
   }
 
   function normalizeJobDescription(text) {
@@ -275,13 +367,360 @@
 
   function extractLeverJobDescription(root) {
     const scope = root || document;
-    const page = scope.querySelector('.content-wrapper.posting-page, .posting-page');
+    const content = scope.querySelector('.content-wrapper.posting-page .content, .posting-page .content');
+    const page = content || scope.querySelector('.content-wrapper.posting-page, .posting-page');
     if (!page) return '';
     const clone = page.cloneNode(true);
     clone.querySelectorAll(
-      'script, style, template, .simplify-jobs-shadow-root, .postings-btn-wrapper, .postings-btn, [data-qa="btn-apply-bottom"], [data-qa="ai-disclaimer"], .main-footer, .main-header, .main-header-content, .accent-section'
+      'script, style, template, meta, .simplify-jobs-shadow-root, [class*="simplify-banner"], .accent-section, .postings-btn-wrapper, .postings-btn, a.postings-btn, a.template-btn-submit, [data-qa="btn-apply-bottom"], [data-qa="show-page-apply"], [data-qa="ai-disclaimer"], .last-section-apply, .main-footer, .main-header, .main-header-content, .cc-window, .cc-banner'
     ).forEach((node) => node.remove());
     return normalizeJobDescription(clone.innerText || clone.textContent || '');
+  }
+
+  function resolveLeverCompanyName() {
+    const logoAlt = document.querySelector('.main-header-logo img[alt], a.main-header-logo img[alt]')?.getAttribute('alt') || '';
+    if (logoAlt) {
+      const fromAlt = cleanCompany(trim(logoAlt.replace(/\s*logo\s*$/i, '')));
+      if (fromAlt) return fromAlt;
+    }
+    const headerLink = document.querySelector('a.main-header-logo[href]');
+    if (headerLink) {
+      const href = headerLink.getAttribute('href') || '';
+      const linkMatch = /jobs\.lever\.co\/([^/?#]+)/i.exec(href);
+      if (linkMatch?.[1]) {
+        const fromLink = cleanCompany(
+          decodeURIComponent(linkMatch[1]).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        );
+        if (fromLink) return fromLink;
+      }
+    }
+    const jsonLd = readJobPostingJsonLd();
+    const fromJson = cleanCompany(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization);
+    if (fromJson) return fromJson;
+    const fromTitle = cleanCompany(parseCompanyFromTitle(document.title));
+    if (fromTitle) return fromTitle;
+    const m = /jobs\.lever\.co\/([^/?#]+)/i.exec(location.href);
+    if (m) {
+      return decodeURIComponent(m[1]).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+    return '';
+  }
+
+  function findLeverPostingTitle() {
+    const titleEl = document.querySelector(
+      '.posting-headline h2, .posting-header h2, [data-qa="posting-name"], .application-page .posting-headline h2'
+    );
+    if (titleEl && !titleEl.closest('form, .application-page form, .application-form')) {
+      const fromHeadline = cleanTitle(trim(titleEl.textContent || ''));
+      if (fromHeadline) return fromHeadline;
+    }
+    const jsonLd = readJobPostingJsonLd();
+    if (jsonLd?.title) {
+      const fromJson = cleanTitle(trim(jsonLd.title));
+      if (fromJson) return fromJson;
+    }
+    return '';
+  }
+
+  function getLeverPostingMetaParts() {
+    const parts = [];
+    const categoryLabels = {
+      location: 'Location',
+      department: 'Department',
+      commitment: 'Employment Type',
+      workplaceTypes: 'Workplace'
+    };
+    document.querySelectorAll('.posting-categories .posting-category').forEach((el) => {
+      const className = Array.from(el.classList).find((name) => categoryLabels[name]);
+      if (!className) return;
+      const value = trim((el.textContent || '').replace(/\/\s*$/, ''));
+      if (!value || value.length > 120) return;
+      const line = `${categoryLabels[className]}: ${value}`;
+      if (!parts.includes(line)) parts.push(line);
+    });
+    return parts;
+  }
+
+  function getLeverJobPostingInfo() {
+    if (!document.querySelector('.content-wrapper.posting-page, .posting-page, [data-qa="job-description"]')) return {};
+    const job_title = findLeverPostingTitle();
+    const company_name = resolveLeverCompanyName();
+    let job_description = extractLeverJobDescription(document);
+    if (!job_description) {
+      const jsonLd = readJobPostingJsonLd();
+      if (jsonLd?.description) job_description = htmlDescriptionToText(jsonLd.description);
+    }
+    const metaParts = getLeverPostingMetaParts();
+    if (metaParts.length && job_description) {
+      job_description = `${metaParts.join('\n')}\n\n${job_description}`;
+    } else if (metaParts.length) {
+      job_description = metaParts.join('\n');
+    }
+    return { job_title, company_name, job_description };
+  }
+
+  function isWorkableHost() {
+    const host = location.hostname.toLowerCase();
+    return host.includes('workable.com') || isWorkablePageContext();
+  }
+
+  function isWorkablePageContext() {
+    return Boolean(
+      document.querySelector(
+        '[data-ui="overview-title"], [data-ui="job-breakdown-description-parsed-html"], [class*="jobBreakdown__job-breakdown"]'
+      )
+    );
+  }
+
+  function extractWorkableJobDescription(root) {
+    const scope = root || document;
+    const breakdown = scope.querySelector('[class*="jobBreakdown__job-breakdown"], .jobBreakdown__job-breakdown');
+    if (breakdown) {
+      const clone = breakdown.cloneNode(true);
+      clone.querySelectorAll('script, style, template, meta, button').forEach((node) => node.remove());
+      return normalizeJobDescription(clone.innerText || clone.textContent || '');
+    }
+    const sections = scope.querySelectorAll(
+      '[data-ui="job-breakdown-description-parsed-html"], [data-ui="job-breakdown-requirements-parsed-html"], [data-ui="job-breakdown-benefits-parsed-html"], [data-ui^="job-breakdown-"][data-ui$="-parsed-html"]'
+    );
+    if (!sections.length) return '';
+    const wrapper = document.createElement('div');
+    sections.forEach((section) => wrapper.appendChild(section.cloneNode(true)));
+    wrapper.querySelectorAll('script, style, template, meta, button').forEach((node) => node.remove());
+    return normalizeJobDescription(wrapper.innerText || wrapper.textContent || '');
+  }
+
+  function resolveWorkableCompanyName() {
+    const companyLink = document.querySelector(
+      '[data-ui="overview-company"] a, [class*="jobOverview__company"] a, [class*="companyName__link"]'
+    );
+    if (companyLink) {
+      const fromLink = cleanCompany(trim(companyLink.textContent || ''));
+      if (fromLink) return fromLink;
+    }
+    const logoSelectors = [
+      '.companyLogo__logo[alt]',
+      'img[class*="companyLogo"][alt]',
+      '[class*="companyDescription__company-logo"] img[alt]'
+    ];
+    for (const selector of logoSelectors) {
+      const logoImg = document.querySelector(selector);
+      if (!logoImg) continue;
+      const fromAlt = cleanCompany(trim((logoImg.getAttribute('alt') || '').replace(/\s*logo\s*$/i, '')));
+      if (fromAlt) return fromAlt;
+    }
+    const jsonLd = readJobPostingJsonLd();
+    const fromJson = cleanCompany(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization);
+    if (fromJson) return fromJson;
+    const jobsAtMatch = /jobs-at-([a-z0-9-]+)/i.exec(location.pathname);
+    if (jobsAtMatch?.[1]) {
+      return cleanCompany(
+        decodeURIComponent(jobsAtMatch[1]).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+      );
+    }
+    const fromTitle = cleanCompany(parseCompanyFromTitle(document.title));
+    if (fromTitle) return fromTitle;
+    return '';
+  }
+
+  function findWorkablePostingTitle() {
+    const titleEl = document.querySelector(
+      '[data-ui="overview-title"], h1[class*="jobOverview__job-title"], [class*="jobOverview__job-title"]'
+    );
+    if (titleEl) {
+      const strong = titleEl.querySelector('strong');
+      const text = strong ? trim(strong.textContent || '') : trim(titleEl.textContent || '');
+      const title = cleanTitle(text);
+      if (title) return title;
+    }
+    const jsonLd = readJobPostingJsonLd();
+    if (jsonLd?.title) {
+      const fromJson = cleanTitle(trim(jsonLd.title));
+      if (fromJson) return fromJson;
+    }
+    return '';
+  }
+
+  function getWorkablePostingMetaParts() {
+    const parts = [];
+    const metaMap = {
+      'overview-workplace': 'Workplace',
+      'overview-location': 'Location',
+      'overview-department': 'Department',
+      'overview-employment-type': 'Employment Type'
+    };
+    for (const [ui, label] of Object.entries(metaMap)) {
+      const el = document.querySelector(`[data-ui="${ui}"]`);
+      if (!el) continue;
+      const value = trim(el.textContent || '');
+      if (!value || value.length > 120) continue;
+      const line = `${label}: ${value}`;
+      if (!parts.includes(line)) parts.push(line);
+    }
+    return parts;
+  }
+
+  function appendWorkableCompanyDescription(description) {
+    const companyDescEl = document.querySelector('[data-ui="company-description-parsed-html"]');
+    if (!companyDescEl) return description;
+    const clone = companyDescEl.cloneNode(true);
+    clone.querySelectorAll('script, style, template, meta, button').forEach((node) => node.remove());
+    const companyText = normalizeJobDescription(clone.innerText || clone.textContent || '');
+    if (!companyText) return description;
+    if (description) return `${description}\n\nAbout the company\n${companyText}`;
+    return `About the company\n${companyText}`;
+  }
+
+  function getWorkableJobPostingInfo() {
+    if (!isWorkablePageContext()) return {};
+    const job_title = findWorkablePostingTitle();
+    const company_name = resolveWorkableCompanyName();
+    let job_description = extractWorkableJobDescription(document);
+    if (!job_description) {
+      const jsonLd = readJobPostingJsonLd();
+      if (jsonLd?.description) job_description = htmlDescriptionToText(jsonLd.description);
+    }
+    job_description = appendWorkableCompanyDescription(job_description);
+    const metaParts = getWorkablePostingMetaParts();
+    if (metaParts.length && job_description) {
+      job_description = `${metaParts.join('\n')}\n\n${job_description}`;
+    } else if (metaParts.length) {
+      job_description = metaParts.join('\n');
+    }
+    return { job_title, company_name, job_description };
+  }
+
+  function isDoverHost() {
+    const host = location.hostname.toLowerCase();
+    return host.includes('dover.com') || isDoverPageContext();
+  }
+
+  function isDoverPageContext() {
+    return Boolean(
+      document.querySelector(
+        '[class*="InboundApplication__ApplicationPortalContainer"], [class*="InboundApplication__JobDescriptionWrapper"], [class*="JobDescriptionWrapper"]'
+      )
+    );
+  }
+
+  function parseDoverCompanyFromDescription(root) {
+    const scope = root || document;
+    const descEl = scope.querySelector(
+      '[class*="InboundApplication__JobDescriptionWrapper"] [class*="StyledHtmlWrapper"], [class*="JobDescriptionWrapper"] [class*="StyledHtmlWrapper"], [class*="InboundApplication__JobDescriptionWrapper"]'
+    );
+    if (!descEl) return '';
+    const text = descEl.innerText || descEl.textContent || '';
+    const textMatch = /(?:^|\n)\s*Company:\s*([^\n]+)/i.exec(text);
+    if (textMatch?.[1]) {
+      const fromText = cleanCompany(trim(textMatch[1]));
+      if (fromText) return fromText;
+    }
+    const html = descEl.innerHTML || '';
+    const htmlMatch = /<strong>\s*Company:\s*<\/strong>\s*([^<\n]+)/i.exec(html);
+    if (htmlMatch?.[1]) {
+      const fromHtml = cleanCompany(trim(htmlMatch[1].replace(/<br\s*\/?>/gi, '')));
+      if (fromHtml) return fromHtml;
+    }
+    return '';
+  }
+
+  function extractDoverJobDescription(root) {
+    const scope = root || document;
+    const wrapper = scope.querySelector(
+      '[class*="InboundApplication__JobDescriptionWrapper"], [class*="JobDescriptionWrapper"]'
+    );
+    if (!wrapper) return '';
+    const target = wrapper.querySelector('[class*="StyledHtmlWrapper"]') || wrapper;
+    const clone = target.cloneNode(true);
+    clone.querySelectorAll(
+      'script, style, template, meta, button, iframe, [class*="FormWrapper"], form, [class*="RightColumn"]'
+    ).forEach((node) => node.remove());
+    return normalizeJobDescription(clone.innerText || clone.textContent || '');
+  }
+
+  function resolveDoverCompanyName() {
+    const fromDescription = parseDoverCompanyFromDescription(document);
+    if (fromDescription) return fromDescription;
+    const jsonLd = readJobPostingJsonLd();
+    const fromJson = cleanCompany(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization);
+    if (fromJson) return fromJson;
+    const logoLink = document.querySelector(
+      '[class*="HeaderContent"] a[href], [class*="styles__Header"] a[href], [class*="InboundApplication"] a[href]'
+    );
+    if (logoLink) {
+      try {
+        const host = new URL(logoLink.href, location.href).hostname.replace(/^www\./i, '');
+        const base = host.split('.')[0];
+        if (base && !/^(app|apply|jobs|careers)$/i.test(base)) {
+          const fromHost = cleanCompany(base.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()));
+          if (fromHost) return fromHost;
+        }
+      } catch (_) {
+        /* ignore invalid logo href */
+      }
+    }
+    const pathMatch = /\/([^/]+)\/careers\//i.exec(location.pathname);
+    if (pathMatch?.[1]) {
+      const fromPath = cleanCompany(
+        decodeURIComponent(pathMatch[1]).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+      );
+      if (fromPath) return fromPath;
+    }
+    const fromTitle = cleanCompany(parseCompanyFromTitle(document.title));
+    if (fromTitle) return fromTitle;
+    return '';
+  }
+
+  function findDoverPostingTitle() {
+    const titleEl = document.querySelector(
+      '[class*="typography__TitleLarge"], [class*="InboundApplication__"] [class*="TitleLarge"]'
+    );
+    if (titleEl) {
+      const title = cleanTitle(trim(titleEl.textContent || ''));
+      if (title) return title;
+    }
+    const jsonLd = readJobPostingJsonLd();
+    if (jsonLd?.title) {
+      const fromJson = cleanTitle(trim(jsonLd.title));
+      if (fromJson) return fromJson;
+    }
+    return '';
+  }
+
+  function readDoverMetaValue(container) {
+    if (!container) return '';
+    const directDivs = Array.from(container.children).filter((child) => child.tagName === 'DIV');
+    if (directDivs.length) return trim(directDivs[directDivs.length - 1].textContent || '');
+    return trim(container.textContent || '');
+  }
+
+  function getDoverPostingMetaParts() {
+    const parts = [];
+    const locationEl = document.querySelector('[aria-label="Job location"]');
+    const employmentEl = document.querySelector('[aria-label="Employment Type"]');
+    const location = readDoverMetaValue(locationEl);
+    const employment = readDoverMetaValue(employmentEl);
+    if (location) parts.push(`Location: ${location}`);
+    if (employment) parts.push(`Employment Type: ${employment}`);
+    return parts;
+  }
+
+  function getDoverJobPostingInfo() {
+    if (!isDoverPageContext()) return {};
+    const job_title = findDoverPostingTitle();
+    const company_name = resolveDoverCompanyName();
+    let job_description = extractDoverJobDescription(document);
+    if (!job_description) {
+      const jsonLd = readJobPostingJsonLd();
+      if (jsonLd?.description) job_description = htmlDescriptionToText(jsonLd.description);
+    }
+    const metaParts = getDoverPostingMetaParts();
+    if (metaParts.length && job_description) {
+      job_description = `${metaParts.join('\n')}\n\n${job_description}`;
+    } else if (metaParts.length) {
+      job_description = metaParts.join('\n');
+    }
+    return { job_title, company_name, job_description };
   }
 
   function extractRipplingJobDescription(root) {
@@ -289,23 +728,70 @@
     const el = scope.querySelector('.ATS_htmlPreview');
     if (!el) return '';
     const clone = el.cloneNode(true);
-    clone.querySelectorAll('script, style, meta').forEach((node) => node.remove());
+    clone.querySelectorAll(
+      'script, style, meta, button, [data-testid="Apply now"], [data-testid="Apply"]'
+    ).forEach((node) => node.remove());
     return normalizeJobDescription(clone.innerText || clone.textContent || '');
   }
 
+  function isRipplingPageContext() {
+    return Boolean(
+      document.querySelector('.ATS_htmlPreview')
+      || document.querySelector('[data-testid="breadcrumb"] a[data-value*="/jobs"], [data-testid="breadcrumb"] a[data-testid*="/jobs"]')
+      || document.querySelector('img[src*="ripplingcdn" i]')
+    );
+  }
+
+  function cleanRipplingCompanyLabel(value) {
+    let name = cleanCompany(value);
+    if (!name) return '';
+    name = name.replace(/\s+careers?\s*$/i, '').trim();
+    name = name.replace(/\s+jobs?\s*$/i, '').trim();
+    return cleanCompany(name);
+  }
+
+  function findRipplingPostingRoot() {
+    const titledHeading = document.querySelector('h2.css-of4wst');
+    if (titledHeading && !titledHeading.closest('.ATS_htmlPreview, form')) {
+      return titledHeading.parentElement;
+    }
+    const preview = document.querySelector('.ATS_htmlPreview');
+    if (preview) {
+      let node = preview.parentElement;
+      for (let depth = 0; depth < 8 && node; depth += 1) {
+        if (node.querySelector('img[alt]')) return node;
+        node = node.parentElement;
+      }
+    }
+    return document.querySelector('[data-testid="breadcrumb"]')?.closest('[class*="css-"]') || null;
+  }
+
+  function parseRipplingCompanyFromBreadcrumbPath() {
+    const crumbLink = document.querySelector('[data-testid="breadcrumb"] li:first-child a');
+    if (!crumbLink) return '';
+    const pathHint = trim(
+      crumbLink.getAttribute('data-testid') || crumbLink.getAttribute('data-value') || crumbLink.getAttribute('href') || ''
+    );
+    const m = /\/([^/]+)\/jobs/i.exec(pathHint);
+    if (!m?.[1]) return '';
+    const slug = decodeURIComponent(m[1]).replace(/[-_]+/g, ' ');
+    return cleanRipplingCompanyLabel(slug.replace(/\b\w/g, (c) => c.toUpperCase()));
+  }
+
   function isGreenhouseHost() {
-    return /greenhouse\.io$/i.test(location.hostname.toLowerCase());
+    const host = location.hostname.toLowerCase();
+    return host.includes('greenhouse.io');
   }
 
   function extractGreenhouseJobDescription(root) {
     const scope = root || document;
     const el = scope.querySelector(
-      '.job__description, main.job-post .job__description, #content .content.body, #content .body'
+      '.job__description, main.job-post .job__description, .job-post-container .job__description, #content .content.body, #content .body'
     );
     if (!el) return '';
     const clone = el.cloneNode(true);
     clone.querySelectorAll(
-      'script, style, template, meta, .simplify-jobs-shadow-root, [class*="simplify-banner"], .job-alert'
+      'script, style, template, meta, .simplify-jobs-shadow-root, [class*="simplify-banner"], .job-alert, button, .application--container, #application-form, footer, [class*="footer-logo"]'
     ).forEach((node) => node.remove());
     return normalizeJobDescription(clone.innerText || clone.textContent || '');
   }
@@ -313,7 +799,7 @@
   function extractSmartRecruitersJobDescription(root) {
     const scope = root || document;
     const descRoot = scope.querySelector(
-      'main.jobad-main [itemprop="description"], main.job [itemprop="description"], .jobad-main [itemprop="description"]'
+      'main.jobad-main [itemprop="description"], main.job [itemprop="description"], .jobad-main [itemprop="description"], main.jobad-main .job-sections, .job-sections'
     );
     let clone;
     if (descRoot) {
@@ -325,7 +811,7 @@
       sections.forEach((section) => clone.appendChild(section.cloneNode(true)));
     }
     clone.querySelectorAll(
-      'script, style, template, meta, .simplify-jobs-shadow-root, [class*="simplify-banner"], .googlejobs-paragraph--empty, .video-disclaimer, .job-apply'
+      'script, style, template, meta, spl-job-location, spl-icon, .simplify-jobs-shadow-root, [class*="simplify-banner"], .googlejobs-paragraph--empty, .video-disclaimer, .job-apply, #st-videos, .js-others, .js-similar, .socials, .jobad-aside, .jobad-buttons, button, .widget, .video-items'
     ).forEach((node) => node.remove());
     return normalizeJobDescription(clone.innerText || clone.textContent || '');
   }
@@ -333,15 +819,24 @@
   function extractAshbyJobDescription(root) {
     const scope = root || document;
     const textEl = scope.querySelector(
-      '#overview [class*="descriptionText"], [role="tabpanel"][aria-labelledby="job-overview"] [class*="descriptionText"], [class*="descriptionText"]'
+      '.ashby-job-posting-description, #overview .ashby-job-posting-description, #overview [class*="descriptionText"], [role="tabpanel"][aria-labelledby="job-overview"] .ashby-job-posting-description, [role="tabpanel"][aria-labelledby="job-overview"] [class*="descriptionText"], [class*="descriptionText"]'
     );
-    const panel = scope.querySelector('#overview[role="tabpanel"], [role="tabpanel"][aria-labelledby="job-overview"]');
+    const panel = scope.querySelector(
+      '#overview[role="tabpanel"], [role="tabpanel"][aria-labelledby="job-overview"], .ashby-job-posting-description-container'
+    );
     const target = textEl || panel;
     if (!target) return '';
     const clone = target.cloneNode(true);
     clone.querySelectorAll(
-      'script, style, template, meta, .simplify-jobs-shadow-root, [class*="simplify-banner"], a[href*="/application"], button'
+      'script, style, template, meta, .simplify-jobs-shadow-root, [class*="simplify-banner"], a[href*="/application"], button, footer, [class*="powered" i][href*="ashbyhq.com"]'
     ).forEach((node) => node.remove());
+    const postingTitle = findAshbyPostingTitle();
+    if (postingTitle) {
+      const firstHeading = clone.querySelector('h1, h2');
+      if (firstHeading && cleanTitle(trim(firstHeading.textContent || '')) === postingTitle) {
+        firstHeading.remove();
+      }
+    }
     return normalizeJobDescription(clone.innerText || clone.textContent || '');
   }
 
@@ -356,47 +851,33 @@
 
   function extractWorkdayJobDescription(root) {
     const scope = root || document;
-    const el = scope.querySelector('[data-automation-id="jobPostingDescription"]');
+    const page = scope.querySelector('[data-automation-id="jobPostingPage"]') || scope;
+    const el = page.querySelector('[data-automation-id="jobPostingDescription"]');
     if (!el) return '';
     const clone = el.cloneNode(true);
     clone.querySelectorAll(
-      'script, style, template, .simplify-jobs-shadow-root, [class*="simplify-banner"]'
+      'script, style, template, meta, button, [data-automation-id="similarJobsCard"], [data-automation-id="similar-jobs-heading"], [data-automation-id="toggle-all-jobs"], .simplify-jobs-shadow-root, [class*="simplify-banner"]'
     ).forEach((node) => node.remove());
     return normalizeJobDescription(clone.innerText || clone.textContent || '');
   }
 
   function getWorkdayJobPostingInfo() {
     const page = document.querySelector('[data-automation-id="jobPostingPage"]') || document;
-    const titleEl = page.querySelector(
-      '[data-automation-id="jobPostingHeader"], [data-automation-id="jobTitleHeading"], h2[data-automation-id="jobPostingHeader"]'
-    );
+    if (!page.querySelector('[data-automation-id="jobPostingDescription"], [data-automation-id="job-posting-details"]')) {
+      return {};
+    }
     const companyMeta = document.querySelector(
       'meta[property="og:site_name"], meta[name="application-name"]'
     );
     let company = resolveWorkdayCompanyName();
     if (!company && companyMeta) {
-      const metaCompany = cleanCompany(companyMeta.getAttribute('content') || '');
+      const metaCompany = cleanWorkdayCompanyLabel(companyMeta.getAttribute('content') || '');
       if (metaCompany && !isUnreliableWorkdayCompanyName(metaCompany)) company = metaCompany;
     }
 
-    const alertTitle = page.querySelector('[role="alert"]');
-    let job_title = titleEl ? trim(titleEl.textContent) : '';
-    if (!job_title && alertTitle) {
-      const alertText = trim(alertTitle.textContent || '');
-      const m = /^(.+?)\s+page is loaded$/i.exec(alertText);
-      if (m) job_title = trim(m[1]);
-    }
-
+    const job_title = findWorkdayPostingTitle(page);
     const job_description = extractWorkdayJobDescription(page);
-    const requisitionEl = page.querySelector('[data-automation-id="requisitionId"] dd');
-    const locationEl = page.querySelector('[data-automation-id="locations"] dd');
-    const remoteEl = page.querySelector('[data-automation-id="remoteType"] dd');
-
-    const metaParts = [
-      remoteEl ? `Remote: ${trim(remoteEl.textContent)}` : '',
-      locationEl ? `Location: ${trim(locationEl.textContent)}` : '',
-      requisitionEl ? `Requisition: ${trim(requisitionEl.textContent)}` : ''
-    ].filter(Boolean);
+    const metaParts = getWorkdayPostingMetaParts(page);
 
     let description = job_description;
     if (metaParts.length) {
@@ -414,36 +895,51 @@
   function resolveRipplingCompanyName() {
     const breadcrumbCompany = document.querySelector('[data-testid="breadcrumb"] li:first-child a');
     if (breadcrumbCompany) {
-      const fromCrumb = cleanCompany(trim(breadcrumbCompany.textContent || ''));
+      const fromCrumb = cleanRipplingCompanyLabel(trim(breadcrumbCompany.textContent || ''));
       if (fromCrumb) return fromCrumb;
     }
-    const preview = document.querySelector('.ATS_htmlPreview');
-    if (preview) {
-      const postingBlock = preview.parentElement?.parentElement?.parentElement;
-      const logoAlt = postingBlock?.querySelector('img[alt]')?.getAttribute('alt') || '';
-      const fromAlt = cleanCompany(trim(logoAlt));
+    const postingRoot = findRipplingPostingRoot();
+    const logoAlt = postingRoot?.querySelector('img[alt]')?.getAttribute('alt') || '';
+    if (logoAlt) {
+      const fromAlt = cleanRipplingCompanyLabel(trim(logoAlt));
       if (fromAlt && !/^(logo|company)$/i.test(fromAlt)) return fromAlt;
     }
+    const fromPath = parseRipplingCompanyFromBreadcrumbPath();
+    if (fromPath) return fromPath;
     const jsonLd = readJobPostingJsonLd();
-    const fromJson = cleanCompany(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization);
+    const fromJson = cleanRipplingCompanyLabel(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization);
     if (fromJson) return fromJson;
     const m = /\/([^/]+)\/jobs(?:\/|$)/i.exec(location.pathname);
     if (m) {
-      return decodeURIComponent(m[1]).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      return cleanRipplingCompanyLabel(
+        decodeURIComponent(m[1]).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+      );
     }
     return '';
   }
 
   function findRipplingPostingTitle() {
-    const breadcrumbCurrent = document.querySelector('[data-testid="breadcrumb"] a[aria-current="page"]');
+    const breadcrumbCurrent = document.querySelector(
+      '[data-testid="breadcrumb"] a[aria-current="page"], [data-testid="breadcrumb"] li:last-child a'
+    );
     if (breadcrumbCurrent) {
       const fromCrumb = cleanTitle(trim(breadcrumbCurrent.textContent || ''));
       if (fromCrumb) return fromCrumb;
+    }
+    const pageTitle = document.querySelector('h2.css-of4wst, .css-cssveg > h2, [data-testid="breadcrumb"] ~ div h2');
+    if (pageTitle && !pageTitle.closest('.ATS_htmlPreview, form')) {
+      const fromHeading = cleanTitle(trim(pageTitle.textContent || ''));
+      if (fromHeading && fromHeading.length < 220) return fromHeading;
     }
     for (const h2 of document.querySelectorAll('h2')) {
       if (h2.closest('form, .ATS_htmlPreview')) continue;
       const t = cleanTitle(trim(h2.textContent || ''));
       if (t && t.length < 220) return t;
+    }
+    const jsonLd = readJobPostingJsonLd();
+    if (jsonLd?.title) {
+      const fromJson = cleanTitle(trim(jsonLd.title));
+      if (fromJson) return fromJson;
     }
     return '';
   }
@@ -451,12 +947,20 @@
   function getRipplingPostingMetaParts() {
     const parts = [];
     document.querySelectorAll('[data-icon="DEPARTMENTS_OUTLINE"], [data-icon="LOCATION_OUTLINE"]').forEach((icon) => {
-      const value = trim(icon.parentElement?.querySelector('p')?.textContent || '');
+      const row = icon.closest('[class*="jugqli"]') || icon.parentElement;
+      const value = trim(row?.querySelector('p')?.textContent || '');
       if (!value) return;
       const label = icon.getAttribute('data-icon') === 'DEPARTMENTS_OUTLINE' ? 'Department' : 'Location';
       parts.push(`${label}: ${value}`);
     });
-    return parts;
+    if (!parts.some((part) => /^location:/i.test(part))) {
+      const preview = document.querySelector('.ATS_htmlPreview');
+      if (preview) {
+        const locationMatch = /\blocation:\s*([^\n]+)/i.exec(preview.innerText || preview.textContent || '');
+        if (locationMatch) parts.unshift(`Location: ${trim(locationMatch[1])}`);
+      }
+    }
+    return parts.slice(0, 4);
   }
 
   function getRipplingJobPostingInfo() {
@@ -478,12 +982,40 @@
   }
 
   function resolveGreenhouseCompanyName() {
-    const logoAlt = document.querySelector(
-      '.job-post-container .logo img[alt], .image-container .logo img[alt], main.job-post .logo img[alt]'
-    )?.getAttribute('alt') || '';
-    if (logoAlt) {
+    const logoSelectors = [
+      '.image-container img.logo[alt]',
+      '.image-container img[alt]',
+      'img.logo[alt]',
+      '.job-post-container .logo img[alt]',
+      '.image-container .logo img[alt]',
+      'main.job-post .logo img[alt]',
+      '.job-post-container img[alt]'
+    ];
+    for (const selector of logoSelectors) {
+      const logoImg = document.querySelector(selector);
+      if (!logoImg) continue;
+      const logoAlt = trim(logoImg.getAttribute('alt') || '');
+      if (!logoAlt) continue;
       const fromAlt = cleanCompany(trim(logoAlt.replace(/\s*logo\s*$/i, '')));
       if (fromAlt) return fromAlt;
+    }
+    const boardLink = document.querySelector(
+      'a.link[href*="greenhouse.io/"], a[href*="job-boards.greenhouse.io/"]'
+    );
+    if (boardLink) {
+      const href = boardLink.getAttribute('href') || '';
+      const pathMatch = /greenhouse\.io\/([^/?#]+)/i.exec(href);
+      if (pathMatch?.[1] && !/^(jobs|embed|users)$/i.test(pathMatch[1])) {
+        const fromLink = cleanCompany(
+          decodeURIComponent(pathMatch[1]).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        );
+        if (fromLink) return fromLink;
+      }
+    }
+    const ogSite = document.querySelector('meta[property="og:site_name"]');
+    if (ogSite) {
+      const fromOg = cleanCompany(trim(ogSite.getAttribute('content') || ''));
+      if (fromOg && !/^greenhouse$/i.test(fromOg)) return fromOg;
     }
     const jsonLd = readJobPostingJsonLd();
     const fromJson = cleanCompany(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization);
@@ -499,9 +1031,9 @@
 
   function findGreenhousePostingTitle() {
     const titleEl = document.querySelector(
-      '.job__title h1, .job__header .job__title h1, main.job-post .job__header h1'
+      '.job__title h1, .job__header .job__title h1, .job__header h1.section-header, main.job-post .job__header h1'
     );
-    if (titleEl && !titleEl.closest('form, .application--container, .eeoc__container')) {
+    if (titleEl && !titleEl.closest('form, .application--container, .eeoc__container, .demographic--container')) {
       const fromHeader = cleanTitle(trim(titleEl.textContent || ''));
       if (fromHeader && !/^apply for this job$/i.test(fromHeader)) return fromHeader;
     }
@@ -519,11 +1051,16 @@
     if (locationWrap) {
       for (const div of locationWrap.querySelectorAll('div')) {
         const value = trim(div.textContent || '');
-        if (value) {
+        if (value && value.length < 120) {
           parts.push(`Location: ${value}`);
           break;
         }
       }
+    }
+    const tagEl = document.querySelector('.job__tags .tag-text, .job__tags [class*="tag-text"]');
+    if (tagEl) {
+      const tag = trim(tagEl.textContent || '');
+      if (tag && tag.length < 40) parts.push(`Tag: ${tag}`);
     }
     return parts;
   }
@@ -546,18 +1083,40 @@
     return { job_title, company_name, job_description };
   }
 
+  function isSmartRecruitersHost() {
+    const host = location.hostname.toLowerCase();
+    return host.includes('smartrecruiters.com') || isSmartRecruitersPageContext();
+  }
+
+  function isSmartRecruitersPageContext() {
+    return Boolean(
+      document.querySelector('main.jobad-main, .jobad-container, h1.job-title[itemprop="title"], .job-section[id^="st-"]')
+    );
+  }
+
+  function parseSmartRecruitersCompanyFromPath() {
+    const pathMatch = /^\/([^/]+)\//i.exec(location.pathname);
+    if (!pathMatch?.[1]) return '';
+    let slug = decodeURIComponent(pathMatch[1]).replace(/[-_+]+/g, ' ');
+    slug = slug.replace(/\d+$/i, '').trim();
+    if (!slug) return '';
+    return cleanCompany(slug.replace(/\b\w/g, (c) => c.toUpperCase()));
+  }
+
   function resolveSmartRecruitersCompanyName() {
     const orgMeta = document.querySelector('[itemprop="hiringOrganization"] meta[itemprop="name"]');
     if (orgMeta) {
       const fromOrg = cleanCompany(trim(orgMeta.getAttribute('content') || ''));
       if (fromOrg) return fromOrg;
     }
-    const logoAlt = document.querySelector('.jobad-header .header-logo img[alt], .header-logo img[alt]')?.getAttribute('alt') || '';
+    const logoAlt = document.querySelector(
+      '.jobad-header .header-logo img[alt], .header-logo img[alt], .jobad-header img[alt]'
+    )?.getAttribute('alt') || '';
     if (logoAlt) {
       const fromAlt = cleanCompany(trim(logoAlt.replace(/\s*logo\s*$/i, '')));
       if (fromAlt) return fromAlt;
     }
-    const logoTitle = document.querySelector('.header-logo a[title]')?.getAttribute('title');
+    const logoTitle = document.querySelector('.header-logo a[title], .jobad-header a[title]')?.getAttribute('title');
     if (logoTitle) {
       const fromTitle = cleanCompany(trim(logoTitle));
       if (fromTitle) return fromTitle;
@@ -565,6 +1124,8 @@
     const jsonLd = readJobPostingJsonLd();
     const fromJson = cleanCompany(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization);
     if (fromJson) return fromJson;
+    const fromPath = parseSmartRecruitersCompanyFromPath();
+    if (fromPath) return fromPath;
     const fromPageTitle = cleanCompany(parseCompanyFromTitle(document.title));
     if (fromPageTitle) return fromPageTitle;
     const m = /\/company\/([^/]+)/i.exec(location.pathname);
@@ -576,23 +1137,37 @@
 
   function findSmartRecruitersPostingTitle() {
     const titleEl = document.querySelector(
-      'h1.job-title[itemprop="title"], main.jobad-main h1.job-title, h1[itemprop="title"]'
+      'h1.job-title[itemprop="title"], main.jobad-main h1.job-title, h1[itemprop="title"], h1.job-title'
     );
     if (titleEl) {
       const title = cleanTitle(trim(titleEl.textContent || ''));
       if (title) return title;
+    }
+    const jsonLd = readJobPostingJsonLd();
+    if (jsonLd?.title) {
+      const fromJson = cleanTitle(trim(jsonLd.title));
+      if (fromJson) return fromJson;
     }
     return '';
   }
 
   function getSmartRecruitersPostingMetaParts() {
     const parts = [];
-    const splLoc = document.querySelector('spl-job-location[formattedaddress]');
+    const splLoc = document.querySelector('spl-job-location[formattedaddress], spl-job-location');
     if (splLoc) {
       const address = trim(splLoc.getAttribute('formattedaddress') || '');
-      const workplace = trim(splLoc.getAttribute('workplacetype') || splLoc.getAttribute('workplacedescription') || '');
+      const workplaceType = trim(splLoc.getAttribute('workplacetype') || '');
+      const workplaceDesc = trim(splLoc.getAttribute('workplacedescription') || '');
       if (address) {
-        parts.push(workplace && !/remote/i.test(address) ? `Location: ${address} (${workplace})` : `Location: ${address}`);
+        let locationLine = `Location: ${address}`;
+        if (workplaceType === 'remote' || /remote/i.test(workplaceDesc)) {
+          locationLine += workplaceDesc ? ` (${workplaceDesc})` : ' (Remote)';
+        } else if (workplaceType) {
+          locationLine += ` (${workplaceType})`;
+        }
+        parts.push(locationLine);
+      } else if (workplaceType === 'remote' || workplaceDesc) {
+        parts.push(`Workplace: ${workplaceDesc || 'Remote'}`);
       }
     }
     if (!parts.length) {
@@ -602,12 +1177,24 @@
       const locationBits = [locality, region, country].map(trim).filter(Boolean);
       if (locationBits.length) parts.push(`Location: ${locationBits.join(', ')}`);
     }
-    const employment = document.querySelector('.job-details [itemprop="employmentType"], li[itemprop="employmentType"]');
+    const employment = document.querySelector(
+      '.job-details [itemprop="employmentType"], li[itemprop="employmentType"], .job-details .job-detail[itemprop="employmentType"]'
+    );
     if (employment) {
       const value = trim(employment.textContent || employment.getAttribute('content') || '');
       if (value) parts.push(`Employment type: ${value}`);
     }
-    return parts;
+    document.querySelectorAll('.job-details > li, .job-details .job-detail').forEach((el) => {
+      if (el.matches('[itemprop="jobLocation"], [itemprop="employmentType"]') || el.querySelector('[itemprop="jobLocation"]')) return;
+      const value = trim(el.textContent || '');
+      if (!value || value.length > 120) return;
+      if (/^business unit/i.test(value)) {
+        parts.push(`Department: ${value.replace(/^business unit\s*\(internal\):\s*/i, '').trim() || value}`);
+      } else if (!parts.some((part) => part.includes(value))) {
+        parts.push(`Detail: ${value}`);
+      }
+    });
+    return parts.slice(0, 4);
   }
 
   function getSmartRecruitersJobPostingInfo() {
@@ -631,12 +1218,26 @@
   }
 
   function resolveAshbyCompanyName() {
-    const companyEl = document.querySelector(
-      '[class*="company-name" i], [class*="CompanyName" i], header [class*="company" i] a, header a[href*="ashbyhq.com"]'
-    );
-    if (companyEl) {
+    const companySelectors = [
+      '.ashby-job-posting-header [class*="navLogoText" i]',
+      '.ashby-job-posting-header a[class*="navLogoLink" i]',
+      '[class*="navLogoText" i]',
+      'a[class*="navLogoLink" i] p',
+      '[class*="company-name" i]',
+      '[class*="CompanyName" i]',
+      'header [class*="company" i] a',
+      'header a[href*="ashbyhq.com"]'
+    ];
+    for (const selector of companySelectors) {
+      const companyEl = document.querySelector(selector);
+      if (!companyEl) continue;
       const fromEl = cleanCompany(trim(companyEl.textContent || companyEl.getAttribute('title') || ''));
       if (fromEl) return fromEl;
+    }
+    const ogSite = document.querySelector('meta[property="og:site_name"]');
+    if (ogSite) {
+      const fromOg = cleanCompany(trim(ogSite.getAttribute('content') || ''));
+      if (fromOg && !/^ashby$/i.test(fromOg)) return fromOg;
     }
     const jsonLd = readJobPostingJsonLd();
     const fromJson = cleanCompany(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization);
@@ -652,14 +1253,14 @@
 
   function findAshbyPostingTitle() {
     const titleEl = document.querySelector(
-      'h1.ashby-job-posting-heading, [class*="job-posting-heading" i], [class*="posting-title" i], [class*="JobPostingTitle" i]'
+      'h1.ashby-job-posting-heading, [class*="titles" i] h1.ashby-job-posting-heading, [class*="job-posting-heading" i], [class*="posting-title" i], [class*="JobPostingTitle" i]'
     );
-    if (titleEl && !titleEl.closest('#overview, [role="tabpanel"], form, [class*="application-form" i]')) {
+    if (titleEl && !titleEl.closest('#overview, [role="tabpanel"], form, [class*="application-form" i], [class*="descriptionText" i], .ashby-job-posting-description')) {
       const fromHeading = cleanTitle(trim(titleEl.textContent || ''));
       if (fromHeading) return fromHeading;
     }
-    for (const h1 of document.querySelectorAll('main h1, [role="main"] h1, h1')) {
-      if (h1.closest('#overview, form, [class*="application-form" i], [class*="descriptionText" i]')) continue;
+    for (const h1 of document.querySelectorAll('[class*="titles" i] h1, main h1, [role="main"] h1, h1')) {
+      if (h1.closest('#overview, form, [class*="application-form" i], [class*="descriptionText" i], .ashby-job-posting-description')) continue;
       const title = cleanTitle(trim(h1.textContent || ''));
       if (title && title.length < 220) return title;
     }
@@ -668,19 +1269,45 @@
 
   function getAshbyPostingMetaParts() {
     const parts = [];
+    const leftPane = document.querySelector(
+      '.ashby-job-posting-left-pane, [class*="ashby-job-posting-left-pane"], [class*="job-posting-left-pane" i]'
+    );
+    if (leftPane) {
+      leftPane.querySelectorAll('[class*="_section_" i], [class*="section" i]').forEach((section) => {
+        const heading = section.querySelector('h2, [class*="heading" i]');
+        const valueEl = section.querySelector('p, dd, li:last-child');
+        if (!heading || !valueEl) return;
+        const label = trim(heading.textContent || '').replace(/:$/, '');
+        const value = trim(valueEl.textContent || '');
+        if (!label || !value || value.length > 120) return;
+        const line = `${label}: ${value}`;
+        if (!parts.includes(line)) parts.push(line);
+      });
+      if (parts.length) return parts;
+    }
+    document.querySelectorAll('.ashby-job-posting-left-pane [class*="heading" i]').forEach((heading) => {
+      const label = trim(heading.textContent || '').replace(/:$/, '');
+      const valueEl = heading.nextElementSibling;
+      const value = trim(valueEl?.textContent || '');
+      if (label && value && value.length < 120) {
+        const line = `${label}: ${value}`;
+        if (!parts.includes(line)) parts.push(line);
+      }
+    });
+    if (parts.length) return parts;
     document.querySelectorAll('[class*="location" i], [class*="Location" i]').forEach((el) => {
-      if (el.closest('#overview, form, [class*="application-form" i], [class*="descriptionText" i]')) return;
+      if (el.closest('#overview, form, [class*="application-form" i], [class*="descriptionText" i], .ashby-job-posting-description')) return;
       const value = trim(el.textContent || '');
       if (value && value.length < 120 && !parts.some((part) => part.includes(value))) {
         parts.push(`Location: ${value}`);
       }
     });
-    return parts.slice(0, 2);
+    return parts.slice(0, 4);
   }
 
   function getAshbyJobPostingInfo() {
     if (!document.querySelector(
-      '#overview[role="tabpanel"], [role="tabpanel"][aria-labelledby="job-overview"], [class*="descriptionText"]'
+      '#overview[role="tabpanel"], [role="tabpanel"][aria-labelledby="job-overview"], [class*="descriptionText"], .ashby-job-posting-description, .ashby-job-posting-heading'
     )) {
       return {};
     }
@@ -896,6 +1523,8 @@
       const host = location.hostname.toLowerCase();
       if (/\.workday\.com$/i.test(host) || host.includes('myworkdayjobs.com')) score += 45;
       if (document.querySelector('[data-automation-id="jobPostingPage"], [data-automation-id="jobPostingDescription"]')) score += 22;
+      if (document.querySelector('[data-automation-id="job-posting-details"]')) score += 14;
+      if (document.querySelector('[data-automation-id="jobSidebar"], [data-automation-id="sidebar"]')) score += 8;
       if (document.querySelector('[data-automation-id="applyFlowPage"], [data-automation-id="applyFlowMyInfoPage"]')) score += 28;
       if (document.querySelector('[data-automation-id="applyFlow"], [data-automation-id="applyManually"]')) score += 15;
       const wdFields = document.querySelectorAll('[data-automation-id^="formField-"]').length;
@@ -1016,7 +1645,7 @@
 
   function isRipplingHost() {
     const host = location.hostname.toLowerCase();
-    return host.includes('rippling.com');
+    return host.includes('rippling.com') || isRipplingPageContext();
   }
 
   function normalizeRipplingFieldToken(token) {
@@ -1041,6 +1670,8 @@
       if (document.querySelector('.ATS_htmlPreview')) score += 32;
       if (document.querySelector('[data-testid="breadcrumb"]')) score += 14;
       if (document.querySelector('button[data-testid="Apply now"]')) score += 10;
+      if (document.querySelector('img[src*="ripplingcdn" i]')) score += 12;
+      if (isRipplingPageContext()) score += 18;
       const appTitle = document.querySelector('form h4, h4');
       if (appTitle && /application\s*:/i.test(appTitle.textContent || '')) score += 10;
       if (document.querySelector('[data-testid="resume"], [data-testid="input-resume"]')) score += 8;
@@ -1109,19 +1740,20 @@
       return ripplingAdapter.mapNameToCategory(null, el);
     },
     getJobInfo() {
-      if (document.querySelector('.ATS_htmlPreview')) {
-        return getRipplingJobPostingInfo();
+      if (document.querySelector('.ATS_htmlPreview') || isRipplingPageContext()) {
+        const postingInfo = getRipplingJobPostingInfo();
+        if (postingInfo.job_title || postingInfo.company_name || postingInfo.job_description) return postingInfo;
       }
       const titleEl = document.querySelector('form h4, h4');
       let job_title = '';
       if (titleEl) {
         const m = /application\s*:\s*(.+)/i.exec(trim(titleEl.textContent || ''));
-        job_title = m ? trim(m[1]) : trim(titleEl.textContent);
+        job_title = m ? trim(m[1]) : cleanTitle(trim(titleEl.textContent));
       }
       const companyEl = document.querySelector('[class*="company" i], header h1, header h2');
       return {
         job_title,
-        company_name: companyEl ? trim(companyEl.textContent) : resolveRipplingCompanyName()
+        company_name: companyEl ? cleanRipplingCompanyLabel(trim(companyEl.textContent)) : resolveRipplingCompanyName()
       };
     },
     isVoluntaryField() {
@@ -1489,11 +2121,6 @@
   function isAshbyHost() {
     const host = location.hostname.toLowerCase();
     return host === 'ashbyhq.com' || host.endsWith('.ashbyhq.com');
-  }
-
-  function isSmartRecruitersHost() {
-    const host = location.hostname.toLowerCase();
-    return host === 'smartrecruiters.com' || host.endsWith('.smartrecruiters.com');
   }
 
   function isAshbyFormContext() {
@@ -1915,47 +2542,12 @@
       return null;
     },
     getJobInfo() {
-      const titleEl = document.querySelector(
-        '.posting-header h2, [data-qa="posting-name"], .posting-headline h2, .application-page h2'
-      );
-      const companyEl = document.querySelector('.main-header-logo-name, .main-header-logo-text');
-      let company = companyEl ? trim(companyEl.textContent) : '';
-      if (!company) {
-        const logoAlt = document.querySelector('.main-header-logo img[alt]')?.getAttribute('alt') || '';
-        const altMatch = /logo$/i.test(logoAlt) ? trim(logoAlt.replace(/\s*logo\s*$/i, '')) : '';
-        if (altMatch) company = altMatch;
-      }
-      if (!company) {
-        const dept = document.querySelector('.posting-category.department, .posting-categories .department');
-        if (dept) {
-          const part = trim((dept.textContent || '').split(/[–—/]/)[0]);
-          if (part) company = part;
-        }
-      }
-      if (!company) {
-        const m = /jobs\.lever\.co\/([^/]+)/i.exec(location.href);
-        if (m) company = decodeURIComponent(m[1]).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-      }
-
-      const categories = Array.from(document.querySelectorAll('.posting-categories .posting-category'))
-        .map((node) => trim(node.textContent).replace(/\/\s*$/, ''))
-        .filter(Boolean);
-      const metaParts = categories.length ? [`Categories: ${categories.join(' · ')}`] : [];
-      let job_description = extractLeverJobDescription(document);
-      if (!job_description) {
-        const jsonLd = readJobPostingJsonLd();
-        if (jsonLd?.description) job_description = htmlDescriptionToText(jsonLd.description);
-      }
-      if (metaParts.length && job_description) {
-        job_description = `${metaParts.join('\n')}\n\n${job_description}`;
-      } else if (metaParts.length) {
-        job_description = metaParts.join('\n');
-      }
-
+      const postingInfo = getLeverJobPostingInfo();
+      if (postingInfo.job_title || postingInfo.job_description) return postingInfo;
       return {
-        job_title: titleEl ? trim(titleEl.textContent) : '',
-        company_name: company,
-        job_description
+        job_title: findLeverPostingTitle(),
+        company_name: resolveLeverCompanyName(),
+        job_description: extractLeverJobDescription(document)
       };
     },
     isLeverFieldRequired(el) {
@@ -2133,7 +2725,9 @@
       const titleEl = document.querySelector(
         'h1, .ashby-job-posting-heading, [class*="posting-title" i], [class*="job-title" i], [data-testid*="title" i]'
       );
-      const companyEl = document.querySelector('[class*="company-name" i], header a, header h2');
+      const companyEl = document.querySelector(
+        '[class*="navLogoText" i], .ashby-job-posting-header a, [class*="company-name" i], header a, header h2'
+      );
       return {
         job_title: titleEl ? trim(titleEl.textContent) : '',
         company_name: companyEl ? trim(companyEl.textContent) : resolveAshbyCompanyName()
@@ -2221,7 +2815,7 @@
     },
     getJobInfo() {
       const postingInfo = getSmartRecruitersJobPostingInfo();
-      if (postingInfo.job_title || postingInfo.job_description) return postingInfo;
+      if (postingInfo.job_title || postingInfo.company_name || postingInfo.job_description) return postingInfo;
       const titleEl = document.querySelector(
         '[data-automation="job-title"], [class*="job-title" i], h1, .job-title'
       );
@@ -2229,8 +2823,8 @@
         '[data-automation="company-name"], [class*="company-name" i], .company-name, header .brand'
       );
       return {
-        job_title: titleEl ? trim(titleEl.textContent) : '',
-        company_name: companyEl ? trim(companyEl.textContent) : resolveSmartRecruitersCompanyName()
+        job_title: titleEl ? cleanTitle(trim(titleEl.textContent)) : '',
+        company_name: companyEl ? cleanCompany(trim(companyEl.textContent)) : resolveSmartRecruitersCompanyName()
       };
     },
     isVoluntaryField(el) {
@@ -2321,11 +2915,120 @@
     }
   };
 
+  const workableAdapter = {
+    name: 'workable',
+    score() {
+      let score = 0;
+      if (isWorkableHost()) score += 45;
+      if (document.querySelector('[data-ui="overview-title"]')) score += 25;
+      if (document.querySelector('[data-ui="job-breakdown-description-parsed-html"], [class*="jobBreakdown__job-breakdown"]')) score += 28;
+      if (document.querySelector('[data-ui="overview-apply-now"], [class*="applyButton__apply-button"]')) score += 10;
+      if (document.querySelector('form[data-ui], form[class*="application"]')) score += 12;
+      return Math.max(0, score);
+    },
+    detect() { return workableAdapter.score() >= ADAPTER_SCORE_THRESHOLD; },
+    getScanRoot() {
+      return document.querySelector('form[data-ui], form[class*="application"]') || document.querySelector('main');
+    },
+    getQuestionContainer(el) {
+      return el.closest('[data-ui], .field, fieldset, [class*="field"]');
+    },
+    getJobInfo() {
+      const postingInfo = getWorkableJobPostingInfo();
+      if (postingInfo.job_title || postingInfo.job_description) return postingInfo;
+      return {
+        job_title: findWorkablePostingTitle(),
+        company_name: resolveWorkableCompanyName(),
+        job_description: appendWorkableCompanyDescription(extractWorkableJobDescription(document))
+      };
+    },
+    mapNameToCategory() {
+      return null;
+    },
+    resolveFieldCategory(el, questionText) {
+      const fr = fieldRegistry();
+      if (!fr) return null;
+      return fr.resolveFieldCategory({
+        labelText: questionText,
+        nameAttr: el && el.getAttribute('name'),
+        idAttr: el && el.getAttribute('id')
+      });
+    }
+  };
+
+  const doverAdapter = {
+    name: 'dover',
+    score() {
+      let score = 0;
+      if (isDoverHost()) score += 45;
+      if (document.querySelector('[class*="InboundApplication__JobDescriptionWrapper"], [class*="JobDescriptionWrapper"]')) score += 28;
+      if (document.querySelector('[class*="typography__TitleLarge"]')) score += 12;
+      if (document.querySelector('input[name="firstName"], input[name="lastName"], input[name="email"]')) score += 25;
+      if (document.querySelector('a[href*="dover.com"]')) score += 8;
+      return Math.max(0, score);
+    },
+    detect() { return doverAdapter.score() >= ADAPTER_SCORE_THRESHOLD; },
+    getScanRoot() {
+      return document.querySelector(
+        '[class*="InboundApplication__FormWrapper"] form, [class*="FormWrapper"] form, form'
+      ) || document.querySelector('[class*="InboundApplication__RightColumn"]');
+    },
+    getQuestionContainer(el) {
+      return el.closest('.MuiFormControl-root, .MuiBox-root, fieldset, [class*="FormLabel"]')?.parentElement
+        || el.closest('.MuiFormControl-root, .MuiBox-root, fieldset');
+    },
+    getQuestionLabel(container, el) {
+      if (!container) return null;
+      const label = container.querySelector('[class*="FormLabel"], label, legend');
+      if (label && el && !label.contains(el)) return label;
+      const prev = el?.previousElementSibling;
+      if (prev && /FormLabel/i.test(prev.className || '')) return prev;
+      return null;
+    },
+    getJobInfo() {
+      const postingInfo = getDoverJobPostingInfo();
+      if (postingInfo.job_title || postingInfo.job_description) return postingInfo;
+      return {
+        job_title: findDoverPostingTitle(),
+        company_name: resolveDoverCompanyName(),
+        job_description: extractDoverJobDescription(document)
+      };
+    },
+    mapNameToCategory(nameAttr) {
+      if (!nameAttr) return null;
+      const key = String(nameAttr).toLowerCase();
+      const table = {
+        firstname: 'first_name',
+        lastname: 'last_name',
+        email: 'email',
+        linkedinurl: 'linkedin',
+        phonenumber: 'phone'
+      };
+      return table[key] || null;
+    },
+    mapIdToCategory(idAttr) {
+      return doverAdapter.mapNameToCategory(idAttr);
+    },
+    resolveFieldCategory(el, questionText) {
+      const fromName = doverAdapter.mapNameToCategory(el?.getAttribute('name'));
+      if (fromName) return fromName;
+      const fr = fieldRegistry();
+      if (!fr) return null;
+      return fr.resolveFieldCategory({
+        labelText: questionText,
+        nameAttr: el && el.getAttribute('name'),
+        idAttr: el && el.getAttribute('id')
+      });
+    }
+  };
+
   const adapters = [
     greenhouseAdapter,
     leverAdapter,
     ashbyAdapter,
     smartRecruitersAdapter,
+    workableAdapter,
+    doverAdapter,
     bamboohrAdapter,
     workdayAdapter,
     ripplingAdapter,
@@ -3686,16 +4389,22 @@
     const pick = pickAdapterWithDebug();
     activeAdapter = pick.adapter;
     const adapterInfo = activeAdapter.getJobInfo ? (activeAdapter.getJobInfo() || {}) : {};
-    const workdayInfo = isWorkdayHost() ? getWorkdayJobPostingInfo() : {};
-    const ripplingInfo = isRipplingHost() ? getRipplingJobPostingInfo() : {};
+    const workdayInfo = (isWorkdayHost() || isWorkdayPageContext()) ? getWorkdayJobPostingInfo() : {};
+    const ripplingInfo = (isRipplingHost() || isRipplingPageContext()) ? getRipplingJobPostingInfo() : {};
     const greenhouseInfo = isGreenhouseHost() ? getGreenhouseJobPostingInfo() : {};
     const smartRecruitersInfo = isSmartRecruitersHost() ? getSmartRecruitersJobPostingInfo() : {};
     const ashbyInfo = isAshbyHost() ? getAshbyJobPostingInfo() : {};
     const bamboohrInfo = isBamboohrHost() ? getBamboohrJobPostingInfo() : {};
+    const leverInfo = isLeverHost() ? getLeverJobPostingInfo() : {};
+    const workableInfo = isWorkableHost() ? getWorkableJobPostingInfo() : {};
+    const doverInfo = isDoverHost() ? getDoverJobPostingInfo() : {};
     const jsonLd = readJobPostingJsonLd();
     const metaTitle = document.querySelector('meta[property="og:title"], meta[name="twitter:title"]')?.content || '';
     const titleCandidates = [
       adapterInfo.job_title,
+      doverInfo.job_title,
+      workableInfo.job_title,
+      leverInfo.job_title,
       bamboohrInfo.job_title,
       ashbyInfo.job_title,
       smartRecruitersInfo.job_title,
@@ -3721,6 +4430,12 @@
       resolveSmartRecruitersCompanyName(),
       greenhouseInfo.company_name,
       resolveGreenhouseCompanyName(),
+      leverInfo.company_name,
+      resolveLeverCompanyName(),
+      workableInfo.company_name,
+      resolveWorkableCompanyName(),
+      doverInfo.company_name,
+      resolveDoverCompanyName(),
       ripplingInfo.company_name,
       resolveRipplingCompanyName(),
       adapterInfo.company_name,
@@ -3734,6 +4449,9 @@
 
     const descriptionCandidates = [
       adapterInfo.job_description,
+      doverInfo.job_description,
+      workableInfo.job_description,
+      leverInfo.job_description,
       bamboohrInfo.job_description,
       ashbyInfo.job_description,
       smartRecruitersInfo.job_description,
@@ -3745,7 +4463,9 @@
       isSmartRecruitersHost() ? extractSmartRecruitersJobDescription(document) : '',
       isGreenhouseHost() ? extractGreenhouseJobDescription(document) : '',
       isLeverHost() ? extractLeverJobDescription(document) : '',
-      isRipplingHost() ? extractRipplingJobDescription(document) : '',
+      isWorkableHost() ? appendWorkableCompanyDescription(extractWorkableJobDescription(document)) : '',
+      isDoverHost() ? extractDoverJobDescription(document) : '',
+      (isRipplingHost() || isRipplingPageContext()) ? extractRipplingJobDescription(document) : '',
       jsonLd?.description,
       extractWorkdayJobDescription(document)
     ]

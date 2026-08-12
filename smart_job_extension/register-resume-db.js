@@ -200,6 +200,8 @@
     document.getElementById('regJobTitle').value = job.jobTitle;
     document.getElementById('regCompany').value = job.companyName;
     document.getElementById('regJobLink').value = job.jobLink;
+    const noteEl = document.getElementById('regNote');
+    if (noteEl) noteEl.value = job.jobDescription;
     setRegisterStatus('Job description copied to clipboard.', 'success');
     if (showStatus) showStatus('Job description copied to clipboard.', 'success');
   }
