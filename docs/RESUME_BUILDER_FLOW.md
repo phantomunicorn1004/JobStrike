@@ -10,26 +10,24 @@ This doc covers the Chrome extension Register tab, website Resume Builder / Sett
 
 | Piece | Role |
 |-------|------|
-| Website `/resume-builder` | Edit/save per-profile prompt kit (template + resume JSON); syncs to extension |
+| Website `/resume-builder` | Edit/save per-profile prompt kit to account DB (template + resume JSON) |
 | Website `/settings` | Enable json2docx URL + output mode; Test connection |
 | Website `/prompt-builder`, `/resume-tailor` | Original tools (unchanged) |
-| Extension Register | Prompt kit (`chrome.storage`), Build & Copy Prompt, paste JSON, Generate Files, Register |
+| Extension Register | Prompt kit via API + local cache; Build & Copy Prompt, paste JSON, Generate Files, Register |
 | Extension Settings | Website sign-in + json2docx enable / URL / output mode |
 | `json2docx/server.py` | Local API on `127.0.0.1:8765` → writes files to Downloads |
 
-**Note:** Prompt kits sync between website Resume Builder and the extension when the extension is installed and this site is open (content-script bridge → `chrome.storage` key `promptKit_v1_{profileId}`). Without the extension, the website keeps a localStorage cache only.
+**Note:** Prompt kits are stored per profile in `profile_prompt_kits` (Supabase). Website and extension both use `GET`/`PUT` `/api/profiles/{id}/prompt-kit` (session cookie or `X-Extension-Key`). Local caches (`localStorage` / `chrome.storage`) are offline helpers only.
 
-### How to sync (website → extension)
+### How to sync across Chrome profiles
 
-1. Reload the unpacked extension in `chrome://extensions` (needed after code updates).
-2. Open `/resume-builder` in a normal Chrome tab **with the extension enabled** (refresh the page after reload).
-3. Select the same **Profile** you use in the extension.
-4. Click **Save prompt kit**.
-5. Toast should say **“Prompt kit saved and synced to the extension.”**  
-   If it says it only saved in the browser, the bridge is not active — refresh the page / check the extension is enabled.
-6. In the extension Register tab, select that profile (or re-open Prompt kit). Status should update; Build & Copy uses the synced kit.
+1. Run `scripts/add-profile-prompt-kits.sql` in the Supabase SQL editor (once).
+2. Deploy / restart the website.
+3. Sign in with the **same account** on each Chrome profile (website and/or extension Settings).
+4. On `/resume-builder`, select Profile → **Save prompt kit**.
+5. On any other Chrome profile: sign in → open Register or `/resume-builder` → same Profile → kit loads from the account.
 
-Extension → website: open `/resume-builder` again (or keep it open); newer kits merge by `updatedAt`.
+First save from a browser that still has only a local draft will **seed** the server row automatically.
 
 ---
 
@@ -111,7 +109,7 @@ Reload the extension after code updates.
 
 1. Sign in as a member.
 2. **Settings → json2docx local server:** enable + Test (browser calls localhost; CORS is open on the Python server).
-3. **Resume Builder:** select Profile, edit Original prompt / resume JSON, Save kit (syncs to extension).
+3. **Resume Builder:** select Profile, edit Original prompt / resume JSON, Save kit (account DB).
 4. Keep **Resume Tailor** for the workflow-canvas path. Build & Copy runs in the extension.
 
 ---
@@ -129,7 +127,7 @@ Reload the extension after code updates.
 | Download blocked | Path outside Downloads | Server only serves Downloads `.docx`/`.pdf` |
 | CORS in browser Settings | Old server without CORS | Update / restart `server.py` (allows `*`) |
 | Build & Copy empty JD | Note empty | Scrape / paste JD into Note, or save JD in kit |
-| Website kit ≠ extension kit | Extension not loaded / outdated | Reload extension; reopen `/resume-builder` and Save kit again |
+| Website kit ≠ extension kit | Not signed in / migration not run | Sign in both sides; run `scripts/add-profile-prompt-kits.sql`; Save kit again |
 
 ---
 
@@ -147,7 +145,9 @@ Reload the extension after code updates.
 ### B. Website
 
 - [ ] `/settings` → enable json2docx → Test connection succeeds while server runs
-- [ ] `/resume-builder` → select Profile → edit kit → Save (sync toast)
+- [ ] Run `scripts/add-profile-prompt-kits.sql` in Supabase
+- [ ] `/resume-builder` → select Profile → edit kit → Save (account)
+- [ ] Extension (another Chrome profile, same account) → Register → same Profile → kit loads
 - [ ] `/prompt-builder` and `/resume-tailor` still open (unchanged)
 
 ### C. Extension Register

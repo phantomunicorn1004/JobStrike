@@ -26,12 +26,11 @@ import {
   type ProfilePromptKit,
 } from "@/lib/resume-builder/promptKitStorage";
 import {
-  fetchPromptKitFromExtension,
-  pickNewerPromptKit,
-  PROMPT_KIT_BRIDGE_SOURCE,
-  syncPromptKitToExtension,
-  type PromptKitBridgeChangedMessage,
-} from "@/lib/resume-builder/promptKitExtensionSync";
+  fetchProfilePromptKit,
+  localPromptKitHasDraft,
+  saveProfilePromptKit,
+} from "@/lib/resume-builder/promptKitApi";
+import { syncPromptKitToExtension } from "@/lib/resume-builder/promptKitExtensionSync";
 import {
   fetchJson2docxHealth,
   readJson2docxSettingsFromStorage,
@@ -132,21 +131,28 @@ export function ResumeBuilderPageClient() {
     setKit(local);
     setSavedKit(local);
     try {
-      const fromExt = await fetchPromptKitFromExtension(id);
-      if (!fromExt.available) return;
-
-      const merged = pickNewerPromptKit(local, fromExt.kit, fromExt.exists);
-      writeProfilePromptKit(id, merged, undefined, { touchUpdatedAt: false });
-      setKit(merged);
-      setSavedKit(merged);
-
-      const localIsNewer = merged === local && Boolean(local.updatedAt);
-      const extensionMissing = !fromExt.exists;
-      if (localIsNewer || (extensionMissing && Boolean(local.updatedAt))) {
-        void syncPromptKitToExtension(id, local);
+      const remote = await fetchProfilePromptKit(id);
+      if (!remote.exists && localPromptKitHasDraft(local)) {
+        const seeded = await saveProfilePromptKit(id, local);
+        writeProfilePromptKit(id, seeded.kit, undefined, { touchUpdatedAt: false });
+        setKit(seeded.kit);
+        setSavedKit(seeded.kit);
+        void syncPromptKitToExtension(id, seeded.kit);
+        return;
       }
-    } catch {
-      // Keep localStorage kit when bridge fails.
+
+      const next = remote.exists ? remote.kit : emptyProfilePromptKit();
+      writeProfilePromptKit(id, next, undefined, { touchUpdatedAt: false });
+      setKit(next);
+      setSavedKit(next);
+      if (remote.exists) {
+        void syncPromptKitToExtension(id, next);
+      }
+    } catch (error) {
+      // Keep localStorage kit when API fails (offline / unauthorized).
+      toast.error(
+        error instanceof Error ? error.message : "Failed to load prompt kit from server.",
+      );
     }
   }, []);
 
@@ -214,23 +220,6 @@ export function ResumeBuilderPageClient() {
     };
   }, [loadKitForProfile, refreshJson2docxHealth]);
 
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== window) return;
-      const data = event.data as PromptKitBridgeChangedMessage | null;
-      if (!data || data.source !== PROMPT_KIT_BRIDGE_SOURCE) return;
-      if (data.type !== "prompt-kit-changed") return;
-      if (profileId == null || data.profileId !== profileId) return;
-      if (dirty) return;
-      const next = data.kit;
-      writeProfilePromptKit(profileId, next, undefined, { touchUpdatedAt: false });
-      setKit(next);
-      setSavedKit(next);
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [profileId, dirty]);
-
   const selectProfile = (raw: string) => {
     const id = Number(raw);
     if (!Number.isFinite(id) || id < 1) return;
@@ -256,30 +245,20 @@ export function ResumeBuilderPageClient() {
     }
     setSaving(true);
     try {
-      // Preserve JD / output for extension compatibility; this page no longer edits them.
-      const next = writeProfilePromptKit(profileId, {
+      const payload: ProfilePromptKit = {
         ...kit,
         jobDescription: kit.jobDescription || savedKit.jobDescription || "",
         output: kit.output || savedKit.output || "",
-      });
-      setKit(next);
-      setSavedKit(next);
-      const sync = await syncPromptKitToExtension(profileId, next);
+      };
+      const saved = await saveProfilePromptKit(profileId, payload);
+      writeProfilePromptKit(profileId, saved.kit, undefined, { touchUpdatedAt: false });
+      setKit(saved.kit);
+      setSavedKit(saved.kit);
+      const sync = await syncPromptKitToExtension(profileId, saved.kit);
       if (sync.synced) {
-        if (sync.kit) {
-          setKit(sync.kit);
-          setSavedKit(sync.kit);
-          writeProfilePromptKit(profileId, sync.kit, undefined, {
-            touchUpdatedAt: false,
-          });
-        }
-        toast.success("Prompt kit saved and synced to the extension.");
-      } else if (!sync.ok) {
-        toast.error(sync.error || "Saved locally, but extension sync failed.");
+        toast.success("Prompt kit saved to your account (synced to extension).");
       } else {
-        toast.success(
-          "Prompt kit saved in this browser. Open this site with Remote Helper Ext enabled to sync.",
-        );
+        toast.success("Prompt kit saved to your account.");
       }
     } catch (error) {
       toast.error(
@@ -314,9 +293,9 @@ export function ResumeBuilderPageClient() {
           <div>
             <h1 className="text-lg font-semibold">Resume Builder</h1>
             <p className="text-xs text-muted-foreground">
-              Edit and save the per-profile prompt kit (synced to the extension). Build
-              &amp; Copy and job description live in the extension Register tab. Built JSON
-              must include{" "}
+              Edit and save the per-profile prompt kit to your account (works across
+              Chrome profiles once signed in). Build &amp; Copy and job description live
+              in the extension Register tab. Built JSON must include{" "}
               {REQUIRED_BUILT_RESUME_JSON_FIELDS.map((field) => (
                 <code key={field} className="mx-0.5">
                   {field}
@@ -396,7 +375,7 @@ export function ResumeBuilderPageClient() {
               ) : dirty ? (
                 "Unsaved changes for this profile."
               ) : savedKit.updatedAt ? (
-                `Last saved ${new Date(savedKit.updatedAt).toLocaleString()}.`
+                `Last saved ${new Date(savedKit.updatedAt).toLocaleString()} (account).`
               ) : (
                 "No saved kit yet for this profile (uses default template)."
               )}

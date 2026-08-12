@@ -1760,7 +1760,7 @@
       jobDescription: noteText || existing.kit.jobDescription || '',
     });
     updatePromptKitStatus(api.kitStatusSummary(next, true), 'success');
-    setRegisterStatus('Prompt kit saved for this profile (extension storage).', 'success');
+    setRegisterStatus('Prompt kit saved for this profile (account).', 'success');
     if (showStatus) showStatus('Prompt kit saved for this profile.', 'success');
     syncRbStatusChips();
     return next;

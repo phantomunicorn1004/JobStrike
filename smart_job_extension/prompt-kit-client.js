@@ -1,11 +1,14 @@
 /**
- * Per-profile prompt kit (chrome.storage.local) + Build & Copy helpers.
- * Synced from website Resume Builder via website-bridge.js when the user saves a kit.
+ * Per-profile prompt kit: server API (source of truth) + chrome.storage.local cache.
  */
 (function (global) {
   'use strict';
 
   const KIT_PREFIX = 'promptKit_v1_';
+  const BACKEND_URL_KEY = 'resume_db_backend_url';
+  const EXTENSION_API_KEY_KEY = 'resume_db_extension_api_key';
+  const LEGACY_API_KEY_KEY = 'resume_db_api_key';
+  const DEFAULT_BACKEND = 'https://remote-work-helper.vercel.app';
   const PLACEHOLDER_RESUME_TEMPLATE_JSON = '{resume_template_json}';
   const PLACEHOLDER_JOB_DESCRIPTION = '{job_description}';
 
@@ -82,16 +85,123 @@ Return valid JSON only. No markdown fences, no commentary.`;
     });
   }
 
+  function normalizeBackendUrl(url) {
+    const trimmed = String(url || '').trim().replace(/\/+$/, '');
+    return trimmed || DEFAULT_BACKEND;
+  }
+
+  async function getRemoteAuth() {
+    const result = await storageGet([
+      BACKEND_URL_KEY,
+      EXTENSION_API_KEY_KEY,
+      LEGACY_API_KEY_KEY,
+    ]);
+    const extensionApiKey = String(
+      result[EXTENSION_API_KEY_KEY] || result[LEGACY_API_KEY_KEY] || ''
+    ).trim();
+    if (!extensionApiKey) return null;
+    return {
+      baseUrl: normalizeBackendUrl(result[BACKEND_URL_KEY]),
+      extensionApiKey,
+    };
+  }
+
+  function localKitHasDraft(kit) {
+    const defaults = emptyKit();
+    return Boolean(
+      trim(kit.resumeTemplateJson) ||
+        trim(kit.jobDescription) ||
+        trim(kit.output) ||
+        trim(kit.template) !== trim(defaults.template)
+    );
+  }
+
+  async function readLocalKit(profileId) {
+    const key = kitStorageKey(profileId);
+    const result = await storageGet([key]);
+    const raw = result[key];
+    if (!raw) return { kit: emptyKit(), exists: false };
+    return { kit: normalizeKit(raw), exists: true };
+  }
+
+  async function writeLocalKit(profileId, kit) {
+    const next = normalizeKit(kit);
+    await storageSet({ [kitStorageKey(profileId)]: next });
+    return next;
+  }
+
+  async function fetchRemoteKit(profileId) {
+    const auth = await getRemoteAuth();
+    if (!auth) return { available: false, exists: false, kit: emptyKit() };
+
+    const res = await fetch(`${auth.baseUrl}/api/profiles/${profileId}/prompt-kit`, {
+      method: 'GET',
+      headers: { 'X-Extension-Key': auth.extensionApiKey },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.error || `Failed to load prompt kit (${res.status})`);
+      err.status = res.status;
+      throw err;
+    }
+    return {
+      available: true,
+      exists: Boolean(data.exists),
+      kit: normalizeKit(data.kit || {}),
+    };
+  }
+
+  async function putRemoteKit(profileId, kit) {
+    const auth = await getRemoteAuth();
+    if (!auth) throw new Error('Sign in under Settings to sync prompt kits.');
+
+    const res = await fetch(`${auth.baseUrl}/api/profiles/${profileId}/prompt-kit`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Extension-Key': auth.extensionApiKey,
+      },
+      body: JSON.stringify({
+        template: kit.template,
+        resumeTemplateJson: kit.resumeTemplateJson,
+        jobDescription: kit.jobDescription,
+        output: kit.output,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Failed to save prompt kit (${res.status})`);
+    }
+    return normalizeKit(data.kit || kit);
+  }
+
   async function getPromptKit(profileId) {
     const id = Number(profileId);
     if (!Number.isFinite(id) || id < 1) {
       return { kit: emptyKit(), exists: false };
     }
-    const key = kitStorageKey(id);
-    const result = await storageGet([key]);
-    const raw = result[key];
-    if (!raw) return { kit: emptyKit(), exists: false };
-    return { kit: normalizeKit(raw), exists: true };
+
+    const local = await readLocalKit(id);
+
+    try {
+      const remote = await fetchRemoteKit(id);
+      if (!remote.available) return local;
+
+      if (!remote.exists && local.exists && localKitHasDraft(local.kit)) {
+        const seeded = await putRemoteKit(id, local.kit);
+        await writeLocalKit(id, seeded);
+        return { kit: seeded, exists: true };
+      }
+
+      if (remote.exists) {
+        await writeLocalKit(id, remote.kit);
+        return { kit: remote.kit, exists: true };
+      }
+
+      return { kit: emptyKit(), exists: false };
+    } catch (_) {
+      return local;
+    }
   }
 
   async function savePromptKit(profileId, kit) {
@@ -99,12 +209,21 @@ Return valid JSON only. No markdown fences, no commentary.`;
     if (!Number.isFinite(id) || id < 1) {
       throw new Error('Select a profile first.');
     }
-    const next = normalizeKit({
+
+    const draft = normalizeKit({
       ...kit,
       updatedAt: new Date().toISOString(),
     });
-    await storageSet({ [kitStorageKey(id)]: next });
-    return next;
+
+    try {
+      const saved = await putRemoteKit(id, draft);
+      await writeLocalKit(id, saved);
+      return saved;
+    } catch (err) {
+      // Offline / unsigned-in fallback: keep local cache so Build & Copy still works.
+      await writeLocalKit(id, draft);
+      throw err;
+    }
   }
 
   function buildPrompt(template, resumeTemplateJson, jobDescription) {
@@ -144,9 +263,6 @@ Return valid JSON only. No markdown fences, no commentary.`;
     return parts.join(' · ');
   }
 
-  /**
-   * Resolve JD for build: live Register Note wins, then kit.jobDescription.
-   */
   function resolveJobDescription({ noteText, kit }) {
     const note = trim(noteText);
     if (note) return note;
