@@ -928,21 +928,20 @@ body.sidepanel.assistant-dialog {
 
 .rb-card-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .rb-card-head h2 {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 14px;
+  flex-shrink: 0;
 }
 
-.rb-card-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
+.rb-chips-header {
+  flex: 1;
+  min-width: 0;
 }
 
 .btn.icon-btn {
@@ -1138,23 +1137,6 @@ body.sidepanel.assistant-dialog {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.rb-card.rb-dock-collapsed > :not(.rb-card-head):not(.rb-actions):not(.register-action-group) {
-  display: none !important;
-}
-
-.rb-card.rb-dock-collapsed .rb-card-head p {
-  display: none !important;
-}
-
-.rb-card.rb-dock-collapsed .register-action-group .register-queue-count,
-.rb-card.rb-dock-collapsed .register-action-group .register-queue-list {
-  display: none !important;
-}
-
-.rb-card.rb-dock-collapsed .rb-actions {
-  grid-template-columns: 1fr 1fr;
 }
 
 .register-card.register-fit.rb-card {

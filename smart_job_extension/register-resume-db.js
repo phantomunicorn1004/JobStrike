@@ -8,11 +8,9 @@
   const EXTENSION_API_KEY_KEY = 'resume_db_extension_api_key';
   const LEGACY_API_KEY_KEY = 'resume_db_api_key';
   const SELECTED_PROFILE_KEY = 'resume_db_selected_profile_id';
-  const OFFLINE_QUEUE_KEY = 'resume_db_offline_queue';
   const DUPLICATE_CHECK_WINDOW_DAYS_KEY = 'resume_db_duplicate_check_window_days';
   const DEFAULT_DUPLICATE_CHECK_WINDOW_DAYS = 15;
   const DEFAULT_BACKEND = 'https://remote-work-helper.vercel.app';
-  const QUEUE_VERSION = 1;
 
   let connectionPollTimer = null;
   let profilesLoadSeq = 0;
@@ -107,66 +105,6 @@
     return headers;
   }
 
-  async function getTargetJobTab() {
-    const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (current?.id && current.url && /^https?:\/\//i.test(current.url)) {
-      return current;
-    }
-
-    try {
-      const lastFocused = await chrome.windows.getLastFocused({
-        populate: true,
-        windowTypes: ['normal']
-      });
-      const active = lastFocused?.tabs?.find((tab) => tab.active);
-      if (active?.id) return active;
-    } catch (_) {
-      /* ignore */
-    }
-
-    const normals = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
-    for (const win of normals) {
-      const active = win.tabs?.find((tab) => tab.active);
-      if (active?.id && active.url && /^https?:\/\//i.test(active.url)) return active;
-    }
-
-    const [fallback] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (fallback?.id) return fallback;
-    throw new Error('No active tab.');
-  }
-
-  async function sendToActiveTab(message) {
-    const tab = await getTargetJobTab();
-    if (!tab?.id) throw new Error('No active tab.');
-    const response = await chrome.tabs.sendMessage(tab.id, message);
-    return { response, tab };
-  }
-
-  async function scrapeJobFromTab() {
-    const { response, tab } = await sendToActiveTab({ action: 'getJobFields' });
-    if (!response?.success && !response?.job_title && !response?.company_name) {
-      throw new Error(response?.error || 'Could not read job info from this page.');
-    }
-    return {
-      jobTitle: response.job_title || '',
-      companyName: response.company_name || '',
-      jobLink: response.job_link || tab.url || '',
-      jobDescription: response.job_description || '',
-    };
-  }
-
-  function formatJobPostingForClipboard(job) {
-    const lines = [];
-    if (job.jobTitle) lines.push(`Job title: ${job.jobTitle}`);
-    if (job.companyName) lines.push(`Company: ${job.companyName}`);
-    if (job.jobLink) lines.push(`Job link: ${job.jobLink}`);
-    if (job.jobDescription) {
-      if (lines.length) lines.push('');
-      lines.push(job.jobDescription);
-    }
-    return lines.join('\n');
-  }
-
   async function copyTextToClipboard(text) {
     if (typeof global.copyTextToClipboard === 'function' && global.copyTextToClipboard !== copyTextToClipboard) {
       return global.copyTextToClipboard(text);
@@ -193,20 +131,6 @@
     } finally {
       textarea.remove();
     }
-  }
-
-  async function copyJobDescriptionFromTab(showStatus) {
-    const job = await scrapeJobFromTab();
-    const text = formatJobPostingForClipboard(job);
-    if (!text.trim()) throw new Error('No job description found on this page.');
-    await copyTextToClipboard(text);
-    document.getElementById('regJobTitle').value = job.jobTitle;
-    document.getElementById('regCompany').value = job.companyName;
-    document.getElementById('regJobLink').value = job.jobLink;
-    const noteEl = document.getElementById('regNote');
-    if (noteEl) noteEl.value = job.jobDescription;
-    setRegisterStatus('Job description copied to clipboard.', 'success');
-    if (showStatus) showStatus('Job description copied to clipboard.', 'success');
   }
 
   function setRegisterStatus(message, type) {
@@ -1084,7 +1008,7 @@
   }
 
   /**
-   * Build the live Register draft for Save/Register.
+   * Build the live Register draft for Register submit.
    * Re-applies built resume JSON onto title/company/note when present.
    * Never scrapes the tab at submit time.
    */
@@ -1165,126 +1089,6 @@
         ...validated.fields,
       },
     };
-  }
-
-  async function getOfflineQueue() {
-    return new Promise((resolve) => {
-      chrome.storage.local.get([OFFLINE_QUEUE_KEY], (result) => {
-        const queue = Array.isArray(result[OFFLINE_QUEUE_KEY]) ? result[OFFLINE_QUEUE_KEY] : [];
-        resolve(queue);
-      });
-    });
-  }
-
-  async function saveOfflineQueue(queue) {
-    return new Promise((resolve) => {
-      chrome.storage.local.set({ [OFFLINE_QUEUE_KEY]: queue }, resolve);
-    });
-  }
-
-  function newQueueId() {
-    if (global.crypto?.randomUUID) return global.crypto.randomUUID();
-    return 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
-  }
-
-  async function renderOfflineQueue() {
-    const listEl = document.getElementById('registerQueueList');
-    const countEl = document.getElementById('registerQueueCount');
-    const queue = await getOfflineQueue();
-
-    if (countEl) {
-      const n = queue.length;
-      countEl.textContent = n === 1 ? '1 saved' : `${n} saved`;
-    }
-
-    if (!listEl) return;
-
-    if (!queue.length) {
-      listEl.hidden = true;
-      listEl.innerHTML = '';
-      return;
-    }
-
-    listEl.hidden = false;
-    listEl.innerHTML = queue
-      .slice()
-      .reverse()
-      .map((entry) => {
-        const title = escapeHtml(entry.jobTitle || 'Untitled');
-        const company = escapeHtml(entry.companyName || '');
-        const when = entry.queuedAt ? new Date(entry.queuedAt).toLocaleString() : '';
-        return `
-          <article class="register-queue-item" data-queue-id="${escapeHtml(entry.id)}">
-            <div>
-              <div class="register-queue-title">${title}</div>
-              <div class="register-queue-company">${company}</div>
-              <div class="register-queue-meta muted small">${escapeHtml(when)}</div>
-            </div>
-            <button type="button" class="btn small danger register-queue-remove">Remove</button>
-          </article>
-        `;
-      })
-      .join('');
-
-    listEl.querySelectorAll('.register-queue-remove').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.closest('.register-queue-item')?.dataset.queueId;
-        if (!id) return;
-        const next = (await getOfflineQueue()).filter((item) => item.id !== id);
-        await saveOfflineQueue(next);
-        await renderOfflineQueue();
-      });
-    });
-  }
-
-  async function saveCurrentJobToQueue(showStatus) {
-    const draft = prepareRegisterDraftForSubmit();
-    if (!draft.ok) {
-      throw new Error(draft.errors[0] || 'Register draft is incomplete.');
-    }
-    if (draft.warnings?.length) {
-      setRegisterStatus(draft.warnings[0], 'warn');
-    }
-
-    const fields = draft.fields;
-    const entry = {
-      id: newQueueId(),
-      queuedAt: new Date().toISOString(),
-      ...fields,
-      draftSource: draft.fromJson ? 'resume-json' : 'form',
-    };
-
-    const queue = await getOfflineQueue();
-    queue.push(entry);
-    await saveOfflineQueue(queue);
-    await renderOfflineQueue();
-    setRegisterStatus(`Queued (${queue.length}).`, 'success');
-    if (showStatus) showStatus('Saved to queue.', 'success');
-  }
-
-  function exportOfflineQueueJson(showStatus) {
-    void getOfflineQueue().then((entries) => {
-      const payload = {
-        version: QUEUE_VERSION,
-        exportedAt: new Date().toISOString(),
-        entries
-      };
-      const d = new Date();
-      const filename = `resume_db_queue_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      chrome.downloads.download({ url, filename, saveAs: true }, () => {
-        URL.revokeObjectURL(url);
-        if (showStatus) showStatus('Queue JSON download started.', 'success');
-      });
-    });
-  }
-
-  async function clearOfflineQueue(showStatus) {
-    await saveOfflineQueue([]);
-    await renderOfflineQueue();
-    setRegisterStatus('Offline queue cleared.', 'info');
-    if (showStatus) showStatus('Offline queue cleared.', 'success');
   }
 
   async function registerJobToBackend() {
@@ -1403,45 +1207,10 @@
     }
   }
 
-  function wireOfflineQueueControls(showStatus) {
-    const saveBtn = document.getElementById('saveToQueueBtn');
-    const exportBtn = document.getElementById('exportQueueBtn');
-    const clearBtn = document.getElementById('clearQueueBtn');
-
-    if (saveBtn) {
-      saveBtn.addEventListener('click', async () => {
-        try {
-          await saveCurrentJobToQueue(showStatus);
-        } catch (err) {
-          const msg = err.message || String(err);
-          setRegisterStatus(msg, 'error');
-          if (showStatus) showStatus(msg, 'error');
-        }
-      });
-    }
-
-    if (exportBtn) {
-      exportBtn.addEventListener('click', () => exportOfflineQueueJson(showStatus));
-    }
-
-    if (clearBtn) {
-      clearBtn.addEventListener('click', async () => {
-        const queue = await getOfflineQueue();
-        if (!queue.length) {
-          setRegisterStatus('Queue is already empty.', 'info');
-          return;
-        }
-        if (!global.confirm(`Clear ${queue.length} queued job(s)?`)) return;
-        await clearOfflineQueue(showStatus);
-      });
-    }
-  }
-
   function startConnectionPolling() {
     if (connectionPollTimer) clearInterval(connectionPollTimer);
     checkBackendConnection();
     loadProfilesIntoSelect();
-    renderOfflineQueue();
     connectionPollTimer = setInterval(() => {
       checkBackendConnection();
     }, 30000);
@@ -1957,11 +1726,7 @@
     return next;
   }
 
-  function wireResumeBuilderChrome(showStatus) {
-    const root = document.getElementById('resumeBuilderRoot');
-    const collapseBtn = document.getElementById('regCollapseBtn');
-    const expandBtn = document.getElementById('regExpandBtn');
-    const refreshBtn = document.getElementById('regRefreshSessionBtn');
+  function wireResumeBuilderChrome() {
     const openJsonBtn = document.getElementById('regOpenResumeJsonBtn');
     const kitDetails = document.getElementById('regPromptKitBlock');
     const modal = document.getElementById('rbMaxModal');
@@ -1976,13 +1741,6 @@
       kitResumeJson: 'regPromptKitResumeJson',
       resumeJson: 'regResumeJson',
     };
-
-    function setCollapsed(collapsed) {
-      if (!root) return;
-      root.classList.toggle('rb-dock-collapsed', collapsed);
-      if (collapseBtn) collapseBtn.hidden = collapsed;
-      if (expandBtn) expandBtn.hidden = !collapsed;
-    }
 
     function openMax(key) {
       const id = fieldMap[key];
@@ -2015,28 +1773,6 @@
       closeMax();
     }
 
-    if (collapseBtn && collapseBtn.dataset.wired !== '1') {
-      collapseBtn.dataset.wired = '1';
-      collapseBtn.addEventListener('click', () => setCollapsed(true));
-    }
-    if (expandBtn && expandBtn.dataset.wired !== '1') {
-      expandBtn.dataset.wired = '1';
-      expandBtn.addEventListener('click', () => setCollapsed(false));
-    }
-    if (refreshBtn && refreshBtn.dataset.wired !== '1') {
-      refreshBtn.dataset.wired = '1';
-      refreshBtn.addEventListener('click', () => {
-        clearResumeJsonOverride({ clearTextarea: true });
-        void checkBackendConnection();
-        if (global.SmartJobJson2Docx?.checkJson2docxHealth) {
-          void global.SmartJobJson2Docx.checkJson2docxHealth().then(() => syncRbStatusChips());
-        }
-        void refreshPromptKitUi({ fillEditor: true });
-        syncRbStatusChips();
-        setRegisterStatus('Session refreshed.', 'info');
-        if (showStatus) showStatus('Resume Builder session refreshed.', 'info');
-      });
-    }
     if (openJsonBtn && openJsonBtn.dataset.wired !== '1') {
       openJsonBtn.dataset.wired = '1';
       openJsonBtn.addEventListener('click', () => openMax('resumeJson'));
@@ -2110,19 +1846,17 @@
       });
     }
 
-    wireResumeBuilderChrome(showStatus);
+    wireResumeBuilderChrome();
     void refreshPromptKitUi({ fillEditor: true });
     syncRbStatusChips();
     document.addEventListener('rwh-json2docx-ui', () => syncRbStatusChips());
   }
 
   function initRegisterResumeDb(showStatus) {
-    const copyJdBtn = document.getElementById('regCopyJdBtn');
     const registerBtn = document.getElementById('registerJobBtn');
 
     loadBackendSettingsForm();
     wireBackendSettingsForm(showStatus);
-    wireOfflineQueueControls(showStatus);
     wireRegisterFileDrops();
     wireProfileSelectPersistence();
     wireDuplicateWindowSetting();
@@ -2135,7 +1869,6 @@
       tabBtn.addEventListener('click', () => {
         checkBackendConnection();
         loadProfilesIntoSelect();
-        renderOfflineQueue();
         updateRegisterDriveBadge();
         void refreshPromptKitUi();
         syncRbStatusChips();
@@ -2213,20 +1946,6 @@
     wireRegisterFieldCopy('regJobLinkCopyBtn', 'regJobLink', 'Job link copied to clipboard.', 'Could not copy job link.', showStatus);
     wireRegisterFieldDup('regCompanyDupBtn', 'company', showStatus);
     wireRegisterFieldDup('regJobLinkDupBtn', 'link', showStatus);
-
-    if (copyJdBtn) {
-      copyJdBtn.addEventListener('click', () => {
-        setRegisterStatus('Reading job description…', 'info');
-        copyJobDescriptionFromTab(showStatus).catch((err) => {
-          const msg = err.message || String(err);
-          const friendly = /receiving end does not exist/i.test(msg)
-            ? 'Cannot read this tab. Open a job posting page and reload it, then try Copy JD again.'
-            : msg;
-          setRegisterStatus(friendly, 'error');
-          if (showStatus) showStatus(friendly, 'error');
-        });
-      });
-    }
   }
 
   global.SmartJobRegisterResumeDb = {

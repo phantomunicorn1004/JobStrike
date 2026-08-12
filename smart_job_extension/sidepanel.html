@@ -343,33 +343,16 @@
       <section class="tab-panel active" id="tab-register">
         <div class="card register-card register-fit rb-card" id="resumeBuilderRoot">
           <div class="rb-card-head">
-            <div>
-              <h2>Resume Builder</h2>
-              <p class="muted">Profile kit → Build &amp; Copy → paste GPT JSON → Generate Files → Register. Collapse keeps action buttons only.</p>
-            </div>
-            <div class="rb-card-head-actions">
-              <button type="button" class="btn icon-btn" id="regCopyJdBtn" title="Copy job title, company, and full description to clipboard" aria-label="Copy JD">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                </svg>
-              </button>
-              <button type="button" class="btn icon-btn" id="regRefreshSessionBtn" title="Clear built JSON and refresh status" aria-label="Refresh session">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                </svg>
-              </button>
-              <button type="button" class="btn icon-btn" id="regCollapseBtn" title="Collapse to actions" aria-label="Collapse Resume Builder">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-              </button>
-              <button type="button" class="btn icon-btn" id="regExpandBtn" hidden title="Expand Resume Builder" aria-label="Expand Resume Builder">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
-                  <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
-                </svg>
-              </button>
+            <h2>Resume Builder</h2>
+            <div class="rb-chips rb-chips-header" aria-live="polite">
+              <span class="rb-chip" id="rbChipWebsite" title="Website connection">
+                <span class="backend-connection-dot" id="backendConnectionDot"></span>
+                <span class="rb-chip-label backend-connection-label" id="backendConnectionLabel">Checking…</span>
+              </span>
+              <span class="rb-chip" id="rbChipJson2docx" title="Local json2docx server">
+                <span class="backend-connection-dot" id="json2docxConnectionDot"></span>
+                <span class="rb-chip-label backend-connection-label" id="json2docxConnectionLabel">json2docx…</span>
+              </span>
             </div>
           </div>
 
@@ -383,14 +366,6 @@
             </label>
 
             <div class="rb-chips" id="regStatusChips" aria-live="polite">
-              <span class="rb-chip" id="rbChipWebsite" title="Website connection">
-                <span class="backend-connection-dot" id="backendConnectionDot"></span>
-                <span class="rb-chip-label backend-connection-label" id="backendConnectionLabel">Checking…</span>
-              </span>
-              <span class="rb-chip" id="rbChipJson2docx" title="Local json2docx server">
-                <span class="backend-connection-dot" id="json2docxConnectionDot"></span>
-                <span class="rb-chip-label backend-connection-label" id="json2docxConnectionLabel">json2docx…</span>
-              </span>
               <span class="rb-chip" id="rbChipKit" title="Prompt kit">
                 <span class="rb-chip-label" id="regPromptKitStatus">Kit…</span>
               </span>
@@ -556,13 +531,6 @@
 
           <div class="register-action-group">
             <div id="registerStatus" class="register-status" hidden></div>
-            <div class="register-actions-row rb-secondary-actions">
-              <button class="btn" type="button" id="saveToQueueBtn">Save</button>
-              <button class="btn" type="button" id="exportQueueBtn">Export</button>
-              <button class="btn danger" type="button" id="clearQueueBtn">Clear</button>
-            </div>
-            <p class="register-queue-count" id="registerQueueCount" aria-live="polite">0 saved</p>
-            <div id="registerQueueList" class="register-queue-list" hidden></div>
           </div>
         </div>
 
