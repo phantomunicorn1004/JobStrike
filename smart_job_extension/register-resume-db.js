@@ -477,6 +477,7 @@
           (state === 'ok' ? 'Connected' : state === 'checking' ? 'Checking…' : 'Not connected');
       }
     }
+    syncRbStatusChips();
   }
 
   function updateBackendDependentUi(connected) {
@@ -956,6 +957,7 @@
     if (cta) cta.hidden = hasAny;
     if (formats) formats.hidden = hasAny;
     if (icon) icon.hidden = hasAny;
+    syncRbStatusChips();
   }
 
   function clearAllRegisterFiles() {
@@ -1641,6 +1643,7 @@
     if (!chips.length) {
       host.hidden = true;
       host.innerHTML = '';
+      syncRbStatusChips();
       return;
     }
 
@@ -1673,6 +1676,7 @@
         setRegisterStatus(`Removed ${slot} attachment.`, 'info');
       });
     });
+    syncRbStatusChips();
   }
 
   function attachGeneratedFilesToRegister(preferred) {
@@ -1717,7 +1721,10 @@
     // Keep Register draft in sync before generate.
     applyResumeJsonToRegisterForm(raw, { silent: true });
 
-    if (btn) btn.disabled = true;
+    if (btn) {
+      btn.disabled = true;
+      setRbButtonLoading(btn, true);
+    }
     setGenerateProgress({ hidden: false, percent: 8, message: 'Starting…' });
     setRegisterStatus('Generating resume files via json2docx…', 'info');
 
@@ -1743,6 +1750,7 @@
       const msg = `Generated and attached: ${names.join(' · ')}`;
       setGenerateProgress({ hidden: false, percent: 100, message: msg });
       setRegisterStatus(msg, 'success');
+      syncRbStatusChips();
       if (showStatus) showStatus(msg, 'success');
       return result;
     } catch (err) {
@@ -1753,7 +1761,10 @@
       if (showStatus) showStatus(message, 'error');
       throw err;
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) {
+        btn.disabled = false;
+        setRbButtonLoading(btn, false);
+      }
       setTimeout(() => {
         const label = document.getElementById('regGenerateProgressLabel');
         const isError = document.getElementById('registerStatus')?.classList.contains('is-error');
@@ -1761,6 +1772,7 @@
         else if (label) {
           // keep error visible briefly; user can generate again
         }
+        syncRbStatusChips();
       }, 1200);
     }
   }
@@ -1785,42 +1797,91 @@
     el.textContent = message;
     el.classList.toggle('is-error', type === 'error');
     el.classList.toggle('is-success', type === 'success');
+    const chip = document.getElementById('rbChipKit');
+    if (chip) {
+      chip.classList.toggle('is-ok', type === 'success');
+      chip.classList.toggle('is-error', type === 'error');
+    }
+  }
+
+  function syncRbStatusChips() {
+    const website = document.getElementById('rbChipWebsite');
+    const j2d = document.getElementById('rbChipJson2docx');
+    const websiteDot = document.getElementById('backendConnectionDot');
+    const j2dDot = document.getElementById('json2docxConnectionDot');
+    if (website && websiteDot) {
+      website.classList.toggle('is-ok', websiteDot.classList.contains('is-ok'));
+      website.classList.toggle('is-error', websiteDot.classList.contains('is-error'));
+    }
+    if (j2d && j2dDot) {
+      j2d.classList.toggle('is-ok', j2dDot.classList.contains('is-ok'));
+      j2d.classList.toggle('is-error', j2dDot.classList.contains('is-error'));
+    }
+
+    const filesChip = document.getElementById('rbChipFiles');
+    const filesLabel = document.getElementById('regFilesChipLabel');
+    const attachHost = document.getElementById('regGeneratedAttachments');
+    const attachCount = attachHost
+      ? attachHost.querySelectorAll('.register-attach-chip').length
+      : 0;
+    const summary = document.getElementById('regFilesSummary');
+    const hasManual = summary && !summary.hidden && String(summary.textContent || '').trim();
+    if (filesChip) {
+      if (attachCount > 0 || hasManual) {
+        filesChip.hidden = false;
+        if (filesLabel) {
+          filesLabel.textContent =
+            attachCount > 0
+              ? `${attachCount} generated file${attachCount === 1 ? '' : 's'}`
+              : 'Files attached';
+        }
+        filesChip.classList.add('is-ok');
+      } else {
+        filesChip.hidden = true;
+        filesChip.classList.remove('is-ok');
+      }
+    }
+  }
+
+  function setRbButtonLoading(btn, loading) {
+    if (!btn) return;
+    btn.classList.toggle('is-loading', Boolean(loading));
+    const spinner = btn.querySelector('.rb-spinner');
+    if (spinner) spinner.hidden = !loading;
   }
 
   async function refreshPromptKitUi({ fillEditor = false } = {}) {
     const api = global.SmartJobPromptKit;
     const profileId = getSelectedRegisterProfileId();
-    const editor = document.getElementById('regPromptKitEditor');
+    const kitDetails = document.getElementById('regPromptKitBlock');
     const buildBtn = document.getElementById('regBuildCopyPromptBtn');
-    const editBtn = document.getElementById('regEditPromptKitBtn');
 
     if (!api) {
       updatePromptKitStatus('Prompt kit module not loaded.', 'error');
       if (buildBtn) buildBtn.disabled = true;
-      if (editBtn) editBtn.disabled = true;
+      syncRbStatusChips();
       return;
     }
 
     if (!profileId) {
       updatePromptKitStatus('Select a profile to load a kit.', '');
       if (buildBtn) buildBtn.disabled = true;
-      if (editBtn) editBtn.disabled = true;
-      if (editor && !editor.hidden) {
+      if (fillEditor || kitDetails?.open) {
         const templateEl = document.getElementById('regPromptKitTemplate');
         const resumeEl = document.getElementById('regPromptKitResumeJson');
         if (templateEl) templateEl.value = api.DEFAULT_PROMPT_TEMPLATE;
         if (resumeEl) resumeEl.value = '';
       }
+      syncRbStatusChips();
       return;
     }
 
     if (buildBtn) buildBtn.disabled = false;
-    if (editBtn) editBtn.disabled = false;
 
     try {
       const { kit, exists } = await api.getPromptKit(profileId);
       updatePromptKitStatus(api.kitStatusSummary(kit, exists), exists ? 'success' : '');
-      if (fillEditor || (editor && !editor.hidden)) {
+      if (fillEditor || kitDetails?.open) {
         const templateEl = document.getElementById('regPromptKitTemplate');
         const resumeEl = document.getElementById('regPromptKitResumeJson');
         if (templateEl) templateEl.value = kit.template || api.DEFAULT_PROMPT_TEMPLATE;
@@ -1829,6 +1890,7 @@
     } catch (err) {
       updatePromptKitStatus(err.message || 'Failed to load prompt kit.', 'error');
     }
+    syncRbStatusChips();
   }
 
   async function buildAndCopyPromptFromKit(showStatus) {
@@ -1859,7 +1921,7 @@
       /* non-fatal: copy already succeeded */
     }
 
-    let message = 'Final prompt copied to clipboard. Paste into GPT, then paste JSON below.';
+    let message = 'Final prompt copied to clipboard. Paste into GPT, then open Resume JSON.';
     if (missingPlaceholders.length) {
       message = `Copied (empty: ${missingPlaceholders.join(', ')}). Fill kit / Note, then rebuild.`;
       setRegisterStatus(message, 'warn');
@@ -1891,37 +1953,140 @@
     updatePromptKitStatus(api.kitStatusSummary(next, true), 'success');
     setRegisterStatus('Prompt kit saved for this profile (extension storage).', 'success');
     if (showStatus) showStatus('Prompt kit saved for this profile.', 'success');
+    syncRbStatusChips();
     return next;
+  }
+
+  function wireResumeBuilderChrome(showStatus) {
+    const root = document.getElementById('resumeBuilderRoot');
+    const collapseBtn = document.getElementById('regCollapseBtn');
+    const expandBtn = document.getElementById('regExpandBtn');
+    const refreshBtn = document.getElementById('regRefreshSessionBtn');
+    const openJsonBtn = document.getElementById('regOpenResumeJsonBtn');
+    const kitDetails = document.getElementById('regPromptKitBlock');
+    const modal = document.getElementById('rbMaxModal');
+    const modalTitle = document.getElementById('rbMaxModalTitle');
+    const modalTextarea = document.getElementById('rbMaxModalTextarea');
+    const modalClose = document.getElementById('rbMaxModalCloseBtn');
+    const modalApply = document.getElementById('rbMaxModalApplyBtn');
+    let maxTargetId = null;
+
+    const fieldMap = {
+      kitTemplate: 'regPromptKitTemplate',
+      kitResumeJson: 'regPromptKitResumeJson',
+      resumeJson: 'regResumeJson',
+    };
+
+    function setCollapsed(collapsed) {
+      if (!root) return;
+      root.classList.toggle('rb-dock-collapsed', collapsed);
+      if (collapseBtn) collapseBtn.hidden = collapsed;
+      if (expandBtn) expandBtn.hidden = !collapsed;
+    }
+
+    function openMax(key) {
+      const id = fieldMap[key];
+      const source = id ? document.getElementById(id) : null;
+      if (!source || !modal || !modalTextarea || !modalTitle) return;
+      maxTargetId = id;
+      const titles = {
+        kitTemplate: 'Original prompt',
+        kitResumeJson: 'resume_template_json',
+        resumeJson: 'Built resume JSON',
+      };
+      modalTitle.textContent = titles[key] || 'Edit';
+      modalTextarea.value = source.value || '';
+      modal.hidden = false;
+      modalTextarea.focus();
+    }
+
+    function closeMax() {
+      if (modal) modal.hidden = true;
+      maxTargetId = null;
+    }
+
+    function applyMax() {
+      if (!maxTargetId || !modalTextarea) return;
+      const target = document.getElementById(maxTargetId);
+      if (!target) return;
+      target.value = modalTextarea.value;
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      closeMax();
+    }
+
+    if (collapseBtn && collapseBtn.dataset.wired !== '1') {
+      collapseBtn.dataset.wired = '1';
+      collapseBtn.addEventListener('click', () => setCollapsed(true));
+    }
+    if (expandBtn && expandBtn.dataset.wired !== '1') {
+      expandBtn.dataset.wired = '1';
+      expandBtn.addEventListener('click', () => setCollapsed(false));
+    }
+    if (refreshBtn && refreshBtn.dataset.wired !== '1') {
+      refreshBtn.dataset.wired = '1';
+      refreshBtn.addEventListener('click', () => {
+        clearResumeJsonOverride({ clearTextarea: true });
+        void checkBackendConnection();
+        if (global.SmartJobJson2Docx?.checkJson2docxHealth) {
+          void global.SmartJobJson2Docx.checkJson2docxHealth().then(() => syncRbStatusChips());
+        }
+        void refreshPromptKitUi({ fillEditor: true });
+        syncRbStatusChips();
+        setRegisterStatus('Session refreshed.', 'info');
+        if (showStatus) showStatus('Resume Builder session refreshed.', 'info');
+      });
+    }
+    if (openJsonBtn && openJsonBtn.dataset.wired !== '1') {
+      openJsonBtn.dataset.wired = '1';
+      openJsonBtn.addEventListener('click', () => openMax('resumeJson'));
+    }
+    if (kitDetails && kitDetails.dataset.wired !== '1') {
+      kitDetails.dataset.wired = '1';
+      kitDetails.addEventListener('toggle', () => {
+        if (kitDetails.open) void refreshPromptKitUi({ fillEditor: true });
+      });
+    }
+
+    document.querySelectorAll('[data-rb-max]').forEach((btn) => {
+      if (btn.dataset.wired === '1') return;
+      btn.dataset.wired = '1';
+      btn.addEventListener('click', () => openMax(btn.getAttribute('data-rb-max')));
+    });
+    if (modalClose && modalClose.dataset.wired !== '1') {
+      modalClose.dataset.wired = '1';
+      modalClose.addEventListener('click', closeMax);
+    }
+    if (modalApply && modalApply.dataset.wired !== '1') {
+      modalApply.dataset.wired = '1';
+      modalApply.addEventListener('click', applyMax);
+    }
+    if (modal && modal.dataset.wired !== '1') {
+      modal.dataset.wired = '1';
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) closeMax();
+      });
+    }
   }
 
   function wirePromptKitControls(showStatus) {
     const buildBtn = document.getElementById('regBuildCopyPromptBtn');
-    const editBtn = document.getElementById('regEditPromptKitBtn');
-    const editor = document.getElementById('regPromptKitEditor');
     const saveBtn = document.getElementById('regPromptKitSaveBtn');
     const resetBtn = document.getElementById('regPromptKitResetTemplateBtn');
-    const cancelBtn = document.getElementById('regPromptKitCancelEditBtn');
     const api = global.SmartJobPromptKit;
 
     if (buildBtn && buildBtn.dataset.wired !== '1') {
       buildBtn.dataset.wired = '1';
       buildBtn.addEventListener('click', () => {
         setRegisterStatus('Building prompt…', 'info');
-        buildAndCopyPromptFromKit(showStatus).catch((err) => {
-          const msg = err.message || String(err);
-          setRegisterStatus(msg, 'error');
-          if (showStatus) showStatus(msg, 'error');
-        });
-      });
-    }
-
-    if (editBtn && editBtn.dataset.wired !== '1') {
-      editBtn.dataset.wired = '1';
-      editBtn.addEventListener('click', () => {
-        if (!editor) return;
-        const opening = editor.hidden;
-        editor.hidden = !opening;
-        if (opening) void refreshPromptKitUi({ fillEditor: true });
+        setRbButtonLoading(buildBtn, true);
+        buildAndCopyPromptFromKit(showStatus)
+          .catch((err) => {
+            const msg = err.message || String(err);
+            setRegisterStatus(msg, 'error');
+            if (showStatus) showStatus(msg, 'error');
+          })
+          .finally(() => setRbButtonLoading(buildBtn, false));
       });
     }
 
@@ -1945,14 +2110,10 @@
       });
     }
 
-    if (cancelBtn && cancelBtn.dataset.wired !== '1') {
-      cancelBtn.dataset.wired = '1';
-      cancelBtn.addEventListener('click', () => {
-        if (editor) editor.hidden = true;
-      });
-    }
-
-    void refreshPromptKitUi();
+    wireResumeBuilderChrome(showStatus);
+    void refreshPromptKitUi({ fillEditor: true });
+    syncRbStatusChips();
+    document.addEventListener('rwh-json2docx-ui', () => syncRbStatusChips());
   }
 
   function initRegisterResumeDb(showStatus) {
@@ -1977,6 +2138,7 @@
         renderOfflineQueue();
         updateRegisterDriveBadge();
         void refreshPromptKitUi();
+        syncRbStatusChips();
       });
     });
 

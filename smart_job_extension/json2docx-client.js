@@ -270,6 +270,11 @@
         dot.className = 'backend-connection-dot is-error';
       }
     });
+    try {
+      document.dispatchEvent(new CustomEvent('rwh-json2docx-ui'));
+    } catch (_) {
+      /* ignore */
+    }
   }
 
   async function checkJson2docxHealth({ updateUi = true } = {}) {

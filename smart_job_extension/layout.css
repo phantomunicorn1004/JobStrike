@@ -918,3 +918,278 @@ body.sidepanel.assistant-dialog {
   overflow: auto;
   margin-top: 2px;
 }
+
+/* Resume Builder (Register) — Bid Automation–inspired control panel */
+.rb-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rb-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rb-card-head h2 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.rb-card-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.btn.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  min-width: 28px;
+  border-radius: 8px;
+}
+
+.btn.icon-btn svg {
+  display: block;
+}
+
+.rb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  line-height: 1.2;
+}
+
+.rb-chip .backend-connection-dot {
+  flex-shrink: 0;
+}
+
+.rb-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.rb-chip.is-ok {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.rb-chip.is-error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
+.rb-config summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.rb-config-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.rb-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rb-mini {
+  width: 100%;
+  min-height: 52px;
+  max-height: 90px;
+  resize: vertical;
+  font-size: 11px;
+  line-height: 1.35;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.rb-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rb-actions .btn {
+  width: 100%;
+  position: relative;
+}
+
+.rb-actions .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rb-btn-label {
+  display: inline;
+}
+
+.rb-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 8px;
+  border: 2px solid color-mix(in srgb, var(--text) 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: rb-spin 0.7s linear infinite;
+}
+
+.rb-spinner[hidden] {
+  display: none !important;
+}
+
+@keyframes rb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn.is-loading .rb-btn-label {
+  opacity: 0.85;
+}
+
+.btn.is-loading {
+  pointer-events: none;
+}
+
+.rb-max-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 16px;
+}
+
+.rb-max-modal[hidden] {
+  display: none !important;
+}
+
+.rb-max-sheet {
+  width: min(560px, 100%);
+  max-height: min(86vh, 720px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-elevated, var(--card));
+  color: inherit;
+  border-radius: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+.rb-max-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.rb-max-sheet textarea {
+  flex: 1;
+  min-height: 280px;
+  width: 100%;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.rb-details-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.rb-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rb-card.rb-dock-collapsed > :not(.rb-card-head):not(.rb-actions):not(.register-action-group) {
+  display: none !important;
+}
+
+.rb-card.rb-dock-collapsed .rb-card-head p {
+  display: none !important;
+}
+
+.rb-card.rb-dock-collapsed .register-action-group .register-queue-count,
+.rb-card.rb-dock-collapsed .register-action-group .register-queue-list {
+  display: none !important;
+}
+
+.rb-card.rb-dock-collapsed .rb-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
+.register-card.register-fit.rb-card {
+  overflow: auto;
+}
+
+#tab-register .register-form .rb-field-head,
+#tab-register .register-form .register-resume-json-meta,
+#tab-register .register-form .register-generate-progress,
+#tab-register .register-form .register-generated-attachments,
+#tab-register .register-form details.rb-config {
+  grid-column: 1 / -1;
+}
+
+#tab-register .register-form .rb-mini.full,
+#tab-register .register-form textarea.full {
+  grid-column: 1 / -1;
+}
+
+#regPromptKitStatus.is-error {
+  color: var(--danger);
+}
+
+#regPromptKitStatus.is-success {
+  color: var(--success);
+}
+
+.visually-hidden-legacy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

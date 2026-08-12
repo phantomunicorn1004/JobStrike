@@ -341,160 +341,241 @@
       </section>
 
       <section class="tab-panel active" id="tab-register">
-        <div class="card register-card register-fit">
-          <div class="register-top">
-            <div class="register-toolbar">
-              <div class="register-status-bar" aria-live="polite">
-                <div class="backend-connection-row" id="backendConnectionRow">
-                  <span class="backend-connection-dot" id="backendConnectionDot"></span>
-                  <span class="backend-connection-label" id="backendConnectionLabel">Checking connection…</span>
-                </div>
-                <div class="backend-connection-row" id="json2docxConnectionRow" aria-live="polite" title="Local json2docx server">
-                  <span class="backend-connection-dot" id="json2docxConnectionDot"></span>
-                  <span class="backend-connection-label" id="json2docxConnectionLabel">json2docx…</span>
-                </div>
-                <span class="register-drive-status is-off" id="registerDriveStatus" hidden></span>
-              </div>
-              <div class="register-toolbar-actions">
-                <button class="btn small register-scrape-btn" type="button" id="regCopyJdBtn" title="Copy job title, company, and full description to clipboard">Copy JD</button>
-              </div>
+        <div class="card register-card register-fit rb-card" id="resumeBuilderRoot">
+          <div class="rb-card-head">
+            <div>
+              <h2>Resume Builder</h2>
+              <p class="muted">Profile kit → Build &amp; Copy → paste GPT JSON → Generate Files → Register. Collapse keeps action buttons only.</p>
             </div>
-            <p class="register-offline-banner" id="registerOfflineBanner" hidden></p>
+            <div class="rb-card-head-actions">
+              <button type="button" class="btn icon-btn" id="regCopyJdBtn" title="Copy job title, company, and full description to clipboard" aria-label="Copy JD">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+              </button>
+              <button type="button" class="btn icon-btn" id="regRefreshSessionBtn" title="Clear built JSON and refresh status" aria-label="Refresh session">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+              </button>
+              <button type="button" class="btn icon-btn" id="regCollapseBtn" title="Collapse to actions" aria-label="Collapse Resume Builder">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              </button>
+              <button type="button" class="btn icon-btn" id="regExpandBtn" hidden title="Expand Resume Builder" aria-label="Expand Resume Builder">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+                  <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                </svg>
+              </button>
+            </div>
           </div>
+
+          <p class="register-offline-banner" id="registerOfflineBanner" hidden></p>
+
           <div class="register-body" id="registerBackendPanel">
+            <label class="full">Profile
+              <select id="regProfileId" class="register-select" aria-label="Profile">
+                <option value="">Profile…</option>
+              </select>
+            </label>
+
+            <div class="rb-chips" id="regStatusChips" aria-live="polite">
+              <span class="rb-chip" id="rbChipWebsite" title="Website connection">
+                <span class="backend-connection-dot" id="backendConnectionDot"></span>
+                <span class="rb-chip-label backend-connection-label" id="backendConnectionLabel">Checking…</span>
+              </span>
+              <span class="rb-chip" id="rbChipJson2docx" title="Local json2docx server">
+                <span class="backend-connection-dot" id="json2docxConnectionDot"></span>
+                <span class="rb-chip-label backend-connection-label" id="json2docxConnectionLabel">json2docx…</span>
+              </span>
+              <span class="rb-chip" id="rbChipKit" title="Prompt kit">
+                <span class="rb-chip-label" id="regPromptKitStatus">Kit…</span>
+              </span>
+              <span class="rb-chip" id="rbChipFiles" title="Attached files" hidden>
+                <span class="rb-chip-label" id="regFilesChipLabel">Files</span>
+              </span>
+              <span class="register-drive-status is-off rb-chip" id="registerDriveStatus" hidden></span>
+            </div>
+
+            <details class="rb-config" id="regPromptKitBlock">
+              <summary>Prompt kit (local)</summary>
+              <div class="rb-config-body" id="regPromptKitEditor">
+                <div class="rb-field-head">
+                  <span>Original prompt</span>
+                  <button type="button" class="btn icon-btn" data-rb-max="kitTemplate" title="Maximize" aria-label="Maximize original prompt">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                    </svg>
+                  </button>
+                </div>
+                <textarea id="regPromptKitTemplate" class="rb-mini" rows="3" spellcheck="false" placeholder="Template with {resume_template_json} and {job_description}"></textarea>
+
+                <div class="rb-field-head">
+                  <span>resume_template_json</span>
+                  <button type="button" class="btn icon-btn" data-rb-max="kitResumeJson" title="Maximize" aria-label="Maximize resume template JSON">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                    </svg>
+                  </button>
+                </div>
+                <textarea id="regPromptKitResumeJson" class="rb-mini" rows="3" spellcheck="false" placeholder='{"resume_template":"Jose",...}'></textarea>
+                <p class="muted" style="margin:0;font-size:11px">Job description uses <strong>Note</strong> when present (else kit JD).</p>
+                <div class="rb-secondary-actions">
+                  <button type="button" class="btn small primary" id="regPromptKitSaveBtn">Save kit</button>
+                  <button type="button" class="btn small" id="regPromptKitResetTemplateBtn">Reset template</button>
+                </div>
+              </div>
+            </details>
+
+            <div class="rb-actions" role="group" aria-label="Resume Builder actions">
+              <button type="button" class="btn primary" id="regBuildCopyPromptBtn" title="Build final prompt from kit + Note and copy">
+                <span class="rb-btn-label">Build &amp; Copy Prompt</span>
+                <span class="rb-spinner" id="regBuildCopySpinner" hidden aria-hidden="true"></span>
+              </button>
+              <button type="button" class="btn" id="regOpenResumeJsonBtn" title="Open built resume JSON editor">
+                <span class="rb-btn-label">Resume JSON</span>
+              </button>
+              <button type="button" class="btn primary" id="regGenerateFilesBtn" title="Convert JSON via local json2docx and attach files">
+                <span class="rb-btn-label">Generate Files</span>
+                <span class="rb-spinner" id="regGenerateSpinner" hidden aria-hidden="true"></span>
+              </button>
+              <button type="button" class="btn primary register-submit-btn" id="registerJobBtn" disabled>
+                <span class="rb-btn-label">Register</span>
+                <span class="rb-spinner" id="regRegisterSpinner" hidden aria-hidden="true"></span>
+              </button>
+            </div>
+
             <form class="form-grid register-form" id="registerForm" onsubmit="return false">
-              <div class="full register-prompt-kit" id="regPromptKitBlock">
-                <div class="register-prompt-kit-header">
-                  <div>
-                    <strong class="register-prompt-kit-title">Prompt kit</strong>
-                    <small class="muted" id="regPromptKitStatus">Select a profile to load a kit.</small>
-                  </div>
-                  <span class="register-resume-json-actions">
-                    <button type="button" class="btn small primary" id="regBuildCopyPromptBtn" title="Build final prompt from this profile kit + Note/JD and copy to clipboard">Build &amp; Copy Prompt</button>
-                    <button type="button" class="btn small" id="regEditPromptKitBtn" title="Edit original prompt and resume template JSON for this profile">Edit kit</button>
-                  </span>
-                </div>
-                <div class="register-prompt-kit-editor" id="regPromptKitEditor" hidden>
-                  <label>Original prompt
-                    <textarea id="regPromptKitTemplate" rows="7" spellcheck="false" placeholder="Template with {resume_template_json} and {job_description}"></textarea>
-                  </label>
-                  <label>resume_template_json
-                    <textarea id="regPromptKitResumeJson" class="register-resume-json" rows="5" spellcheck="false" placeholder='{"resume_template":"Jose",...}'></textarea>
-                  </label>
-                  <p class="muted register-prompt-kit-jd-hint">Job description uses the Register <strong>Note</strong> field when present (else the kit’s saved JD).</p>
-                  <div class="button-row">
-                    <button type="button" class="btn small primary" id="regPromptKitSaveBtn">Save kit</button>
-                    <button type="button" class="btn small" id="regPromptKitResetTemplateBtn">Reset template</button>
-                    <button type="button" class="btn small subtle" id="regPromptKitCancelEditBtn">Close</button>
-                  </div>
-                </div>
+              <div class="rb-field-head full">
+                <span>Note / job description</span>
               </div>
-              <label class="full">Built resume JSON
-                <textarea
-                  id="regResumeJson"
-                  class="register-resume-json"
-                  rows="4"
-                  spellcheck="false"
-                  placeholder='Paste built resume JSON (must include resume_template, job_title, company_name, job_description)…'
-                ></textarea>
-                <span class="register-resume-json-meta">
-                  <small class="muted" id="regResumeJsonHint">Fills job title, company, and note from JSON. Job link stays from the current tab / Refresh.</small>
-                  <span class="register-resume-json-actions">
-                    <button type="button" class="btn small primary" id="regGenerateFilesBtn" title="Convert JSON via local json2docx and attach files">Generate Files</button>
-                    <button type="button" class="btn small" id="regResumeJsonClearBtn" hidden>Clear JSON</button>
-                  </span>
+              <textarea id="regNote" class="rb-mini full" rows="2" placeholder="JD or notes (used when building prompt)"></textarea>
+
+              <div class="rb-field-head full">
+                <span>Built resume JSON</span>
+                <button type="button" class="btn icon-btn" data-rb-max="resumeJson" title="Maximize" aria-label="Maximize resume JSON">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                  </svg>
+                </button>
+              </div>
+              <textarea
+                id="regResumeJson"
+                class="rb-mini register-resume-json full"
+                rows="3"
+                spellcheck="false"
+                placeholder='Paste built resume JSON (resume_template, job_title, company_name, job_description)…'
+              ></textarea>
+              <span class="register-resume-json-meta full">
+                <small class="muted" id="regResumeJsonHint">Fills title, company, note from JSON. Job link from tab.</small>
+                <span class="register-resume-json-actions">
+                  <button type="button" class="btn small" id="regResumeJsonClearBtn" hidden>Clear JSON</button>
                 </span>
-                <div class="register-generate-progress" id="regGenerateProgress" hidden>
-                  <div class="register-progress-track" aria-hidden="true">
-                    <div class="register-progress-fill" id="regGenerateProgressFill"></div>
-                  </div>
-                  <small class="muted" id="regGenerateProgressLabel">Generating…</small>
+              </span>
+              <div class="register-generate-progress full" id="regGenerateProgress" hidden>
+                <div class="register-progress-track" aria-hidden="true">
+                  <div class="register-progress-fill" id="regGenerateProgressFill"></div>
                 </div>
-                <div class="register-generated-attachments" id="regGeneratedAttachments" hidden></div>
-              </label>
-              <label class="full">Job title
-                <span class="register-field-with-action">
-                  <input id="regJobTitle" type="text" placeholder="Job title" data-fill-source="">
-                  <span class="register-field-actions">
-                    <button type="button" class="register-field-action-btn" id="regJobTitleCopyBtn" title="Copy job title" aria-label="Copy job title">
-                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    </button>
-                  </span>
-                </span>
-              </label>
-              <label class="full">Company
-                <span class="register-field-with-action">
-                  <input id="regCompany" type="text" placeholder="Company">
-                  <span class="register-field-actions">
-                    <button type="button" class="register-field-action-btn" id="regCompanyCopyBtn" title="Copy company name" aria-label="Copy company name">
-                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    </button>
-                    <button type="button" class="register-field-action-btn register-field-dup-btn" id="regCompanyDupBtn" title="Check if this company exists for the selected profile (uses Settings → Duplicate check window)" aria-label="Check company duplicate" disabled>
-                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
-                    </button>
-                  </span>
-                </span>
-              </label>
-              <label class="full">Job link
-                <span class="register-field-with-action">
-                  <input id="regJobLink" type="url" placeholder="Job link">
-                  <span class="register-field-actions">
-                    <button type="button" class="register-field-action-btn" id="regJobLinkCopyBtn" title="Copy job link" aria-label="Copy job link">
-                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    </button>
-                    <button type="button" class="register-field-action-btn register-field-dup-btn" id="regJobLinkDupBtn" title="Check if this job link exists for the selected profile (uses Settings → Duplicate check window)" aria-label="Check job link duplicate" disabled>
-                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
-                    </button>
-                  </span>
-                </span>
-              </label>
-              <label class="full">Note
-                <textarea id="regNote" class="register-note" rows="2" placeholder="Extra job description or notes (optional)"></textarea>
-              </label>
-              <label class="full">Profile
-                <select id="regProfileId" class="register-select" aria-label="Profile">
-                  <option value="">Profile…</option>
-                </select>
-              </label>
-              <div class="register-files-row register-files-unified">
-                <div class="register-file-field register-file-unified">
-                  <div class="register-file-head">
-                    <span class="register-file-label">Resume / cover <span class="register-file-optional">opt.</span></span>
-                  </div>
-                  <div
-                    class="file-drop register-file-drop register-combo-drop"
-                    id="regFilesDrop"
-                    tabindex="0"
-                    role="button"
-                    aria-label="Drop resume or resume and cover letter, or click to browse"
-                  >
-                    <input type="file" id="regFilesPicker" accept=".pdf,.docx,.doc,.txt" multiple hidden>
-                    <input type="file" id="regResumeFile" accept=".pdf,.docx,.doc" hidden>
-                    <input type="file" id="regCoverFile" accept=".pdf,.docx,.doc,.txt" hidden>
-                    <span class="file-drop-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
-                      </svg>
+                <small class="muted" id="regGenerateProgressLabel">Generating…</small>
+              </div>
+              <div class="register-generated-attachments full" id="regGeneratedAttachments" hidden></div>
+
+              <details class="rb-config full" id="regDetailsBlock">
+                <summary>Register details</summary>
+                <div class="rb-config-body rb-details-grid">
+                  <label class="full">Job title
+                    <span class="register-field-with-action">
+                      <input id="regJobTitle" type="text" placeholder="Job title" data-fill-source="">
+                      <span class="register-field-actions">
+                        <button type="button" class="register-field-action-btn" id="regJobTitleCopyBtn" title="Copy job title" aria-label="Copy job title">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                      </span>
                     </span>
-                    <span class="file-drop-cta">Drop files or browse</span>
-                    <span class="muted small">1–2 files · PDF · DOCX · DOC · TXT</span>
-                    <span class="file-drop-selected" id="regFilesSummary" hidden></span>
-                    <button type="button" class="file-drop-clear" id="regFilesClear" hidden data-clear-file aria-label="Remove files">Clear</button>
+                  </label>
+                  <label class="full">Company
+                    <span class="register-field-with-action">
+                      <input id="regCompany" type="text" placeholder="Company">
+                      <span class="register-field-actions">
+                        <button type="button" class="register-field-action-btn" id="regCompanyCopyBtn" title="Copy company name" aria-label="Copy company name">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                        <button type="button" class="register-field-action-btn register-field-dup-btn" id="regCompanyDupBtn" title="Check if this company exists for the selected profile" aria-label="Check company duplicate" disabled>
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
+                        </button>
+                      </span>
+                    </span>
+                  </label>
+                  <label class="full">Job link
+                    <span class="register-field-with-action">
+                      <input id="regJobLink" type="url" placeholder="Job link">
+                      <span class="register-field-actions">
+                        <button type="button" class="register-field-action-btn" id="regJobLinkCopyBtn" title="Copy job link" aria-label="Copy job link">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        </button>
+                        <button type="button" class="register-field-action-btn register-field-dup-btn" id="regJobLinkDupBtn" title="Check if this job link exists for the selected profile" aria-label="Check job link duplicate" disabled>
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
+                        </button>
+                      </span>
+                    </span>
+                  </label>
+                  <div class="register-files-row register-files-unified">
+                    <div class="register-file-field register-file-unified">
+                      <div class="register-file-head">
+                        <span class="register-file-label">Resume / cover <span class="register-file-optional">opt.</span></span>
+                      </div>
+                      <div
+                        class="file-drop register-file-drop register-combo-drop"
+                        id="regFilesDrop"
+                        tabindex="0"
+                        role="button"
+                        aria-label="Drop resume or resume and cover letter, or click to browse"
+                      >
+                        <input type="file" id="regFilesPicker" accept=".pdf,.docx,.doc,.txt" multiple hidden>
+                        <input type="file" id="regResumeFile" accept=".pdf,.docx,.doc" hidden>
+                        <input type="file" id="regCoverFile" accept=".pdf,.docx,.doc,.txt" hidden>
+                        <span class="file-drop-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+                          </svg>
+                        </span>
+                        <span class="file-drop-cta">Drop files or browse</span>
+                        <span class="muted small">1–2 files · PDF · DOCX · DOC · TXT</span>
+                        <span class="file-drop-selected" id="regFilesSummary" hidden></span>
+                        <button type="button" class="file-drop-clear" id="regFilesClear" hidden data-clear-file aria-label="Remove files">Clear</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </details>
             </form>
           </div>
+
           <div class="register-action-group">
             <div id="registerStatus" class="register-status" hidden></div>
-            <div class="register-actions-row">
-              <button class="btn primary register-submit-btn" type="button" id="registerJobBtn" disabled>Register</button>
+            <div class="register-actions-row rb-secondary-actions">
               <button class="btn" type="button" id="saveToQueueBtn">Save</button>
               <button class="btn" type="button" id="exportQueueBtn">Export</button>
               <button class="btn danger" type="button" id="clearQueueBtn">Clear</button>
             </div>
             <p class="register-queue-count" id="registerQueueCount" aria-live="polite">0 saved</p>
             <div id="registerQueueList" class="register-queue-list" hidden></div>
+          </div>
+        </div>
+
+        <div id="rbMaxModal" class="rb-max-modal" hidden>
+          <div class="rb-max-sheet">
+            <div class="rb-max-head">
+              <strong id="rbMaxModalTitle">Edit</strong>
+              <button type="button" class="btn small" id="rbMaxModalCloseBtn">Close</button>
+            </div>
+            <textarea id="rbMaxModalTextarea" spellcheck="false"></textarea>
+            <div class="rb-secondary-actions">
+              <button type="button" class="btn primary" id="rbMaxModalApplyBtn">Apply</button>
+            </div>
           </div>
         </div>
       </section>
