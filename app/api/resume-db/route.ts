@@ -344,7 +344,7 @@ export async function POST(request: NextRequest) {
 
     if (!entry.jobTitle && !entry.candidateName) {
       return corsJson(
-        { error: "At least job title or candidate name is required." },
+        { error: "At least job title or profile name is required." },
         { status: 400 },
       );
     }

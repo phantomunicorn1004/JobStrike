@@ -408,8 +408,8 @@ function CandidateFilter({
               size="icon"
               aria-label={
                 active && selectedLabel
-                  ? `Candidate filter: ${selectedLabel}`
-                  : "Filter by candidate"
+                  ? `Profile filter: ${selectedLabel}`
+                  : "Filter by profile"
               }
               className={cn(
                 "relative h-9 w-9 rounded-xl shrink-0",
@@ -427,20 +427,20 @@ function CandidateFilter({
           </PopoverTrigger>
         </TooltipTrigger>
         <TooltipContent side="bottom">
-          {active && selectedLabel ? `Candidate: ${selectedLabel}` : "Filter by candidate"}
+          {active && selectedLabel ? `Profile: ${selectedLabel}` : "Filter by profile"}
         </TooltipContent>
       </Tooltip>
       <PopoverContent className="w-64 p-3" align="start">
-        <p className="text-sm font-medium mb-3">Filter by candidate</p>
+        <p className="text-sm font-medium mb-3">Filter by profile</p>
         <Select
           value={draft || "__all__"}
           onValueChange={(v) => setDraft(v === "__all__" ? "" : v)}
         >
           <SelectTrigger className="h-9 w-full">
-            <SelectValue placeholder="All candidates" />
+            <SelectValue placeholder="All profiles" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__">All candidates</SelectItem>
+            <SelectItem value="__all__">All profiles</SelectItem>
             {options.map((option) => (
               <SelectItem key={option.key} value={option.key}>
                 {option.label}
@@ -449,7 +449,7 @@ function CandidateFilter({
           </SelectContent>
         </Select>
         {options.length === 0 && (
-          <p className="mt-2 text-xs text-muted-foreground">No profiles or candidates yet.</p>
+          <p className="mt-2 text-xs text-muted-foreground">No profiles yet.</p>
         )}
         <div className="mt-3 flex justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={clear}>
@@ -1328,7 +1328,7 @@ export function ResumeDBPageClient() {
             ) : filtered.length === 0 ? (
               <p className="p-4 text-sm text-muted-foreground text-center sm:p-6">
                 {hasActiveFilters
-                  ? "No matches for your search, date, candidate, or status filters."
+                  ? "No matches for your search, date, profile, or status filters."
                   : "No entries yet. Use the extension Register tab on a job posting."}
               </p>
             ) : (

@@ -402,7 +402,7 @@
 
     const profileId = document.getElementById('regProfileId')?.value?.trim();
     if (!profileId) {
-      throw new Error('Select a candidate first.');
+      throw new Error('Select a profile first.');
     }
 
     const fields = readRegisterFormFields();
@@ -437,11 +437,11 @@
     const match = forCandidate.find((app) => config.matches(app));
     if (match) {
       const { when, detail } = formatApplicationSummary(match, fields);
-      const message = `Duplicate ${config.label.toLowerCase()} — already in Resume DB for this candidate${windowSuffix}${
+      const message = `Duplicate ${config.label.toLowerCase()} — already in Resume DB for this profile${windowSuffix}${
         when ? ` (${when}${detail ? `: ${detail}` : ''})` : detail ? ` (${detail})` : ''
       }.`;
       setRegisterStatus(message, 'error');
-      if (showStatus) showStatus(`Duplicate ${config.label.toLowerCase()} for this candidate.`, 'error');
+      if (showStatus) showStatus(`Duplicate ${config.label.toLowerCase()} for this profile.`, 'error');
       return { level: 'duplicate', match, windowDays, field };
     }
 
@@ -449,8 +449,8 @@
       windowDays > 0
         ? `No matching ${config.label.toLowerCase()} in the last ${windowDays} day${
             windowDays === 1 ? '' : 's'
-          } for this candidate.`
-        : `No matching ${config.label.toLowerCase()} for this candidate.`;
+          } for this profile.`
+        : `No matching ${config.label.toLowerCase()} for this profile.`;
     setRegisterStatus(noMatchMessage, 'success');
     if (showStatus) showStatus(noMatchMessage, 'success');
     return { level: 'none', match: null, windowDays, field };
@@ -753,7 +753,7 @@
       }
 
       select.innerHTML =
-        '<option value="">Select candidate…</option>' +
+        '<option value="">Select profile…</option>' +
         profiles
           .map(
             (p) =>

@@ -82,7 +82,7 @@ export async function addApplicationToPipeline(
     .from("jobs")
     .insert({
       user_id: userId,
-      name: app.candidateName || "Candidate",
+      name: app.candidateName || "Profile",
       title: app.jobTitle || "Role",
       company_name: app.company || "Company",
       job_link: app.jobLink || "",

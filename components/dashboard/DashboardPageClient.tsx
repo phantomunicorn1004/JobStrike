@@ -386,7 +386,7 @@ export function DashboardPageClient() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">Candidates</span>
+                  <span className="text-[11px] text-muted-foreground">Profiles</span>
                   <Button
                     type="button"
                     variant="ghost"
@@ -507,7 +507,7 @@ export function DashboardPageClient() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base font-medium">Pipeline</CardTitle>
                   <CardDescription className="text-xs">
-                    Candidates by stage
+                    Profiles by stage
                     {stageTotal > 0 ? ` · ${stageTotal}` : ""}
                     {data
                       ? ` · ${formatChartDate(data.bidFrom, timezone)}–${formatChartDate(data.bidTo, timezone)}`
@@ -517,7 +517,7 @@ export function DashboardPageClient() {
                 <CardContent className="min-w-0 space-y-3 pt-1">
                   {stageTotal === 0 ? (
                     <p className="py-10 text-center text-sm text-muted-foreground">
-                      No pipeline activity in this range for selected candidates.
+                      No pipeline activity in this range for selected profiles.
                     </p>
                   ) : (
                     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_200px] lg:items-start">

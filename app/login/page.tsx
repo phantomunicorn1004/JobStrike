@@ -235,7 +235,7 @@ function LoginPageContent() {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground">
-          Candidate profiles and pipeline data require a member account.
+          Profiles and pipeline data require a member account.
         </p>
       </div>
     </div>

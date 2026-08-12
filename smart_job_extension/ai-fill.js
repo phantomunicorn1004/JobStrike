@@ -104,7 +104,7 @@
 
     return [
       jobLines.length ? `## Job posting\n${jobLines.join('\n')}` : '',
-      lines.length ? `## Candidate profile\n${lines.join('\n')}` : '',
+      lines.length ? `## Profile\n${lines.join('\n')}` : '',
       work ? `## Work experience (default kit)\n${work}` : '',
       custom ? `## Saved custom Q&A\n${custom}` : ''
     ].filter(Boolean).join('\n\n');
@@ -164,7 +164,7 @@
 
     const system = [
       'You help complete job application form fields accurately.',
-      'Use ONLY facts from the candidate profile, work experience, and saved answers provided.',
+      'Use ONLY facts from the profile, work experience, and saved answers provided.',
       'Do not invent employers, degrees, or credentials.',
       'For multiple-choice fields, the "value" must exactly match one listed option when options are given.',
       'For yes/no questions, answer with Yes or No unless options specify otherwise.',

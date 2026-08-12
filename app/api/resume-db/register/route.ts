@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (profileId == null || Number.isNaN(profileId)) {
-      return corsJson({ error: "profileId (candidate) is required." }, { status: 400 });
+      return corsJson({ error: "profileId is required." }, { status: 400 });
     }
 
     const profile = await getProfileById(user.id, profileId);

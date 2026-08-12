@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     const needsCandidateData = excludeRegisteredJobs || excludeRegisteredCompanies;
     if (needsCandidateData && !candidateFilter) {
       return corsJson(
-        { error: "Select a candidate to use Resume DB job/company filters." },
+        { error: "Select a profile to use Resume DB job/company filters." },
         { status: 400 },
       );
     }

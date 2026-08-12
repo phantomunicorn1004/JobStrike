@@ -942,7 +942,7 @@ export function JobsPipelineBoard() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
           <Input
             className="h-9 pl-9 rounded-lg bg-muted/30"
-            placeholder="Search title, company, candidate…"
+            placeholder="Search title, company, profile…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -961,7 +961,7 @@ export function JobsPipelineBoard() {
             >
               <User className="h-4 w-4 shrink-0" />
               <span className="truncate hidden sm:inline">
-                {candidateFilter || "Candidate"}
+                {candidateFilter || "Profile"}
               </span>
               {candidateFilter && (
                 <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-medium shrink-0">
@@ -971,16 +971,16 @@ export function JobsPipelineBoard() {
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-64 p-3" align="start">
-            <p className="text-sm font-medium mb-3">Filter by candidate</p>
+            <p className="text-sm font-medium mb-3">Filter by profile</p>
             <Select
               value={candidateFilter || "__all__"}
               onValueChange={(v) => setCandidateFilter(v === "__all__" ? "" : v)}
             >
               <SelectTrigger className="h-9 w-full">
-                <SelectValue placeholder="All candidates" />
+                <SelectValue placeholder="All profiles" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all__">All candidates</SelectItem>
+                <SelectItem value="__all__">All profiles</SelectItem>
                 {candidateOptions.map((name) => (
                   <SelectItem key={name} value={name}>
                     {name}

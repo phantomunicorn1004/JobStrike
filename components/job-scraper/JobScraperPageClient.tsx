@@ -491,7 +491,7 @@ export function JobScraperPageClient() {
       (excludeRegisteredJobs || excludeRegisteredCompanies) &&
       !candidateFilter
     ) {
-      toast.error("Select a candidate before using Resume DB filters.");
+      toast.error("Select a profile before using Resume DB filters.");
       return;
     }
     setScraping(true);
@@ -944,7 +944,7 @@ export function JobScraperPageClient() {
   }, [page, safePage, updateParams]);
 
   const selectedCandidateLabel =
-    candidates.find((candidate) => candidate.key === candidateFilter)?.label ?? "No candidate";
+    candidates.find((candidate) => candidate.key === candidateFilter)?.label ?? "No profile";
   const actionScopeLabel =
     selectedKeys.size > 0 ? `${selectedKeys.size} selected` : "all results";
 
@@ -1166,7 +1166,7 @@ export function JobScraperPageClient() {
                 </SheetHeader>
                 <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pb-4">
                   <div className="rounded-md border p-3 text-sm text-muted-foreground">
-                    Registered jobs for candidate:{" "}
+                    Registered jobs for profile:{" "}
                     <span className="font-medium text-foreground">{registeredJobCount}</span>
                   </div>
                   <div className="min-h-0 flex-1 space-y-2 overflow-auto rounded-md border p-3">
@@ -1175,7 +1175,7 @@ export function JobScraperPageClient() {
                     </div>
                     {!candidateFilter ? (
                       <p className="text-sm text-muted-foreground">
-                        Select a candidate to load registered companies.
+                        Select a profile to load registered companies.
                       </p>
                     ) : loadingBlocked ? (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1184,7 +1184,7 @@ export function JobScraperPageClient() {
                       </div>
                     ) : resumeDbCompanies.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
-                        No registered companies for this candidate.
+                        No registered companies for this profile.
                       </p>
                     ) : (
                       <ul className="space-y-1 text-sm">
@@ -1260,9 +1260,9 @@ export function JobScraperPageClient() {
                 value={candidateFilter}
                 onChange={(e) => setCandidateFilter(e.target.value)}
                 className="border-input bg-card dark:bg-input/30 h-8 min-w-[180px] rounded-md border px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-                aria-label="Candidate"
+                aria-label="Profile"
               >
-                <option value="">Select candidate…</option>
+                <option value="">Select profile…</option>
                 {candidates.map((candidate) => (
                   <option key={candidate.key} value={candidate.key}>
                     {candidate.label}

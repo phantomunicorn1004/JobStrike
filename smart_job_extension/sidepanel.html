@@ -429,7 +429,7 @@
                     <button type="button" class="register-field-action-btn" id="regCompanyCopyBtn" title="Copy company name" aria-label="Copy company name">
                       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                     </button>
-                    <button type="button" class="register-field-action-btn register-field-dup-btn" id="regCompanyDupBtn" title="Check if this company exists for the selected candidate (uses Settings → Duplicate check window)" aria-label="Check company duplicate" disabled>
+                    <button type="button" class="register-field-action-btn register-field-dup-btn" id="regCompanyDupBtn" title="Check if this company exists for the selected profile (uses Settings → Duplicate check window)" aria-label="Check company duplicate" disabled>
                       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
                     </button>
                   </span>
@@ -442,7 +442,7 @@
                     <button type="button" class="register-field-action-btn" id="regJobLinkCopyBtn" title="Copy job link" aria-label="Copy job link">
                       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                     </button>
-                    <button type="button" class="register-field-action-btn register-field-dup-btn" id="regJobLinkDupBtn" title="Check if this job link exists for the selected candidate (uses Settings → Duplicate check window)" aria-label="Check job link duplicate" disabled>
+                    <button type="button" class="register-field-action-btn register-field-dup-btn" id="regJobLinkDupBtn" title="Check if this job link exists for the selected profile (uses Settings → Duplicate check window)" aria-label="Check job link duplicate" disabled>
                       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
                     </button>
                   </span>
@@ -451,9 +451,9 @@
               <label class="full">Note
                 <textarea id="regNote" class="register-note" rows="2" placeholder="Extra job description or notes (optional)"></textarea>
               </label>
-              <label class="full">Candidate
-                <select id="regProfileId" class="register-select" aria-label="Candidate">
-                  <option value="">Candidate…</option>
+              <label class="full">Profile
+                <select id="regProfileId" class="register-select" aria-label="Profile">
+                  <option value="">Profile…</option>
                 </select>
               </label>
               <div class="register-files-row register-files-unified">
@@ -511,7 +511,7 @@
         </div>
         <div class="card register-card">
           <h2>Website connection (Resume DB)</h2>
-          <p class="muted">Sign in with your <strong>remote-work-helper</strong> account. Used by the Register tab to save jobs and load candidate profiles.</p>
+          <p class="muted">Sign in with your <strong>remote-work-helper</strong> account. Used by the Register tab to save jobs and load profiles.</p>
           <div class="backend-connection-row" id="settingsBackendConnectionRow" aria-live="polite">
             <span class="backend-connection-dot" id="settingsBackendConnectionDot"></span>
             <span class="backend-connection-label" id="settingsBackendConnectionLabel">Checking connection…</span>
