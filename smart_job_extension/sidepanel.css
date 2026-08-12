@@ -2112,6 +2112,10 @@ input[type="range"] { padding: 0; height: 24px; }
   margin-top: 8px;
 }
 
+.register-generate-progress[hidden] {
+  display: none !important;
+}
+
 .register-progress-track {
   height: 6px;
   border-radius: 999px;
@@ -2132,6 +2136,10 @@ input[type="range"] { padding: 0; height: 24px; }
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+.register-generated-attachments[hidden] {
+  display: none !important;
 }
 
 .register-attach-chip {

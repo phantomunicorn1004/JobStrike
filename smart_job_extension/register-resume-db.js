@@ -1580,12 +1580,7 @@
       }
       syncResumeBuilderActionButtons();
       setTimeout(() => {
-        const label = document.getElementById('regGenerateProgressLabel');
-        const isError = document.getElementById('registerStatus')?.classList.contains('is-error');
-        if (!isError) setGenerateProgress({ hidden: true, percent: 0, message: '' });
-        else if (label) {
-          // keep error visible briefly; user can generate again
-        }
+        setGenerateProgress({ hidden: true, percent: 0, message: '' });
         syncRbStatusChips();
       }, 1200);
     }
@@ -1910,6 +1905,7 @@
     wirePromptKitControls(showStatus);
     startConnectionPolling();
     syncResumeBuilderActionButtons();
+    setGenerateProgress({ hidden: true, percent: 0, message: '' });
 
     document.querySelectorAll('.tab-main[data-tab="register"]').forEach((tabBtn) => {
       tabBtn.addEventListener('click', () => {
