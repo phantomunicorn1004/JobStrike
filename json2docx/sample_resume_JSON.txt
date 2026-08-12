@@ -1,0 +1,580 @@
+{
+  "schema_version": "1.0",
+  "template_name": "Andrew_RESUME_TEMP",
+  "cover_letter_filename": "Andrew_Garcia_Social_Discovery_Group_Senior_NLP_Engineer_Cover_Letter.pdf",
+  "resume_filename": "Andrew_Garcia_Social_Discovery_Group_Senior_NLP_Engineer_Resume.pdf",
+  "candidate": "Andrew Garcia",
+  "email": "andrewgca720@outlook.com",
+  "phone_number": "+1 818-806-6652",
+  "current_location": "Canoga Park, CA",
+  "availability": "Open to Remote",
+  "cover_letter": {
+    "today_date": {
+      "placeholder": "<<Today-Date>>",
+      "text": "June 16, 2026",
+      "bold_words": []
+    },
+    "recipient_name": {
+      "placeholder": "<<Recipient-Name>>",
+      "text": "Hiring Team",
+      "bold_words": []
+    },
+    "company_name": {
+      "placeholder": "<<Company-Name>>",
+      "text": "Social Discovery Group",
+      "bold_words": [
+        "Social Discovery Group"
+      ]
+    },
+    "cover_letter_text": {
+      "placeholder": "<<Cover-Letter-Text>>",
+      "text": "I am excited to apply for the Senior NLP Engineer role at Social Discovery Group. My background combines senior backend engineering with hands-on NLP and LLM product work, including fine-tuning transformer models, building agentic chat workflows, and deploying scalable AI services for high-volume user-facing products.\n\nAt beehiiv, I have helped build AI-assisted content and audience systems that rely on Python services, PyTorch and Hugging Face workflows, evaluation harnesses, and production observability. I have worked across the practical LLM stack: dataset preparation, supervised fine-tuning, prompt and retrieval design, post-training experiments, model quality measurement, and reliable deployment into customer-facing APIs.\n\nWhat stands out about SDG is the scale and sensitivity of the social discovery problem. AI companions and conversational products require more than model accuracy; they need thoughtful alignment, fast iteration, measurable validation, and close collaboration with content, validation, and dataset teams. That is the kind of cross-functional engineering environment where I can contribute immediately.\n\nI would bring SDG a pragmatic senior engineer who can translate NLP research into production systems, build robust agent harnesses, improve chat quality through experimentation, and keep backend services reliable as models and datasets grow. I would welcome the opportunity to help advance SDG's AI companion roadmap for millions of users worldwide.",
+      "bold_words": [
+        "Senior NLP Engineer",
+        "Social Discovery Group",
+        "NLP and LLM product work",
+        "fine-tuning transformer models",
+        "agentic chat workflows",
+        "Python",
+        "PyTorch",
+        "Hugging Face",
+        "evaluation harnesses",
+        "supervised fine-tuning",
+        "post-training experiments",
+        "AI companions",
+        "agent harnesses"
+      ]
+    }
+  },
+  "profile_title": {
+    "placeholder": "<<Profile_title>>",
+    "text": "Senior Software Engineer",
+    "bold_words": [
+      "Senior Software Engineer"
+    ]
+  },
+  "small_title": {
+    "placeholder": "<<Small_title>>",
+    "text": "LLM Systems · Agentic AI · Scalable Backend Platforms",
+    "bold_words": [
+      "LLM Systems",
+      "Agentic AI",
+      "Scalable Backend Platforms"
+    ]
+  },
+  "summary": {
+    "heading": "SUMMARY",
+    "placeholder": "<<Summary>>",
+    "text": "Senior Software Engineer with 8+ years of experience building scalable backend platforms and AI-powered product features, including LLM fine-tuning workflows, agentic chat systems, model evaluation harnesses, and production ML services. Strong Python, PyTorch, transformers, APIs, distributed systems, CI/CD, monitoring, and cross-functional delivery background across remote, high-growth engineering teams. Known for translating ambiguous product and research goals into reliable systems that improve user experience, model quality, and release velocity.",
+    "bold_words": [
+      "Senior Software Engineer",
+      "LLM fine-tuning workflows",
+      "agentic chat systems",
+      "model evaluation harnesses",
+      "production ML services",
+      "Python",
+      "PyTorch",
+      "transformers",
+      "distributed systems",
+      "model quality"
+    ]
+  },
+  "core_competences": {
+    "heading": "CORE COMPETENCIES",
+    "placeholder": "<<Core-Competences>>",
+    "text": "LLM Fine-Tuning · NLP Systems · Agent Harnesses · RLHF/DPO Concepts · PyTorch · Transformers · Python Backend Engineering · Model Evaluation · Scalable APIs · Distributed Systems · Dataset Pipelines · CI/CD · Observability · Production Deployment · Cross-Functional Experimentation",
+    "bold_words": [
+      "LLM Fine-Tuning",
+      "NLP Systems",
+      "Agent Harnesses",
+      "RLHF/DPO Concepts",
+      "PyTorch",
+      "Transformers",
+      "Python Backend Engineering",
+      "Model Evaluation",
+      "Production Deployment"
+    ]
+  },
+  "technology_stack": {
+    "heading": "TECHNOLOGY STACK",
+    "skill_group_1": {
+      "placeholder": "<<Skill-Group-1>>",
+      "text": "Programming Languages",
+      "bold_words": []
+    },
+    "skill_items_1": {
+      "placeholder": "<<Skill-Items-1>>",
+      "text": "Python, TypeScript, JavaScript, Go, C#, SQL, Bash",
+      "bold_words": [
+        "Python",
+        "Go",
+        "C#"
+      ]
+    },
+    "skill_group_2": {
+      "placeholder": "<<Skill-Group-2>>",
+      "text": "NLP and Machine Learning",
+      "bold_words": [
+        "NLP",
+        "Machine Learning"
+      ]
+    },
+    "skill_items_2": {
+      "placeholder": "<<Skill-Items-2>>",
+      "text": "PyTorch, Hugging Face Transformers, tokenization, supervised fine-tuning, RLHF, DPO, embeddings, RAG, model evaluation, prompt engineering",
+      "bold_words": [
+        "PyTorch",
+        "Hugging Face Transformers",
+        "supervised fine-tuning",
+        "RLHF",
+        "DPO",
+        "model evaluation"
+      ]
+    },
+    "skill_group_3": {
+      "placeholder": "<<Skill-Group-3>>",
+      "text": "Backend and APIs",
+      "bold_words": [
+        "Backend",
+        "APIs"
+      ]
+    },
+    "skill_items_3": {
+      "placeholder": "<<Skill-Items-3>>",
+      "text": "FastAPI, Django, Node.js, GraphQL, REST APIs, gRPC, microservices, event-driven architecture, background jobs",
+      "bold_words": [
+        "FastAPI",
+        "REST APIs",
+        "microservices",
+        "event-driven architecture"
+      ]
+    },
+    "skill_group_4": {
+      "placeholder": "<<Skill-Group-4>>",
+      "text": "Data and Storage",
+      "bold_words": []
+    },
+    "skill_items_4": {
+      "placeholder": "<<Skill-Items-4>>",
+      "text": "PostgreSQL, Redis, Elasticsearch, BigQuery, Kafka, S3, data validation, feature pipelines, dataset preparation",
+      "bold_words": [
+        "PostgreSQL",
+        "Redis",
+        "Kafka",
+        "dataset preparation"
+      ]
+    },
+    "skill_group_5": {
+      "placeholder": "<<Skill-Group-5>>",
+      "text": "Cloud and Deployment",
+      "bold_words": [
+        "Cloud",
+        "Deployment"
+      ]
+    },
+    "skill_items_5": {
+      "placeholder": "<<Skill-Items-5>>",
+      "text": "AWS, Azure, Docker, Kubernetes, Terraform, GitHub Actions, CI/CD, scalable deployment systems, blue-green releases",
+      "bold_words": [
+        "AWS",
+        "Azure",
+        "Docker",
+        "Kubernetes",
+        "CI/CD",
+        "scalable deployment systems"
+      ]
+    },
+    "skill_group_6": {
+      "placeholder": "<<Skill-Group-6>>",
+      "text": "Quality and Observability",
+      "bold_words": [
+        "Quality",
+        "Observability"
+      ]
+    },
+    "skill_items_6": {
+      "placeholder": "<<Skill-Items-6>>",
+      "text": "pytest, Jest, integration testing, experiment tracking, A/B testing, Datadog, Prometheus, Grafana, OpenTelemetry, Sentry",
+      "bold_words": [
+        "integration testing",
+        "experiment tracking",
+        "A/B testing",
+        "OpenTelemetry"
+      ]
+    }
+  },
+  "work_experience": {
+    "heading": "WORK EXPERIENCE",
+    "experience_1": {
+      "company": "beehiiv",
+      "company_url": "https://www.beehiiv.com/",
+      "location": "Remote (New York, NY)",
+      "role_title": "Senior Software Engineer",
+      "extra_role_title": {
+        "placeholder": "<<Extra-Role-Title-1>>",
+        "text": "AI Content Platform and Backend Systems",
+        "bold_words": [
+          "AI Content Platform",
+          "Backend Systems"
+        ]
+      },
+      "start_date": "Nov 2023",
+      "end_date": "Present",
+      "date_range": "Nov 2023 – Present",
+      "bullets": {
+        "bullet_1": {
+          "placeholder": "<<Bullet-1-1>>",
+          "text": "Led backend development for AI-assisted newsletter creation workflows, integrating LLM services with Python APIs, TypeScript clients, PostgreSQL, and Redis to support high-volume editorial and audience engagement features.",
+          "bold_words": [
+            "AI-assisted newsletter creation",
+            "LLM services",
+            "Python APIs",
+            "PostgreSQL",
+            "Redis"
+          ]
+        },
+        "bullet_2": {
+          "placeholder": "<<Bullet-1-2>>",
+          "text": "Built model evaluation harnesses for summarization, personalization, and chat-style content assistance, combining offline datasets, human review rubrics, and production feedback loops to improve accepted AI suggestions by 31%.",
+          "bold_words": [
+            "model evaluation harnesses",
+            "summarization",
+            "personalization",
+            "chat-style content assistance",
+            "31%"
+          ]
+        },
+        "bullet_3": {
+          "placeholder": "<<Bullet-1-3>>",
+          "text": "Fine-tuned transformer-based text models using PyTorch and Hugging Face workflows on curated content datasets, improving response relevance and reducing manual prompt rewrites for internal operators by 42%.",
+          "bold_words": [
+            "Fine-tuned transformer-based text models",
+            "PyTorch",
+            "Hugging Face",
+            "curated content datasets",
+            "42%"
+          ]
+        },
+        "bullet_4": {
+          "placeholder": "<<Bullet-1-4>>",
+          "text": "Designed agentic orchestration patterns for draft generation, audience segmentation, retrieval, safety checks, and tool execution, reducing multi-step content workflow latency by 28% while preserving traceability.",
+          "bold_words": [
+            "agentic orchestration",
+            "draft generation",
+            "retrieval",
+            "safety checks",
+            "28%"
+          ]
+        },
+        "bullet_5": {
+          "placeholder": "<<Bullet-1-5>>",
+          "text": "Implemented scalable deployment and observability for ML-backed services with Docker, Kubernetes, OpenTelemetry, Datadog, and CI/CD gates, cutting AI feature rollback incidents by 24%.",
+          "bold_words": [
+            "scalable deployment",
+            "ML-backed services",
+            "Docker",
+            "Kubernetes",
+            "OpenTelemetry",
+            "24%"
+          ]
+        },
+        "bullet_6": {
+          "placeholder": "<<Bullet-1-6>>",
+          "text": "Partnered with product, content, data, and support teams to define experiment plans, monitor model quality, triage edge cases, and turn user feedback into an actionable AI roadmap.",
+          "bold_words": [
+            "experiment plans",
+            "model quality",
+            "user feedback",
+            "AI roadmap"
+          ]
+        }
+      }
+    },
+    "experience_2": {
+      "company": "DevSquad",
+      "company_url": "https://devsquad.com/",
+      "location": "Remote (Salt Lake City, UT)",
+      "role_title": "Senior Software Engineer",
+      "extra_role_title": {
+        "placeholder": "<<Extra-Role-Title-2>>",
+        "text": "ML-Enabled SaaS Platforms and Cloud APIs",
+        "bold_words": [
+          "ML-Enabled SaaS Platforms",
+          "Cloud APIs"
+        ]
+      },
+      "start_date": "Mar 2022",
+      "end_date": "Oct 2023",
+      "date_range": "Mar 2022 – Oct 2023",
+      "bullets": {
+        "bullet_1": {
+          "placeholder": "<<Bullet-2-1>>",
+          "text": "Architected Python and Go microservices for SaaS clients, including NLP-powered search, classification, and recommendation features deployed on AWS with Kubernetes and Terraform.",
+          "bold_words": [
+            "Python",
+            "Go microservices",
+            "NLP-powered search",
+            "recommendation features",
+            "AWS",
+            "Kubernetes"
+          ]
+        },
+        "bullet_2": {
+          "placeholder": "<<Bullet-2-2>>",
+          "text": "Developed agent-style workflow services that coordinated LLM prompts, retrieval, business rules, and external APIs, reducing manual operations for customer success teams by up to 55%.",
+          "bold_words": [
+            "agent-style workflow services",
+            "LLM prompts",
+            "retrieval",
+            "external APIs",
+            "55%"
+          ]
+        },
+        "bullet_3": {
+          "placeholder": "<<Bullet-2-3>>",
+          "text": "Created dataset preparation and validation pipelines for text classification and entity extraction projects, improving labeling consistency and reducing rework across client delivery teams by 34%.",
+          "bold_words": [
+            "dataset preparation",
+            "validation pipelines",
+            "text classification",
+            "entity extraction",
+            "34%"
+          ]
+        },
+        "bullet_4": {
+          "placeholder": "<<Bullet-2-4>>",
+          "text": "Evaluated post-training approaches including preference datasets, RLHF concepts, and DPO-style ranking experiments to improve chatbot and support automation quality in client prototypes.",
+          "bold_words": [
+            "post-training approaches",
+            "preference datasets",
+            "RLHF",
+            "DPO-style ranking",
+            "chatbot"
+          ]
+        },
+        "bullet_5": {
+          "placeholder": "<<Bullet-2-5>>",
+          "text": "Improved API reliability and release cadence by expanding integration tests, deployment health checks, and observability dashboards, lowering production defects by 29%.",
+          "bold_words": [
+            "API reliability",
+            "integration tests",
+            "observability dashboards",
+            "29%"
+          ]
+        },
+        "bullet_6": {
+          "placeholder": "<<Bullet-2-6>>",
+          "text": "Mentored engineers through architecture reviews, code reviews, incident response, and documentation, helping distributed teams deliver complex backend and AI-assisted features predictably.",
+          "bold_words": [
+            "architecture reviews",
+            "code reviews",
+            "incident response",
+            "AI-assisted features"
+          ]
+        }
+      }
+    },
+    "experience_3": {
+      "company": "DevSquad",
+      "company_url": "https://devsquad.com/",
+      "location": "Remote (Salt Lake City, UT)",
+      "role_title": "Software Engineer",
+      "extra_role_title": {
+        "placeholder": "<<Extra-Role-Title-3>>",
+        "text": "Full-Stack Product Engineering",
+        "bold_words": [
+          "Full-Stack Product Engineering"
+        ]
+      },
+      "start_date": "Sep 2019",
+      "end_date": "Feb 2022",
+      "date_range": "Sep 2019 – Feb 2022",
+      "bullets": {
+        "bullet_1": {
+          "placeholder": "<<Bullet-3-1>>",
+          "text": "Built production web applications and backend APIs using Python, TypeScript, Node.js, PostgreSQL, and Redis for SaaS, marketplace, and workflow automation clients.",
+          "bold_words": [
+            "backend APIs",
+            "Python",
+            "TypeScript",
+            "Node.js",
+            "PostgreSQL",
+            "Redis"
+          ]
+        },
+        "bullet_2": {
+          "placeholder": "<<Bullet-3-2>>",
+          "text": "Implemented search, tagging, and content moderation services using embeddings, Elasticsearch, and rules-based NLP pipelines to improve discovery and reduce manual review load.",
+          "bold_words": [
+            "search",
+            "content moderation",
+            "embeddings",
+            "Elasticsearch",
+            "NLP pipelines"
+          ]
+        },
+        "bullet_3": {
+          "placeholder": "<<Bullet-3-3>>",
+          "text": "Designed asynchronous job systems for data ingestion, notification delivery, and third-party integrations, improving throughput by 37% during peak client workloads.",
+          "bold_words": [
+            "asynchronous job systems",
+            "data ingestion",
+            "third-party integrations",
+            "37%"
+          ]
+        },
+        "bullet_4": {
+          "placeholder": "<<Bullet-3-4>>",
+          "text": "Raised automated test coverage across core services by 26% with unit, integration, and contract tests that caught regressions before release.",
+          "bold_words": [
+            "automated test coverage",
+            "26%",
+            "unit",
+            "integration",
+            "contract tests"
+          ]
+        },
+        "bullet_5": {
+          "placeholder": "<<Bullet-3-5>>",
+          "text": "Collaborated directly with product managers, designers, and client stakeholders to scope technical tradeoffs, document APIs, and deliver maintainable product increments in remote agile teams.",
+          "bold_words": [
+            "product managers",
+            "technical tradeoffs",
+            "document APIs",
+            "remote agile teams"
+          ]
+        }
+      }
+    },
+    "experience_4": {
+      "company": "Microsoft",
+      "company_url": "https://www.microsoft.com/",
+      "location": "Redmond, WA (Onsite)",
+      "role_title": "Software Engineer",
+      "extra_role_title": {
+        "placeholder": "<<Extra-Role-Title-4>>",
+        "text": "Cloud Services and Developer Platforms",
+        "bold_words": [
+          "Cloud Services",
+          "Developer Platforms"
+        ]
+      },
+      "start_date": "Sep 2017",
+      "end_date": "Aug 2019",
+      "date_range": "Sep 2017 – Aug 2019",
+      "bullets": {
+        "bullet_1": {
+          "placeholder": "<<Bullet-4-1>>",
+          "text": "Developed C# and Python services for cloud platform workflows, focusing on API reliability, telemetry, access controls, and operational tooling for internal engineering users.",
+          "bold_words": [
+            "C#",
+            "Python services",
+            "cloud platform workflows",
+            "API reliability",
+            "telemetry"
+          ]
+        },
+        "bullet_2": {
+          "placeholder": "<<Bullet-4-2>>",
+          "text": "Optimized service performance and database access patterns, reducing median request latency by 33% for frequently used internal platform endpoints.",
+          "bold_words": [
+            "service performance",
+            "database access patterns",
+            "33%",
+            "platform endpoints"
+          ]
+        },
+        "bullet_3": {
+          "placeholder": "<<Bullet-4-3>>",
+          "text": "Built CI/CD improvements, automated validation, and deployment safeguards that increased release confidence and shortened manual verification time by 41%.",
+          "bold_words": [
+            "CI/CD improvements",
+            "automated validation",
+            "deployment safeguards",
+            "41%"
+          ]
+        },
+        "bullet_4": {
+          "placeholder": "<<Bullet-4-4>>",
+          "text": "Participated in production support, design reviews, and secure coding practices while learning large-scale distributed systems engineering in a high-standards environment.",
+          "bold_words": [
+            "production support",
+            "design reviews",
+            "secure coding practices",
+            "distributed systems"
+          ]
+        }
+      }
+    }
+  },
+  "education": {
+    "heading": "EDUCATION",
+    "institution": "BELLEVUE COLLEGE",
+    "institution_url": "https://www.bellevuecollege.edu/",
+    "location": "Bellevue, WA",
+    "degree": "Bachelor of Science in Computer Science (BSCS)",
+    "start_date": "Sep 2013",
+    "end_date": "Jun 2017",
+    "date_range": "Sep 2013 – Jun 2017",
+    "relevant_coursework": {
+      "label": "Relevant Coursework",
+      "text": "Software Engineering, Data Structures & Algorithms, Database Systems, Web Programming, Cloud Computing, Operating Systems, Software Patterns.",
+      "bold_words": [
+        "Software Engineering",
+        "Database Systems",
+        "Cloud Computing"
+      ]
+    }
+  },
+  "placeholder_order": [
+    "<<Today-Date>>",
+    "<<Recipient-Name>>",
+    "<<Company-Name>>",
+    "<<Cover-Letter-Text>>",
+    "<<Profile_title>>",
+    "<<Small_title>>",
+    "<<Summary>>",
+    "<<Core-Competences>>",
+    "<<Skill-Group-1>>",
+    "<<Skill-Items-1>>",
+    "<<Skill-Group-2>>",
+    "<<Skill-Items-2>>",
+    "<<Skill-Group-3>>",
+    "<<Skill-Items-3>>",
+    "<<Skill-Group-4>>",
+    "<<Skill-Items-4>>",
+    "<<Skill-Group-5>>",
+    "<<Skill-Items-5>>",
+    "<<Skill-Group-6>>",
+    "<<Skill-Items-6>>",
+    "<<Extra-Role-Title-1>>",
+    "<<Bullet-1-1>>",
+    "<<Bullet-1-2>>",
+    "<<Bullet-1-3>>",
+    "<<Bullet-1-4>>",
+    "<<Bullet-1-5>>",
+    "<<Bullet-1-6>>",
+    "<<Extra-Role-Title-2>>",
+    "<<Bullet-2-1>>",
+    "<<Bullet-2-2>>",
+    "<<Bullet-2-3>>",
+    "<<Bullet-2-4>>",
+    "<<Bullet-2-5>>",
+    "<<Bullet-2-6>>",
+    "<<Extra-Role-Title-3>>",
+    "<<Bullet-3-1>>",
+    "<<Bullet-3-2>>",
+    "<<Bullet-3-3>>",
+    "<<Bullet-3-4>>",
+    "<<Bullet-3-5>>",
+    "<<Extra-Role-Title-4>>",
+    "<<Bullet-4-1>>",
+    "<<Bullet-4-2>>",
+    "<<Bullet-4-3>>",
+    "<<Bullet-4-4>>"
+  ],
+  "ats_score": {
+    "score": "9.1/10",
+    "reason": "Strong alignment with the Senior NLP Engineer role through natural coverage of LLM fine-tuning, agent harnesses, PyTorch, transformers, RLHF/DPO concepts, backend engineering, scalable deployment, dataset preparation, model evaluation, and cross-functional experimentation. The main gap is that the fixed career history is software-platform led rather than explicitly AI-startup focused, so the match is strong but not perfect."
+  }
+}
