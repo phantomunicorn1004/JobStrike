@@ -151,9 +151,42 @@
 
   function setRegisterBusy(busy) {
     const btn = document.getElementById('registerJobBtn');
-    if (btn) {
-      btn.disabled = busy || !backendConnected;
-      btn.textContent = busy ? '…' : 'Register';
+    setRbButtonLoading(btn, busy);
+    syncResumeBuilderActionButtons({ registerBusy: busy });
+  }
+
+  /** Built resume JSON is usable when it parses and includes the Register contract fields. */
+  function hasUsableBuiltResumeJson() {
+    const raw = String(document.getElementById('regResumeJson')?.value || '').trim();
+    if (!raw) return false;
+    const mapper = global.SmartJobResumeJsonMapper;
+    const result = mapper?.extractRegisterFieldsFromResumeJsonText?.(raw);
+    if (!result?.ok) return false;
+    const fields = result.fields || {};
+    return Boolean(fields.resumeTemplate && fields.hasRegisterFields);
+  }
+
+  function syncResumeBuilderActionButtons({ registerBusy = false } = {}) {
+    const hasJson = hasUsableBuiltResumeJson();
+    const generateBtn = document.getElementById('regGenerateFilesBtn');
+    const registerBtn = document.getElementById('registerJobBtn');
+
+    if (generateBtn && !generateBtn.classList.contains('is-loading')) {
+      generateBtn.disabled = !hasJson;
+      generateBtn.title = hasJson
+        ? 'Convert JSON via local json2docx and attach files'
+        : 'Paste a built resume JSON with resume_template and job fields first';
+    }
+
+    if (registerBtn && !registerBtn.classList.contains('is-loading')) {
+      registerBtn.disabled = Boolean(registerBusy) || !backendConnected || !hasJson;
+      if (!backendConnected) {
+        registerBtn.title = 'Sign in under Settings to register';
+      } else if (!hasJson) {
+        registerBtn.title = 'Paste a built resume JSON with resume_template and job fields first';
+      } else {
+        registerBtn.title = 'Register this job to Resume DB';
+      }
     }
   }
 
@@ -407,14 +440,13 @@
   function updateBackendDependentUi(connected) {
     backendConnected = connected;
 
-    const registerBtn = document.getElementById('registerJobBtn');
     const profileSelect = document.getElementById('regProfileId');
     const offlineBanner = document.getElementById('registerOfflineBanner');
     const registerTabBtn = document.getElementById('registerTabBtn');
     const signedInAs = document.getElementById('backendSignedInAs');
     const signedInUser = document.getElementById('backendSignedInUser');
 
-    if (registerBtn) registerBtn.disabled = !connected;
+    syncResumeBuilderActionButtons();
     FIELD_DUP_BUTTON_IDS.forEach((id) => {
       const btn = document.getElementById(id);
       if (btn) btn.disabled = !connected;
@@ -1287,6 +1319,7 @@
       'Fills job title, company, and note from JSON. Job link stays from the current tab / Refresh.',
       ''
     );
+    syncResumeBuilderActionButtons();
   }
 
   /**
@@ -1301,6 +1334,7 @@
     if (!text) {
       clearResumeJsonOverride({ clearTextarea: false });
       if (clearBtn) clearBtn.hidden = true;
+      syncResumeBuilderActionButtons();
       return { ok: false, empty: true };
     }
 
@@ -1309,6 +1343,7 @@
     if (!mapper?.extractRegisterFieldsFromResumeJsonText) {
       updateResumeJsonHint('Resume JSON mapper is not loaded.', 'error');
       resumeJsonOverrideActive = false;
+      syncResumeBuilderActionButtons();
       return { ok: false, error: 'mapper missing' };
     }
 
@@ -1317,6 +1352,7 @@
       resumeJsonOverrideActive = false;
       updateResumeJsonHint(result.error || 'Invalid JSON', 'error');
       if (!silent) setRegisterStatus(result.error || 'Invalid resume JSON', 'error');
+      syncResumeBuilderActionButtons();
       return result;
     }
 
@@ -1327,6 +1363,7 @@
         'JSON parsed, but no job_title / company_name / job_description found yet.',
         'error'
       );
+      syncResumeBuilderActionButtons();
       return { ok: false, error: 'missing register fields', fields };
     }
 
@@ -1336,14 +1373,22 @@
 
     resumeJsonOverrideActive = true;
     const templateNote = fields.resumeTemplate ? ` · template ${fields.resumeTemplate}` : '';
-    updateResumeJsonHint(
-      `Register fields updated from resume JSON${templateNote}. Job link unchanged.`,
-      'success'
-    );
+    if (!fields.resumeTemplate) {
+      updateResumeJsonHint(
+        'JSON has job fields, but resume_template is required to Generate Files / Register.',
+        'error'
+      );
+    } else {
+      updateResumeJsonHint(
+        `Register fields updated from resume JSON${templateNote}. Job link unchanged.`,
+        'success'
+      );
+    }
     if (!silent) {
       setRegisterStatus('Register fields filled from built resume JSON.', 'success');
     }
 
+    syncResumeBuilderActionButtons();
     return { ok: true, fields, data: result.data };
   }
 
@@ -1531,9 +1576,9 @@
       throw err;
     } finally {
       if (btn) {
-        btn.disabled = false;
         setRbButtonLoading(btn, false);
       }
+      syncResumeBuilderActionButtons();
       setTimeout(() => {
         const label = document.getElementById('regGenerateProgressLabel');
         const isError = document.getElementById('registerStatus')?.classList.contains('is-error');
@@ -1864,6 +1909,7 @@
     wireJson2docxGenerate(showStatus);
     wirePromptKitControls(showStatus);
     startConnectionPolling();
+    syncResumeBuilderActionButtons();
 
     document.querySelectorAll('.tab-main[data-tab="register"]').forEach((tabBtn) => {
       tabBtn.addEventListener('click', () => {
@@ -1941,6 +1987,7 @@
       });
     }
 
+    wireRegisterFieldCopy('regNoteCopyBtn', 'regNote', 'Note copied to clipboard.', 'Could not copy note.', showStatus);
     wireRegisterFieldCopy('regJobTitleCopyBtn', 'regJobTitle', 'Job title copied to clipboard.', 'Could not copy job title.', showStatus);
     wireRegisterFieldCopy('regCompanyCopyBtn', 'regCompany', 'Company copied to clipboard.', 'Could not copy company name.', showStatus);
     wireRegisterFieldCopy('regJobLinkCopyBtn', 'regJobLink', 'Job link copied to clipboard.', 'Could not copy job link.', showStatus);

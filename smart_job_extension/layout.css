@@ -258,7 +258,10 @@ main {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   margin: 4px -2px 0;
-  padding: 0 2px;
+  padding: 0 2px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .register-action-group .register-status {
@@ -332,7 +335,7 @@ main {
 }
 
 .register-form.form-grid {
-  gap: 4px;
+  gap: 10px;
   margin-top: 0;
 }
 
@@ -923,7 +926,7 @@ body.sidepanel.assistant-dialog {
 .rb-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 
 .rb-card-head {
@@ -1018,6 +1021,24 @@ body.sidepanel.assistant-dialog {
   gap: 8px;
   font-size: 12px;
   font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.rb-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rb-field-block .rb-mini {
+  width: 100%;
+  min-height: 64px;
+  max-height: 140px;
+  resize: vertical;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 8px;
+  font-family: inherit;
 }
 
 .rb-mini {
@@ -1034,7 +1055,8 @@ body.sidepanel.assistant-dialog {
 .rb-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
+  margin-top: 2px;
 }
 
 .rb-actions .btn {

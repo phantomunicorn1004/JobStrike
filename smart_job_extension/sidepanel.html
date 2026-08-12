@@ -405,6 +405,18 @@
               </div>
             </details>
 
+            <div class="rb-field-block" id="regNoteBlock">
+              <div class="rb-field-head">
+                <span>Note / job description</span>
+                <button type="button" class="btn icon-btn" id="regNoteCopyBtn" title="Copy note" aria-label="Copy note">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                </button>
+              </div>
+              <textarea id="regNote" class="rb-mini" rows="3" placeholder="JD or notes (used when building prompt)"></textarea>
+            </div>
+
             <div class="rb-actions" role="group" aria-label="Resume Builder actions">
               <button type="button" class="btn primary" id="regBuildCopyPromptBtn" title="Build final prompt from kit + Note and copy">
                 <span class="rb-btn-label">Build &amp; Copy Prompt</span>
@@ -413,7 +425,7 @@
               <button type="button" class="btn" id="regOpenResumeJsonBtn" title="Open built resume JSON editor">
                 <span class="rb-btn-label">Resume JSON</span>
               </button>
-              <button type="button" class="btn primary" id="regGenerateFilesBtn" title="Convert JSON via local json2docx and attach files">
+              <button type="button" class="btn primary" id="regGenerateFilesBtn" title="Convert JSON via local json2docx and attach files" disabled>
                 <span class="rb-btn-label">Generate Files</span>
                 <span class="rb-spinner" id="regGenerateSpinner" hidden aria-hidden="true"></span>
               </button>
@@ -424,11 +436,6 @@
             </div>
 
             <form class="form-grid register-form" id="registerForm" onsubmit="return false">
-              <div class="rb-field-head full">
-                <span>Note / job description</span>
-              </div>
-              <textarea id="regNote" class="rb-mini full" rows="2" placeholder="JD or notes (used when building prompt)"></textarea>
-
               <div class="rb-field-head full">
                 <span>Built resume JSON</span>
                 <button type="button" class="btn icon-btn" data-rb-max="resumeJson" title="Maximize" aria-label="Maximize resume JSON">
