@@ -84,13 +84,17 @@ export function writeProfilePromptKit(
   profileId: number,
   kit: ProfilePromptKit,
   storage: Pick<Storage, "setItem"> = globalThis.localStorage,
+  options: { touchUpdatedAt?: boolean } = {},
 ): ProfilePromptKit {
+  const touchUpdatedAt = options.touchUpdatedAt !== false;
   const next: ProfilePromptKit = {
     template: kit.template ?? DEFAULT_PROMPT_TEMPLATE,
     resumeTemplateJson: kit.resumeTemplateJson ?? "",
     jobDescription: kit.jobDescription ?? "",
     output: kit.output ?? "",
-    updatedAt: new Date().toISOString(),
+    updatedAt: touchUpdatedAt
+      ? new Date().toISOString()
+      : (kit.updatedAt ?? new Date().toISOString()),
   };
   storage.setItem(promptKitStorageKey(profileId), JSON.stringify(next));
   return next;

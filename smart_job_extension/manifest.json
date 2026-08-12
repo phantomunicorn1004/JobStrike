@@ -74,7 +74,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["field-registry.js", "content.js", "assistant-overlay.js"],
+      "js": ["field-registry.js", "content.js", "assistant-overlay.js", "website-bridge.js"],
       "run_at": "document_idle"
     }
   ],

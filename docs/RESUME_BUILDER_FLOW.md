@@ -10,14 +10,14 @@ This doc covers the Chrome extension Register tab, website Resume Builder / Sett
 
 | Piece | Role |
 |-------|------|
-| Website `/resume-builder` | Per-profile prompt kit (browser `localStorage`), Build / Build + Copy |
+| Website `/resume-builder` | Per-profile prompt kit (browser `localStorage` + sync to extension) |
 | Website `/settings` | Enable json2docx URL + output mode; Test connection |
 | Website `/prompt-builder`, `/resume-tailor` | Original tools (unchanged) |
 | Extension Register | Prompt kit (`chrome.storage`), Build & Copy Prompt, paste JSON, Generate Files, Register |
 | Extension Settings | Website sign-in + json2docx enable / URL / output mode |
 | `json2docx/server.py` | Local API on `127.0.0.1:8765` → writes files to Downloads |
 
-**Note:** Website prompt kits and extension prompt kits are **not shared** (different storage origins). Edit the kit where you build the prompt.
+**Note:** Prompt kits sync between website Resume Builder and the extension when the extension is installed and this site is open (content-script bridge → `chrome.storage` key `promptKit_v1_{profileId}`). Without the extension, the website keeps a localStorage cache only.
 
 ---
 
@@ -117,7 +117,7 @@ Reload the extension after code updates.
 | Download blocked | Path outside Downloads | Server only serves Downloads `.docx`/`.pdf` |
 | CORS in browser Settings | Old server without CORS | Update / restart `server.py` (allows `*`) |
 | Build & Copy empty JD | Note empty | Scrape / paste JD into Note, or save JD in kit |
-| Website kit ≠ extension kit | Separate storage | Edit kit in the surface you use to build |
+| Website kit ≠ extension kit | Extension not loaded / outdated | Reload extension; reopen `/resume-builder` and Save kit again |
 
 ---
 

@@ -1,6 +1,6 @@
 /**
  * Per-profile prompt kit (chrome.storage.local) + Build & Copy helpers.
- * Mirrors website Resume Builder localStorage shape (not shared across origins).
+ * Synced from website Resume Builder via website-bridge.js when the user saves a kit.
  */
 (function (global) {
   'use strict';

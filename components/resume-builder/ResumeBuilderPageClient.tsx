@@ -30,6 +30,13 @@ import {
   type ProfilePromptKit,
 } from "@/lib/resume-builder/promptKitStorage";
 import {
+  fetchPromptKitFromExtension,
+  pickNewerPromptKit,
+  PROMPT_KIT_BRIDGE_SOURCE,
+  syncPromptKitToExtension,
+  type PromptKitBridgeChangedMessage,
+} from "@/lib/resume-builder/promptKitExtensionSync";
+import {
   fetchJson2docxHealth,
   readJson2docxSettingsFromStorage,
 } from "@/lib/json2docx/settings";
@@ -136,10 +143,28 @@ export function ResumeBuilderPageClient() {
   const dirty = profileId != null && !kitEquals(kit, savedKit);
   const editorsDisabled = profileId == null;
 
-  const loadKitForProfile = useCallback((id: number) => {
-    const next = readProfilePromptKit(id);
-    setKit(next);
-    setSavedKit(next);
+  const loadKitForProfile = useCallback(async (id: number) => {
+    const local = readProfilePromptKit(id);
+    setKit(local);
+    setSavedKit(local);
+    try {
+      const fromExt = await fetchPromptKitFromExtension(id);
+      if (!fromExt.available) return;
+
+      const merged = pickNewerPromptKit(local, fromExt.kit, fromExt.exists);
+      writeProfilePromptKit(id, merged, undefined, { touchUpdatedAt: false });
+      setKit(merged);
+      setSavedKit(merged);
+
+      // If this browser's kit is newer (or extension empty), push it into the extension.
+      const localIsNewer = merged === local && Boolean(local.updatedAt);
+      const extensionMissing = !fromExt.exists;
+      if (localIsNewer || (extensionMissing && Boolean(local.updatedAt))) {
+        void syncPromptKitToExtension(id, local);
+      }
+    } catch {
+      // Keep localStorage kit when bridge fails.
+    }
   }, []);
 
   const refreshJson2docxHealth = useCallback(async () => {
@@ -185,7 +210,7 @@ export function ResumeBuilderPageClient() {
         setProfileId(initial);
         if (initial != null) {
           writeSelectedProfileId(initial);
-          loadKitForProfile(initial);
+          void loadKitForProfile(initial);
         } else {
           setKit(emptyProfilePromptKit());
           setSavedKit(emptyProfilePromptKit());
@@ -206,6 +231,23 @@ export function ResumeBuilderPageClient() {
     };
   }, [loadKitForProfile, refreshJson2docxHealth]);
 
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      const data = event.data as PromptKitBridgeChangedMessage | null;
+      if (!data || data.source !== PROMPT_KIT_BRIDGE_SOURCE) return;
+      if (data.type !== "prompt-kit-changed") return;
+      if (profileId == null || data.profileId !== profileId) return;
+      if (dirty) return;
+      const next = data.kit;
+      writeProfilePromptKit(profileId, next, undefined, { touchUpdatedAt: false });
+      setKit(next);
+      setSavedKit(next);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [profileId, dirty]);
+
   const selectProfile = (raw: string) => {
     const id = Number(raw);
     if (!Number.isFinite(id) || id < 1) return;
@@ -217,14 +259,14 @@ export function ResumeBuilderPageClient() {
     }
     setProfileId(id);
     writeSelectedProfileId(id);
-    loadKitForProfile(id);
+    void loadKitForProfile(id);
   };
 
   const patchKit = (partial: Partial<ProfilePromptKit>) => {
     setKit((prev) => ({ ...prev, ...partial }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (profileId == null) {
       toast.error("Select a profile first.");
       return;
@@ -234,7 +276,23 @@ export function ResumeBuilderPageClient() {
       const next = writeProfilePromptKit(profileId, kit);
       setKit(next);
       setSavedKit(next);
-      toast.success("Prompt kit saved for this profile (this browser).");
+      const sync = await syncPromptKitToExtension(profileId, next);
+      if (sync.synced) {
+        if (sync.kit) {
+          setKit(sync.kit);
+          setSavedKit(sync.kit);
+          writeProfilePromptKit(profileId, sync.kit, undefined, {
+            touchUpdatedAt: false,
+          });
+        }
+        toast.success("Prompt kit saved and synced to the extension.");
+      } else if (!sync.ok) {
+        toast.error(sync.error || "Saved locally, but extension sync failed.");
+      } else {
+        toast.success(
+          "Prompt kit saved in this browser. Open this site with Remote Helper Ext enabled to sync.",
+        );
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to save prompt kit.",

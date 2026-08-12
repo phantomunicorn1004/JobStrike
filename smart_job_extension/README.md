@@ -193,7 +193,7 @@ autofill_session_scan        // chrome.storage.session (last scan + plan)
 autofill_hide_filled_fields  // chrome.storage.local (UI toggle for hiding fillable rows)
 autofill_hero_dismissed      // chrome.storage.local (whether the autofill hero card is dismissed)
 autofill_total_filled        // chrome.storage.local (lifetime field-fill counter)
-promptKit_v1_{profileId}     // per-profile Resume Builder prompt kit (Register Build & Copy)
+promptKit_v1_{profileId}     // per-profile kit (synced from website /resume-builder Save)
 json2docx_enabled            // local json2docx server toggle
 json2docx_base_url           // default http://127.0.0.1:8765
 json2docx_output_mode        // docx | pdf | both
