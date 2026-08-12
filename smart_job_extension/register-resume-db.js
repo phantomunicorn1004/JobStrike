@@ -711,6 +711,7 @@
     select.dataset.persistenceWired = '1';
     select.addEventListener('change', () => {
       void saveSelectedProfileId(select.value);
+      void refreshPromptKitUi();
     });
   }
 
@@ -722,6 +723,7 @@
     if (!isAuthenticated(config)) {
       select.innerHTML = '<option value="">Sign in to load profiles</option>';
       select.disabled = true;
+      void refreshPromptKitUi();
       return;
     }
 
@@ -760,6 +762,7 @@
           .join('');
       select.disabled = !backendConnected;
       restoreProfileSelection(select, profiles, preservedId);
+      void refreshPromptKitUi();
     } catch (err) {
       if (loadSeq !== profilesLoadSeq) return;
       const msg = err.message || 'Failed to load profiles';
@@ -767,6 +770,7 @@
       if (/fetch|network|failed/i.test(msg)) {
         select.innerHTML = '<option value="">Not connected — sign in under Settings</option>';
       }
+      void refreshPromptKitUi();
     }
   }
 
@@ -1771,6 +1775,186 @@
     });
   }
 
+  function getSelectedRegisterProfileId() {
+    return document.getElementById('regProfileId')?.value?.trim() || '';
+  }
+
+  function updatePromptKitStatus(message, type) {
+    const el = document.getElementById('regPromptKitStatus');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('is-error', type === 'error');
+    el.classList.toggle('is-success', type === 'success');
+  }
+
+  async function refreshPromptKitUi({ fillEditor = false } = {}) {
+    const api = global.SmartJobPromptKit;
+    const profileId = getSelectedRegisterProfileId();
+    const editor = document.getElementById('regPromptKitEditor');
+    const buildBtn = document.getElementById('regBuildCopyPromptBtn');
+    const editBtn = document.getElementById('regEditPromptKitBtn');
+
+    if (!api) {
+      updatePromptKitStatus('Prompt kit module not loaded.', 'error');
+      if (buildBtn) buildBtn.disabled = true;
+      if (editBtn) editBtn.disabled = true;
+      return;
+    }
+
+    if (!profileId) {
+      updatePromptKitStatus('Select a profile to load a kit.', '');
+      if (buildBtn) buildBtn.disabled = true;
+      if (editBtn) editBtn.disabled = true;
+      if (editor && !editor.hidden) {
+        const templateEl = document.getElementById('regPromptKitTemplate');
+        const resumeEl = document.getElementById('regPromptKitResumeJson');
+        if (templateEl) templateEl.value = api.DEFAULT_PROMPT_TEMPLATE;
+        if (resumeEl) resumeEl.value = '';
+      }
+      return;
+    }
+
+    if (buildBtn) buildBtn.disabled = false;
+    if (editBtn) editBtn.disabled = false;
+
+    try {
+      const { kit, exists } = await api.getPromptKit(profileId);
+      updatePromptKitStatus(api.kitStatusSummary(kit, exists), exists ? 'success' : '');
+      if (fillEditor || (editor && !editor.hidden)) {
+        const templateEl = document.getElementById('regPromptKitTemplate');
+        const resumeEl = document.getElementById('regPromptKitResumeJson');
+        if (templateEl) templateEl.value = kit.template || api.DEFAULT_PROMPT_TEMPLATE;
+        if (resumeEl) resumeEl.value = kit.resumeTemplateJson || '';
+      }
+    } catch (err) {
+      updatePromptKitStatus(err.message || 'Failed to load prompt kit.', 'error');
+    }
+  }
+
+  async function buildAndCopyPromptFromKit(showStatus) {
+    const api = global.SmartJobPromptKit;
+    if (!api) throw new Error('Prompt kit module not loaded.');
+
+    const profileId = getSelectedRegisterProfileId();
+    if (!profileId) throw new Error('Select a profile first.');
+
+    const { kit } = await api.getPromptKit(profileId);
+    const noteText = document.getElementById('regNote')?.value || '';
+    const jobDescription = api.resolveJobDescription({ noteText, kit });
+    const { prompt, missingPlaceholders } = api.buildPrompt(
+      kit.template,
+      kit.resumeTemplateJson,
+      jobDescription
+    );
+
+    if (!String(prompt || '').trim()) {
+      throw new Error('Nothing to copy — prompt is empty.');
+    }
+
+    await copyTextToClipboard(prompt);
+
+    try {
+      await api.savePromptKit(profileId, { ...kit, output: prompt });
+    } catch (_) {
+      /* non-fatal: copy already succeeded */
+    }
+
+    let message = 'Final prompt copied to clipboard. Paste into GPT, then paste JSON below.';
+    if (missingPlaceholders.length) {
+      message = `Copied (empty: ${missingPlaceholders.join(', ')}). Fill kit / Note, then rebuild.`;
+      setRegisterStatus(message, 'warn');
+      if (showStatus) showStatus(message, 'error');
+    } else {
+      setRegisterStatus(message, 'success');
+      if (showStatus) showStatus(message, 'success');
+    }
+    void refreshPromptKitUi();
+    return { prompt, missingPlaceholders };
+  }
+
+  async function savePromptKitFromEditor(showStatus) {
+    const api = global.SmartJobPromptKit;
+    if (!api) throw new Error('Prompt kit module not loaded.');
+    const profileId = getSelectedRegisterProfileId();
+    if (!profileId) throw new Error('Select a profile first.');
+
+    const template = document.getElementById('regPromptKitTemplate')?.value ?? '';
+    const resumeTemplateJson = document.getElementById('regPromptKitResumeJson')?.value ?? '';
+    const noteText = String(document.getElementById('regNote')?.value || '').trim();
+    const existing = await api.getPromptKit(profileId);
+    const next = await api.savePromptKit(profileId, {
+      ...existing.kit,
+      template,
+      resumeTemplateJson,
+      jobDescription: noteText || existing.kit.jobDescription || '',
+    });
+    updatePromptKitStatus(api.kitStatusSummary(next, true), 'success');
+    setRegisterStatus('Prompt kit saved for this profile (extension storage).', 'success');
+    if (showStatus) showStatus('Prompt kit saved for this profile.', 'success');
+    return next;
+  }
+
+  function wirePromptKitControls(showStatus) {
+    const buildBtn = document.getElementById('regBuildCopyPromptBtn');
+    const editBtn = document.getElementById('regEditPromptKitBtn');
+    const editor = document.getElementById('regPromptKitEditor');
+    const saveBtn = document.getElementById('regPromptKitSaveBtn');
+    const resetBtn = document.getElementById('regPromptKitResetTemplateBtn');
+    const cancelBtn = document.getElementById('regPromptKitCancelEditBtn');
+    const api = global.SmartJobPromptKit;
+
+    if (buildBtn && buildBtn.dataset.wired !== '1') {
+      buildBtn.dataset.wired = '1';
+      buildBtn.addEventListener('click', () => {
+        setRegisterStatus('Building prompt…', 'info');
+        buildAndCopyPromptFromKit(showStatus).catch((err) => {
+          const msg = err.message || String(err);
+          setRegisterStatus(msg, 'error');
+          if (showStatus) showStatus(msg, 'error');
+        });
+      });
+    }
+
+    if (editBtn && editBtn.dataset.wired !== '1') {
+      editBtn.dataset.wired = '1';
+      editBtn.addEventListener('click', () => {
+        if (!editor) return;
+        const opening = editor.hidden;
+        editor.hidden = !opening;
+        if (opening) void refreshPromptKitUi({ fillEditor: true });
+      });
+    }
+
+    if (saveBtn && saveBtn.dataset.wired !== '1') {
+      saveBtn.dataset.wired = '1';
+      saveBtn.addEventListener('click', () => {
+        savePromptKitFromEditor(showStatus).catch((err) => {
+          const msg = err.message || String(err);
+          setRegisterStatus(msg, 'error');
+          if (showStatus) showStatus(msg, 'error');
+        });
+      });
+    }
+
+    if (resetBtn && resetBtn.dataset.wired !== '1') {
+      resetBtn.dataset.wired = '1';
+      resetBtn.addEventListener('click', () => {
+        const ta = document.getElementById('regPromptKitTemplate');
+        if (ta && api) ta.value = api.DEFAULT_PROMPT_TEMPLATE;
+        setRegisterStatus('Template reset to default (Save kit to keep).', 'info');
+      });
+    }
+
+    if (cancelBtn && cancelBtn.dataset.wired !== '1') {
+      cancelBtn.dataset.wired = '1';
+      cancelBtn.addEventListener('click', () => {
+        if (editor) editor.hidden = true;
+      });
+    }
+
+    void refreshPromptKitUi();
+  }
+
   function initRegisterResumeDb(showStatus) {
     const copyJdBtn = document.getElementById('regCopyJdBtn');
     const registerBtn = document.getElementById('registerJobBtn');
@@ -1783,6 +1967,7 @@
     wireDuplicateWindowSetting();
     wireResumeJsonLiveFill(showStatus);
     wireJson2docxGenerate(showStatus);
+    wirePromptKitControls(showStatus);
     startConnectionPolling();
 
     document.querySelectorAll('.tab-main[data-tab="register"]').forEach((tabBtn) => {
@@ -1791,6 +1976,7 @@
         loadProfilesIntoSelect();
         renderOfflineQueue();
         updateRegisterDriveBadge();
+        void refreshPromptKitUi();
       });
     });
 

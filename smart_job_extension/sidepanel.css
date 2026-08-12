@@ -2090,6 +2090,64 @@ input[type="range"] { padding: 0; height: 24px; }
   resize: vertical;
 }
 
+.register-prompt-kit {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border, #cbd5e1) 85%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface, #fff) 94%, var(--muted));
+}
+
+.register-prompt-kit-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.register-prompt-kit-title {
+  display: block;
+  font-size: 13px;
+}
+
+.register-prompt-kit-header .muted {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.register-prompt-kit-header .muted.is-error {
+  color: var(--danger, #dc2626);
+}
+
+.register-prompt-kit-header .muted.is-success {
+  color: color-mix(in srgb, var(--success, #16a34a) 85%, var(--foreground));
+}
+
+.register-prompt-kit-editor {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px dashed color-mix(in srgb, var(--border, #cbd5e1) 80%, transparent);
+}
+
+.register-prompt-kit-editor textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.register-prompt-kit-jd-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .register-resume-json-meta {
   display: flex;
   align-items: flex-start;
