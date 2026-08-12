@@ -2,3 +2,5 @@
 __pycache__/
 output/
 for_releasing/
+_step1_test_payload.json
+~$*.docx

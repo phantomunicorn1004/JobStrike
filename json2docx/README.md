@@ -31,14 +31,27 @@ pip install pywin32   # required for PDF export on Windows (Microsoft Word)
 
 ## Quick start
 
-**Interactive (loop):**
+**Local HTTP server (for Chrome extension / Resume Builder):**
+```bash
+pip install -r requirements.txt
+python server.py
+# or: start_server.bat
+```
+
+Listens on `http://127.0.0.1:8765`:
+- `GET /health`
+- `GET /templates`
+- `POST /generate` — body `{ "json": { ... }, "output_mode": "docx"|"pdf"|"both" }`  
+  Template folder is read from the JSON field **`resume_template`** (e.g. `"Jose"`, `"Oscar"`).
+
+**Interactive CLI (loop):**
 ```bash
 python main.py
 ```
 
 **One-shot from sample file:**
 ```bash
-python main.py --template Andrew --json-file sample_resume_JSON.txt --output-mode docx --once
+python main.py --template Jose --json-file sample_resume_JSON.txt --output-mode docx --once
 ```
 
 Or double-click `run_sample.bat` (DOCX only).
@@ -159,6 +172,7 @@ Nested format like `sample_resume_JSON.txt` or `Andrew_RESUME_TEMP.txt`:
 | File | Role |
 |------|------|
 | `main.py` | CLI entry point |
+| `server.py` | Local HTTP API (`/health`, `/templates`, `/generate`) |
 | `pipeline.py` | JSON processing orchestration + progress |
 | `templates.py` | Template discovery, loading, fill schema |
 | `json_io.py` | JSON parse, validate, generation plan |

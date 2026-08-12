@@ -1,5 +1,10 @@
 python-docx>=1.1.2
 PyPDF2>=3.0.1
 
+# Local HTTP server (extension / Resume Builder):
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0.0
+
 # Optional (Windows PDF export via Microsoft Word):
 # pywin32
