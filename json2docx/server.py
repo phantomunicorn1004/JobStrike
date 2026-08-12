@@ -13,8 +13,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import JSONResponse
 
@@ -28,11 +29,15 @@ from templates import (
     scan_template_dirs,
 )
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+ALLOWED_DOWNLOAD_SUFFIXES = {".docx", ".pdf"}
 
 ROOT = Path(__file__).resolve().parent
+
+# Absolute paths of files produced by this server process (best-effort allowlist).
+_GENERATED_PATHS: set[str] = set()
 
 app = FastAPI(title="json2docx local server", version=APP_VERSION)
 app.add_middleware(
@@ -91,6 +96,65 @@ def _file_payload(kind: str, path: Path) -> dict[str, str]:
         "path": str(path.resolve()),
         "filename": path.name,
     }
+
+
+def _downloads_root() -> Path:
+    return downloads_dir().resolve()
+
+
+def _is_under_downloads(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(_downloads_root())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _register_generated(paths: list[Path]) -> None:
+    for path in paths:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if _is_under_downloads(resolved) and resolved.is_file():
+            _GENERATED_PATHS.add(str(resolved))
+
+
+def _resolve_download_target(*, path: str | None, filename: str | None) -> Path:
+    downloads = _downloads_root()
+
+    if path and str(path).strip():
+        candidate = Path(str(path).strip()).expanduser()
+        if not candidate.is_absolute():
+            candidate = downloads / candidate.name
+        target = candidate.resolve()
+    elif filename and str(filename).strip():
+        name = Path(str(filename).strip()).name
+        if not name or name in {".", ".."}:
+            raise ValueError("Invalid filename")
+        target = (downloads / name).resolve()
+    else:
+        raise ValueError("Provide path= or filename=")
+
+    if not _is_under_downloads(target):
+        raise PermissionError("Download path must be under the Downloads folder")
+    if target.suffix.lower() not in ALLOWED_DOWNLOAD_SUFFIXES:
+        raise PermissionError("Only .docx and .pdf downloads are allowed")
+    if not target.is_file():
+        raise FileNotFoundError(f"File not found: {target.name}")
+
+    # Prefer files this server generated; still allow same-basename under Downloads
+    # so a restarted server can serve the latest generate output by filename/path.
+    return target
+
+
+def _media_type_for(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        return "application/pdf"
+    if suffix == ".docx":
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return "application/octet-stream"
 
 
 @app.get("/health")
@@ -154,6 +218,7 @@ def generate(body: GenerateRequest) -> JSONResponse:
         )
 
     files = [_file_payload(item.kind, item.path) for item in result.outputs]
+    _register_generated([item.path for item in result.outputs])
     return JSONResponse(
         content={
             "ok": True,
@@ -162,6 +227,29 @@ def generate(body: GenerateRequest) -> JSONResponse:
             "files": files,
             "downloads": str(downloads_dir()),
         }
+    )
+
+
+@app.get("/download")
+def download(
+    path: str | None = Query(default=None, description="Absolute file path under Downloads"),
+    filename: str | None = Query(default=None, description="Basename under Downloads"),
+):
+    try:
+        target = _resolve_download_target(path=path, filename=filename)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+    except PermissionError as exc:
+        return JSONResponse(status_code=403, content={"ok": False, "error": str(exc)})
+    except FileNotFoundError as exc:
+        return JSONResponse(status_code=404, content={"ok": False, "error": str(exc)})
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+
+    return FileResponse(
+        path=str(target),
+        media_type=_media_type_for(target),
+        filename=target.name,
     )
 
 

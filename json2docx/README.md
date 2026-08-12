@@ -43,6 +43,7 @@ Listens on `http://127.0.0.1:8765`:
 - `GET /templates`
 - `POST /generate` — body `{ "json": { ... }, "output_mode": "docx"|"pdf"|"both" }`  
   Template folder is read from the JSON field **`resume_template`** (e.g. `"Jose"`, `"Oscar"`).
+- `GET /download?path=` or `GET /download?filename=` — fetch a generated `.docx`/`.pdf` from Downloads (localhost only; path traversal blocked).
 
 **Interactive CLI (loop):**
 ```bash
@@ -172,7 +173,7 @@ Nested format like `sample_resume_JSON.txt` or `Andrew_RESUME_TEMP.txt`:
 | File | Role |
 |------|------|
 | `main.py` | CLI entry point |
-| `server.py` | Local HTTP API (`/health`, `/templates`, `/generate`) |
+| `server.py` | Local HTTP API (`/health`, `/templates`, `/generate`, `/download`) |
 | `pipeline.py` | JSON processing orchestration + progress |
 | `templates.py` | Template discovery, loading, fill schema |
 | `json_io.py` | JSON parse, validate, generation plan |
