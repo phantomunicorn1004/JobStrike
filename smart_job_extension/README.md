@@ -61,6 +61,21 @@ python scripts/generate-icons.py
 4. Select this extension folder.
 5. Pin the extension from the Chrome toolbar.
 
+## Resume Builder / Register (json2docx)
+
+Register tab flow for tailored resumes:
+
+1. **Settings → Website connection** — sign in so **Profile** options load.
+2. Start local server: `json2docx/start_server.bat` or `python json2docx/server.py` (`http://127.0.0.1:8765`).
+3. **Settings → json2docx** — enable, confirm URL, choose DOCX / PDF / both, Test connection.
+4. **Register** — select Profile → **Edit kit** (original prompt + resume JSON) → Save.
+5. Put JD in **Note** (or scrape) → **Build & Copy Prompt** → GPT → paste built JSON.
+6. **Generate Files** → review/remove attach chips → Register / Mark Applied.
+
+Required JSON fields: `resume_template`, `job_title`, `company_name`, `job_description`.
+
+Full checklist and troubleshooting: [`docs/RESUME_BUILDER_FLOW.md`](../docs/RESUME_BUILDER_FLOW.md).
+
 ## How to Use
 
 ### 1. Open the side panel
@@ -178,6 +193,10 @@ autofill_session_scan        // chrome.storage.session (last scan + plan)
 autofill_hide_filled_fields  // chrome.storage.local (UI toggle for hiding fillable rows)
 autofill_hero_dismissed      // chrome.storage.local (whether the autofill hero card is dismissed)
 autofill_total_filled        // chrome.storage.local (lifetime field-fill counter)
+promptKit_v1_{profileId}     // per-profile Resume Builder prompt kit (Register Build & Copy)
+json2docx_enabled            // local json2docx server toggle
+json2docx_base_url           // default http://127.0.0.1:8765
+json2docx_output_mode        // docx | pdf | both
 ```
 
 ## Profile & application kits

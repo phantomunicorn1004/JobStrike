@@ -17,7 +17,7 @@ resume_template/
 sample_resume_JSON.txt        # completed sample (project root)
 ```
 
-Each candidate folder (e.g. `Andrew/`, `Steven/`) must contain `resume.docx` and `cover-letter.docx`.
+Each template folder (e.g. `Jose/`, `Oscar/`) must contain `resume.docx` and `cover-letter.docx`.
 
 Optional per template folder:
 - `fill-schema.json` — flat fill skeleton validated against DOCX placeholders
@@ -167,6 +167,19 @@ Nested format like `sample_resume_JSON.txt` or `Andrew_RESUME_TEMP.txt`:
 - Metadata stripped from output DOCX/PDF when possible
 - PDF export: Windows + Microsoft Word + pywin32
 - Exit code: `0` success, `1` error (for scripting)
+- Server binds **127.0.0.1 only**; CORS allows browser Settings / Resume Builder health checks
+
+## Troubleshooting (server + extension)
+
+| Issue | Fix |
+|-------|-----|
+| Port in use | `python server.py --port 8766` and update extension/website URL |
+| `/health` fails | Confirm process is running; try `127.0.0.1` not `localhost` if IPv6 oddities |
+| PDF generation errors | Install Microsoft Word + `pip install pywin32`, or use `output_mode: docx` |
+| Template not ready | Each folder needs `resume.docx` and `cover-letter.docx` |
+| Extension cannot download | Keep files in Downloads; do not move them before Generate finishes |
+
+Full product smoke checklist: [`docs/RESUME_BUILDER_FLOW.md`](../docs/RESUME_BUILDER_FLOW.md).
 
 ## Project modules
 
@@ -174,6 +187,7 @@ Nested format like `sample_resume_JSON.txt` or `Andrew_RESUME_TEMP.txt`:
 |------|------|
 | `main.py` | CLI entry point |
 | `server.py` | Local HTTP API (`/health`, `/templates`, `/generate`, `/download`) |
+| `start_server.bat` | Windows helper to run `server.py` |
 | `pipeline.py` | JSON processing orchestration + progress |
 | `templates.py` | Template discovery, loading, fill schema |
 | `json_io.py` | JSON parse, validate, generation plan |
