@@ -416,17 +416,17 @@
       });
     }
 
-    document.querySelectorAll('[data-tab="settings"]').forEach((tabBtn) => {
-      tabBtn.addEventListener('click', () => {
-        void loadJson2docxSettingsForm().then(() => checkJson2docxHealth());
+    const headerSettings = document.getElementById('headerSettingsBtn');
+    if (headerSettings) {
+      headerSettings.addEventListener('click', () => {
+        const settingsOpen = document.getElementById('tab-settings')?.classList.contains('active');
+        if (settingsOpen) {
+          void loadJson2docxSettingsForm().then(() => checkJson2docxHealth());
+        } else {
+          void checkJson2docxHealth();
+        }
       });
-    });
-
-    document.querySelectorAll('.tab-main[data-tab="register"]').forEach((tabBtn) => {
-      tabBtn.addEventListener('click', () => {
-        void checkJson2docxHealth();
-      });
-    });
+    }
   }
 
   function initJson2docxClient(showStatus) {

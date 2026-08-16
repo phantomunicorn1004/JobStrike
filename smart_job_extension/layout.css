@@ -1069,6 +1069,10 @@ body.sidepanel.assistant-dialog {
   cursor: not-allowed;
 }
 
+.rb-actions .rb-action-wide {
+  grid-column: 1 / -1;
+}
+
 .rb-btn-label {
   display: inline;
 }
@@ -1153,6 +1157,17 @@ body.sidepanel.assistant-dialog {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
+}
+
+.rb-details-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rb-details-pair label {
+  min-width: 0;
 }
 
 .rb-secondary-actions {

@@ -576,6 +576,63 @@ function normalizeProfile(stored) {
   return p;
 }
 
+function firstListValue(value) {
+  if (Array.isArray(value)) return String(value[0] || '').trim();
+  return String(value || '').trim();
+}
+
+function splitFullName(fullName) {
+  const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { firstName: '', lastName: '' };
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' };
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+}
+
+function websiteProfileToAutofillProfile(record) {
+  const fullName = String(record?.full_name || record?.fullName || '').trim();
+  const names = splitFullName(fullName);
+  const city = String(record?.city || '').trim();
+  const state = String(record?.state || '').trim();
+  const zip = String(record?.postal_code || record?.postalCode || '').trim();
+  const location = [city, state, zip].filter(Boolean).join(', ');
+  return normalizeProfile({
+    fullName,
+    firstName: names.firstName,
+    lastName: names.lastName,
+    email: firstListValue(record?.work_emails || record?.workEmails),
+    phone: firstListValue(record?.phone_numbers || record?.phoneNumbers),
+    dateOfBirth: String(record?.dob || '').trim(),
+    address: String(record?.address || '').trim(),
+    city,
+    state,
+    zip,
+    location,
+    school: String(record?.university || '').trim(),
+    linkedin: String(record?.linkedin || '').trim()
+  });
+}
+
+async function loadWebsiteProfileForAutofill() {
+  const api = window.SmartJobRegisterResumeDb;
+  const profileId = document.getElementById('regProfileId')?.value?.trim();
+  if (!profileId) {
+    showStatus('Select a profile first.', 'error');
+    return false;
+  }
+  if (!api?.fetchProfileRecord) {
+    showStatus('Profile loader is not available.', 'error');
+    return false;
+  }
+  showStatus('Loading website profile…', 'info', 0);
+  const record = await api.fetchProfileRecord(profileId);
+  if (!record) {
+    showStatus('Selected profile was not found on the website.', 'error');
+    return false;
+  }
+  currentProfile = websiteProfileToAutofillProfile(record);
+  return true;
+}
+
 function mimeTypeFromFileName(name) {
   const ext = fileExtensionOf(name);
   const map = {
@@ -636,7 +693,8 @@ function init() {
 function bindEvents() {
   const globalRefreshBtn = document.getElementById('globalRefreshBtn');
   if (globalRefreshBtn) globalRefreshBtn.addEventListener('click', () => globalRefreshCurrentTab());
-  document.getElementById('fillSelectedBtn').addEventListener('click', () => autofillThisPage({ useAi: false }));
+  const fillBtn = document.getElementById('regAutofillBtn') || document.getElementById('fillSelectedBtn');
+  if (fillBtn) fillBtn.addEventListener('click', () => autofillThisPage({ useAi: false }));
   const fillAiBtn = document.getElementById('fillSelectedAiBtn');
   if (fillAiBtn) fillAiBtn.addEventListener('click', () => autofillThisPage({ useAi: true }));
   const aiSettingsForm = document.getElementById('aiSettingsForm');
@@ -657,8 +715,10 @@ function bindEvents() {
       updateAiKeyFieldHint();
     });
   }
-  document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
-  document.getElementById('clearProfileBtn').addEventListener('click', clearProfile);
+  const saveProfileBtn = document.getElementById('saveProfileBtn');
+  if (saveProfileBtn) saveProfileBtn.addEventListener('click', saveProfile);
+  const clearProfileBtn = document.getElementById('clearProfileBtn');
+  if (clearProfileBtn) clearProfileBtn.addEventListener('click', clearProfile);
   const profileEditBtn = document.getElementById('profileEditBtn');
   if (profileEditBtn) profileEditBtn.addEventListener('click', () => setProfileEditMode(true));
   const profileCancelEditBtn = document.getElementById('profileCancelEditBtn');
@@ -673,7 +733,8 @@ function bindEvents() {
   if (profileHeroBody) {
     profileHeroBody.addEventListener('click', onProfileCopyClick);
   }
-  document.getElementById('questionForm').addEventListener('submit', saveCustomQuestion);
+  const questionForm = document.getElementById('questionForm');
+  if (questionForm) questionForm.addEventListener('submit', saveCustomQuestion);
   const addQuestionBtn = document.getElementById('addQuestionBtn');
   if (addQuestionBtn) addQuestionBtn.addEventListener('click', () => startNewQuestion());
   const cancelQuestionEditBtn = document.getElementById('cancelQuestionEditBtn');
@@ -688,11 +749,16 @@ function bindEvents() {
     fieldsSearch.addEventListener('input', () => renderFieldPlan());
     fieldsSearch.addEventListener('search', () => renderFieldPlan());
   }
-  document.getElementById('jobForm').addEventListener('submit', saveJobFromForm);
-  document.getElementById('downloadJsonBtn').addEventListener('click', downloadJobsJson);
-  document.getElementById('resetJobsBtn').addEventListener('click', resetJobs);
-  document.getElementById('settingsForm').addEventListener('submit', saveSettings);
-  document.getElementById('resetSettingsBtn').addEventListener('click', resetSettingsForm);
+  const jobForm = document.getElementById('jobForm');
+  if (jobForm) jobForm.addEventListener('submit', saveJobFromForm);
+  const downloadJsonBtn = document.getElementById('downloadJsonBtn');
+  if (downloadJsonBtn) downloadJsonBtn.addEventListener('click', downloadJobsJson);
+  const resetJobsBtn = document.getElementById('resetJobsBtn');
+  if (resetJobsBtn) resetJobsBtn.addEventListener('click', resetJobs);
+  const settingsForm = document.getElementById('settingsForm');
+  if (settingsForm) settingsForm.addEventListener('submit', saveSettings);
+  const resetSettingsBtn = document.getElementById('resetSettingsBtn');
+  if (resetSettingsBtn) resetSettingsBtn.addEventListener('click', resetSettingsForm);
   const dismissBtn = document.getElementById('dismissHeroBtn');
   if (dismissBtn) dismissBtn.addEventListener('click', dismissHero);
   const quickSave = document.getElementById('quickSaveJobBtn');
@@ -897,6 +963,12 @@ function clearOpenAiKeyError() {
 }
 
 function openSettingsPanel() {
+  const settingsPanel = document.getElementById('tab-settings');
+  const alreadyOpen = Boolean(settingsPanel?.classList.contains('active'));
+  if (alreadyOpen) {
+    activateExtensionTab('register', { tier: 'main' });
+    return;
+  }
   activateExtensionTab('settings', { tier: 'settings' });
 }
 
@@ -1199,8 +1271,10 @@ function restoreScanState() {
           customQuestionId: stored.customQuestionId || fresh.customQuestionId
         };
       });
-      document.getElementById('currentUrl').textContent = currentScanUrl || 'Not scanned';
-      document.getElementById('detectedCount').textContent = currentFields.length;
+      const urlEl = document.getElementById('currentUrl');
+      if (urlEl) urlEl.textContent = currentScanUrl || 'Not scanned';
+      const detectedCount = document.getElementById('detectedCount');
+      if (detectedCount) detectedCount.textContent = currentFields.length;
       renderFieldPlan();
       resolve(true);
     });
@@ -1347,7 +1421,8 @@ async function notifyActiveTabChange(source = 'switch') {
     lastObservedTabId = tab.id;
     lastObservedTabUrl = url;
     if (/^https?:\/\//.test(url)) {
-      document.getElementById('currentUrl').textContent = url;
+      const urlEl = document.getElementById('currentUrl');
+      if (urlEl) urlEl.textContent = url;
       showStatus(`Active tab changed (${source}): ${summarizeTabUrl(url)}.`, 'info', 2600);
       return;
     }
@@ -2706,8 +2781,10 @@ async function scanCurrentPage({ silent = false } = {}) {
     lastDismissedCount = dismissed.length;
     clearFieldsSearch();
 
-    document.getElementById('currentUrl').textContent = currentScanUrl;
-    document.getElementById('detectedCount').textContent = currentFields.length;
+    const urlEl = document.getElementById('currentUrl');
+    if (urlEl) urlEl.textContent = currentScanUrl;
+    const detectedCount = document.getElementById('detectedCount');
+    if (detectedCount) detectedCount.textContent = currentFields.length;
     renderAdapterDebug({
       adapter: response.adapter,
       adapterScore: response.adapterScore,
@@ -2739,16 +2816,31 @@ async function scanCurrentPage({ silent = false } = {}) {
 }
 
 async function autofillThisPage({ useAi = false } = {}) {
-  const fillBtn = document.getElementById(useAi ? 'fillSelectedAiBtn' : 'fillSelectedBtn');
-  const otherBtn = document.getElementById(useAi ? 'fillSelectedBtn' : 'fillSelectedAiBtn');
-  if (fillBtn) fillBtn.disabled = true;
+  const fillBtn = document.getElementById(useAi ? 'fillSelectedAiBtn' : 'regAutofillBtn')
+    || document.getElementById(useAi ? 'fillSelectedAiBtn' : 'fillSelectedBtn');
+  const otherBtn = document.getElementById(useAi ? 'regAutofillBtn' : 'fillSelectedAiBtn')
+    || document.getElementById(useAi ? 'fillSelectedBtn' : 'fillSelectedAiBtn');
+  if (fillBtn) {
+    fillBtn.disabled = true;
+    fillBtn.classList.add('is-loading');
+    const spinner = fillBtn.querySelector('.rb-spinner');
+    if (spinner) spinner.hidden = false;
+  }
   if (otherBtn) otherBtn.disabled = true;
   if (useAi && !requireOpenAiApiKey('Add your OpenAI API key in Settings before using Autofill with AI.')) {
-    if (fillBtn) fillBtn.disabled = false;
+    if (fillBtn) {
+      fillBtn.disabled = false;
+      fillBtn.classList.remove('is-loading');
+      const spinner = fillBtn.querySelector('.rb-spinner');
+      if (spinner) spinner.hidden = true;
+    }
     if (otherBtn) otherBtn.disabled = false;
     return;
   }
   try {
+    const loaded = await loadWebsiteProfileForAutofill();
+    if (!loaded) return;
+
     showStatus('Scrolling to top to detect all fields...', 'info', 0);
     try {
       await sendToActiveTab({ action: 'prepareForScan' });
@@ -2783,8 +2875,13 @@ async function autofillThisPage({ useAi = false } = {}) {
   } catch (error) {
     showStatus(error.message || String(error), 'error');
   } finally {
-    if (fillBtn) fillBtn.disabled = false;
+    if (fillBtn) {
+      fillBtn.classList.remove('is-loading');
+      const spinner = fillBtn.querySelector('.rb-spinner');
+      if (spinner) spinner.hidden = true;
+    }
     if (otherBtn) otherBtn.disabled = false;
+    window.SmartJobRegisterResumeDb?.syncResumeBuilderActionButtons?.();
     updateReadyCountHint();
   }
 }
@@ -3504,6 +3601,7 @@ function updateReadyCountHint() {
 function renderFieldPlan() {
   const container = document.getElementById('fieldsContainer');
   updateReadyCountHint();
+  if (!container) return;
 
   if (!currentPlan.length) {
     container.className = 'fields-list empty';
@@ -4137,6 +4235,7 @@ function updateQuestionsCountBadge(count) {
 
 function renderQuestionsList() {
   const container = document.getElementById('questionsList');
+  if (!container) return;
   const searchQuery = getQuestionsSearchQuery();
   const filtered = filterQuestionsForSearch(currentQuestions, searchQuery);
   const activeId = getActiveEditingQuestionId();
@@ -4323,6 +4422,7 @@ function saveJobFromForm(event) {
 
 function renderSavedJobs() {
   const container = document.getElementById('savedJobsList');
+  if (!container) return;
   chrome.storage.local.get([STORAGE_KEY], (result) => {
     const jobs = Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY].map(toJobEntry) : [];
     if (!jobs.length) {

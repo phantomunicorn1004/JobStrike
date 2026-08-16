@@ -49,301 +49,10 @@
       </div>
     </header>
 
-    <nav class="nav-primary" aria-label="Primary">
-      <button class="tab-main" data-tab="autofill" data-tier="main" type="button">
-        <span class="tab-icon" aria-hidden="true">
-          <img src="icons/icon-16.png" alt="" class="brand-mark-inline" width="16" height="16" />
-        </span>
-        <span class="tab-label">Autofill</span>
-      </button>
-      <button class="tab-main active" data-tab="register" data-tier="main" type="button" id="registerTabBtn" aria-describedby="registerTabHint">
-        <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <path d="M14 2v6h6M12 18v-6M9 15h6"/>
-          </svg>
-        </span>
-        <span class="tab-label">Register</span>
-      </button>
-    </nav>
-
-    <nav class="nav-secondary" aria-label="More tools">
-      <button class="tab-sub" data-tab="profile" data-tier="sub" type="button">
-        <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="8" r="4"/>
-            <path d="M4 21v-1a8 8 0 0 1 16 0v1"/>
-          </svg>
-        </span>
-        <span class="tab-label">Profile</span>
-      </button>
-      <button class="tab-sub" data-tab="questions" data-tier="sub" type="button">
-        <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z"/>
-          </svg>
-        </span>
-        <span class="tab-label">Q&amp;A Bank</span>
-      </button>
-      <button class="tab-sub" data-tab="jobs" data-tier="sub" type="button">
-        <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-          </svg>
-        </span>
-        <span class="tab-label">Saved Jobs</span>
-      </button>
-      <button class="tab-sub dialog-only" data-tab="settings" data-tier="settings" type="button" title="Settings" aria-label="Settings">
-        <span class="tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06-2.83 2.83-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21h-4v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06-2.83-2.83.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3v-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06 2.83-2.83.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3h4v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06 2.83 2.83-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21v4h-.09A1.65 1.65 0 0 0 19.4 15z"/>
-          </svg>
-        </span>
-        <span class="tab-label">Settings</span>
-      </button>
-    </nav>
-
     <main class="app-main">
-      <section class="tab-panel" id="tab-autofill">
-        <div class="tab-panel-scroll">
-        <div class="hero-card" id="heroCard">
-          <button class="hero-close" id="dismissHeroBtn" type="button" aria-label="Dismiss tip">×</button>
-          <div class="hero-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2 l1.8 4.6 L18.5 8.4 l-3.7 3 .9 4.8 L12 13.8 l-3.7 2.4 .9 -4.8 -3.7 -3 4.7 -1.8z"/>
-            </svg>
-          </div>
-          <h2>Autofill every question, smartly.</h2>
-          <ul class="hero-bullets">
-            <li>Detects every input, dropdown, combo-box, and yes/no question on the page.</li>
-            <li>Auto-fills from your saved profile and custom answer bank.</li>
-            <li>Click any badge to override the detected category or widget type.</li>
-            <li>Skips legal/consent checkboxes for safety &mdash; never auto-submits.</li>
-          </ul>
-        </div>
-
-        <div class="action-card">
-          <div class="action-card-top">
-            <div class="action-icon" aria-hidden="true">
-              <img src="icons/icon-32.png" alt="" class="brand-mark" width="28" height="28" />
-            </div>
-            <div class="action-card-text">
-              <h2>Autofill this job application!</h2>
-              <p class="action-stats">
-                <span><strong id="totalFilledCount">0</strong> fields filled <span id="totalFilledFire" class="action-flame" aria-hidden="true">&#128293;</span></span>
-                <span class="action-stat-sep">&middot;</span>
-                <span>~<strong id="minutesSaved">0</strong> min saved</span>
-              </p>
-            </div>
-          </div>
-          <div class="action-cta-row" id="autofillCtaRow">
-            <button class="action-cta primary" id="fillSelectedBtn" type="button">
-              <span class="cta-icon" aria-hidden="true">
-                <img src="icons/icon-16.png" alt="" class="brand-mark-inline" width="18" height="18" />
-              </span>
-              <span id="autofillCtaLabel">Autofill this page</span>
-            </button>
-            <button class="action-cta ai-cta hidden" id="fillSelectedAiBtn" type="button" title="Generate answers with OpenAI, then fill">
-              <span class="cta-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 3l1.2 3.6L17 8l-3.8 1.4L12 13l-1.2-3.6L7 8l3.8-1.4L12 3z"/>
-                  <path d="M5 15l.8 2.2L8 18l-2.2.8L5 21l-.8-2.2L2 18l2.2-.8L5 15z"/>
-                  <path d="M19 11l.6 1.7L21 13l-1.7.6L19 15l-.6-1.7L17 13l1.7-.6L19 11z"/>
-                </svg>
-              </span>
-              <span id="autofillAiCtaLabel">Autofill with AI</span>
-            </button>
-          </div>
-          <div class="action-meta">
-            <span id="currentUrl" class="mono">Not scanned</span>
-            <span class="dot">&middot;</span>
-            <span><strong id="detectedCount">0</strong> detected</span>
-          </div>
-        </div>
-
-        <details class="collapsible-card adapter-debug-card" id="adapterDebugSection">
-          <summary>
-            <span class="summary-title">Adapter detection</span>
-            <span class="summary-meta muted" id="adapterDebugSummary">Not scanned</span>
-          </summary>
-          <div class="collapsible-body">
-            <p class="hint-text">Shows which ATS adapter ran and how confident the match is. Scores at or above the threshold win; otherwise the generic default adapter is used.</p>
-            <div id="adapterDebugPanel" class="adapter-debug-panel empty">Run autofill or refresh detection to see adapter scores.</div>
-            <div class="button-row">
-              <button class="btn small" type="button" id="refreshAdapterDebugBtn">Refresh detection</button>
-            </div>
-          </div>
-        </details>
-
-        <div class="quick-row">
-          <button class="quick-link" id="quickSaveJobBtn" type="button" title="Save this job to your list">
-            <span aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-              </svg>
-            </span>
-            <span>Save job</span>
-          </button>
-          <button class="quick-link" id="downloadJsonBtn" type="button" title="Download all saved jobs as JSON">
-            <span aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>
-              </svg>
-            </span>
-            <span>Export JSON</span>
-          </button>
-        </div>
-
-        <details class="collapsible-card" id="previewSection">
-          <summary>
-            <span class="summary-title">Detected Fields</span>
-            <span class="summary-meta muted" id="readyCountHint">0 ready to fill</span>
-          </summary>
-          <div class="collapsible-body">
-            <p class="hint-text">Clear a textarea to skip a field. Click a badge to override the detected category or widget type.</p>
-            <div class="field-filter-row">
-              <label class="filter-toggle">
-                <input type="checkbox" id="hideFilledToggle" checked>
-                <span>Hide already-fillable fields</span>
-              </label>
-              <span class="filter-meta muted" id="fieldsFilterMeta"></span>
-            </div>
-            <label class="fields-search">
-              <span class="visually-hidden">Search detected fields</span>
-              <input type="search" id="fieldsSearch" class="fields-search-input" placeholder="Search question, category, answer, options…" autocomplete="off" spellcheck="false">
-            </label>
-            <div id="fieldsContainer" class="fields-list empty">No scanned fields yet.</div>
-          </div>
-        </details>
-
-        <details class="collapsible-card">
-          <summary>
-            <span class="summary-title">Save this job</span>
-            <span class="summary-meta muted">Same JSON shape as before</span>
-          </summary>
-          <div class="collapsible-body">
-            <form id="jobForm" class="form-grid">
-              <label>Legal Name<input id="jobName" type="text" autocomplete="name"></label>
-              <label>Company<input id="jobCompany" type="text" autocomplete="organization"></label>
-              <label>Job Title<input id="jobTitle" type="text"></label>
-              <label class="full">Job Link<input id="jobLink" type="url" readonly></label>
-              <label class="full">Note<input id="jobNote" type="text"></label>
-              <div class="button-row full">
-                <button class="btn primary" type="submit">Add / Update Job</button>
-              </div>
-            </form>
-          </div>
-        </details>
-        </div>
-      </section>
-
-      <section class="tab-panel" id="tab-profile">
-        <div class="tab-panel-scroll">
-        <div class="profile-page">
-          <div class="profile-copy-banner" id="profileCopyBanner" role="note">
-            <span class="profile-copy-banner-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </span>
-            <span>Click any block of text below to copy it! Reference your profile to fill out your application.</span>
-          </div>
-
-          <div id="profileViewPanel" class="profile-view-panel">
-            <header class="profile-hero">
-              <div class="profile-hero-head">
-                <h2 class="profile-display-name" id="profileDisplayName">Your profile</h2>
-                <div class="profile-hero-actions">
-                  <button type="button" class="profile-link-btn" id="profileRefreshBtn" title="Reload profile from storage">
-                    <span class="profile-link-icon" aria-hidden="true">↻</span> Refresh
-                  </button>
-                  <button type="button" class="profile-link-btn" id="profileEditBtn" title="Edit profile fields">
-                    <span class="profile-link-icon" aria-hidden="true">✎</span> Edit
-                  </button>
-                </div>
-              </div>
-              <div class="profile-hero-body" id="profileHeroBody"></div>
-            </header>
-            <div id="profileSectionsView" class="profile-sections-view"></div>
-          </div>
-
-          <div id="profileEditPanel" class="profile-edit-panel hidden">
-            <header class="profile-edit-head">
-              <h2 class="profile-edit-heading">Edit profile</h2>
-              <p class="profile-edit-intro muted">Values are grouped by section and used when autofilling applications.</p>
-            </header>
-            <form id="profileForm" class="profile-edit-form" novalidate></form>
-            <div class="button-row profile-edit-actions">
-              <button class="btn primary" type="button" id="saveProfileBtn">Save Profile</button>
-              <button class="btn" type="button" id="profileCancelEditBtn">Cancel</button>
-              <button class="btn" type="button" id="clearProfileBtn">Clear Profile</button>
-            </div>
-          </div>
-
-          <div class="card profile-kits-card">
-          <h2>Application Kits</h2>
-          <p>Each kit is a <strong>resume + cover letter</strong> pair with its own work experience (role titles and bullets). Use different kits for different job targets.</p>
-          <div class="button-row">
-            <button class="btn primary small" type="button" id="addKitBtn">+ Add kit</button>
-          </div>
-          <div id="kitsContainer" class="kits-list empty">No application kits yet. Add one to upload a resume and optional cover letter.</div>
-          <input type="file" id="kitFilePicker" hidden>
-          </div>
-        </div>
-        </div>
-      </section>
-
-      <section class="tab-panel" id="tab-questions">
-        <div class="tab-panel-scroll">
-        <div class="card question-bank-intro">
-          <h2>Custom Question Bank</h2>
-          <p class="muted">Save reusable answers for extra application questions. Similar questions will be suggested during scanning.</p>
-        </div>
-
-        <div id="questionEditorWrap" class="card question-editor-card is-collapsed" aria-hidden="true">
-          <div class="question-editor-toolbar">
-            <div class="question-editor-heading">
-              <span class="question-editor-kicker" id="questionEditorKicker">New</span>
-              <h3 class="question-editor-title" id="questionEditorHeading">New custom Q&amp;A</h3>
-            </div>
-            <button type="button" id="cancelQuestionEditBtn" class="btn small subtle">Cancel</button>
-          </div>
-          <form id="questionForm" class="question-form">
-            <input type="hidden" id="questionId">
-            <label>Title<input id="questionTitle" type="text" placeholder="Short label for this Q&amp;A"></label>
-            <label>Question patterns<textarea id="questionPatterns" rows="3" placeholder="One pattern per line — used to match fields on job forms"></textarea></label>
-            <label>Answer<textarea id="questionAnswer" rows="5" placeholder="Reusable answer"></textarea></label>
-            <label>Tags<input id="questionTags" type="text" placeholder="motivation, general"></label>
-            <div class="checks">
-              <label><input id="questionRequireReview" type="checkbox" checked> Require review</label>
-              <label><input id="questionAutoFill" type="checkbox"> Allow high-confidence autofill selection</label>
-            </div>
-            <div class="button-row question-form-actions">
-              <button class="btn primary" type="submit" id="questionFormSubmitBtn">Save</button>
-            </div>
-          </form>
-        </div>
-
-        <div class="card saved-custom-qa-card">
-          <div class="saved-custom-qa-toolbar">
-            <div class="saved-custom-qa-title-wrap">
-              <h2>Saved Custom Q&amp;A</h2>
-              <span id="questionsCountBadge" class="questions-count-badge" aria-live="polite">0</span>
-            </div>
-            <button type="button" id="addQuestionBtn" class="btn icon-round add-question-btn" title="Add custom Q&amp;A" aria-label="Add custom Q&amp;A">+</button>
-          </div>
-          <label class="questions-search">
-            <span class="visually-hidden">Search saved custom Q&amp;A</span>
-            <input type="search" id="questionsSearch" class="questions-search-input" placeholder="Search title, question, answer, tags…" autocomplete="off" spellcheck="false">
-          </label>
-          <div id="questionsList" class="questions-list empty">No custom Q&amp;A saved yet.</div>
-        </div>
-        </div>
-      </section>
-
       <section class="tab-panel active" id="tab-register">
         <div class="card register-card register-fit rb-card" id="resumeBuilderRoot">
           <div class="rb-card-head">
-            <h2>Resume Builder</h2>
             <div class="rb-chips rb-chips-header" aria-live="polite">
               <span class="rb-chip" id="rbChipWebsite" title="Website connection">
                 <span class="backend-connection-dot" id="backendConnectionDot"></span>
@@ -433,6 +142,10 @@
                 <span class="rb-btn-label">Register</span>
                 <span class="rb-spinner" id="regRegisterSpinner" hidden aria-hidden="true"></span>
               </button>
+              <button type="button" class="btn primary rb-action-wide" id="regAutofillBtn" title="Fill the current job page from the selected website profile" disabled>
+                <span class="rb-btn-label">Autofill</span>
+                <span class="rb-spinner" id="regAutofillSpinner" hidden aria-hidden="true"></span>
+              </button>
             </div>
 
             <form class="form-grid register-form" id="registerForm" onsubmit="return false">
@@ -468,29 +181,6 @@
               <details class="rb-config full" id="regDetailsBlock">
                 <summary>Register details</summary>
                 <div class="rb-config-body rb-details-grid">
-                  <label class="full">Job title
-                    <span class="register-field-with-action">
-                      <input id="regJobTitle" type="text" placeholder="Job title" data-fill-source="">
-                      <span class="register-field-actions">
-                        <button type="button" class="register-field-action-btn" id="regJobTitleCopyBtn" title="Copy job title" aria-label="Copy job title">
-                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        </button>
-                      </span>
-                    </span>
-                  </label>
-                  <label class="full">Company
-                    <span class="register-field-with-action">
-                      <input id="regCompany" type="text" placeholder="Company">
-                      <span class="register-field-actions">
-                        <button type="button" class="register-field-action-btn" id="regCompanyCopyBtn" title="Copy company name" aria-label="Copy company name">
-                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        </button>
-                        <button type="button" class="register-field-action-btn register-field-dup-btn" id="regCompanyDupBtn" title="Check if this company exists for the selected profile" aria-label="Check company duplicate" disabled>
-                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
-                        </button>
-                      </span>
-                    </span>
-                  </label>
                   <label class="full">Job link
                     <span class="register-field-with-action">
                       <input id="regJobLink" type="url" placeholder="Job link">
@@ -504,10 +194,35 @@
                       </span>
                     </span>
                   </label>
+                  <div class="rb-details-pair">
+                    <label>Job title
+                      <span class="register-field-with-action">
+                        <input id="regJobTitle" type="text" placeholder="Job title" data-fill-source="">
+                        <span class="register-field-actions">
+                          <button type="button" class="register-field-action-btn" id="regJobTitleCopyBtn" title="Copy job title" aria-label="Copy job title">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                          </button>
+                        </span>
+                      </span>
+                    </label>
+                    <label>Company
+                      <span class="register-field-with-action">
+                        <input id="regCompany" type="text" placeholder="Company">
+                        <span class="register-field-actions">
+                          <button type="button" class="register-field-action-btn" id="regCompanyCopyBtn" title="Copy company name" aria-label="Copy company name">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                          </button>
+                          <button type="button" class="register-field-action-btn register-field-dup-btn" id="regCompanyDupBtn" title="Check if this company exists for the selected profile" aria-label="Check company duplicate" disabled>
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/><path d="M8 11h6"/></svg>
+                          </button>
+                        </span>
+                      </span>
+                    </label>
+                  </div>
                   <div class="register-files-row register-files-unified">
                     <div class="register-file-field register-file-unified">
                       <div class="register-file-head">
-                        <span class="register-file-label">Resume / cover <span class="register-file-optional">opt.</span></span>
+                        <span class="register-file-label">Drop files <span class="register-file-optional">opt.</span></span>
                       </div>
                       <div
                         class="file-drop register-file-drop register-combo-drop"
@@ -567,7 +282,7 @@
         </div>
         <div class="card register-card">
           <h2>Website connection (Resume DB)</h2>
-          <p class="muted">Sign in with your <strong>remote-work-helper</strong> account. Used by the Register tab to save jobs and load profiles.</p>
+          <p class="muted">Sign in with your <strong>remote-work-helper</strong> account. Used to save jobs, load profiles, and Autofill the current page.</p>
           <div class="backend-connection-row" id="settingsBackendConnectionRow" aria-live="polite">
             <span class="backend-connection-dot" id="settingsBackendConnectionDot"></span>
             <span class="backend-connection-label" id="settingsBackendConnectionLabel">Checking connection…</span>
@@ -732,20 +447,6 @@
         </div>
       </section>
 
-      <section class="tab-panel" id="tab-jobs">
-        <div class="tab-panel-scroll">
-        <div class="card">
-          <div class="card-header compact">
-            <div>
-              <h2>Saved Jobs</h2>
-              <p>Kept in the same JSON format as your previous extension.</p>
-            </div>
-            <button class="btn danger" id="resetJobsBtn">Clear All</button>
-          </div>
-          <div id="savedJobsList" class="saved-list empty">No saved applications yet.</div>
-        </div>
-        </div>
-      </section>
     </main>
 
     <div id="status" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>

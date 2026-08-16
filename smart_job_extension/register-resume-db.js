@@ -19,6 +19,8 @@
   let autoAttachedFromJson2docx = { resume: false, cover: false };
   let resumeJsonOverrideActive = false;
   let resumeJsonApplyTimer = null;
+  let resumeJsonDupTimer = null;
+  let lastAutoCheckedCompanyKey = '';
 
   function normalizeBackendUrl(url) {
     const trimmed = String(url || '').trim().replace(/\/+$/, '');
@@ -188,6 +190,20 @@
         registerBtn.title = 'Register this job to Resume DB';
       }
     }
+
+    const autofillBtn = document.getElementById('regAutofillBtn');
+    const profileId = document.getElementById('regProfileId')?.value?.trim();
+    if (autofillBtn && !autofillBtn.classList.contains('is-loading')) {
+      const canAutofill = backendConnected && Boolean(profileId);
+      autofillBtn.disabled = !canAutofill;
+      if (!backendConnected) {
+        autofillBtn.title = 'Sign in under Settings to Autofill from a website profile';
+      } else if (!profileId) {
+        autofillBtn.title = 'Select a profile to Autofill this page';
+      } else {
+        autofillBtn.title = 'Fill the current job page from the selected website profile';
+      }
+    }
   }
 
   const FIELD_DUP_BUTTON_IDS = [
@@ -349,7 +365,7 @@
     return Array.isArray(data.resumes) ? data.resumes : [];
   }
 
-  async function checkFieldDuplicate(field, showStatus) {
+  async function checkFieldDuplicate(field, showStatus, { quietIfNone = false } = {}) {
     const connected = await checkBackendConnection();
     if (!connected) {
       throw new Error(
@@ -408,9 +424,36 @@
             windowDays === 1 ? '' : 's'
           } for this profile.`
         : `No matching ${config.label.toLowerCase()} for this profile.`;
-    setRegisterStatus(noMatchMessage, 'success');
-    if (showStatus) showStatus(noMatchMessage, 'success');
+    if (!quietIfNone) {
+      setRegisterStatus(noMatchMessage, 'success');
+      if (showStatus) showStatus(noMatchMessage, 'success');
+    }
     return { level: 'none', match: null, windowDays, field };
+  }
+
+  function scheduleCompanyDuplicateCheckFromResumeJson(companyName, showStatus) {
+    const key = normalizeMatchKey(companyName);
+    if (!key) return;
+    if (key === lastAutoCheckedCompanyKey) return;
+    if (resumeJsonDupTimer) clearTimeout(resumeJsonDupTimer);
+    resumeJsonDupTimer = setTimeout(() => {
+      void runAutoCompanyDuplicateCheck(companyName, showStatus);
+    }, 450);
+  }
+
+  async function runAutoCompanyDuplicateCheck(companyName, showStatus) {
+    const key = normalizeMatchKey(companyName);
+    if (!key || key === lastAutoCheckedCompanyKey) return;
+    if (!backendConnected) return;
+    const profileId = document.getElementById('regProfileId')?.value?.trim();
+    if (!profileId) return;
+
+    lastAutoCheckedCompanyKey = key;
+    try {
+      await checkFieldDuplicate('company', showStatus, { quietIfNone: true });
+    } catch (_) {
+      lastAutoCheckedCompanyKey = '';
+    }
   }
 
   function setConnectionStatus(state, detail, username) {
@@ -669,6 +712,7 @@
     select.addEventListener('change', () => {
       void saveSelectedProfileId(select.value);
       void refreshPromptKitUi();
+      syncResumeBuilderActionButtons();
     });
   }
 
@@ -681,6 +725,7 @@
       select.innerHTML = '<option value="">Sign in to load profiles</option>';
       select.disabled = true;
       void refreshPromptKitUi();
+      syncResumeBuilderActionButtons();
       return;
     }
 
@@ -706,6 +751,7 @@
       if (!profiles.length) {
         select.innerHTML =
           '<option value="">No profiles — add them on the website /profile page</option>';
+        syncResumeBuilderActionButtons();
         return;
       }
 
@@ -720,6 +766,7 @@
       select.disabled = !backendConnected;
       restoreProfileSelection(select, profiles, preservedId);
       void refreshPromptKitUi();
+      syncResumeBuilderActionButtons();
     } catch (err) {
       if (loadSeq !== profilesLoadSeq) return;
       const msg = err.message || 'Failed to load profiles';
@@ -728,7 +775,27 @@
         select.innerHTML = '<option value="">Not connected — sign in under Settings</option>';
       }
       void refreshPromptKitUi();
+      syncResumeBuilderActionButtons();
     }
+  }
+
+  async function fetchProfileRecord(profileId) {
+    const id = String(profileId || '').trim();
+    if (!id) return null;
+    const config = await getBackendConfig();
+    if (!isAuthenticated(config)) {
+      throw new Error('Not signed in. Open Settings and sign in first.');
+    }
+    const res = await fetch(`${config.baseUrl}/api/profiles?full=1`, {
+      headers: apiHeaders(config),
+      cache: 'no-store'
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Failed to load profile (${res.status}).`);
+    }
+    const list = Array.isArray(data.profiles) ? data.profiles : [];
+    return list.find((profile) => String(profile.id) === id) || null;
   }
 
   function escapeHtml(text) {
@@ -1305,6 +1372,7 @@
 
   function clearResumeJsonOverride({ clearTextarea = true } = {}) {
     resumeJsonOverrideActive = false;
+    lastAutoCheckedCompanyKey = '';
     if (clearTextarea) {
       const ta = document.getElementById('regResumeJson');
       if (ta) ta.value = '';
@@ -1326,12 +1394,13 @@
    * Apply built resume JSON to Register draft fields (title/company/note).
    * Does not change job link.
    */
-  function applyResumeJsonToRegisterForm(rawText, { silent = false } = {}) {
+  function applyResumeJsonToRegisterForm(rawText, { silent = false, showStatus } = {}) {
     const mapper = global.SmartJobResumeJsonMapper;
     const clearBtn = document.getElementById('regResumeJsonClearBtn');
     const text = String(rawText || '').trim();
 
     if (!text) {
+      lastAutoCheckedCompanyKey = '';
       clearResumeJsonOverride({ clearTextarea: false });
       if (clearBtn) clearBtn.hidden = true;
       syncResumeBuilderActionButtons();
@@ -1370,6 +1439,9 @@
     if (fields.jobTitle) setRegisterFieldValue('regJobTitle', fields.jobTitle, 'resume-json');
     if (fields.companyName) setRegisterFieldValue('regCompany', fields.companyName, 'resume-json');
     if (fields.jobDescription) setRegisterFieldValue('regNote', fields.jobDescription, 'resume-json');
+    if (fields.companyName) {
+      scheduleCompanyDuplicateCheckFromResumeJson(fields.companyName, showStatus);
+    }
 
     resumeJsonOverrideActive = true;
     const templateNote = fields.resumeTemplate ? ` · template ${fields.resumeTemplate}` : '';
@@ -1400,7 +1472,7 @@
     const scheduleApply = () => {
       if (resumeJsonApplyTimer) clearTimeout(resumeJsonApplyTimer);
       resumeJsonApplyTimer = setTimeout(() => {
-        applyResumeJsonToRegisterForm(ta.value, { silent: true });
+        applyResumeJsonToRegisterForm(ta.value, { silent: true, showStatus });
       }, 250);
     };
 
@@ -1409,7 +1481,7 @@
       setTimeout(scheduleApply, 0);
     });
     ta.addEventListener('change', () => {
-      const result = applyResumeJsonToRegisterForm(ta.value, { silent: false });
+      const result = applyResumeJsonToRegisterForm(ta.value, { silent: false, showStatus });
       if (result.ok && showStatus) {
         showStatus('Register fields filled from built resume JSON.', 'success');
       }
@@ -1929,16 +2001,6 @@
     syncResumeBuilderActionButtons();
     setGenerateProgress({ hidden: true, percent: 0, message: '' });
 
-    document.querySelectorAll('.tab-main[data-tab="register"]').forEach((tabBtn) => {
-      tabBtn.addEventListener('click', () => {
-        checkBackendConnection();
-        loadProfilesIntoSelect();
-        updateRegisterDriveBadge();
-        void refreshPromptKitUi();
-        syncRbStatusChips();
-      });
-    });
-
     document.querySelectorAll('[data-tab="settings"]').forEach((tabBtn) => {
       tabBtn.addEventListener('click', () => {
         loadBackendSettingsForm();
@@ -1950,9 +2012,14 @@
     const headerSettings = document.getElementById('headerSettingsBtn');
     if (headerSettings) {
       headerSettings.addEventListener('click', () => {
-        loadBackendSettingsForm();
-        loadDuplicateWindowSetting();
-        checkBackendConnection();
+        const settingsOpen = document.getElementById('tab-settings')?.classList.contains('active');
+        if (settingsOpen) {
+          loadBackendSettingsForm();
+          loadDuplicateWindowSetting();
+          checkBackendConnection();
+        } else {
+          onRegisterViewShown();
+        }
       });
     }
 
@@ -2013,11 +2080,22 @@
     wireRegisterFieldDup('regJobLinkDupBtn', 'link', showStatus);
   }
 
+  function onRegisterViewShown() {
+    checkBackendConnection();
+    loadProfilesIntoSelect();
+    updateRegisterDriveBadge();
+    void refreshPromptKitUi();
+    syncRbStatusChips();
+  }
+
   global.SmartJobRegisterResumeDb = {
     initRegisterResumeDb,
     getBackendConfig,
     saveBackendConfig,
     checkBackendConnection,
+    fetchProfileRecord,
+    onRegisterViewShown,
+    syncResumeBuilderActionButtons,
     loadBackendSettingsForm,
     hasActiveResumeJsonOverride,
     applyResumeJsonToRegisterForm,
