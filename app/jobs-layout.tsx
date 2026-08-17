@@ -188,6 +188,7 @@ export default function JobsLayout({
                 <NavLink item={NAV_ITEMS[3]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[4]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[5]} pathname={pathname} />
+                <NavLink item={NAV_ITEMS[6]} pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
