@@ -93,22 +93,27 @@ export async function buildPipelineStageMap(
     } else if (app.pipelineJobId) {
       map.set(app.id, "applied");
     } else {
+      // Default: Registered. Do NOT ILIKE-scan the whole pipeline for these —
+      // that made page-1 (25 rows) as slow as a full-table join.
       map.set(app.id, null);
     }
   }
   if (applications.length === 0) return map;
 
-  const supabase = getSupabaseAdminClient();
-
-  // Only resolve markers for apps on this page that are still unset.
-  // Prefer denormalized pipeline_stage_id / pipeline_job_id when present.
+  // Only resolve markers for rows that claim to be in pipeline but lack a stage id.
+  // Registered rows (apply !== "In Pipeline", no pipeline_job_id) stay null.
   const unresolvedIds = applications
-    .filter((app) => map.get(app.id) == null)
+    .filter(
+      (app) =>
+        map.get(app.id) == null &&
+        (app.apply === "In Pipeline" || /pipeline/i.test(app.apply || "")),
+    )
     .map((app) => app.id);
   if (unresolvedIds.length === 0) return map;
 
+  const supabase = getSupabaseAdminClient();
   const unresolvedSet = new Set(unresolvedIds);
-  const chunkSize = 25;
+  const chunkSize = 10;
   for (let i = 0; i < unresolvedIds.length; i += chunkSize) {
     const chunk = unresolvedIds.slice(i, i + chunkSize);
     const jobOr = chunk
@@ -149,13 +154,13 @@ export async function buildPipelineStageMap(
     }
   }
 
-  // Persist resolved stages so future list requests skip ILIKE scans.
+  // Persist in background — never block the list response on N updates.
   const toPersist = applications.filter((app) => {
     const stage = map.get(app.id);
-    return stage && !app.pipelineStageId;
+    return Boolean(stage) && !app.pipelineStageId;
   });
   if (toPersist.length) {
-    await Promise.all(
+    void Promise.all(
       toPersist.map((app) =>
         updateApplication(app.id, userId, {
           pipelineStageId: map.get(app.id) ?? null,

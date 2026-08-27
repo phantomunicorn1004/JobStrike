@@ -110,7 +110,7 @@ const DEFAULT_PAGE_SIZE = 25;
 
 function parsePage(value: string | null): number {
   const n = Number(value ?? "");
-  if (Number.isNaN(n) || n < 1) return 1;
+  if (!Number.isFinite(n) || n < 1) return 1;
   return Math.floor(n);
 }
 
@@ -722,6 +722,8 @@ export function ResumeDBPageClient() {
   const [orphanCandidateNames, setOrphanCandidateNames] = useState<string[]>([]);
   const [orphanCandidateNamesLoaded, setOrphanCandidateNamesLoaded] = useState(false);
   const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
+  const loadRowsAbortRef = useRef<AbortController | null>(null);
+  const loadRowsSeqRef = useRef(0);
 
   const updateParams = useCallback(
     (patch: Record<string, string | null | undefined>) => {
@@ -752,6 +754,11 @@ export function ResumeDBPageClient() {
   }, []);
 
   const loadRows = useCallback(async () => {
+    loadRowsAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadRowsAbortRef.current = controller;
+    const seq = ++loadRowsSeqRef.current;
+
     setIsLoading(true);
     try {
       const params = new URLSearchParams();
@@ -771,12 +778,16 @@ export function ResumeDBPageClient() {
       params.set("sortDir", sortDir);
 
       const url = `/api/resume-db?${params.toString()}`;
-      const resumeRes = await fetch(url, { credentials: "same-origin" });
+      const resumeRes = await fetch(url, {
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
       if (!resumeRes.ok) {
         const err = await resumeRes.json().catch(() => ({}));
         throw new Error(err.error || "Failed to load Resume DB.");
       }
       const data = await resumeRes.json();
+      if (seq !== loadRowsSeqRef.current) return;
       setRows(
         (data.resumes ?? []).map((row: ResumeDbRow) => ({
           ...row,
@@ -795,11 +806,13 @@ export function ResumeDBPageClient() {
         updateParams({ page: String(resolvedPage) });
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (seq !== loadRowsSeqRef.current) return;
       toast.error(
         error instanceof Error ? error.message : "Failed to load Resume DB.",
       );
     } finally {
-      setIsLoading(false);
+      if (seq === loadRowsSeqRef.current) setIsLoading(false);
     }
   }, [
     page,
@@ -954,6 +967,10 @@ export function ResumeDBPageClient() {
         ),
       );
       toast.success("Status updated.");
+      // Under an active status filter the row may no longer belong on this page.
+      if (statusFilter && statusFilter !== "__all__") {
+        void loadRows();
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Status update failed.");
     } finally {

@@ -137,12 +137,12 @@ export async function GET(request: NextRequest) {
 
     const parsePage = (v: string | null) => {
       const n = Number(v ?? "");
-      if (Number.isNaN(n) || n < 1) return 1;
+      if (!Number.isFinite(n) || n < 1) return 1;
       return Math.floor(n);
     };
     const parsePageSize = (v: string | null) => {
       const n = Number(v ?? "");
-      if (Number.isNaN(n) || n < 1) return 25;
+      if (!Number.isFinite(n) || n < 1) return 25;
       const max = 200; // keep UI responsive
       return Math.min(max, Math.floor(n));
     };
@@ -331,9 +331,32 @@ export async function GET(request: NextRequest) {
     }
     void useLegacyStatusScan;
 
-    const [stageMap, pipelineStages] = await Promise.all([
+    const [stageMap, pipelineStages, orphanCandidateNames] = await Promise.all([
       buildPipelineStageMap(entries, user.id),
       listPipelineStages(),
+      includeOrphans
+        ? (async () => {
+            const supabase = getSupabaseAdminClient();
+            const { data: orphanRows, error: orphanError } = await supabase
+              .from("resume_db_applications")
+              .select("candidate_name")
+              .eq("user_id", userId)
+              .is("profile_id", null)
+              .neq("candidate_name", "")
+              .order("candidate_name", { ascending: true })
+              .limit(500);
+            if (orphanError) throw new Error(orphanError.message);
+            return Array.from(
+              new Set(
+                (orphanRows ?? [])
+                  .map((r: { candidate_name?: string | null }) =>
+                    r.candidate_name?.trim(),
+                  )
+                  .filter((x): x is string => Boolean(x)),
+              ),
+            );
+          })()
+        : Promise.resolve([] as string[]),
     ]);
 
     const resumes = entries.map((entry) => mapForList(entry, timeZone, stageMap));
@@ -353,29 +376,6 @@ export async function GET(request: NextRequest) {
         if (cmp !== 0) return sortDir === "asc" ? cmp : -cmp;
         return b.rowIndex - a.rowIndex;
       });
-    }
-
-    let orphanCandidateNames: string[] = [];
-    if (includeOrphans) {
-      const supabase = getSupabaseAdminClient();
-      // Orphans are uncommon; one capped page is enough for filter labels.
-      const { data: orphanRows, error: orphanError } = await supabase
-        .from("resume_db_applications")
-        .select("candidate_name")
-        .eq("user_id", userId)
-        .is("profile_id", null)
-        .neq("candidate_name", "")
-        .order("candidate_name", { ascending: true })
-        .limit(500);
-      if (orphanError) throw new Error(orphanError.message);
-
-      orphanCandidateNames = Array.from(
-        new Set(
-          (orphanRows ?? [])
-            .map((r: { candidate_name?: string | null }) => r.candidate_name?.trim())
-            .filter((x): x is string => Boolean(x)),
-        ),
-      );
     }
 
     return corsJson({

@@ -13,6 +13,16 @@ SET pipeline_stage_id = 'applied'
 WHERE pipeline_job_id IS NOT NULL
   AND (pipeline_stage_id IS NULL OR pipeline_stage_id = '');
 
+-- Backfill technical/final stages from marker text in technical_jobs.
+-- Apps linked only via "Resume DB #<id>" in job_description (no pipeline_job_id).
+UPDATE resume_db_applications AS a
+SET pipeline_stage_id = COALESCE(NULLIF(t.stage_id, ''), 'technical')
+FROM technical_jobs AS t
+WHERE a.user_id = t.user_id
+  AND a.pipeline_job_id IS NULL
+  AND (a.pipeline_stage_id IS NULL OR a.pipeline_stage_id = '')
+  AND t.job_description ILIKE '%Resume DB #' || a.id::text || '%';
+
 -- Default Resume DB list sort
 CREATE INDEX IF NOT EXISTS idx_resume_db_applications_user_id_id_desc
   ON resume_db_applications (user_id, id DESC);

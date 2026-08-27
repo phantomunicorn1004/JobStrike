@@ -223,12 +223,22 @@ function applyCommonFilters(
 
   const search = q.search?.trim();
   if (search) {
-    const safe = search.replace(/[%_*]/g, "").trim();
-    const pattern = `%${safe}%`;
-    // OR across the main user-visible text fields.
-    builder = builder.or(
-      `company.ilike.${pattern},job_title.ilike.${pattern},candidate_name.ilike.${pattern},job_link.ilike.${pattern},note.ilike.${pattern},apply.ilike.${pattern},entry_id.ilike.${pattern}`,
-    );
+    const safe = search.replace(/[%_,*()]/g, " ").replace(/\s+/g, " ").trim();
+    if (safe) {
+      const pattern = `%${safe}%`;
+      // Quote values so commas / reserved chars cannot break PostgREST .or() parsing.
+      builder = builder.or(
+        [
+          `company.ilike."${pattern}"`,
+          `job_title.ilike."${pattern}"`,
+          `candidate_name.ilike."${pattern}"`,
+          `job_link.ilike."${pattern}"`,
+          `note.ilike."${pattern}"`,
+          `apply.ilike."${pattern}"`,
+          `entry_id.ilike."${pattern}"`,
+        ].join(","),
+      );
+    }
   }
 
   const from = q.dateFrom?.trim();
@@ -361,24 +371,23 @@ export async function listApplicationsWithFilters(
 
   let { data, error } = await builder.range(start, end);
   if (error && /pipeline_stage_id/i.test(error.message)) {
-    // Column not migrated yet — retry without denormalized stage.
+    // Column missing: if the caller asked for a stage filter, fail so the route
+    // can fall back to the legacy marker scan — never silently drop the filter.
+    if (query.pipelineStageIsNull || query.pipelineStageId) {
+      throw new Error(error.message);
+    }
     let fallback = supabase
       .from("resume_db_applications")
       .select(
         "id, entry_id, profile_id, user_id, candidate_name, job_link, job_title, company, note, apply, resume_url, cover_letter_url, applied_at, created_at, pipeline_job_id",
       );
-    const qWithoutStage = {
-      ...query,
-      pipelineStageId: undefined,
-      pipelineStageIsNull: false,
-    };
     fallback = applyCommonFilters(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       supabase as any,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       fallback as any,
       userId,
-      qWithoutStage,
+      query,
     );
     if (sortKey === "company") {
       fallback = fallback.order("company", { ascending: sortDir === "asc" });
