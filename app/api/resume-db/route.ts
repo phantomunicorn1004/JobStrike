@@ -44,7 +44,7 @@ function mapForList(
     hour: "numeric",
     minute: "2-digit",
   });
-  const pipelineStageId = stageMap?.get(app.id) ?? null;
+  const pipelineStageId = stageMap?.get(app.id) ?? app.pipelineStageId ?? null;
   return {
     id: app.id,
     rowIndex: app.id,
@@ -185,6 +185,7 @@ export async function GET(request: NextRequest) {
       return out;
     }
 
+    /** Legacy fallback when pipeline_stage_id is not yet backfilled. */
     async function getPipelineAppIdSets() {
       const supabase = getSupabaseAdminClient();
       const [jobsRows, techRows] = await Promise.all([
@@ -232,10 +233,36 @@ export async function GET(request: NextRequest) {
       return { appliedIds, technicalIdsByStage };
     }
 
+    let pipelineStageId: string | null | undefined;
+    let pipelineStageIsNull = false;
     let statusIncludeIds: number[] | undefined;
     let statusExcludeIds: number[] | undefined;
+    let useLegacyStatusScan = false;
 
     if (statusFilter && statusFilter !== "__all__") {
+      if (statusFilter === "registered") {
+        pipelineStageIsNull = true;
+      } else {
+        pipelineStageId = statusFilter;
+      }
+    }
+
+    const listQueryBase = {
+      search,
+      dateFrom,
+      dateTo,
+      timeZone,
+      candidateFilter,
+      pipelineStageId,
+      pipelineStageIsNull,
+      statusIncludeIds,
+      statusExcludeIds,
+      sortKey,
+      sortDir,
+      pageSize,
+    };
+
+    async function loadLegacyStatusIds() {
       const { appliedIds, technicalIdsByStage } = await getPipelineAppIdSets();
       const unionIds = new Set<number>(appliedIds);
       for (const ids of technicalIdsByStage.values()) for (const id of ids) unionIds.add(id);
@@ -245,32 +272,64 @@ export async function GET(request: NextRequest) {
       } else if (statusFilter === "applied") {
         statusIncludeIds = Array.from(appliedIds);
       } else {
-        statusIncludeIds = Array.from(technicalIdsByStage.get(statusFilter) ?? new Set());
+        statusIncludeIds = Array.from(
+          technicalIdsByStage.get(statusFilter) ?? new Set(),
+        );
       }
+      pipelineStageId = undefined;
+      pipelineStageIsNull = false;
     }
 
-    const listQuery = {
-      search,
-      dateFrom,
-      dateTo,
-      timeZone,
-      candidateFilter,
-      statusIncludeIds,
-      statusExcludeIds,
-      sortKey,
-      sortDir,
-      page,
-      pageSize,
-    };
+    let total: number;
+    let entries: Awaited<ReturnType<typeof listApplicationsWithFilters>>;
+    let resolvedPage = page;
 
-    const total = await countApplicationsWithFilters(user.id, listQuery);
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const resolvedPage = Math.min(page, totalPages);
-
-    const entries = await listApplicationsWithFilters(user.id, {
-      ...listQuery,
-      page: resolvedPage,
-    });
+    try {
+      const listQuery = { ...listQueryBase, page };
+      const [countResult, pageGuess] = await Promise.all([
+        countApplicationsWithFilters(user.id, listQuery),
+        listApplicationsWithFilters(user.id, listQuery),
+      ]);
+      total = countResult;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      resolvedPage = Math.min(page, totalPages);
+      if (resolvedPage !== page) {
+        entries = await listApplicationsWithFilters(user.id, {
+          ...listQuery,
+          page: resolvedPage,
+        });
+      } else {
+        entries = pageGuess;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        statusFilter &&
+        statusFilter !== "__all__" &&
+        /pipeline_stage_id/i.test(msg)
+      ) {
+        useLegacyStatusScan = true;
+        await loadLegacyStatusIds();
+        const listQuery = {
+          ...listQueryBase,
+          pipelineStageId: undefined,
+          pipelineStageIsNull: false,
+          statusIncludeIds,
+          statusExcludeIds,
+          page,
+        };
+        total = await countApplicationsWithFilters(user.id, listQuery);
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        resolvedPage = Math.min(page, totalPages);
+        entries = await listApplicationsWithFilters(user.id, {
+          ...listQuery,
+          page: resolvedPage,
+        });
+      } else {
+        throw err;
+      }
+    }
+    void useLegacyStatusScan;
 
     const [stageMap, pipelineStages] = await Promise.all([
       buildPipelineStageMap(entries, user.id),

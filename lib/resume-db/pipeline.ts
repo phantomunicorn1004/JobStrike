@@ -100,6 +100,7 @@ export async function addApplicationToPipeline(
   await updateApplication(applicationId, userId, {
     apply: "In Pipeline",
     pipelineJobId,
+    pipelineStageId: "applied",
   });
 
   return { pipelineJobId };
@@ -117,11 +118,40 @@ export async function removeApplicationFromPipeline(
   await updateApplication(applicationId, userId, {
     apply: "Registered",
     pipelineJobId: null,
+    pipelineStageId: null,
   });
 }
 
 export function isInPipeline(app: Pick<ResumeDbApplication, "pipelineJobId" | "apply">): boolean {
   return app.pipelineJobId != null || app.apply === "In Pipeline";
+}
+
+/** Keep denormalized pipeline_stage_id in sync when board cards move. */
+export async function syncApplicationStageFromCardNotes(
+  userId: string,
+  notes: string | null | undefined,
+  stageId: string | null,
+  pipelineJobId: number | null = null,
+): Promise<void> {
+  if (!notes) return;
+  const match = notes.match(/Resume DB #(\d+)/);
+  if (!match?.[1]) return;
+  const applicationId = Number(match[1]);
+  if (!Number.isFinite(applicationId)) return;
+  try {
+    const patch: Parameters<typeof updateApplication>[2] = {
+      pipelineStageId: stageId,
+      apply: stageId ? "In Pipeline" : "Registered",
+    };
+    if (stageId === "applied" && pipelineJobId != null) {
+      patch.pipelineJobId = pipelineJobId;
+    } else if (stageId !== "applied") {
+      patch.pipelineJobId = null;
+    }
+    await updateApplication(applicationId, userId, patch);
+  } catch {
+    /* non-fatal: card move already succeeded */
+  }
 }
 
 export async function syncPipelineJobFromApplication(

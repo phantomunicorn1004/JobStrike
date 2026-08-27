@@ -88,33 +88,20 @@ export async function buildPipelineStageMap(
 ): Promise<Map<number, string | null>> {
   const map = new Map<number, string | null>();
   for (const app of applications) {
-    map.set(app.id, null);
+    if (app.pipelineStageId) {
+      map.set(app.id, app.pipelineStageId);
+    } else if (app.pipelineJobId) {
+      map.set(app.id, "applied");
+    } else {
+      map.set(app.id, null);
+    }
   }
   if (applications.length === 0) return map;
 
   const supabase = getSupabaseAdminClient();
-  const pipelineJobIds = applications
-    .map((app) => app.pipelineJobId)
-    .filter((id): id is number => id != null);
-
-  if (pipelineJobIds.length) {
-    const { data: linkedJobs } = await supabase
-      .from("jobs")
-      .select("id")
-      .eq("user_id", userId)
-      .in("id", pipelineJobIds);
-    const linkedSet = new Set(
-      ((linkedJobs ?? []) as Pick<JobRow, "id">[]).map((row) => row.id),
-    );
-    for (const app of applications) {
-      if (app.pipelineJobId && linkedSet.has(app.pipelineJobId)) {
-        map.set(app.id, "applied");
-      }
-    }
-  }
 
   // Only resolve markers for apps on this page that are still unset.
-  // Avoid scanning every pipeline card (PostgREST 1000+ row trap + latency).
+  // Prefer denormalized pipeline_stage_id / pipeline_job_id when present.
   const unresolvedIds = applications
     .filter((app) => map.get(app.id) == null)
     .map((app) => app.id);
@@ -160,6 +147,22 @@ export async function buildPipelineStageMap(
         map.set(appId, tech.stage_id ?? "technical");
       }
     }
+  }
+
+  // Persist resolved stages so future list requests skip ILIKE scans.
+  const toPersist = applications.filter((app) => {
+    const stage = map.get(app.id);
+    return stage && !app.pipelineStageId;
+  });
+  if (toPersist.length) {
+    await Promise.all(
+      toPersist.map((app) =>
+        updateApplication(app.id, userId, {
+          pipelineStageId: map.get(app.id) ?? null,
+          apply: "In Pipeline",
+        }).catch(() => undefined),
+      ),
+    );
   }
 
   return map;
@@ -241,6 +244,11 @@ export async function setApplicationPipelineStage(
   if (!target) {
     if (current.source) {
       await removeApplicationFromPipeline(applicationId, userId);
+    } else {
+      await updateApplication(applicationId, userId, {
+        pipelineStageId: null,
+        apply: "Registered",
+      });
     }
     return;
   }
@@ -254,6 +262,12 @@ export async function setApplicationPipelineStage(
     if (target === "applied" && current.jobId && app.pipelineJobId !== current.jobId) {
       await updateApplication(applicationId, userId, {
         pipelineJobId: current.jobId,
+        pipelineStageId: "applied",
+        apply: "In Pipeline",
+      });
+    } else if (!app.pipelineStageId || app.pipelineStageId !== target) {
+      await updateApplication(applicationId, userId, {
+        pipelineStageId: target,
         apply: "In Pipeline",
       });
     }
@@ -288,6 +302,7 @@ export async function setApplicationPipelineStage(
     await updateApplication(applicationId, userId, {
       apply: "In Pipeline",
       pipelineJobId: null,
+      pipelineStageId: target,
     });
     return;
   }
@@ -339,6 +354,7 @@ export async function setApplicationPipelineStage(
 
     await updateApplication(applicationId, userId, {
       pipelineJobId: null,
+      pipelineStageId: target,
       apply: "In Pipeline",
     });
     return;
@@ -396,6 +412,7 @@ export async function setApplicationPipelineStage(
       const insertedJob = inserted as Pick<JobRow, "id">;
       await updateApplication(applicationId, userId, {
         pipelineJobId: insertedJob.id,
+        pipelineStageId: "applied",
         apply: "In Pipeline",
       });
       return;
@@ -415,5 +432,10 @@ export async function setApplicationPipelineStage(
       .eq("id", current.jobId)
       .eq("user_id", userId);
     if (error) throw new Error(error.message);
+
+    await updateApplication(applicationId, userId, {
+      pipelineStageId: target,
+      apply: "In Pipeline",
+    });
   }
 }

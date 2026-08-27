@@ -13,6 +13,8 @@ export type ResumeDbApplication = {
   appliedAt: string;
   createdAt: string;
   pipelineJobId: number | null;
+  /** Cached pipeline stage; null = Registered (not in pipeline). */
+  pipelineStageId?: string | null;
   resumeStoragePath?: string | null;
   coverLetterStoragePath?: string | null;
   resumeDriveFileId?: string | null;
@@ -35,6 +37,7 @@ export type ResumeDbApplicationInput = {
   resumeDriveFileId?: string;
   coverDriveFileId?: string;
   pipelineJobId?: number | null;
+  pipelineStageId?: string | null;
 };
 
 export type ResumeDbJobExport = {

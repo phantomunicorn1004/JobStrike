@@ -23,11 +23,16 @@ type DbRow = {
   applied_at: string;
   created_at: string;
   pipeline_job_id: number | null;
+  pipeline_stage_id?: string | null;
   resume_storage_path: string | null;
   cover_letter_storage_path: string | null;
   resume_drive_file_id: string | null;
   cover_drive_file_id: string | null;
 };
+
+/** Columns needed for Resume DB table list (avoid select *). */
+export const RESUME_DB_LIST_COLUMNS =
+  "id, entry_id, profile_id, user_id, candidate_name, job_link, job_title, company, note, apply, resume_url, cover_letter_url, applied_at, created_at, pipeline_job_id, pipeline_stage_id";
 
 type ProfileRow = {
   id: number;
@@ -65,6 +70,7 @@ function mapRow(row: DbRow): ResumeDbApplication {
     appliedAt: row.applied_at,
     createdAt: row.created_at,
     pipelineJobId: row.pipeline_job_id ?? null,
+    pipelineStageId: row.pipeline_stage_id ?? null,
     resumeStoragePath: row.resume_storage_path ?? null,
     coverLetterStoragePath: row.cover_letter_storage_path ?? null,
     resumeDriveFileId: row.resume_drive_file_id ?? null,
@@ -177,8 +183,12 @@ export type ResumeDbApplicationsListQuery = {
   dateTo?: string; // YYYY-MM-DD
   timeZone?: string;
   candidateFilter?: string; // "profile-{id}" | "name-{encodedName}"
-  statusIncludeIds?: number[]; // only these application ids
-  statusExcludeIds?: number[]; // exclude these application ids
+  /** Prefer denormalized stage filter over ID include/exclude scans. */
+  pipelineStageId?: string | null;
+  /** When true, only rows with pipeline_stage_id IS NULL (Registered). */
+  pipelineStageIsNull?: boolean;
+  statusIncludeIds?: number[]; // only these application ids (legacy fallback)
+  statusExcludeIds?: number[]; // exclude these application ids (legacy fallback)
   sortKey?: "company" | "jobTitle" | "pipeline" | null;
   sortDir?: "asc" | "desc";
   page?: number; // 1-based
@@ -241,13 +251,19 @@ function applyCommonFilters(
     );
   }
 
+  if (q.pipelineStageIsNull) {
+    builder = builder.is("pipeline_stage_id", null);
+  } else if (q.pipelineStageId != null && q.pipelineStageId !== "") {
+    builder = builder.eq("pipeline_stage_id", q.pipelineStageId);
+  }
+
   if (q.statusIncludeIds) {
     if (q.statusIncludeIds.length === 0) builder = builder.eq("id", -1);
     else builder = builder.in("id", q.statusIncludeIds);
   }
 
   if (q.statusExcludeIds && q.statusExcludeIds.length > 0) {
-    builder = builder.not("id", "in", q.statusExcludeIds);
+    builder = builder.not("id", "in", `(${q.statusExcludeIds.join(",")})`);
   }
 
   return builder;
@@ -273,7 +289,36 @@ export async function countApplicationsWithFilters(
   );
 
   const { count, error } = await builder;
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (
+      /pipeline_stage_id/i.test(error.message) &&
+      (query.pipelineStageIsNull || query.pipelineStageId)
+    ) {
+      throw new Error(error.message);
+    }
+    if (/pipeline_stage_id/i.test(error.message)) {
+      // Column missing but not filtering by it — recount without stage predicates.
+      let retry = supabase
+        .from("resume_db_applications")
+        .select("id", { count: "exact", head: true });
+      retry = applyCommonFilters(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        supabase as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        retry as any,
+        userId,
+        {
+          ...query,
+          pipelineStageId: undefined,
+          pipelineStageIsNull: false,
+        },
+      );
+      const second = await retry;
+      if (second.error) throw new Error(second.error.message);
+      return second.count ?? 0;
+    }
+    throw new Error(error.message);
+  }
   return count ?? 0;
 }
 
@@ -289,7 +334,7 @@ export async function listApplicationsWithFilters(
 
   let builder = supabase
     .from("resume_db_applications")
-    .select("*");
+    .select(RESUME_DB_LIST_COLUMNS);
 
   builder = applyCommonFilters(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -314,7 +359,40 @@ export async function listApplicationsWithFilters(
     builder = builder.order("id", { ascending: false });
   }
 
-  const { data, error } = await builder.range(start, end);
+  let { data, error } = await builder.range(start, end);
+  if (error && /pipeline_stage_id/i.test(error.message)) {
+    // Column not migrated yet — retry without denormalized stage.
+    let fallback = supabase
+      .from("resume_db_applications")
+      .select(
+        "id, entry_id, profile_id, user_id, candidate_name, job_link, job_title, company, note, apply, resume_url, cover_letter_url, applied_at, created_at, pipeline_job_id",
+      );
+    const qWithoutStage = {
+      ...query,
+      pipelineStageId: undefined,
+      pipelineStageIsNull: false,
+    };
+    fallback = applyCommonFilters(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      supabase as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fallback as any,
+      userId,
+      qWithoutStage,
+    );
+    if (sortKey === "company") {
+      fallback = fallback.order("company", { ascending: sortDir === "asc" });
+      fallback = fallback.order("id", { ascending: false });
+    } else if (sortKey === "jobTitle") {
+      fallback = fallback.order("job_title", { ascending: sortDir === "asc" });
+      fallback = fallback.order("id", { ascending: false });
+    } else {
+      fallback = fallback.order("id", { ascending: false });
+    }
+    const retry = await fallback.range(start, end);
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) throw new Error(error.message);
   return ((data ?? []) as DbRow[]).map(mapRow);
 }
@@ -386,6 +464,9 @@ export async function updateApplication(
   if (input.resumeUrl !== undefined) patch.resume_url = input.resumeUrl;
   if (input.coverLetterUrl !== undefined) patch.cover_letter_url = input.coverLetterUrl;
   if (input.pipelineJobId !== undefined) patch.pipeline_job_id = input.pipelineJobId;
+  if (input.pipelineStageId !== undefined) {
+    patch.pipeline_stage_id = input.pipelineStageId;
+  }
   if (input.resumeStoragePath !== undefined) {
     patch.resume_storage_path = input.resumeStoragePath;
   }

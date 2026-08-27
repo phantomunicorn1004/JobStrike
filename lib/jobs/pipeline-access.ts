@@ -3,6 +3,7 @@ import "server-only";
 import { mergeStageDate, normalizeStageDates, type StageDates } from "@/lib/jobs/pipelineCardUtils";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
+import { syncApplicationStageFromCardNotes } from "@/lib/resume-db/pipeline";
 
 export type PipelineCardSource = "jobs" | "technical_jobs";
 
@@ -150,6 +151,12 @@ async function getOwnedTechnicalJob(
   return mapTechnicalRow(data as TechDbRow);
 }
 
+const PIPELINE_JOB_COLUMNS =
+  "id, name, title, company_name, job_link, resume_link, note, created_at, stage_entered_at, stage_dates, recruiter_name, recruiter_contact";
+
+const PIPELINE_TECH_COLUMNS =
+  "id, stage_id, name, company_name, title, resume_link, job_description, recruiter_name, recruiter_contact, first_round_date, first_round_result, second_round_date, second_round_result, third_round_date, third_round_result, status, created_at, stage_entered_at, stage_dates";
+
 export async function listUserPipelineBoard(userId: string): Promise<{
   applied: PipelineAppliedRow[];
   technicalJobs: PipelineTechnicalRow[];
@@ -159,7 +166,7 @@ export async function listUserPipelineBoard(userId: string): Promise<{
     fetchAllByRange<JobDbRow>((from, to) =>
       supabase
         .from("jobs")
-        .select("*")
+        .select(PIPELINE_JOB_COLUMNS)
         .eq("user_id", userId)
         .order("id", { ascending: false })
         .range(from, to),
@@ -167,7 +174,7 @@ export async function listUserPipelineBoard(userId: string): Promise<{
     fetchAllByRange<TechDbRow>((from, to) =>
       supabase
         .from("technical_jobs")
-        .select("*")
+        .select(PIPELINE_TECH_COLUMNS)
         .eq("user_id", userId)
         .order("id", { ascending: false })
         .range(from, to),
@@ -292,9 +299,17 @@ export async function movePipelineCard(
       .eq("user_id", userId);
     if (deleteError) throw new Error(deleteError.message);
 
+    const techId = (data as { id: number }).id;
+    await syncApplicationStageFromCardNotes(
+      userId,
+      cardNotesFromJob(job),
+      targetStageId,
+      null,
+    );
+
     return {
       source: "technical_jobs",
-      id: (data as { id: number }).id,
+      id: techId,
     };
   }
 
@@ -338,7 +353,15 @@ export async function movePipelineCard(
       .eq("user_id", userId);
     if (deleteError) throw new Error(deleteError.message);
 
-    return { source: "jobs", id: (data as { id: number }).id };
+    const insertedId = (data as { id: number }).id;
+    await syncApplicationStageFromCardNotes(
+      userId,
+      cardNotesFromJob(job),
+      "applied",
+      insertedId,
+    );
+
+    return { source: "jobs", id: insertedId };
   }
 
   const job = await getOwnedTechnicalJob(userId, payload.id);
@@ -358,6 +381,13 @@ export async function movePipelineCard(
     .eq("id", job.id)
     .eq("user_id", userId);
   if (error) throw new Error(error.message);
+
+  await syncApplicationStageFromCardNotes(
+    userId,
+    cardNotesFromJob(job),
+    targetStageId,
+    null,
+  );
 
   return { source: "technical_jobs", id: job.id };
 }

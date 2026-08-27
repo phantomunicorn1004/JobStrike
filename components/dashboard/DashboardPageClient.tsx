@@ -91,16 +91,28 @@ export function DashboardPageClient() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (overrides?: {
+    activityDate?: string;
+    appliedDate?: string;
+    rangeMode?: "week" | "month" | "custom";
+    customFrom?: string;
+    customTo?: string;
+  }) => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams({ rangeMode });
-      if (rangeMode === "custom") {
-        if (customFrom) params.set("bidFrom", customFrom);
-        if (customTo) params.set("bidTo", customTo);
+      const nextRangeMode = overrides?.rangeMode ?? rangeMode;
+      const nextActivity = overrides?.activityDate ?? activityDate;
+      const nextApplied = overrides?.appliedDate ?? appliedDate;
+      const nextFrom = overrides?.customFrom ?? customFrom;
+      const nextTo = overrides?.customTo ?? customTo;
+
+      const params = new URLSearchParams({ rangeMode: nextRangeMode });
+      if (nextRangeMode === "custom") {
+        if (nextFrom) params.set("bidFrom", nextFrom);
+        if (nextTo) params.set("bidTo", nextTo);
       }
-      if (activityDate) params.set("activityDate", activityDate);
-      if (appliedDate) params.set("date", appliedDate);
+      if (nextActivity) params.set("activityDate", nextActivity);
+      if (nextApplied) params.set("date", nextApplied);
 
       const res = await fetch(`/api/dashboard?${params}`, {
         credentials: "same-origin",
@@ -131,17 +143,14 @@ export function DashboardPageClient() {
     } finally {
       setIsLoading(false);
     }
-  }, [
-    activityDate,
-    appliedDate,
-    rangeMode,
-    rangeMode === "custom" ? customFrom : "",
-    rangeMode === "custom" ? customTo : "",
-  ]);
+  }, [activityDate, appliedDate, rangeMode, customFrom, customTo]);
 
+  // Initial + range-mode/custom-range loads only — date picks call loadDashboard directly
+  // so setting dates from the response does not trigger a second full fetch.
   useEffect(() => {
     void loadDashboard();
-  }, [loadDashboard]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: avoid activity/applied date loop
+  }, [rangeMode, rangeMode === "custom" ? customFrom : "", rangeMode === "custom" ? customTo : ""]);
 
   const candidateOptions = useMemo(() => {
     if (!data) return [];
@@ -336,7 +345,11 @@ export function DashboardPageClient() {
                       type="date"
                       value={appliedDate || today}
                       max={today}
-                      onChange={(e) => setAppliedDate(e.target.value || today)}
+                      onChange={(e) => {
+                        const value = e.target.value || today;
+                        setAppliedDate(value);
+                        void loadDashboard({ appliedDate: value });
+                      }}
                       className="h-8 w-[138px] text-xs"
                       aria-label="Focus day"
                     />
@@ -608,7 +621,11 @@ export function DashboardPageClient() {
                       type="date"
                       value={activityDate || today}
                       max={today}
-                      onChange={(e) => setActivityDate(e.target.value || today)}
+                      onChange={(e) => {
+                        const value = e.target.value || today;
+                        setActivityDate(value);
+                        void loadDashboard({ activityDate: value });
+                      }}
                       className="h-8 w-[138px] text-xs"
                       aria-label="Activity day"
                     />

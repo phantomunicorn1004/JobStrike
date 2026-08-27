@@ -9,9 +9,10 @@ import { countApplicationsWithFilters } from "@/lib/resume-db/repository";
 import { listJobScraperCandidates } from "@/lib/job-scraper-repository";
 import { colorForCandidateKey } from "@/lib/dashboard/candidate-colors";
 import {
-  listAllApplicationsForDashboard,
-  listAllPipelineJobsForDashboard,
-  listAllTechnicalJobsForDashboard,
+  listApplicationCandidateKeysForDashboard,
+  listApplicationsForDashboardRange,
+  listPipelineJobsForDashboard,
+  listTechnicalJobsForDashboard,
 } from "@/lib/dashboard/repository";
 import {
   addDaysYmd,
@@ -25,6 +26,7 @@ import {
   localYmd,
   pickStackedCandidateKeys,
   type PipelineStageRow,
+  type ResumeApplicationRow,
 } from "@/lib/dashboard/stats";
 import { normalizeTimeZone } from "@/lib/timezone";
 
@@ -35,6 +37,20 @@ export function OPTIONS() {
 function parseYmd(value: string | null, fallback: string): string {
   const raw = value?.trim() || "";
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : fallback;
+}
+
+function mergeApplicationRows(
+  ...lists: ResumeApplicationRow[][]
+): ResumeApplicationRow[] {
+  const byId = new Map<number, ResumeApplicationRow>();
+  const withoutId: ResumeApplicationRow[] = [];
+  for (const list of lists) {
+    for (const row of list) {
+      if (row.id != null) byId.set(row.id, row);
+      else withoutId.push(row);
+    }
+  }
+  return [...byId.values(), ...withoutId];
 }
 
 export async function GET(request: NextRequest) {
@@ -76,17 +92,19 @@ export async function GET(request: NextRequest) {
 
     const supabase = getSupabaseAdminClient();
     const [
-      applications,
+      applicationsInRange,
+      allCandidateRows,
       totalApplicationsAll,
       jobs,
       techJobs,
       stagesRes,
       candidates,
     ] = await Promise.all([
-      listAllApplicationsForDashboard(user.id),
+      listApplicationsForDashboardRange(user.id, bidFrom, bidTo, timezone),
+      listApplicationCandidateKeysForDashboard(user.id),
       countApplicationsWithFilters(user.id, {}),
-      listAllPipelineJobsForDashboard(user.id),
-      listAllTechnicalJobsForDashboard(user.id),
+      listPipelineJobsForDashboard(user.id),
+      listTechnicalJobsForDashboard(user.id),
       supabase
         .from("pipeline_stages")
         .select("id, name, sort_order")
@@ -110,15 +128,22 @@ export async function GET(request: NextRequest) {
       if (!Number.isNaN(id)) profileLabels.set(id, candidate.label);
     }
 
-    const applicationsByCandidate = buildCandidateCounts(applications, profileLabels);
+    const applicationsByCandidate = buildCandidateCounts(
+      allCandidateRows,
+      profileLabels,
+    );
     const seriesCandidates = pickStackedCandidateKeys(applicationsByCandidate);
 
     let activityDate = activityDateParam || today;
     if (!activityDateParam) {
-      const todayCount = countApplicationsOnDate(applications, today, timezone);
-      if (todayCount === 0 && applications.length > 0) {
+      const todayCount = countApplicationsOnDate(
+        applicationsInRange,
+        today,
+        timezone,
+      );
+      if (todayCount === 0 && allCandidateRows.length > 0) {
         let latest = "";
-        for (const row of applications) {
+        for (const row of allCandidateRows) {
           const day = isoToDayKey(row.applied_at, timezone);
           if (day && day > latest) latest = day;
         }
@@ -127,18 +152,41 @@ export async function GET(request: NextRequest) {
     }
 
     const appliedDate = appliedDateParam || activityDate;
-    const appliedDateRows = applications.filter(
+
+    // Ensure activity/applied day rows are present even if outside bid range.
+    let applicationsForCharts = applicationsInRange;
+    const needExtraDays = [activityDate, appliedDate].filter(
+      (d) => d && (d < bidFrom || d > bidTo),
+    );
+    if (needExtraDays.length) {
+      const extraFrom = needExtraDays.reduce((a, b) => (a < b ? a : b));
+      const extraTo = needExtraDays.reduce((a, b) => (a > b ? a : b));
+      const extra = await listApplicationsForDashboardRange(
+        user.id,
+        extraFrom,
+        extraTo,
+        timezone,
+      );
+      applicationsForCharts = mergeApplicationRows(applicationsInRange, extra);
+    }
+
+    const appliedDateRows = applicationsForCharts.filter(
       (row) => isoToDayKey(row.applied_at, timezone) === appliedDate,
     );
 
-    const bidsByDate = buildBidSeries(applications, bidFrom, bidTo, timezone);
+    const bidsByDate = buildBidSeries(
+      applicationsForCharts,
+      bidFrom,
+      bidTo,
+      timezone,
+    );
     const appliedInBidRange = bidsByDate.reduce((sum, point) => sum + point.count, 0);
 
     const pipelineSeries = buildPipelineCandidateStageSeries(
       jobs,
       techJobs,
       stages,
-      applications,
+      allCandidateRows,
       bidFrom,
       bidTo,
       timezone,
@@ -163,12 +211,16 @@ export async function GET(request: NextRequest) {
       today,
       rangeMode: rangeMode === "week" || rangeMode === "custom" ? rangeMode : "month",
       appliedDate,
-      appliedCount: countApplicationsOnDate(applications, appliedDate, timezone),
+      appliedCount: countApplicationsOnDate(
+        applicationsForCharts,
+        appliedDate,
+        timezone,
+      ),
       appliedCountByCandidate: buildCandidateCounts(appliedDateRows, profileLabels),
       appliedInBidRange,
       bidsByDate,
       bidsStackedByDate: buildStackedBidSeries(
-        applications,
+        applicationsForCharts,
         bidFrom,
         bidTo,
         timezone,
@@ -181,7 +233,11 @@ export async function GET(request: NextRequest) {
       bidFrom,
       bidTo,
       activityDate,
-      hourlyActivity: buildHourlyActivity(applications, activityDate, timezone),
+      hourlyActivity: buildHourlyActivity(
+        applicationsForCharts,
+        activityDate,
+        timezone,
+      ),
       stageCounts: pipelineSeries.stageCounts,
       pipelineByStage: pipelineSeries.points,
       pipelineSeriesCandidates: pipelineSeries.candidates.map((c) => ({

@@ -7,42 +7,63 @@ import type {
   PipelineTechRow,
   ResumeApplicationRow,
 } from "@/lib/dashboard/stats";
+import { endOfDayUtcIso, startOfDayUtcIso } from "@/lib/timezone";
 
 /**
- * Fetch every Resume DB application row for dashboard aggregations.
- * PostgREST/Supabase defaults to a 1000-row cap, so we page until exhausted.
+ * Thin all-time rows for candidate breakdowns (no applied_at needed beyond optional id).
  */
-export async function listAllApplicationsForDashboard(
+export async function listApplicationCandidateKeysForDashboard(
   userId: string,
 ): Promise<ResumeApplicationRow[]> {
   const supabase = getSupabaseAdminClient();
   return fetchAllByRange<ResumeApplicationRow>((from, to) =>
     supabase
       .from("resume_db_applications")
-      .select("id, applied_at, profile_id, candidate_name")
+      .select("id, profile_id, candidate_name, applied_at")
       .eq("user_id", userId)
       .order("id", { ascending: true })
       .range(from, to),
   );
 }
 
-export async function listAllPipelineJobsForDashboard(
+/** Applications in a calendar date range (timezone-aware bounds). */
+export async function listApplicationsForDashboardRange(
+  userId: string,
+  dateFrom: string,
+  dateTo: string,
+  timeZone: string,
+): Promise<ResumeApplicationRow[]> {
+  const supabase = getSupabaseAdminClient();
+  const fromIso = startOfDayUtcIso(dateFrom, timeZone);
+  const toIso = endOfDayUtcIso(dateTo, timeZone);
+  return fetchAllByRange<ResumeApplicationRow>((from, to) =>
+    supabase
+      .from("resume_db_applications")
+      .select("id, applied_at, profile_id, candidate_name")
+      .eq("user_id", userId)
+      .gte("applied_at", fromIso)
+      .lte("applied_at", toIso)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+}
+
+/** Lightweight pipeline rows for dashboard charts (no company/title fluff). */
+export async function listPipelineJobsForDashboard(
   userId: string,
 ): Promise<PipelineJobRow[]> {
   const supabase = getSupabaseAdminClient();
   return fetchAllByRange<PipelineJobRow>((from, to) =>
     supabase
       .from("jobs")
-      .select(
-        "id, name, title, company_name, note, created_at, stage_entered_at, stage_dates",
-      )
+      .select("id, note, created_at, stage_entered_at, stage_dates")
       .eq("user_id", userId)
       .order("id", { ascending: true })
       .range(from, to),
   );
 }
 
-export async function listAllTechnicalJobsForDashboard(
+export async function listTechnicalJobsForDashboard(
   userId: string,
 ): Promise<PipelineTechRow[]> {
   const supabase = getSupabaseAdminClient();
@@ -50,10 +71,31 @@ export async function listAllTechnicalJobsForDashboard(
     supabase
       .from("technical_jobs")
       .select(
-        "id, name, title, company_name, job_description, created_at, stage_entered_at, stage_dates, stage_id",
+        "id, stage_id, job_description, created_at, stage_entered_at, stage_dates",
       )
       .eq("user_id", userId)
       .order("id", { ascending: true })
       .range(from, to),
   );
+}
+
+/** @deprecated Prefer range-scoped helpers above. */
+export async function listAllApplicationsForDashboard(
+  userId: string,
+): Promise<ResumeApplicationRow[]> {
+  return listApplicationCandidateKeysForDashboard(userId);
+}
+
+/** @deprecated Prefer listPipelineJobsForDashboard. */
+export async function listAllPipelineJobsForDashboard(
+  userId: string,
+): Promise<PipelineJobRow[]> {
+  return listPipelineJobsForDashboard(userId);
+}
+
+/** @deprecated Prefer listTechnicalJobsForDashboard. */
+export async function listAllTechnicalJobsForDashboard(
+  userId: string,
+): Promise<PipelineTechRow[]> {
+  return listTechnicalJobsForDashboard(userId);
 }
