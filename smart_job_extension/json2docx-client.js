@@ -248,19 +248,17 @@
   }
 
   function setConnectionUi({ enabled, online, label }) {
-    const rows = [
-      {
-        dot: document.getElementById('json2docxConnectionDot'),
-        labelEl: document.getElementById('json2docxConnectionLabel'),
-      },
-      {
-        dot: document.getElementById('settingsJson2docxConnectionDot'),
-        labelEl: document.getElementById('settingsJson2docxConnectionLabel'),
-      },
-    ];
+    const headerChip = document.getElementById('rbChipJson2docx');
+    const headerDot = document.getElementById('json2docxConnectionDot');
+    const headerLabel = document.getElementById('json2docxConnectionLabel');
+    const settingsDot = document.getElementById('settingsJson2docxConnectionDot');
+    const settingsLabel = document.getElementById('settingsJson2docxConnectionLabel');
 
-    rows.forEach(({ dot, labelEl }) => {
-      if (labelEl) labelEl.textContent = label;
+    if (headerLabel) headerLabel.textContent = 'Json2Docx';
+    if (headerChip) headerChip.title = label || 'Local json2docx server';
+    if (settingsLabel) settingsLabel.textContent = label;
+
+    const applyDot = (dot) => {
       if (!dot) return;
       if (!enabled) {
         dot.className = 'backend-connection-dot';
@@ -269,7 +267,10 @@
       } else {
         dot.className = 'backend-connection-dot is-error';
       }
-    });
+    };
+    applyDot(headerDot);
+    applyDot(settingsDot);
+
     try {
       document.dispatchEvent(new CustomEvent('rwh-json2docx-ui'));
     } catch (_) {

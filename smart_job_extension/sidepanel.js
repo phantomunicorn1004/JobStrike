@@ -67,6 +67,8 @@ let pendingKitFile = null; // { kitId, kind: 'resume' | 'coverLetter' }
 let lastAdapterDebug = null;
 let lastObservedTabId = null;
 let lastObservedTabUrl = '';
+let tabSwitchScrapeSeq = 0;
+let tabSwitchScrapeTimer = null;
 
 const defaultProfile = {
   firstName: '',
@@ -686,6 +688,7 @@ function init() {
   renderProfileView();
   ensureOpenAiModelSelect();
   bindEvents();
+  wireOptimizedUi();
   loadAllData();
   watchActiveTabChanges();
 }
@@ -1294,14 +1297,19 @@ function getTodayKey() {
 function showStatus(message, type = 'info', timeout = 4000) {
   if (typeof showToast === 'function') {
     showToast(message, type, timeout);
-    return;
+  } else {
+    const status = document.getElementById('status');
+    if (status) {
+      status.textContent = message;
+      status.className = `toast toast-${type}`;
+      status.classList.remove('hidden');
+      if (timeout) setTimeout(() => status.classList.add('hidden'), timeout);
+    }
   }
-  const status = document.getElementById('status');
-  if (!status) return;
-  status.textContent = message;
-  status.className = `toast toast-${type}`;
-  status.classList.remove('hidden');
-  if (timeout) setTimeout(() => status.classList.add('hidden'), timeout);
+  // Initial rail logic host: mirror every toast onto the page floating rail.
+  if (IS_ASSISTANT_DIALOG) {
+    notifyOptActionFeedback(message, type);
+  }
 }
 
 function escapeHtml(value) {
@@ -1418,15 +1426,79 @@ async function notifyActiveTabChange(source = 'switch') {
     if (!tab || !tab.id) return;
     const url = String(tab.url || '');
     if (tab.id === lastObservedTabId && url === lastObservedTabUrl) return;
+
+    const previousTabId = lastObservedTabId;
     lastObservedTabId = tab.id;
     lastObservedTabUrl = url;
-    if (/^https?:\/\//.test(url)) {
-      const urlEl = document.getElementById('currentUrl');
-      if (urlEl) urlEl.textContent = url;
-      showStatus(`Active tab changed (${source}): ${summarizeTabUrl(url)}.`, 'info', 2600);
+
+    const urlEl = document.getElementById('currentUrl');
+    if (urlEl && /^https?:\/\//.test(url)) urlEl.textContent = url;
+
+    const resumeApi = window.SmartJobRegisterResumeDb;
+
+    // Bind / restore per-tab Built Resume JSON (side panel).
+    if (source === 'ready') {
+      resumeApi?.restoreResumeJsonForTab?.(tab.id, { silent: true });
       return;
     }
-    showStatus(`Active tab changed (${source}). Open a normal web page to scan.`, 'info', 2600);
+    if (source === 'focus' || source === 'updated') {
+      // Keep JSON bound to this tab id if we landed here without a switch event.
+      if (!previousTabId) resumeApi?.restoreResumeJsonForTab?.(tab.id, { silent: true });
+      return;
+    }
+
+    // Side panel: tab switch → swap per-tab resume JSON, then scrape job fields.
+    if (source !== 'switch') return;
+
+    if (tabSwitchScrapeTimer) {
+      clearTimeout(tabSwitchScrapeTimer);
+      tabSwitchScrapeTimer = null;
+    }
+
+    const hadJson = Boolean(
+      resumeApi?.switchResumeJsonTabContext?.(previousTabId, tab.id, { silent: true })
+    );
+
+    if (!/^https?:\/\//.test(url)) {
+      showStatus(
+        hadJson
+          ? 'Switched tab is not a web page — restored that tab’s resume JSON only.'
+          : 'Switched tab is not a web page — open a job listing to scrape.',
+        'info',
+        2800
+      );
+      return;
+    }
+
+    const seq = ++tabSwitchScrapeSeq;
+    tabSwitchScrapeTimer = setTimeout(async () => {
+      tabSwitchScrapeTimer = null;
+      try {
+        showStatus('Tab switched — loading job info…', 'info', 0);
+        try {
+          await sendToActiveTab({ action: 'prepareForScan' });
+        } catch (_) {
+          /* optional */
+        }
+        await scrapeJobInfoToAllForms({ showSuccess: false });
+        if (seq !== tabSwitchScrapeSeq) return;
+        const preferResumeJson = Boolean(resumeApi?.hasActiveResumeJsonOverride?.());
+        showStatus(
+          preferResumeJson
+            ? 'Tab switched — restored this tab’s resume JSON; job link updated.'
+            : 'Tab switched — job info loaded from current tab.',
+          'success',
+          3200
+        );
+      } catch (error) {
+        if (seq !== tabSwitchScrapeSeq) return;
+        const msg = error.message || String(error);
+        const friendly = /receiving end does not exist/i.test(msg)
+          ? 'Cannot read this tab yet. Reload the page, or use Refresh in the header.'
+          : msg;
+        showStatus(friendly, 'error', 4500);
+      }
+    }, 350);
   } catch (_) {}
 }
 
@@ -1437,6 +1509,7 @@ function watchActiveTabChanges() {
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (!tab || !tab.active) return;
     if (changeInfo.status !== 'complete' && !Object.prototype.hasOwnProperty.call(changeInfo, 'url')) return;
+    // Same-tab navigations: track URL only; do not auto-scrape.
     notifyActiveTabChange('updated');
   });
   chrome.windows.onFocusChanged.addListener(() => {
@@ -4481,4 +4554,444 @@ function downloadJobsJson() {
       showStatus('JSON download started.', 'success');
     });
   });
+}
+
+const OPTIMIZED_UI_KEY = 'rwh_optimized_ui_v1';
+const EXPANDED_HOST_KEY = 'rwh_expanded_host_v1';
+const IS_ASSISTANT_DIALOG =
+  typeof document !== 'undefined' &&
+  (document.documentElement.classList.contains('assistant-dialog') ||
+    /[?&]dialog=1(?:&|$)/.test(location.search || ''));
+
+function notifyParentOptimizedUi(enabled) {
+  const payload = {
+    source: 'remote-helper-sidepanel',
+    action: 'setOptimizedUi',
+    enabled: Boolean(enabled),
+    railOnly: false
+  };
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(payload, '*');
+      return;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    chrome.runtime.sendMessage(
+      {
+        action: 'setOptimizedUiOnActiveTab',
+        enabled: Boolean(enabled),
+        railOnly: false
+      },
+      () => {
+        void chrome.runtime.lastError;
+      }
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function collectOptUiState() {
+  const buttonMap = {
+    buildCopyPrompt: 'regBuildCopyPromptBtn',
+    generateFiles: 'regGenerateFilesBtn',
+    register: 'registerJobBtn',
+    autofill: 'regAutofillBtn'
+  };
+  const buttons = {};
+  Object.entries(buttonMap).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    buttons[key] = {
+      disabled: Boolean(el?.disabled),
+      title: el?.title || '',
+      loading: Boolean(el?.classList.contains('is-loading'))
+    };
+  });
+  const dotInfo = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return { className: '', title: '' };
+    return {
+      className: Array.from(el.classList)
+        .filter((c) => c !== 'backend-connection-dot')
+        .join(' '),
+      title: el.title || ''
+    };
+  };
+  return {
+    buttons,
+    dots: {
+      website: dotInfo('backendConnectionDot'),
+      drive: dotInfo('driveConnectionDot'),
+      json2docx: dotInfo('json2docxConnectionDot')
+    }
+  };
+}
+
+function publishOptUiState() {
+  const state = collectOptUiState();
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(
+        { source: 'remote-helper-sidepanel', action: 'optUiState', state },
+        '*'
+      );
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    chrome.runtime.sendMessage({ action: 'broadcastOptUiState', state }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+async function applyJdText(text) {
+  const note = document.getElementById('regNote');
+  if (!note) throw new Error('Note field not found.');
+  note.value = String(text ?? '');
+  note.dispatchEvent(new Event('input', { bubbles: true }));
+  note.dispatchEvent(new Event('change', { bubbles: true }));
+  showStatus('Job description updated.', 'success');
+}
+
+async function applyResumeJsonText(text) {
+  const raw = String(text ?? '').trim();
+  if (!raw) throw new Error('Resume JSON is empty.');
+  const ta = document.getElementById('regResumeJson');
+  if (!ta) throw new Error('Resume JSON field not found.');
+  ta.value = raw;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  ta.dispatchEvent(new Event('change', { bubbles: true }));
+  const api = window.SmartJobRegisterResumeDb;
+  if (api?.applyResumeJsonToRegisterForm) {
+    api.applyResumeJsonToRegisterForm(raw, { silent: false, showStatus });
+  }
+  try {
+    await scrapeJobInfoToAllForms({ showSuccess: false });
+  } catch (err) {
+    showStatus(
+      'Resume JSON applied. Scrape warning: ' + (err?.message || String(err)),
+      'error'
+    );
+    return;
+  }
+  showStatus('Resume JSON applied; register details refreshed from page.', 'success');
+}
+
+function replyOptFieldValue(field, id) {
+  const map = { note: 'regNote', resumeJson: 'regResumeJson' };
+  const el = document.getElementById(map[field] || '');
+  const value = el ? String(el.value || '') : '';
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(
+        {
+          source: 'remote-helper-sidepanel',
+          action: 'optFieldValue',
+          id,
+          field,
+          value
+        },
+        '*'
+      );
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function notifyOptActionFeedback(message, type = 'info') {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(
+        {
+          source: 'remote-helper-sidepanel',
+          action: 'optActionFeedback',
+          message: String(message || ''),
+          type: type || 'info'
+        },
+        '*'
+      );
+    }
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+async function runBuildCopyPromptAction() {
+  const btn = document.getElementById('regBuildCopyPromptBtn');
+  if (!btn) throw new Error('Build & Copy Prompt button not found.');
+  if (btn.disabled) throw new Error(btn.title || 'Select a profile first.');
+
+  const api = window.SmartJobRegisterResumeDb;
+  if (!api?.buildAndCopyPromptFromKit) {
+    throw new Error('Prompt kit module not ready — reload the extension.');
+  }
+
+  btn.classList.add('is-loading');
+  publishOptUiState();
+  try {
+    await api.buildAndCopyPromptFromKit(showStatus);
+  } finally {
+    btn.classList.remove('is-loading');
+    publishOptUiState();
+  }
+}
+
+async function runOptimizedAction(name) {
+  switch (name) {
+    case 'pasteJd':
+      await pasteJobDescriptionFromClipboard();
+      break;
+    case 'buildCopyPrompt':
+      await runBuildCopyPromptAction();
+      break;
+    case 'pasteResumeJson':
+      await pasteResumeJsonFromClipboard();
+      break;
+    case 'generateFiles':
+      clickIfEnabled('regGenerateFilesBtn');
+      break;
+    case 'register':
+      clickIfEnabled('registerJobBtn');
+      break;
+    case 'autofill':
+      clickIfEnabled('regAutofillBtn');
+      break;
+    default:
+      throw new Error('Unknown optimized action.');
+  }
+}
+
+function setOptimizedUiMode(enabled, { persist = true, notifyParent = true } = {}) {
+  const on = Boolean(enabled);
+  // Page overlay owns the compact floating rail — keep full UI ready in this frame.
+  document.body.classList.remove('ui-optimized');
+  const rail = document.getElementById('optimizedUiRail');
+  if (rail) {
+    rail.hidden = true;
+    rail.setAttribute('aria-hidden', 'true');
+  }
+  const toggle = document.getElementById('headerOptimizedUiBtn');
+  if (toggle) {
+    toggle.classList.toggle('is-active', on);
+    toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+    toggle.title = on
+      ? 'Exit Initial UI (return to side panel)'
+      : 'Initial UI (floating toolbar on page)';
+    toggle.dataset.optimizedOn = on ? '1' : '0';
+  }
+  // Always push state to the page: Initial => hide rail, Optimized => show rail only.
+  if (notifyParent) notifyParentOptimizedUi(on);
+  if (persist) {
+    try {
+      const payload = { [OPTIMIZED_UI_KEY]: on };
+      if (on) {
+        payload[EXPANDED_HOST_KEY] = IS_ASSISTANT_DIALOG ? 'overlay' : 'panel';
+      }
+      chrome.storage.local.set(payload);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  window.SmartJobRegisterResumeDb?.syncResumeBuilderActionButtons?.();
+  publishOptUiState();
+}
+
+window.publishOptUiState = publishOptUiState;
+
+async function readClipboardTextSafe() {
+  if (typeof readTextFromClipboard === 'function') {
+    return readTextFromClipboard();
+  }
+  if (navigator.clipboard?.readText) {
+    return navigator.clipboard.readText();
+  }
+  throw new Error('Clipboard read is not available.');
+}
+
+async function pasteJobDescriptionFromClipboard() {
+  const text = String(await readClipboardTextSafe() || '').trim();
+  if (!text) throw new Error('Clipboard is empty.');
+  const note = document.getElementById('regNote');
+  if (!note) throw new Error('Note field not found.');
+  note.value = text;
+  note.dispatchEvent(new Event('input', { bubbles: true }));
+  note.dispatchEvent(new Event('change', { bubbles: true }));
+  showStatus('Job description pasted into Note.', 'success');
+}
+
+async function pasteResumeJsonFromClipboard() {
+  const text = String(await readClipboardTextSafe() || '').trim();
+  if (!text) throw new Error('Clipboard is empty.');
+  const ta = document.getElementById('regResumeJson');
+  if (!ta) throw new Error('Resume JSON field not found.');
+  ta.value = text;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  ta.dispatchEvent(new Event('change', { bubbles: true }));
+  const api = window.SmartJobRegisterResumeDb;
+  if (api?.applyResumeJsonToRegisterForm) {
+    api.applyResumeJsonToRegisterForm(text, { silent: false, showStatus });
+  }
+  showStatus('Resume JSON pasted for this tab.', 'success');
+}
+
+function clickIfEnabled(id) {
+  const el = document.getElementById(id);
+  if (!el) throw new Error('Action button not found.');
+  if (el.disabled) throw new Error(el.title || 'Action is disabled.');
+  el.click();
+}
+
+function wireOptimizedUi() {
+  const toggle = document.getElementById('headerOptimizedUiBtn');
+  if (toggle && toggle.dataset.wired !== '1') {
+    toggle.dataset.wired = '1';
+    toggle.addEventListener('click', () => {
+      const on = toggle.dataset.optimizedOn === '1';
+      setOptimizedUiMode(!on);
+    });
+  }
+
+  const expand = document.getElementById('optExpandFullUiBtn');
+  if (expand && expand.dataset.wired !== '1') {
+    expand.dataset.wired = '1';
+    expand.addEventListener('click', () => setOptimizedUiMode(false));
+  }
+
+  const bind = (id, handler) => {
+    const btn = document.getElementById(id);
+    if (!btn || btn.dataset.wired === '1') return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', async () => {
+      try {
+        await handler();
+      } catch (err) {
+        showStatus(err?.message || String(err), 'error');
+      }
+    });
+  };
+
+  bind('optPasteJdBtn', pasteJobDescriptionFromClipboard);
+  bind('optBuildCopyPromptBtn', () => runBuildCopyPromptAction());
+  bind('optPasteResumeJsonBtn', pasteResumeJsonFromClipboard);
+  bind('optGenerateFilesBtn', () => clickIfEnabled('regGenerateFilesBtn'));
+  bind('optRegisterBtn', () => clickIfEnabled('registerJobBtn'));
+  bind('optAutofillBtn', () => clickIfEnabled('regAutofillBtn'));
+
+  if (!window.__rwhOptMsgWired) {
+    window.__rwhOptMsgWired = true;
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data || data.source !== 'remote-helper-assistant') return;
+      if (data.action === 'optRunAction') {
+        runOptimizedAction(data.name).catch((err) => {
+          showStatus(err?.message || String(err), 'error');
+        });
+        return;
+      }
+      if (data.action === 'setOptimizedUiMode') {
+        setOptimizedUiMode(Boolean(data.enabled), {
+          notifyParent: data.skipNotifyParent !== true
+        });
+        return;
+      }
+      if (data.action === 'requestOptUiState') {
+        publishOptUiState();
+        return;
+      }
+      if (data.action === 'optGetField') {
+        replyOptFieldValue(data.field, data.id);
+        return;
+      }
+      if (data.action === 'optApplyJd') {
+        applyJdText(data.text).catch((err) => {
+          showStatus(err?.message || String(err), 'error');
+        });
+        return;
+      }
+      if (data.action === 'optApplyResumeJson') {
+        applyResumeJsonText(data.text).catch((err) => {
+          showStatus(err?.message || String(err), 'error');
+        });
+      }
+    });
+
+    try {
+      chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+        if (!request || !request.action) return false;
+        if (request.action === 'optRunAction') {
+          runOptimizedAction(request.name)
+            .then(() => sendResponse({ success: true }))
+            .catch((err) => sendResponse({ success: false, error: err?.message || String(err) }));
+          return true;
+        }
+        if (request.action === 'setOptimizedUiMode') {
+          setOptimizedUiMode(Boolean(request.enabled), {
+            notifyParent: request.skipNotifyParent !== true
+          });
+          sendResponse({ success: true });
+          return true;
+        }
+        if (request.action === 'requestOptUiState') {
+          publishOptUiState();
+          sendResponse({ success: true, state: collectOptUiState() });
+          return true;
+        }
+        if (request.action === 'optGetField') {
+          replyOptFieldValue(request.field, request.id);
+          sendResponse({ success: true });
+          return true;
+        }
+        if (request.action === 'optApplyJd') {
+          applyJdText(request.text)
+            .then(() => sendResponse({ success: true }))
+            .catch((err) => sendResponse({ success: false, error: err?.message || String(err) }));
+          return true;
+        }
+        if (request.action === 'optApplyResumeJson') {
+          applyResumeJsonText(request.text)
+            .then(() => sendResponse({ success: true }))
+            .catch((err) => sendResponse({ success: false, error: err?.message || String(err) }));
+          return true;
+        }
+        return false;
+      });
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+    // Sync header from storage. Never broadcast false on load — that would kill an
+  // already-visible Initial rail when the hidden dialog iframe mounts.
+  try {
+    chrome.storage.local.get([OPTIMIZED_UI_KEY], (result) => {
+      const on = Boolean(result?.[OPTIMIZED_UI_KEY]);
+      const toggleBtn = document.getElementById('headerOptimizedUiBtn');
+      if (toggleBtn) {
+        toggleBtn.classList.toggle('is-active', on);
+        toggleBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        toggleBtn.dataset.optimizedOn = on ? '1' : '0';
+        toggleBtn.title = on
+          ? 'Exit Initial UI (return to side panel)'
+          : 'Initial UI (floating toolbar on page)';
+      }
+      if (on && !IS_ASSISTANT_DIALOG) {
+        try {
+          chrome.storage.local.set({ [EXPANDED_HOST_KEY]: 'panel' });
+        } catch (_) {
+          /* ignore */
+        }
+        notifyParentOptimizedUi(true);
+      }
+    });
+  } catch (_) {
+    /* ignore */
+  }
 }

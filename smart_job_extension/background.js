@@ -133,7 +133,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return false;
     }
-    // Start open synchronously in the message turn to preserve the gesture.
+    // Re-enable before open — Initial UI disables the panel for this tab.
+    if (chrome.sidePanel?.setOptions) {
+      try {
+        chrome.sidePanel.setOptions({
+          tabId,
+          path: 'sidepanel.html',
+          enabled: true
+        });
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    // Start open synchronously in the message turn to preserve the user gesture.
     const openPromise = chrome.sidePanel.open({ tabId });
     void openPromise
       .then(() => preparePinnedSidePanel(tabId))
@@ -266,6 +278,149 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (request && request.action === 'closeSidePanelForActiveTab') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id) {
+        sendResponse({ success: false });
+        return;
+      }
+      try {
+        if (chrome.sidePanel?.setOptions) {
+          await chrome.sidePanel.setOptions({ tabId: tab.id, enabled: false });
+        }
+        sendResponse({ success: true });
+      } catch (error) {
+        sendResponse({ success: false, error: error?.message || String(error) });
+      }
+    });
+    return true;
+  }
+
+  if (request && request.action === 'enableSidePanelForActiveTab') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id) {
+        sendResponse({ success: false });
+        return;
+      }
+      try {
+        if (chrome.sidePanel?.setOptions) {
+          await chrome.sidePanel.setOptions({
+            tabId: tab.id,
+            path: 'sidepanel.html',
+            enabled: true
+          });
+        }
+        sendResponse({ success: true });
+      } catch (error) {
+        sendResponse({ success: false, error: error?.message || String(error) });
+      }
+    });
+    return true;
+  }
+
+  if (request && request.action === 'setOptimizedUiOnActiveTab') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
+        sendResponse({
+          success: false,
+          error: 'Open a regular web page before using Optimized UI.'
+        });
+        return;
+      }
+      try {
+        await chrome.scripting
+          .executeScript({
+            target: { tabId: tab.id },
+            files: ['assistant-overlay.js']
+          })
+          .catch(() => null);
+        const response = await ensureContentScriptAndSendMessage(tab.id, {
+          action: 'setOptimizedUiRail',
+          enabled: Boolean(request.enabled),
+          railOnly: false
+        });
+        if (request.enabled) {
+          await setAssistantDialogOpen(tab.id, true);
+          try {
+            if (chrome.sidePanel?.setOptions) {
+              await chrome.sidePanel.setOptions({ tabId: tab.id, enabled: false });
+            }
+          } catch (_) {
+            /* ignore */
+          }
+        } else {
+          try {
+            if (chrome.sidePanel?.setOptions) {
+              await chrome.sidePanel.setOptions({
+                tabId: tab.id,
+                path: 'sidepanel.html',
+                enabled: true
+              });
+            }
+            if (chrome.sidePanel?.open) {
+              await chrome.sidePanel.open({ tabId: tab.id });
+            }
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        sendResponse(response?.success ? response : { success: false, error: response?.error });
+      } catch (error) {
+        sendResponse({ success: false, error: error?.message || String(error) });
+      }
+    });
+    return true;
+  }
+
+  if (request && request.action === 'copyTextOnActiveTab') {
+    const tabId = request.tabId || sender.tab?.id;
+    const copyOnTab = async (id) => {
+      if (!id) throw new Error('No active tab.');
+      const response = await ensureContentScriptAndSendMessage(id, {
+        action: 'copyTextOnHost',
+        text: request.text
+      });
+      if (response?.success) return { success: true };
+      throw new Error(response?.error || 'Copy failed.');
+    };
+    if (tabId) {
+      void copyOnTab(tabId)
+        .then((result) => sendResponse(result))
+        .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
+    } else {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        void copyOnTab(tabs[0]?.id)
+          .then((result) => sendResponse(result))
+          .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
+      });
+    }
+    return true;
+  }
+
+  if (request && request.action === 'broadcastOptUiState') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id) {
+        sendResponse({ success: false });
+        return;
+      }
+      try {
+        await chrome.tabs.sendMessage(tab.id, {
+          action: 'optUiState',
+          state: request.state
+        });
+        sendResponse({ success: true });
+      } catch (_) {
+        sendResponse({ success: false });
+      }
+    });
+    return true;
+  }
+
   return false;
 });
 

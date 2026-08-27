@@ -2133,7 +2133,9 @@ input[type="range"] { padding: 0; height: 24px; }
 
 .register-generated-attachments {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 6px;
   margin-top: 8px;
 }
@@ -2146,11 +2148,13 @@ input[type="range"] { padding: 0; height: 24px; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 100%;
+  flex: 0 0 auto;
+  max-width: none;
   padding: 4px 8px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border, #cbd5e1) 80%, transparent);
-  background: color-mix(in srgb, var(--surface, #fff) 92%, var(--muted));
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
   font-size: 11px;
   line-height: 1.2;
 }
@@ -2159,13 +2163,14 @@ input[type="range"] { padding: 0; height: 24px; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 220px;
+  max-width: none;
+  color: var(--text);
 }
 
 .register-attach-chip-remove {
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-secondary);
   cursor: pointer;
   padding: 0 2px;
   font-size: 14px;
@@ -2314,16 +2319,23 @@ input[type="range"] { padding: 0; height: 24px; }
   background: var(--success);
   box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.2);
 }
+.backend-connection-dot.is-checking {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+}
 .backend-connection-dot.is-error {
   background: var(--danger);
   box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
 }
 .register-status {
   margin: 10px 0 0;
-  padding: 8px 10px;
+  padding: 10px 12px;
+  min-height: 38px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
+  display: flex;
+  align-items: center;
 }
 .register-status.is-info {
   background: #eff6ff;
@@ -2442,4 +2454,141 @@ input[type="range"] { padding: 0; height: 24px; }
   .profile-edit-form .profile-edit-input {
     font-size: 16px;
   }
+}
+
+/* —— Optimized UI (vertical circle toolbar) —— */
+.optimized-ui-rail {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 12px;
+  width: 64px;
+  box-sizing: border-box;
+}
+
+body.ui-optimized .app-header,
+body.ui-optimized .app-main {
+  display: none !important;
+}
+
+body.ui-optimized .optimized-ui-rail {
+  display: flex;
+}
+
+body.ui-optimized .app-shell {
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
+  overflow: visible;
+  background: var(--bg-elevated, var(--card, #1e1e2a));
+  border-right: 1px solid var(--border);
+}
+
+body.ui-optimized.assistant-dialog .app-shell,
+html.assistant-dialog body.ui-optimized .app-shell {
+  width: 64px;
+  min-height: 100%;
+  border-right: none;
+}
+
+.optimized-ui-drag {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  padding: 4px 0 2px;
+  opacity: 0.45;
+  cursor: grab;
+}
+
+.optimized-ui-drag span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--text-secondary, #94a3b8);
+}
+
+.optimized-ui-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+  width: 100%;
+}
+
+.optimized-ui-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.opt-circle-btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated, var(--card, #282838));
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.opt-circle-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--brand, #6666ff);
+}
+
+.opt-circle-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.opt-circle-btn.is-primary {
+  background: color-mix(in srgb, var(--brand, #6666ff) 22%, var(--bg-elevated, #282838));
+  border-color: color-mix(in srgb, var(--brand, #6666ff) 55%, var(--border));
+  color: var(--brand-deep, #e0e0ff);
+}
+
+[data-theme="light"] .opt-circle-btn.is-primary {
+  color: var(--brand-deep, #4343b8);
+}
+
+.opt-circle-btn.is-loading {
+  pointer-events: none;
+}
+
+.opt-circle-btn .opt-spinner {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 16px;
+  height: 16px;
+}
+
+.opt-circle-btn.is-loading > svg {
+  opacity: 0;
+}
+
+.opt-expand-btn {
+  margin-top: 4px;
+  width: 34px;
+  height: 34px;
+  opacity: 0.85;
+}
+
+.header-icon-btn.is-active {
+  color: var(--brand, #6666ff);
+  background: color-mix(in srgb, var(--brand, #6666ff) 16%, transparent);
 }

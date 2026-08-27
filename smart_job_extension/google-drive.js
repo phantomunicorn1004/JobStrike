@@ -322,6 +322,11 @@
   }
 
   function updateRegisterDriveBadge(settings) {
+    const api = global.SmartJobRegisterResumeDb;
+    if (api?.updateRegisterDriveBadge) {
+      void api.updateRegisterDriveBadge();
+      return;
+    }
     const el = document.getElementById('registerDriveStatus');
     if (!el) return;
     const s = settings || null;

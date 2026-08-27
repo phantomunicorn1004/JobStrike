@@ -20,6 +20,10 @@
   let resumeJsonOverrideActive = false;
   let resumeJsonApplyTimer = null;
   let resumeJsonDupTimer = null;
+  /** @type {Map<number, string>} Built resume JSON keyed by Chrome tab id */
+  const resumeJsonByTabId = new Map();
+  /** Tab id the textarea currently represents */
+  let resumeJsonBoundTabId = null;
   let lastAutoCheckedCompanyKey = '';
 
   function normalizeBackendUrl(url) {
@@ -203,6 +207,61 @@
       } else {
         autofillBtn.title = 'Fill the current job page from the selected website profile';
       }
+    }
+
+    syncOptimizedActionButtons({ registerBusy });
+  }
+
+  function syncOptimizedActionButtons({ registerBusy = false } = {}) {
+    const hasJson = hasUsableBuiltResumeJson();
+    const profileId = document.getElementById('regProfileId')?.value?.trim();
+    const pairs = [
+      ['optGenerateFilesBtn', 'regGenerateFilesBtn'],
+      ['optRegisterBtn', 'registerJobBtn'],
+      ['optAutofillBtn', 'regAutofillBtn'],
+      ['optBuildCopyPromptBtn', 'regBuildCopyPromptBtn'],
+    ];
+    pairs.forEach(([optId, sourceId]) => {
+      const opt = document.getElementById(optId);
+      const source = document.getElementById(sourceId);
+      if (!opt) return;
+      if (source) {
+        opt.disabled = Boolean(source.disabled);
+        if (source.title) opt.title = source.title;
+      }
+    });
+
+    const optGenerate = document.getElementById('optGenerateFilesBtn');
+    if (optGenerate && !optGenerate.classList.contains('is-loading')) {
+      optGenerate.disabled = !hasJson;
+    }
+    const optRegister = document.getElementById('optRegisterBtn');
+    if (optRegister && !optRegister.classList.contains('is-loading')) {
+      optRegister.disabled = Boolean(registerBusy) || !backendConnected || !hasJson;
+    }
+    const optAutofill = document.getElementById('optAutofillBtn');
+    if (optAutofill && !optAutofill.classList.contains('is-loading')) {
+      optAutofill.disabled = !(backendConnected && profileId);
+    }
+
+    const websiteDot = document.getElementById('backendConnectionDot');
+    const driveDot = document.getElementById('driveConnectionDot');
+    const j2dDot = document.getElementById('json2docxConnectionDot');
+    const mirrorDot = (from, toId) => {
+      const to = document.getElementById(toId);
+      if (!to || !from) return;
+      to.className = from.className;
+      to.title = from.title || to.title;
+    };
+    mirrorDot(websiteDot, 'optWebsiteDot');
+    mirrorDot(driveDot, 'optDriveDot');
+    mirrorDot(j2dDot, 'optJson2docxDot');
+
+    try {
+      if (typeof publishOptUiState === 'function') publishOptUiState();
+      else if (typeof window.publishOptUiState === 'function') window.publishOptUiState();
+    } catch (_) {
+      /* ignore */
     }
   }
 
@@ -457,25 +516,66 @@
   }
 
   function setConnectionStatus(state, detail, username) {
-    const pairs = [
-      ['backendConnectionDot', 'backendConnectionLabel'],
-      ['settingsBackendConnectionDot', 'settingsBackendConnectionLabel']
-    ];
-    for (const [dotId, labelId] of pairs) {
-      const dot = document.getElementById(dotId);
-      const label = document.getElementById(labelId);
-      if (!dot || !label) continue;
-      dot.className = 'backend-connection-dot is-' + state;
+    const headerChip = document.getElementById('rbChipWebsite');
+    const headerLabel = document.getElementById('backendConnectionLabel');
+    const headerDot = document.getElementById('backendConnectionDot');
+    const settingsDot = document.getElementById('settingsBackendConnectionDot');
+    const settingsLabel = document.getElementById('settingsBackendConnectionLabel');
+
+    const websiteDetail =
+      detail ||
+      (state === 'ok'
+        ? username
+          ? `Signed in · ${username}`
+          : 'Connected'
+        : state === 'checking'
+          ? 'Checking…'
+          : 'Not connected');
+
+    if (headerDot) headerDot.className = 'backend-connection-dot is-' + state;
+    if (headerLabel) headerLabel.textContent = 'Website';
+    if (headerChip) {
+      headerChip.dataset.websiteDetail = websiteDetail;
+      refreshWebsiteChipTitle();
+    }
+
+    if (settingsDot) settingsDot.className = 'backend-connection-dot is-' + state;
+    if (settingsLabel) {
       if (state === 'ok' && username) {
-        label.innerHTML =
+        settingsLabel.innerHTML =
           'Signed in · <strong class="backend-connection-user">' +
           escapeHtml(username) +
           '</strong>';
       } else {
-        label.textContent =
-          detail ||
-          (state === 'ok' ? 'Connected' : state === 'checking' ? 'Checking…' : 'Not connected');
+        settingsLabel.textContent = websiteDetail;
       }
+    }
+    syncRbStatusChips();
+  }
+
+  function refreshWebsiteChipTitle() {
+    const headerChip = document.getElementById('rbChipWebsite');
+    if (!headerChip) return;
+    const websiteDetail = headerChip.dataset.websiteDetail || 'Website connection';
+    const driveDetail = headerChip.dataset.driveDetail || '';
+    headerChip.title = driveDetail ? `${websiteDetail} · ${driveDetail}` : websiteDetail;
+  }
+
+  function setDriveConnectionUi({ state, detail }) {
+    const driveDot = document.getElementById('driveConnectionDot');
+    const driveLabel = document.getElementById('driveConnectionLabel');
+    const headerChip = document.getElementById('rbChipWebsite');
+    if (driveDot) {
+      driveDot.className = 'backend-connection-dot' + (state ? ` is-${state}` : '');
+      driveDot.title = detail || 'Google Drive';
+    }
+    if (driveLabel) {
+      driveLabel.textContent = 'GDrive';
+      driveLabel.title = detail || 'Google Drive';
+    }
+    if (headerChip) {
+      headerChip.dataset.driveDetail = detail || '';
+      refreshWebsiteChipTitle();
     }
     syncRbStatusChips();
   }
@@ -564,6 +664,7 @@
     if (!isAuthenticated(config)) {
       setConnectionStatus('error', 'Not signed in — open Settings');
       updateBackendDependentUi(false);
+      await updateRegisterDriveBadge();
       return false;
     }
 
@@ -587,6 +688,7 @@
       const host = config.baseUrl.replace(/^https?:\/\//, '');
       setConnectionStatus('error', 'Not connected · ' + host);
       updateBackendDependentUi(false);
+      await updateRegisterDriveBadge();
       return false;
     }
   }
@@ -613,39 +715,43 @@
   }
 
   async function updateRegisterDriveBadge() {
-    const el = document.getElementById('registerDriveStatus');
-    if (!el) return;
+    // Legacy standalone Drive badge removed — status lives on the Website chip.
+    const legacy = document.getElementById('registerDriveStatus');
+    if (legacy) legacy.hidden = true;
 
     if (!backendConnected) {
-      el.hidden = true;
+      setDriveConnectionUi({ state: 'error', detail: 'Drive unavailable (sign in first)' });
       return;
     }
 
     const status = (await fetchWebsiteDriveStatus()) || websiteDriveStatus;
-    el.hidden = false;
-
     if (!status) {
-      el.textContent = 'Drive status unavailable';
-      el.className = 'register-drive-status is-off';
+      setDriveConnectionUi({ state: 'error', detail: 'Drive status unavailable' });
       return;
     }
 
     if (status.connected) {
-      el.textContent = status.googleEmail
-        ? `Drive ready · ${status.googleEmail}`
-        : 'Drive ready';
-      el.className = 'register-drive-status is-ready';
+      setDriveConnectionUi({
+        state: 'ok',
+        detail: status.googleEmail
+          ? `Drive ready · ${status.googleEmail}`
+          : 'Drive ready',
+      });
       return;
     }
 
     if (status.serviceAccountConfigured) {
-      el.textContent = 'Uploads use server Drive (connect personal Drive in website Settings)';
-      el.className = 'register-drive-status is-off';
+      setDriveConnectionUi({
+        state: 'checking',
+        detail: 'Uploads use server Drive (connect personal Drive in website Settings)',
+      });
       return;
     }
 
-    el.textContent = 'Connect Google Drive on the website Settings page to upload files';
-    el.className = 'register-drive-status is-off';
+    setDriveConnectionUi({
+      state: 'error',
+      detail: 'Connect Google Drive on the website Settings page',
+    });
   }
 
   function registerNeedsFileUpload(resumeIsDefault, coverIsDefault, resumeFile, coverFile) {
@@ -765,7 +871,7 @@
           .join('');
       select.disabled = !backendConnected;
       restoreProfileSelection(select, profiles, preservedId);
-      void refreshPromptKitUi();
+      await refreshPromptKitUi();
       syncResumeBuilderActionButtons();
     } catch (err) {
       if (loadSeq !== profilesLoadSeq) return;
@@ -1354,6 +1460,68 @@
     return Boolean(resumeJsonOverrideActive);
   }
 
+  function getResumeJsonText() {
+    return String(document.getElementById('regResumeJson')?.value || '');
+  }
+
+  function persistResumeJsonForTab(tabId) {
+    const id = Number(tabId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const text = getResumeJsonText().trim();
+    if (text) resumeJsonByTabId.set(id, text);
+    else resumeJsonByTabId.delete(id);
+    resumeJsonBoundTabId = id;
+  }
+
+  function restoreResumeJsonForTab(tabId, { showStatus, silent = true } = {}) {
+    const id = Number(tabId);
+    if (!Number.isFinite(id) || id <= 0) {
+      clearResumeJsonOverride({ clearTextarea: true });
+      resumeJsonBoundTabId = null;
+      return false;
+    }
+    const text = resumeJsonByTabId.get(id) || '';
+    resumeJsonBoundTabId = id;
+    const ta = document.getElementById('regResumeJson');
+    if (ta) ta.value = text;
+    applyResumeJsonToRegisterForm(text, { silent, showStatus });
+    return Boolean(text.trim());
+  }
+
+  /**
+   * Save JSON for the outgoing tab, then restore JSON for the incoming tab.
+   * Call this before scraping job fields on a tab switch.
+   */
+  function switchResumeJsonTabContext(previousTabId, nextTabId, options = {}) {
+    if (previousTabId && Number(previousTabId) !== Number(nextTabId)) {
+      persistResumeJsonForTab(previousTabId);
+    }
+    return restoreResumeJsonForTab(nextTabId, options);
+  }
+
+  function rememberResumeJsonForBoundTab() {
+    if (resumeJsonBoundTabId) {
+      persistResumeJsonForTab(resumeJsonBoundTabId);
+      return;
+    }
+    try {
+      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+        const id = tabs?.[0]?.id;
+        if (id) persistResumeJsonForTab(id);
+      });
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function wireResumeJsonTabCleanup() {
+    if (!chrome?.tabs?.onRemoved) return;
+    chrome.tabs.onRemoved.addListener((tabId) => {
+      resumeJsonByTabId.delete(Number(tabId));
+      if (resumeJsonBoundTabId === Number(tabId)) resumeJsonBoundTabId = null;
+    });
+  }
+
   function setRegisterFieldValue(id, value, source) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1387,6 +1555,7 @@
       'Fills job title, company, and note from JSON. Job link stays from the current tab / Refresh.',
       ''
     );
+    if (resumeJsonBoundTabId) resumeJsonByTabId.delete(resumeJsonBoundTabId);
     syncResumeBuilderActionButtons();
   }
 
@@ -1444,6 +1613,7 @@
     }
 
     resumeJsonOverrideActive = true;
+    rememberResumeJsonForBoundTab();
     const templateNote = fields.resumeTemplate ? ` · template ${fields.resumeTemplate}` : '';
     if (!fields.resumeTemplate) {
       updateResumeJsonHint(
@@ -1473,6 +1643,7 @@
       if (resumeJsonApplyTimer) clearTimeout(resumeJsonApplyTimer);
       resumeJsonApplyTimer = setTimeout(() => {
         applyResumeJsonToRegisterForm(ta.value, { silent: true, showStatus });
+        rememberResumeJsonForBoundTab();
       }, 250);
     };
 
@@ -1482,6 +1653,7 @@
     });
     ta.addEventListener('change', () => {
       const result = applyResumeJsonToRegisterForm(ta.value, { silent: false, showStatus });
+      rememberResumeJsonForBoundTab();
       if (result.ok && showStatus) {
         showStatus('Register fields filled from built resume JSON.', 'success');
       }
@@ -1516,13 +1688,15 @@
     if (resumeFile && autoAttachedFromJson2docx.resume) {
       chips.push({
         slot: 'resume',
-        label: `Resume · ${resumeFile.name}`,
+        label: 'Resume',
+        title: resumeFile.name || 'Resume',
       });
     }
     if (coverFile && autoAttachedFromJson2docx.cover) {
       chips.push({
         slot: 'cover',
-        label: `Cover · ${coverFile.name}`,
+        label: 'CoverLetter',
+        title: coverFile.name || 'CoverLetter',
       });
     }
 
@@ -1538,8 +1712,8 @@
       .map(
         (chip) => `
       <span class="register-attach-chip" data-slot="${chip.slot}">
-        <span class="register-attach-chip-label" title="${escapeHtml(chip.label)}">${escapeHtml(chip.label)}</span>
-        <button type="button" class="register-attach-chip-remove" data-remove-slot="${chip.slot}" aria-label="Remove ${chip.slot}">×</button>
+        <span class="register-attach-chip-label" title="${escapeHtml(chip.title)}">${escapeHtml(chip.label)}</span>
+        <button type="button" class="register-attach-chip-remove" data-remove-slot="${chip.slot}" aria-label="Remove ${chip.label}">×</button>
       </span>`
       )
       .join('');
@@ -1689,10 +1863,15 @@
     const website = document.getElementById('rbChipWebsite');
     const j2d = document.getElementById('rbChipJson2docx');
     const websiteDot = document.getElementById('backendConnectionDot');
+    const driveDot = document.getElementById('driveConnectionDot');
     const j2dDot = document.getElementById('json2docxConnectionDot');
     if (website && websiteDot) {
-      website.classList.toggle('is-ok', websiteDot.classList.contains('is-ok'));
-      website.classList.toggle('is-error', websiteDot.classList.contains('is-error'));
+      const websiteOk = websiteDot.classList.contains('is-ok');
+      const websiteErr = websiteDot.classList.contains('is-error');
+      const driveOk = !driveDot || driveDot.classList.contains('is-ok');
+      const driveErr = Boolean(driveDot?.classList.contains('is-error'));
+      website.classList.toggle('is-ok', websiteOk && driveOk);
+      website.classList.toggle('is-error', websiteErr || (websiteOk && driveErr));
     }
     if (j2d && j2dDot) {
       j2d.classList.toggle('is-ok', j2dDot.classList.contains('is-ok'));
@@ -1741,6 +1920,7 @@
       updatePromptKitStatus('Prompt kit module not loaded.', 'error');
       if (buildBtn) buildBtn.disabled = true;
       syncRbStatusChips();
+      syncResumeBuilderActionButtons();
       return;
     }
 
@@ -1754,6 +1934,7 @@
         if (resumeEl) resumeEl.value = '';
       }
       syncRbStatusChips();
+      syncResumeBuilderActionButtons();
       return;
     }
 
@@ -1772,6 +1953,7 @@
       updatePromptKitStatus(err.message || 'Failed to load prompt kit.', 'error');
     }
     syncRbStatusChips();
+    syncResumeBuilderActionButtons();
   }
 
   async function buildAndCopyPromptFromKit(showStatus) {
@@ -1994,6 +2176,7 @@
     wireProfileSelectPersistence();
     wireDuplicateWindowSetting();
     wireResumeJsonLiveFill(showStatus);
+    wireResumeJsonTabCleanup();
     wireJson2docxGenerate(showStatus);
     wirePromptKitControls(showStatus);
     wirePromptKitStorageSync();
@@ -2096,10 +2279,15 @@
     fetchProfileRecord,
     onRegisterViewShown,
     syncResumeBuilderActionButtons,
+    buildAndCopyPromptFromKit,
+    updateRegisterDriveBadge,
     loadBackendSettingsForm,
     hasActiveResumeJsonOverride,
     applyResumeJsonToRegisterForm,
     clearResumeJsonOverride,
+    persistResumeJsonForTab,
+    restoreResumeJsonForTab,
+    switchResumeJsonTabContext,
     prepareRegisterDraftForSubmit,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
