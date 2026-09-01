@@ -3,7 +3,7 @@
  * Supports movable, dock-left, and dock-right modes.
  */
 (function () {
-  const OVERLAY_VERSION = 16;
+  const OVERLAY_VERSION = 17;
   if (window.__remoteHelperAssistantOverlayVersion >= OVERLAY_VERSION) return;
   try {
     document
@@ -791,12 +791,12 @@
                 <path d="M8 4c-2 0-3 1.5-3 4v2c0 1-.5 2-2 2 1.5 0 2 1 2 2v2c0 2.5 1 4 3 4"/><path d="M16 4c2 0 3 1.5 3 4v2c0 1 .5 2 2 2-1.5 0-2 1-2 2v2c0 2.5-1 4-3 4"/>
               </svg>
             </button>
-            <button type="button" class="rh-opt-btn is-primary" data-opt-action="generateFiles" title="Generate Files" disabled>
+            <button type="button" class="rh-opt-btn is-primary" data-opt-action="generateFiles" title="Generate Files">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6M9 15l3 3 3-3"/>
               </svg>
             </button>
-            <button type="button" class="rh-opt-btn is-primary" data-opt-action="register" title="Register" disabled>
+            <button type="button" class="rh-opt-btn is-primary" data-opt-action="register" title="Register">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M20 6L9 17l-5-5"/>
               </svg>

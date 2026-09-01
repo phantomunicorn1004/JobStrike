@@ -4857,10 +4857,10 @@ async function runOptimizedAction(name) {
       await pasteResumeJsonFromClipboard();
       break;
     case 'generateFiles':
-      clickIfEnabled('regGenerateFilesBtn');
+      clickPanelBtn('regGenerateFilesBtn');
       break;
     case 'register':
-      clickIfEnabled('registerJobBtn');
+      clickPanelBtn('registerJobBtn');
       break;
     case 'autofill':
       clickIfEnabled('regAutofillBtn');
@@ -4943,6 +4943,12 @@ async function pasteResumeJsonFromClipboard() {
   showStatus('Resume JSON pasted for this tab.', 'success');
 }
 
+function clickPanelBtn(id) {
+  const el = document.getElementById(id);
+  if (!el) throw new Error('Action button not found.');
+  el.click();
+}
+
 function clickIfEnabled(id) {
   const el = document.getElementById(id);
   if (!el) throw new Error('Action button not found.');
@@ -4982,8 +4988,8 @@ function wireOptimizedUi() {
   bind('optPasteJdBtn', pasteJobDescriptionFromClipboard);
   bind('optBuildCopyPromptBtn', () => runBuildCopyPromptAction());
   bind('optPasteResumeJsonBtn', pasteResumeJsonFromClipboard);
-  bind('optGenerateFilesBtn', () => clickIfEnabled('regGenerateFilesBtn'));
-  bind('optRegisterBtn', () => clickIfEnabled('registerJobBtn'));
+  bind('optGenerateFilesBtn', () => clickPanelBtn('regGenerateFilesBtn'));
+  bind('optRegisterBtn', () => clickPanelBtn('registerJobBtn'));
   bind('optAutofillBtn', () => clickIfEnabled('regAutofillBtn'));
 
   if (!window.__rwhOptMsgWired) {

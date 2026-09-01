@@ -209,9 +209,6 @@
     const hasFiles = Boolean(inputs.resume?.files?.[0] || inputs.cover?.files?.[0]);
     const registered = Boolean(registeredRecord.id);
     const profileId = document.getElementById('regProfileId')?.value?.trim();
-    const json2docxOk = Boolean(
-      document.getElementById('json2docxConnectionDot')?.classList.contains('is-ok')
-    );
 
     const done = {
       job: hasNote,
@@ -227,16 +224,10 @@
       job: hasNote ? '' : 'Use Refresh to read this page, or paste a job description.',
       prompt: profileId ? '' : 'Select a profile first.',
       json: '',
-      files: !hasJson
-        ? 'Paste a valid resume JSON first.'
-        : json2docxOk
-          ? ''
-          : 'Local json2docx server is offline.',
-      register: !backendConnected
-        ? 'Sign in under Settings to register.'
-        : !hasJson
-          ? 'Paste a valid resume JSON first.'
-          : ''
+      // Files are optional — prerequisites are checked when Generate is clicked.
+      files: hasFiles ? '' : 'Optional — generate or attach files, or register without them.',
+      // Register validates on click (sign-in, JSON, profile, job fields).
+      register: ''
     };
 
     // A later step being complete implies the earlier ones were. This matters
@@ -263,6 +254,9 @@
       } else if (step.key === 'files' && filesNeedRegeneration) {
         state = 'warn';
         reason = 'Files were generated earlier — regenerate to attach them.';
+      } else if (step.key === 'files' && !hasFiles && index === currentIndex) {
+        state = 'current';
+        reason = blockedReason.files;
       } else if (index === currentIndex) {
         reason = blockedReason[step.key];
         state = reason ? 'blocked' : 'current';
@@ -478,26 +472,17 @@
   }
 
   function syncResumeBuilderActionButtons({ registerBusy = false } = {}) {
-    const hasJson = hasUsableBuiltResumeJson();
     const generateBtn = document.getElementById('regGenerateFilesBtn');
     const registerBtn = document.getElementById('registerJobBtn');
 
     if (generateBtn && !generateBtn.classList.contains('is-loading')) {
-      generateBtn.disabled = !hasJson;
-      generateBtn.title = hasJson
-        ? 'Convert JSON via local json2docx and attach files'
-        : 'Paste a built resume JSON with resume_template and job fields first';
+      generateBtn.disabled = false;
+      generateBtn.title = 'Convert JSON via local json2docx and attach files';
     }
 
     if (registerBtn && !registerBtn.classList.contains('is-loading')) {
-      registerBtn.disabled = Boolean(registerBusy) || !backendConnected || !hasJson;
-      if (!backendConnected) {
-        registerBtn.title = 'Sign in under Settings to register';
-      } else if (!hasJson) {
-        registerBtn.title = 'Paste a built resume JSON with resume_template and job fields first';
-      } else {
-        registerBtn.title = 'Register this job to Resume DB';
-      }
+      registerBtn.disabled = Boolean(registerBusy);
+      registerBtn.title = 'Register this job to Resume DB';
     }
 
     const autofillBtn = document.getElementById('regAutofillBtn');
@@ -519,7 +504,6 @@
   }
 
   function syncOptimizedActionButtons({ registerBusy = false } = {}) {
-    const hasJson = hasUsableBuiltResumeJson();
     const profileId = document.getElementById('regProfileId')?.value?.trim();
     const pairs = [
       ['optGenerateFilesBtn', 'regGenerateFilesBtn'],
@@ -537,14 +521,6 @@
       }
     });
 
-    const optGenerate = document.getElementById('optGenerateFilesBtn');
-    if (optGenerate && !optGenerate.classList.contains('is-loading')) {
-      optGenerate.disabled = !hasJson;
-    }
-    const optRegister = document.getElementById('optRegisterBtn');
-    if (optRegister && !optRegister.classList.contains('is-loading')) {
-      optRegister.disabled = Boolean(registerBusy) || !backendConnected || !hasJson;
-    }
     const optAutofill = document.getElementById('optAutofillBtn');
     if (optAutofill && !optAutofill.classList.contains('is-loading')) {
       optAutofill.disabled = !(backendConnected && profileId);
@@ -2210,8 +2186,7 @@
     const api = global.SmartJobJson2Docx;
     const mapper = global.SmartJobResumeJsonMapper;
     const btn = document.getElementById('regGenerateFilesBtn');
-    const ta = document.getElementById('regResumeJson');
-    const raw = String(ta?.value || '').trim();
+    const raw = String(document.getElementById('regResumeJson')?.value || '').trim();
 
     if (!api?.generateAndDownloadFiles) {
       throw new Error('json2docx client is not loaded.');
@@ -2228,11 +2203,15 @@
       throw new Error('JSON must include resume_template (template folder name).');
     }
 
+    const j2dDot = document.getElementById('json2docxConnectionDot');
+    if (!j2dDot?.classList.contains('is-ok')) {
+      throw new Error('Local json2docx server is offline. Start it or check Settings.');
+    }
+
     // Keep Register draft in sync before generate.
     applyResumeJsonToRegisterForm(raw, { silent: true });
 
     if (btn) {
-      btn.disabled = true;
       setRbButtonLoading(btn, true);
     }
     setGenerateProgress({ hidden: false, percent: 8, message: 'Starting…' });
@@ -2644,6 +2623,12 @@
           if (!connected) {
             throw new Error(
               'Not signed in. Open Settings → Website connection, enter your username and password, and click Sign in.'
+            );
+          }
+
+          if (!hasUsableBuiltResumeJson()) {
+            throw new Error(
+              'Paste a built resume JSON with resume_template and job fields first.'
             );
           }
 
