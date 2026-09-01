@@ -1,3 +1,5 @@
+import { canonicalJobUrl, jobLinksMatch } from "@/lib/job-url";
+
 export type JobScraperDateWindow = "1d" | "3d" | "7d";
 
 export type ScrapedJob = {
@@ -252,7 +254,7 @@ export function dedupeJobs(jobs: ScrapedJob[]): ScrapedJob[] {
   const unique: ScrapedJob[] = [];
 
   for (const job of jobs) {
-    const urlKey = normalizeText(job.apply_url);
+    const urlKey = canonicalJobUrl(job.apply_url);
     if (urlKey && seenUrls.has(urlKey)) continue;
 
     const companyKey = normalizeCompanyName(job.company_name);
@@ -307,13 +309,11 @@ export function jobMatchesRegisteredJobs(
   job: ScrapedJob,
   registeredJobs: RegisteredJobRef[],
 ): boolean {
-  const jobUrl = normalizeText(job.apply_url);
   const jobCompany = normalizeCompanyName(job.company_name);
   const jobTitle = normalizeText(job.title);
 
   for (const registered of registeredJobs) {
-    const registeredUrl = normalizeText(registered.jobLink);
-    if (jobUrl && registeredUrl && jobUrl === registeredUrl) return true;
+    if (jobLinksMatch(job.apply_url, registered.jobLink)) return true;
 
     const registeredCompany = normalizeCompanyName(registered.company);
     const registeredTitle = normalizeText(registered.jobTitle);

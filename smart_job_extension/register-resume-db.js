@@ -23,6 +23,9 @@
   let resumeJsonApplyTimer = null;
   let resumeJsonDupTimer = null;
   let lastAutoCheckedCompanyKey = '';
+  let lastAutoCheckedJobLinkKey = '';
+  let jobLinkDupTimer = null;
+  let jobLinkDuplicateActive = false;
   let generatedFileMeta = { resumeName: '', coverName: '', generatedAt: 0 };
   /** Set when a reload left file metadata behind but the File objects are gone. */
   let filesNeedRegeneration = false;
@@ -226,8 +229,9 @@
       json: '',
       // Files are optional — prerequisites are checked when Generate is clicked.
       files: hasFiles ? '' : 'Optional — generate or attach files, or register without them.',
-      // Register validates on click (sign-in, JSON, profile, job fields).
-      register: ''
+      register: jobLinkDuplicateActive
+        ? 'Duplicate job link — already in Resume DB for this profile.'
+        : ''
     };
 
     // A later step being complete implies the earlier ones were. This matters
@@ -257,6 +261,9 @@
       } else if (step.key === 'files' && !hasFiles && index === currentIndex) {
         state = 'current';
         reason = blockedReason.files;
+      } else if (step.key === 'register' && jobLinkDuplicateActive) {
+        state = 'blocked';
+        reason = blockedReason.register;
       } else if (index === currentIndex) {
         reason = blockedReason[step.key];
         state = reason ? 'blocked' : 'current';
@@ -481,8 +488,11 @@
     }
 
     if (registerBtn && !registerBtn.classList.contains('is-loading')) {
-      registerBtn.disabled = Boolean(registerBusy);
-      registerBtn.title = 'Register this job to Resume DB';
+      const blockedByDuplicate = jobLinkDuplicateActive;
+      registerBtn.disabled = Boolean(registerBusy) || blockedByDuplicate;
+      registerBtn.title = blockedByDuplicate
+        ? 'Duplicate job link — already in Resume DB for this profile'
+        : 'Register this job to Resume DB';
     }
 
     const autofillBtn = document.getElementById('regAutofillBtn');
@@ -594,23 +604,36 @@
     );
   }
 
-  function normalizeJobLinkKey(value) {
+  function jobUrlApi() {
+    return global.SmartJobJobUrl || null;
+  }
+
+  function canonicalJobLinkKey(value) {
+    const api = jobUrlApi();
+    if (api?.canonicalJobUrl) return api.canonicalJobUrl(value);
     const raw = String(value || '').trim();
     if (!raw) return '';
     try {
       const u = new URL(raw);
       const path = u.pathname.replace(/\/+$/, '') || '';
-      return `${u.hostname}${path}${u.search}`.toLowerCase();
+      return `${u.hostname}${path}`.toLowerCase();
     } catch {
-      return normalizeMatchKey(raw);
+      return '';
     }
   }
 
   function applicationSameJobLink(app, jobLink) {
-    const left = normalizeJobLinkKey(app.jobLink);
-    const right = normalizeJobLinkKey(jobLink);
+    const api = jobUrlApi();
+    if (api?.jobLinksMatch) return api.jobLinksMatch(app.jobLink, jobLink);
+    const left = canonicalJobLinkKey(app.jobLink);
+    const right = canonicalJobLinkKey(jobLink);
     if (!left || !right) return false;
     return left === right;
+  }
+
+  function setJobLinkDuplicateState(active) {
+    jobLinkDuplicateActive = Boolean(active);
+    syncResumeBuilderActionButtons();
   }
 
   function formatApplicationSummary(app, fallback) {
@@ -756,8 +779,11 @@
       }.`;
       setRegisterStatus(message, 'error');
       if (showStatus) showStatus(`Duplicate ${config.label.toLowerCase()} for this profile.`, 'error');
+      if (field === 'link') setJobLinkDuplicateState(true);
       return { level: 'duplicate', match, windowDays, field };
     }
+
+    if (field === 'link') setJobLinkDuplicateState(false);
 
     const noMatchMessage =
       windowDays > 0
@@ -770,6 +796,58 @@
       if (showStatus) showStatus(noMatchMessage, 'success');
     }
     return { level: 'none', match: null, windowDays, field };
+  }
+
+  function scheduleJobLinkDuplicateCheck(showStatus, { force = false } = {}) {
+    const key = canonicalJobLinkKey(document.getElementById('regJobLink')?.value);
+    if (!key) {
+      lastAutoCheckedJobLinkKey = '';
+      setJobLinkDuplicateState(false);
+      return;
+    }
+    if (!force && key === lastAutoCheckedJobLinkKey) return;
+    if (jobLinkDupTimer) clearTimeout(jobLinkDupTimer);
+    jobLinkDupTimer = setTimeout(() => {
+      void runAutoJobLinkDuplicateCheck(showStatus, { force });
+    }, 450);
+  }
+
+  async function runAutoJobLinkDuplicateCheck(showStatus, { force = false } = {}) {
+    const key = canonicalJobLinkKey(document.getElementById('regJobLink')?.value);
+    if (!key) {
+      lastAutoCheckedJobLinkKey = '';
+      setJobLinkDuplicateState(false);
+      return;
+    }
+    if (!force && key === lastAutoCheckedJobLinkKey) return;
+    if (!backendConnected) return;
+    const profileId = document.getElementById('regProfileId')?.value?.trim();
+    if (!profileId) return;
+
+    lastAutoCheckedJobLinkKey = key;
+    try {
+      await checkFieldDuplicate('link', showStatus, { quietIfNone: true });
+    } catch (_) {
+      lastAutoCheckedJobLinkKey = '';
+      setJobLinkDuplicateState(false);
+    }
+  }
+
+  function notifyRegisterJobLinkFilled(showStatus, { force = false } = {}) {
+    if (isRestoringSession) return;
+    scheduleJobLinkDuplicateCheck(showStatus, { force });
+  }
+
+  function wireJobLinkDuplicateAutoCheck(showStatus) {
+    const input = document.getElementById('regJobLink');
+    if (!input || input.dataset.linkDupWired === '1') return;
+    input.dataset.linkDupWired = '1';
+    const onEdit = () => {
+      lastAutoCheckedJobLinkKey = '';
+      scheduleJobLinkDuplicateCheck(showStatus);
+    };
+    input.addEventListener('input', onEdit);
+    input.addEventListener('change', onEdit);
   }
 
   function scheduleCompanyDuplicateCheckFromResumeJson(companyName, showStatus) {
@@ -1100,6 +1178,8 @@
     select.addEventListener('change', () => {
       void saveSelectedProfileId(select.value);
       void refreshPromptKitUi();
+      lastAutoCheckedJobLinkKey = '';
+      scheduleJobLinkDuplicateCheck(null);
       syncResumeBuilderActionButtons();
     });
   }
@@ -1790,6 +1870,8 @@
       resumeJson: getResumeJsonText(),
       resumeJsonOverrideActive,
       lastAutoCheckedCompanyKey,
+      lastAutoCheckedJobLinkKey,
+      jobLinkDuplicateActive,
       files: {
         resume: inputs.resume?.files?.[0] || null,
         cover: inputs.cover?.files?.[0] || null
@@ -1814,9 +1896,15 @@
         clearTimeout(resumeJsonDupTimer);
         resumeJsonDupTimer = null;
       }
+      if (jobLinkDupTimer) {
+        clearTimeout(jobLinkDupTimer);
+        jobLinkDupTimer = null;
+      }
 
       // Globals first, so the renderers below read the right precedence.
       lastAutoCheckedCompanyKey = String(state.lastAutoCheckedCompanyKey || '');
+      lastAutoCheckedJobLinkKey = String(state.lastAutoCheckedJobLinkKey || '');
+      jobLinkDuplicateActive = Boolean(state.jobLinkDuplicateActive);
       autoAttachedFromJson2docx = {
         resume: Boolean(state.autoAttachedFromJson2docx?.resume),
         cover: Boolean(state.autoAttachedFromJson2docx?.cover)
@@ -1881,6 +1969,8 @@
       resumeJson: trim(data.resumeJson),
       resumeJsonOverrideActive: Boolean(data.resumeJsonOverrideActive),
       lastAutoCheckedCompanyKey: data.lastAutoCheckedCompanyKey || '',
+      lastAutoCheckedJobLinkKey: data.lastAutoCheckedJobLinkKey || '',
+      jobLinkDuplicateActive: Boolean(data.jobLinkDuplicateActive),
       fileMeta: data.fileMeta || null,
       autoAttachedFromJson2docx: data.autoAttachedFromJson2docx || null,
       promptCopiedAt: Number(data.promptCopiedAt || 0),
@@ -2586,6 +2676,7 @@
     wireDuplicateWindowSetting();
     wireResumeJsonLiveFill(showStatus);
     wireRegisterTabSession();
+    wireJobLinkDuplicateAutoCheck(showStatus);
     wireJson2docxGenerate(showStatus);
     wirePromptKitControls(showStatus);
     wirePromptKitStorageSync();
@@ -2629,6 +2720,19 @@
           if (!hasUsableBuiltResumeJson()) {
             throw new Error(
               'Paste a built resume JSON with resume_template and job fields first.'
+            );
+          }
+
+          if (jobLinkDuplicateActive) {
+            throw new Error(
+              'Duplicate job link — already in Resume DB for this profile. Change the job link or select a different profile.'
+            );
+          }
+
+          const linkDup = await checkFieldDuplicate('link', showStatus, { quietIfNone: true });
+          if (linkDup.level === 'duplicate') {
+            throw new Error(
+              'Duplicate job link — already in Resume DB for this profile. Change the job link or select a different profile.'
             );
           }
 
@@ -2704,6 +2808,7 @@
     prepareRegisterDraftForSubmit,
     computeApplyProgress,
     refreshApplyProgress,
+    notifyRegisterJobLinkFilled,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND
