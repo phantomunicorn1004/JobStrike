@@ -29,6 +29,52 @@ body.sidepanel {
   padding-bottom: 6px;
 }
 
+.pinned-job-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+  font-size: 10px;
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.pinned-job-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--success, #22c55e);
+}
+
+.pinned-job-bar.is-moved .pinned-job-dot {
+  background: var(--warn, #f59e0b);
+}
+
+.pinned-job-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.pinned-job-note {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn, #f59e0b) 18%, transparent);
+  color: var(--warn, #f59e0b);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
 .brand {
   gap: 8px;
   min-width: 0;
@@ -262,6 +308,198 @@ main {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* ------------------------------------------------ apply progress tracker */
+
+.apply-progress {
+  margin: 0 0 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.apply-progress-track {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+}
+
+.apply-progress-reset {
+  flex-shrink: 0;
+  margin-top: 1px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  line-height: 0;
+  cursor: pointer;
+}
+
+.apply-progress-reset:hover {
+  color: var(--warn, #f59e0b);
+  border-color: var(--warn, #f59e0b);
+}
+
+.apply-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+/* Connector to the previous step. */
+.apply-step:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 50%;
+  left: -50%;
+  height: 2px;
+  background: var(--border);
+}
+
+.apply-step.is-done::before,
+.apply-step.is-warn::before {
+  background: var(--success, #22c55e);
+}
+
+.apply-step-node {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg-elevated, #1e2636);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.apply-step-num {
+  position: relative;
+  z-index: 1;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted);
+}
+
+/* Only used while a step reports live percent (file generation). */
+.apply-step-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: color-mix(in srgb, var(--accent, #6666ff) 55%, transparent);
+  transition: width 0.2s ease;
+}
+
+.apply-step-label {
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apply-step.is-done .apply-step-node {
+  border-color: var(--success, #22c55e);
+  background: var(--success, #22c55e);
+}
+
+.apply-step.is-done .apply-step-num {
+  color: #fff;
+}
+
+.apply-step.is-done .apply-step-label {
+  color: var(--success, #22c55e);
+}
+
+/* Clicking a completed step rewinds to it, so hint that on hover. */
+.apply-step.is-done:hover .apply-step-node,
+.apply-step.is-warn:hover .apply-step-node {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn, #f59e0b) 32%, transparent);
+}
+
+.apply-step.is-current .apply-step-node,
+.apply-step.is-active .apply-step-node {
+  border-color: var(--accent, #6666ff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #6666ff) 25%, transparent);
+}
+
+.apply-step.is-current .apply-step-num,
+.apply-step.is-active .apply-step-num {
+  color: var(--accent, #6666ff);
+}
+
+.apply-step.is-current .apply-step-label,
+.apply-step.is-active .apply-step-label {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.apply-step.is-blocked .apply-step-node,
+.apply-step.is-warn .apply-step-node {
+  border-color: var(--warn, #f59e0b);
+}
+
+.apply-step.is-blocked .apply-step-num,
+.apply-step.is-warn .apply-step-num,
+.apply-step.is-blocked .apply-step-label,
+.apply-step.is-warn .apply-step-label {
+  color: var(--warn, #f59e0b);
+}
+
+.apply-step.is-blocked .apply-step-label {
+  font-weight: 700;
+}
+
+/* Step number badges on the action buttons. */
+.rb-step-badge {
+  flex-shrink: 0;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 22%, transparent);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+}
+
+.btn.is-done-step .rb-step-badge {
+  background: var(--success, #22c55e);
+  color: #fff;
+}
+
+.btn.is-current-step .rb-step-badge {
+  background: var(--accent, #6666ff);
+  color: #fff;
+}
+
+.btn.is-current-step:not(:disabled) {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #6666ff) 45%, transparent);
+}
+
+.btn.is-blocked-step .rb-step-badge {
+  background: var(--warn, #f59e0b);
+  color: #1a1a1a;
 }
 
 .register-action-group .register-status {
@@ -603,15 +841,15 @@ body.sidepanel.assistant-dialog {
 .assistant-dialog .toast {
   top: 6px;
   bottom: auto;
-  transform: translateX(-50%) translateY(-10px);
+  transform: translateY(-10px);
 }
 
 .assistant-dialog .toast.toast-visible {
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
 }
 
 .assistant-dialog .toast.toast-exit {
-  transform: translateX(-50%) translateY(-8px);
+  transform: translateY(-8px);
 }
 
 .assistant-dialog .app-header {
@@ -880,6 +1118,28 @@ body.sidepanel.assistant-dialog {
   margin-top: 0;
 }
 
+/* The dialog footer is too tight for labels, so show nodes only. */
+.assistant-dialog .apply-progress {
+  margin: 0 0 3px;
+}
+
+.assistant-dialog .apply-step-label {
+  display: none;
+}
+
+.assistant-dialog .apply-step-node {
+  width: 14px;
+  height: 14px;
+}
+
+.assistant-dialog .apply-step:not(:first-child)::before {
+  top: 6px;
+}
+
+.assistant-dialog .rb-step-badge {
+  display: none;
+}
+
 @media (max-width: 330px) {
   .assistant-dialog .register-form.form-grid {
     grid-template-columns: 1fr;
@@ -1103,6 +1363,10 @@ body.sidepanel.assistant-dialog {
 .rb-actions .btn {
   width: 100%;
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
 }
 
 .rb-actions .btn:disabled {
@@ -1223,7 +1487,6 @@ body.sidepanel.assistant-dialog {
 
 #tab-register .register-form .rb-field-head,
 #tab-register .register-form .register-resume-json-meta,
-#tab-register .register-form .register-generate-progress,
 #tab-register .register-form .register-generated-attachments,
 #tab-register .register-form details.rb-config {
   grid-column: 1 / -1;

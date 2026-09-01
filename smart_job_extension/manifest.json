@@ -87,6 +87,7 @@
         "theme.css",
         "theme.js",
         "toast.js",
+        "tab-session.js",
         "clipboard.js",
         "ai-fill.js",
         "register-resume-db.js",

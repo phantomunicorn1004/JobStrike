@@ -54,6 +54,12 @@
       </div>
     </header>
 
+    <div class="pinned-job-bar" id="pinnedJobBar" hidden>
+      <span class="pinned-job-dot" id="pinnedJobDot" aria-hidden="true"></span>
+      <span class="pinned-job-url" id="pinnedJobUrl"></span>
+      <span class="pinned-job-note" id="pinnedJobNote" hidden>tab moved on</span>
+    </div>
+
     <main class="app-main">
       <section class="tab-panel active" id="tab-register">
         <div class="card register-card register-fit rb-card" id="resumeBuilderRoot">
@@ -129,18 +135,22 @@
             </div>
 
             <div class="rb-actions" role="group" aria-label="Resume Builder actions">
-              <button type="button" class="btn primary" id="regBuildCopyPromptBtn" title="Build final prompt from kit + Note and copy">
+              <button type="button" class="btn primary" id="regBuildCopyPromptBtn" data-step-btn="prompt" title="Build final prompt from kit + Note and copy">
+                <span class="rb-step-badge" aria-hidden="true">2</span>
                 <span class="rb-btn-label">Build &amp; Copy Prompt</span>
                 <span class="rb-spinner" id="regBuildCopySpinner" hidden aria-hidden="true"></span>
               </button>
-              <button type="button" class="btn" id="regOpenResumeJsonBtn" title="Open built resume JSON editor">
+              <button type="button" class="btn" id="regOpenResumeJsonBtn" data-step-btn="json" title="Open built resume JSON editor">
+                <span class="rb-step-badge" aria-hidden="true">3</span>
                 <span class="rb-btn-label">Resume JSON</span>
               </button>
-              <button type="button" class="btn primary" id="regGenerateFilesBtn" title="Convert JSON via local json2docx and attach files" disabled>
+              <button type="button" class="btn primary" id="regGenerateFilesBtn" data-step-btn="files" title="Convert JSON via local json2docx and attach files" disabled>
+                <span class="rb-step-badge" aria-hidden="true">4</span>
                 <span class="rb-btn-label">Generate Files</span>
                 <span class="rb-spinner" id="regGenerateSpinner" hidden aria-hidden="true"></span>
               </button>
-              <button type="button" class="btn primary register-submit-btn" id="registerJobBtn" disabled>
+              <button type="button" class="btn primary register-submit-btn" id="registerJobBtn" data-step-btn="register" disabled>
+                <span class="rb-step-badge" aria-hidden="true">5</span>
                 <span class="rb-btn-label">Register</span>
                 <span class="rb-spinner" id="regRegisterSpinner" hidden aria-hidden="true"></span>
               </button>
@@ -164,12 +174,6 @@
               ></textarea>
               <small class="muted" id="regResumeJsonHint" hidden>Fills title, company, note from JSON. Job link from tab.</small>
               <button type="button" class="btn small" id="regResumeJsonClearBtn" hidden>Clear JSON</button>
-              <div class="register-generate-progress full" id="regGenerateProgress" hidden>
-                <div class="register-progress-track" aria-hidden="true">
-                  <div class="register-progress-fill" id="regGenerateProgressFill"></div>
-                </div>
-                <small class="muted" id="regGenerateProgressLabel"></small>
-              </div>
               <div class="register-generated-attachments full" id="regGeneratedAttachments" hidden></div>
 
               <details class="rb-config full" id="regDetailsBlock">
@@ -246,6 +250,14 @@
           </div>
 
           <div class="register-action-group">
+            <div class="apply-progress" id="applyProgress" role="group" aria-live="polite" aria-label="Job application progress">
+              <ol class="apply-progress-track" id="applyProgressTrack"></ol>
+              <button type="button" class="apply-progress-reset" id="applyProgressReset" hidden title="Reset this job&#39;s progress" aria-label="Reset this job's progress">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
+                </svg>
+              </button>
+            </div>
             <div id="registerStatus" class="register-status" hidden></div>
           </div>
         </div>
@@ -498,6 +510,7 @@
     <div id="status" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
   </div>
   <script src="toast.js"></script>
+  <script src="tab-session.js"></script>
   <script src="clipboard.js"></script>
   <script src="ai-fill.js"></script>
   <script src="resume-json-mapper.js"></script>

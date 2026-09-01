@@ -16,15 +16,31 @@
   let profilesLoadSeq = 0;
   let backendConnected = false;
   let websiteDriveStatus = null;
+  // These hold the *currently bound tab's* values. SmartJobTabSession owns the
+  // per-tab copies and swaps them in and out around tab changes.
   let autoAttachedFromJson2docx = { resume: false, cover: false };
   let resumeJsonOverrideActive = false;
   let resumeJsonApplyTimer = null;
   let resumeJsonDupTimer = null;
-  /** @type {Map<number, string>} Built resume JSON keyed by Chrome tab id */
-  const resumeJsonByTabId = new Map();
-  /** Tab id the textarea currently represents */
-  let resumeJsonBoundTabId = null;
   let lastAutoCheckedCompanyKey = '';
+  let generatedFileMeta = { resumeName: '', coverName: '', generatedAt: 0 };
+  /** Set when a reload left file metadata behind but the File objects are gone. */
+  let filesNeedRegeneration = false;
+  let promptCopiedAt = 0;
+  let registeredRecord = { id: '', at: 0 };
+  /** Live percent while json2docx runs, mirrored into the Generate Files step. */
+  let generateActivity = null;
+  /** Suppresses side effects (duplicate checks, session writes) while restoring. */
+  let isRestoringSession = false;
+
+  function tabSession() {
+    return global.SmartJobTabSession || null;
+  }
+
+  function syncTabSession() {
+    if (isRestoringSession) return;
+    tabSession()?.sync();
+  }
 
   function normalizeBackendUrl(url) {
     const trimmed = String(url || '').trim().replace(/\/+$/, '');
@@ -172,6 +188,295 @@
     return Boolean(fields.resumeTemplate && fields.hasRegisterFields);
   }
 
+  /* ------------------------------------------------------- apply progress */
+
+  const APPLY_STEPS = [
+    { key: 'job', label: 'Job', target: 'regNote' },
+    { key: 'prompt', label: 'Prompt', target: 'regBuildCopyPromptBtn' },
+    { key: 'json', label: 'JSON', target: 'regOpenResumeJsonBtn' },
+    { key: 'files', label: 'Files', target: 'regGenerateFilesBtn' },
+    { key: 'register', label: 'Register', target: 'registerJobBtn' }
+  ];
+
+  /**
+   * Derives the current step from live state. Nothing about "which step am I on"
+   * is stored, so the tracker cannot drift out of sync with reality.
+   */
+  function computeApplyProgress() {
+    const hasNote = Boolean(document.getElementById('regNote')?.value?.trim());
+    const hasJson = hasUsableBuiltResumeJson();
+    const inputs = getRegisterFileInputs();
+    const hasFiles = Boolean(inputs.resume?.files?.[0] || inputs.cover?.files?.[0]);
+    const registered = Boolean(registeredRecord.id);
+    const profileId = document.getElementById('regProfileId')?.value?.trim();
+    const json2docxOk = Boolean(
+      document.getElementById('json2docxConnectionDot')?.classList.contains('is-ok')
+    );
+
+    const done = {
+      job: hasNote,
+      // Skippable: a valid resume JSON means the prompt round-trip happened,
+      // whether or not it went through this extension.
+      prompt: Boolean(promptCopiedAt) || hasJson,
+      json: hasJson,
+      files: hasFiles,
+      register: registered
+    };
+
+    const blockedReason = {
+      job: hasNote ? '' : 'Use Refresh to read this page, or paste a job description.',
+      prompt: profileId ? '' : 'Select a profile first.',
+      json: '',
+      files: !hasJson
+        ? 'Paste a valid resume JSON first.'
+        : json2docxOk
+          ? ''
+          : 'Local json2docx server is offline.',
+      register: !backendConnected
+        ? 'Sign in under Settings to register.'
+        : !hasJson
+          ? 'Paste a valid resume JSON first.'
+          : ''
+    };
+
+    // A later step being complete implies the earlier ones were. This matters
+    // after Register, which clears the attached files on success.
+    let seenDone = false;
+    for (let i = APPLY_STEPS.length - 1; i >= 0; i -= 1) {
+      const key = APPLY_STEPS[i].key;
+      if (seenDone) done[key] = true;
+      else if (done[key]) seenDone = true;
+    }
+
+    const currentIndex = APPLY_STEPS.findIndex((step) => !done[step.key]);
+    const steps = APPLY_STEPS.map((step, index) => {
+      let state;
+      let reason = '';
+      let percent = null;
+
+      if (generateActivity && step.key === 'files') {
+        state = 'active';
+        reason = generateActivity.message || 'Generating…';
+        percent = generateActivity.percent;
+      } else if (done[step.key]) {
+        state = 'done';
+      } else if (step.key === 'files' && filesNeedRegeneration) {
+        state = 'warn';
+        reason = 'Files were generated earlier — regenerate to attach them.';
+      } else if (index === currentIndex) {
+        reason = blockedReason[step.key];
+        state = reason ? 'blocked' : 'current';
+      } else {
+        state = 'pending';
+      }
+
+      return { ...step, index, number: index + 1, state, reason, percent };
+    });
+
+    const doneCount = APPLY_STEPS.filter((step) => done[step.key]).length;
+    return {
+      steps,
+      currentIndex: currentIndex === -1 ? APPLY_STEPS.length : currentIndex,
+      doneCount,
+      total: APPLY_STEPS.length,
+      percent: Math.round((doneCount / APPLY_STEPS.length) * 100),
+      complete: currentIndex === -1
+    };
+  }
+
+  function applyStepTooltip(step) {
+    if (step.state === 'done') {
+      return `${step.number}. ${step.label} — done · click to redo from here`;
+    }
+    if (step.reason) return `${step.number}. ${step.label} — ${step.reason}`;
+    const suffix = {
+      current: 'do this next',
+      pending: 'not yet',
+      active: 'in progress'
+    }[step.state];
+    return suffix ? `${step.number}. ${step.label} — ${suffix}` : `${step.number}. ${step.label}`;
+  }
+
+  /* ------------------------------------------------- rewind / reset steps */
+
+  const APPLY_STEP_ORDER = APPLY_STEPS.map((step) => step.key);
+
+  /** True when rewinding to this step would throw away real work. */
+  function rewindDiscardsWork(stepKey) {
+    const from = APPLY_STEP_ORDER.indexOf(stepKey);
+    if (from < 0) return false;
+    const clears = (key) => APPLY_STEP_ORDER.indexOf(key) >= from;
+    const inputs = getRegisterFileInputs();
+    if (clears('json') && getResumeJsonText().trim()) return true;
+    if (clears('files') && (inputs.resume?.files?.[0] || inputs.cover?.files?.[0])) return true;
+    return false;
+  }
+
+  /**
+   * Clears the given step and everything after it. Since step states are
+   * derived, clearing the underlying data is all a rewind needs to do.
+   */
+  function rewindApplyTo(stepKey) {
+    const from = APPLY_STEP_ORDER.indexOf(stepKey);
+    if (from < 0) return false;
+    const clears = (key) => APPLY_STEP_ORDER.indexOf(key) >= from;
+
+    // Latest step first, so each renderer sees a consistent state.
+    if (clears('register')) registeredRecord = { id: '', at: 0 };
+    if (clears('files')) clearAllRegisterFiles();
+    if (clears('json')) clearResumeJsonOverride({ clearTextarea: true });
+    if (clears('prompt')) promptCopiedAt = 0;
+    if (clears('job')) setRegisterFieldValue('regNote', '');
+
+    generateActivity = null;
+    filesNeedRegeneration = false;
+    syncTabSession();
+    syncResumeBuilderActionButtons();
+    return true;
+  }
+
+  /** Step 1 owns the scraped job description, so a rewind there re-reads the page. */
+  function requestJobRescrape() {
+    try {
+      document.dispatchEvent(new CustomEvent('rwh-request-rescrape'));
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function handleApplyStepClick(stepKey) {
+    const step = computeApplyProgress().steps.find((s) => s.key === stepKey);
+    if (!step) return;
+
+    // Completed steps rewind; anything else jumps to the control that advances it.
+    if (step.state !== 'done' && step.state !== 'warn') {
+      focusApplyStep(stepKey);
+      return;
+    }
+
+    if (rewindDiscardsWork(stepKey)) {
+      const proceed = window.confirm(
+        `Redo from step ${step.number} (${step.label})?\n\n` +
+          'This clears that step and everything after it.'
+      );
+      if (!proceed) return;
+    }
+
+    rewindApplyTo(stepKey);
+    setRegisterStatus(`Back to step ${step.number}: ${step.label}.`, 'info');
+    if (stepKey === 'job') requestJobRescrape();
+  }
+
+  function resetApplyProgress() {
+    if (rewindDiscardsWork('job')) {
+      const proceed = window.confirm(
+        'Reset this job’s progress?\n\n' +
+          'This clears the job description, resume JSON, generated files, and the registered mark for this tab.'
+      );
+      if (!proceed) return;
+    }
+    rewindApplyTo('job');
+    setRegisterStatus('Progress reset — reloading job info from this tab.', 'info');
+    requestJobRescrape();
+  }
+
+  /** Built once so the live generate fill can animate instead of jumping. */
+  function ensureApplyProgressDom() {
+    const track = document.getElementById('applyProgressTrack');
+    if (!track) return null;
+    if (track.dataset.built === '1') return track;
+
+    track.innerHTML = APPLY_STEPS.map(
+      (step, index) => `
+      <li class="apply-step" data-apply-step="${step.key}">
+        <span class="apply-step-node">
+          <span class="apply-step-fill"></span>
+          <span class="apply-step-num">${index + 1}</span>
+        </span>
+        <span class="apply-step-label">${escapeHtml(step.label)}</span>
+      </li>`
+    ).join('');
+    track.dataset.built = '1';
+
+    track.querySelectorAll('[data-apply-step]').forEach((li) => {
+      li.addEventListener('click', () => handleApplyStepClick(li.getAttribute('data-apply-step')));
+    });
+
+    const resetBtn = document.getElementById('applyProgressReset');
+    if (resetBtn && resetBtn.dataset.wired !== '1') {
+      resetBtn.dataset.wired = '1';
+      resetBtn.addEventListener('click', resetApplyProgress);
+    }
+    return track;
+  }
+
+  function renderApplyProgress(progress) {
+    const root = document.getElementById('applyProgress');
+    const track = ensureApplyProgressDom();
+    if (!track || !root) return;
+
+    progress.steps.forEach((step) => {
+      const li = track.querySelector(`[data-apply-step="${step.key}"]`);
+      if (!li) return;
+      li.className = `apply-step is-${step.state}`;
+      li.title = applyStepTooltip(step);
+      const fill = li.querySelector('.apply-step-fill');
+      if (fill) {
+        fill.style.width =
+          step.percent != null ? `${Math.max(0, Math.min(100, step.percent))}%` : '';
+      }
+    });
+
+    const current = progress.steps[progress.currentIndex];
+    root.setAttribute(
+      'aria-label',
+      progress.complete
+        ? 'Job application progress: registered'
+        : `Job application progress: step ${progress.currentIndex + 1} of ${progress.total}, ${
+            current?.label || ''
+          }`
+    );
+    root.classList.toggle('is-complete', progress.complete);
+
+    const resetBtn = document.getElementById('applyProgressReset');
+    if (resetBtn) resetBtn.hidden = progress.doneCount === 0;
+  }
+
+  /** Clicking a step jumps to the control that advances it. */
+  function focusApplyStep(key) {
+    const step = APPLY_STEPS.find((s) => s.key === key);
+    const el = step && document.getElementById(step.target);
+    if (!el) return;
+    const details = el.closest('details');
+    if (details && !details.open) details.open = true;
+    try {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch (_) {
+      el.scrollIntoView();
+    }
+    if (typeof el.focus === 'function') el.focus({ preventScroll: true });
+  }
+
+  /** Static step numbers plus a ring on whichever button is current. */
+  function syncApplyStepButtons(progress) {
+    progress.steps.forEach((step) => {
+      document.querySelectorAll(`[data-step-btn="${step.key}"]`).forEach((btn) => {
+        btn.classList.toggle('is-current-step', step.state === 'current' || step.state === 'active');
+        btn.classList.toggle('is-blocked-step', step.state === 'blocked');
+        btn.classList.toggle('is-done-step', step.state === 'done');
+        const badge = btn.querySelector('.rb-step-badge');
+        if (badge) badge.textContent = String(step.number);
+      });
+    });
+  }
+
+  function refreshApplyProgress() {
+    const progress = computeApplyProgress();
+    renderApplyProgress(progress);
+    syncApplyStepButtons(progress);
+    return progress;
+  }
+
   function syncResumeBuilderActionButtons({ registerBusy = false } = {}) {
     const hasJson = hasUsableBuiltResumeJson();
     const generateBtn = document.getElementById('regGenerateFilesBtn');
@@ -209,6 +514,7 @@
       }
     }
 
+    refreshApplyProgress();
     syncOptimizedActionButtons({ registerBusy });
   }
 
@@ -1094,8 +1400,11 @@
     if (resume) resume.value = '';
     if (cover) cover.value = '';
     autoAttachedFromJson2docx = { resume: false, cover: false };
+    generatedFileMeta = { resumeName: '', coverName: '', generatedAt: 0 };
+    filesNeedRegeneration = false;
     updateRegisterComboDropUi();
     renderGeneratedAttachmentChips();
+    syncTabSession();
   }
 
   function assignFileToInput(input, file) {
@@ -1122,8 +1431,10 @@
       resume: false,
       cover: false,
     };
+    filesNeedRegeneration = false;
     updateRegisterComboDropUi();
     renderGeneratedAttachmentChips();
+    syncTabSession();
 
     if (result.warning) {
       setRegisterStatus(result.warning, 'info');
@@ -1464,61 +1775,174 @@
     return String(document.getElementById('regResumeJson')?.value || '');
   }
 
-  function persistResumeJsonForTab(tabId) {
-    const id = Number(tabId);
-    if (!Number.isFinite(id) || id <= 0) return;
-    const text = getResumeJsonText().trim();
-    if (text) resumeJsonByTabId.set(id, text);
-    else resumeJsonByTabId.delete(id);
-    resumeJsonBoundTabId = id;
+  /* --------------------------------------------------- per-tab session slice */
+
+  const REGISTER_DRAFT_FIELDS = ['regJobTitle', 'regCompany', 'regNote', 'regJobLink'];
+  const MAX_PERSISTED_TEXT = 50000;
+
+  function captureRegisterStatus() {
+    const el = document.getElementById('registerStatus');
+    if (!el || el.hidden) return null;
+    return { text: el.textContent || '', className: el.className || '' };
   }
 
-  function restoreResumeJsonForTab(tabId, { showStatus, silent = true } = {}) {
-    const id = Number(tabId);
-    if (!Number.isFinite(id) || id <= 0) {
-      clearResumeJsonOverride({ clearTextarea: true });
-      resumeJsonBoundTabId = null;
-      return false;
-    }
-    const text = resumeJsonByTabId.get(id) || '';
-    resumeJsonBoundTabId = id;
-    const ta = document.getElementById('regResumeJson');
-    if (ta) ta.value = text;
-    applyResumeJsonToRegisterForm(text, { silent, showStatus });
-    return Boolean(text.trim());
-  }
-
-  /**
-   * Save JSON for the outgoing tab, then restore JSON for the incoming tab.
-   * Call this before scraping job fields on a tab switch.
-   */
-  function switchResumeJsonTabContext(previousTabId, nextTabId, options = {}) {
-    if (previousTabId && Number(previousTabId) !== Number(nextTabId)) {
-      persistResumeJsonForTab(previousTabId);
-    }
-    return restoreResumeJsonForTab(nextTabId, options);
-  }
-
-  function rememberResumeJsonForBoundTab() {
-    if (resumeJsonBoundTabId) {
-      persistResumeJsonForTab(resumeJsonBoundTabId);
+  function restoreRegisterStatus(state) {
+    const el = document.getElementById('registerStatus');
+    if (!el) return;
+    if (!state?.text) {
+      el.textContent = '';
+      el.hidden = true;
       return;
     }
+    el.textContent = state.text;
+    el.className = state.className || 'register-status';
+    el.hidden = false;
+  }
+
+  function captureRegisterSession() {
+    const inputs = getRegisterFileInputs();
+    const draft = {};
+    const fillSources = {};
+    REGISTER_DRAFT_FIELDS.forEach((id) => {
+      const el = document.getElementById(id);
+      draft[id] = el ? el.value : '';
+      if (el?.dataset.fillSource) fillSources[id] = el.dataset.fillSource;
+    });
+    return {
+      draft,
+      fillSources,
+      resumeJson: getResumeJsonText(),
+      resumeJsonOverrideActive,
+      lastAutoCheckedCompanyKey,
+      files: {
+        resume: inputs.resume?.files?.[0] || null,
+        cover: inputs.cover?.files?.[0] || null
+      },
+      fileMeta: { ...generatedFileMeta },
+      autoAttachedFromJson2docx: { ...autoAttachedFromJson2docx },
+      promptCopiedAt,
+      registeredRecord: { ...registeredRecord },
+      registerStatus: captureRegisterStatus()
+    };
+  }
+
+  function restoreRegisterSession(data) {
+    const state = data || {};
+    isRestoringSession = true;
     try {
-      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-        const id = tabs?.[0]?.id;
-        if (id) persistResumeJsonForTab(id);
+      if (resumeJsonApplyTimer) {
+        clearTimeout(resumeJsonApplyTimer);
+        resumeJsonApplyTimer = null;
+      }
+      if (resumeJsonDupTimer) {
+        clearTimeout(resumeJsonDupTimer);
+        resumeJsonDupTimer = null;
+      }
+
+      // Globals first, so the renderers below read the right precedence.
+      lastAutoCheckedCompanyKey = String(state.lastAutoCheckedCompanyKey || '');
+      autoAttachedFromJson2docx = {
+        resume: Boolean(state.autoAttachedFromJson2docx?.resume),
+        cover: Boolean(state.autoAttachedFromJson2docx?.cover)
+      };
+      generatedFileMeta = {
+        resumeName: String(state.fileMeta?.resumeName || ''),
+        coverName: String(state.fileMeta?.coverName || ''),
+        generatedAt: Number(state.fileMeta?.generatedAt || 0)
+      };
+      promptCopiedAt = Number(state.promptCopiedAt || 0);
+      registeredRecord = {
+        id: String(state.registeredRecord?.id || ''),
+        at: Number(state.registeredRecord?.at || 0)
+      };
+      generateActivity = null;
+
+      // Resume JSON drives title/company/note, so apply it before the draft
+      // fields — otherwise it would overwrite the user's manual edits.
+      const jsonText = String(state.resumeJson || '');
+      const ta = document.getElementById('regResumeJson');
+      if (ta) ta.value = jsonText;
+      if (jsonText.trim()) {
+        applyResumeJsonToRegisterForm(jsonText, { silent: true });
+      } else {
+        clearResumeJsonOverride({ clearTextarea: true });
+      }
+      resumeJsonOverrideActive = Boolean(state.resumeJsonOverrideActive);
+
+      REGISTER_DRAFT_FIELDS.forEach((id) => {
+        setRegisterFieldValue(id, state.draft?.[id] || '', state.fillSources?.[id]);
       });
-    } catch (_) {
-      /* ignore */
+
+      const inputs = getRegisterFileInputs();
+      const resumeFile = state.files?.resume || null;
+      const coverFile = state.files?.cover || null;
+      assignFileToInput(inputs.resume, resumeFile);
+      assignFileToInput(inputs.cover, coverFile);
+      filesNeedRegeneration =
+        !resumeFile && !coverFile && Boolean(generatedFileMeta.generatedAt);
+
+      updateRegisterComboDropUi();
+      renderGeneratedAttachmentChips();
+      restoreRegisterStatus(state.registerStatus);
+      setGenerateProgress({ hidden: true, percent: 0, message: '' });
+      syncResumeBuilderActionButtons();
+    } finally {
+      isRestoringSession = false;
     }
   }
 
-  function wireResumeJsonTabCleanup() {
-    if (!chrome?.tabs?.onRemoved) return;
-    chrome.tabs.onRemoved.addListener((tabId) => {
-      resumeJsonByTabId.delete(Number(tabId));
-      if (resumeJsonBoundTabId === Number(tabId)) resumeJsonBoundTabId = null;
+  /** Drops File objects, which cannot be serialized into chrome.storage. */
+  function registerSessionToPersist(data) {
+    if (!data) return null;
+    const trim = (text) => String(text || '').slice(0, MAX_PERSISTED_TEXT);
+    const draft = {};
+    Object.keys(data.draft || {}).forEach((id) => {
+      draft[id] = trim(data.draft[id]);
+    });
+    return {
+      draft,
+      fillSources: data.fillSources || {},
+      resumeJson: trim(data.resumeJson),
+      resumeJsonOverrideActive: Boolean(data.resumeJsonOverrideActive),
+      lastAutoCheckedCompanyKey: data.lastAutoCheckedCompanyKey || '',
+      fileMeta: data.fileMeta || null,
+      autoAttachedFromJson2docx: data.autoAttachedFromJson2docx || null,
+      promptCopiedAt: Number(data.promptCopiedAt || 0),
+      registeredRecord: data.registeredRecord || null,
+      registerStatus: data.registerStatus || null
+    };
+  }
+
+  function registerSessionHasWork(data) {
+    if (!data) return false;
+    if (String(data.resumeJson || '').trim()) return true;
+    if (data.files?.resume || data.files?.cover) return true;
+    if (data.registeredRecord?.id) return true;
+    return Boolean(data.fileMeta?.generatedAt);
+  }
+
+  function wireRegisterDraftSessionSync() {
+    REGISTER_DRAFT_FIELDS.forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.sessionWired === '1') return;
+      el.dataset.sessionWired = '1';
+      const onEdit = () => {
+        syncTabSession();
+        // The Note field drives the first step of the apply tracker.
+        refreshApplyProgress();
+      };
+      el.addEventListener('input', onEdit);
+      el.addEventListener('change', onEdit);
+    });
+  }
+
+  function wireRegisterTabSession() {
+    wireRegisterDraftSessionSync();
+    tabSession()?.registerSlice('register', {
+      capture: captureRegisterSession,
+      restore: restoreRegisterSession,
+      toPersist: registerSessionToPersist,
+      hasWork: registerSessionHasWork
     });
   }
 
@@ -1555,7 +1979,7 @@
       'Fills job title, company, and note from JSON. Job link stays from the current tab / Refresh.',
       ''
     );
-    if (resumeJsonBoundTabId) resumeJsonByTabId.delete(resumeJsonBoundTabId);
+    syncTabSession();
     syncResumeBuilderActionButtons();
   }
 
@@ -1608,12 +2032,12 @@
     if (fields.jobTitle) setRegisterFieldValue('regJobTitle', fields.jobTitle, 'resume-json');
     if (fields.companyName) setRegisterFieldValue('regCompany', fields.companyName, 'resume-json');
     if (fields.jobDescription) setRegisterFieldValue('regNote', fields.jobDescription, 'resume-json');
-    if (fields.companyName) {
+    if (fields.companyName && !isRestoringSession) {
       scheduleCompanyDuplicateCheckFromResumeJson(fields.companyName, showStatus);
     }
 
     resumeJsonOverrideActive = true;
-    rememberResumeJsonForBoundTab();
+    syncTabSession();
     const templateNote = fields.resumeTemplate ? ` · template ${fields.resumeTemplate}` : '';
     if (!fields.resumeTemplate) {
       updateResumeJsonHint(
@@ -1641,9 +2065,12 @@
 
     const scheduleApply = () => {
       if (resumeJsonApplyTimer) clearTimeout(resumeJsonApplyTimer);
+      // The tab can change before this fires; drop the result if it does.
+      const token = tabSession()?.getGeneration();
       resumeJsonApplyTimer = setTimeout(() => {
+        if (tabSession() && !tabSession().isCurrentGeneration(token)) return;
         applyResumeJsonToRegisterForm(ta.value, { silent: true, showStatus });
-        rememberResumeJsonForBoundTab();
+        syncTabSession();
       }, 250);
     };
 
@@ -1653,7 +2080,7 @@
     });
     ta.addEventListener('change', () => {
       const result = applyResumeJsonToRegisterForm(ta.value, { silent: false, showStatus });
-      rememberResumeJsonForBoundTab();
+      syncTabSession();
       if (result.ok && showStatus) {
         showStatus('Register fields filled from built resume JSON.', 'success');
       }
@@ -1668,13 +2095,12 @@
     }
   }
 
+  /** Generation progress is shown inside the Files step of the apply tracker. */
   function setGenerateProgress({ hidden = false, percent = 0, message = '' } = {}) {
-    const wrap = document.getElementById('regGenerateProgress');
-    const fill = document.getElementById('regGenerateProgressFill');
-    const label = document.getElementById('regGenerateProgressLabel');
-    if (wrap) wrap.hidden = Boolean(hidden);
-    if (fill) fill.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
-    if (label) label.textContent = message || 'Working…';
+    generateActivity = hidden
+      ? null
+      : { percent: Math.max(0, Math.min(100, Number(percent) || 0)), message: message || 'Working…' };
+    refreshApplyProgress();
   }
 
   function renderGeneratedAttachmentChips() {
@@ -1701,6 +2127,20 @@
     }
 
     if (!chips.length) {
+      // A panel reload keeps the metadata but loses the File objects, so say so
+      // rather than showing nothing or a chip with no file behind it.
+      if (filesNeedRegeneration) {
+        const names = [generatedFileMeta.resumeName, generatedFileMeta.coverName]
+          .filter(Boolean)
+          .join(' · ');
+        host.hidden = false;
+        host.innerHTML = `
+      <span class="register-attach-chip is-pending" title="${escapeHtml(names)}">
+        <span class="register-attach-chip-label">Regenerate to attach</span>
+      </span>`;
+        syncRbStatusChips();
+        return;
+      }
       host.hidden = true;
       host.innerHTML = '';
       syncRbStatusChips();
@@ -1727,13 +2167,16 @@
         if (slot === 'resume') {
           assignFileToInput(inputs.resume, null);
           autoAttachedFromJson2docx.resume = false;
+          generatedFileMeta.resumeName = '';
         } else if (slot === 'cover') {
           assignFileToInput(inputs.cover, null);
           autoAttachedFromJson2docx.cover = false;
+          generatedFileMeta.coverName = '';
         }
         updateRegisterComboDropUi();
         renderGeneratedAttachmentChips();
         setRegisterStatus(`Removed ${slot} attachment.`, 'info');
+        syncTabSession();
       });
     });
     syncRbStatusChips();
@@ -1751,8 +2194,15 @@
       resume: Boolean(resumeFile),
       cover: Boolean(coverFile),
     };
+    generatedFileMeta = {
+      resumeName: resumeFile?.name || '',
+      coverName: coverFile?.name || '',
+      generatedAt: resumeFile || coverFile ? Date.now() : 0
+    };
+    filesNeedRegeneration = false;
     updateRegisterComboDropUi();
     renderGeneratedAttachmentChips();
+    syncTabSession();
     return { resumeFile, coverFile };
   }
 
@@ -1852,11 +2302,6 @@
     el.textContent = message;
     el.classList.toggle('is-error', type === 'error');
     el.classList.toggle('is-success', type === 'success');
-    const chip = document.getElementById('rbChipKit');
-    if (chip) {
-      chip.classList.toggle('is-ok', type === 'success');
-      chip.classList.toggle('is-error', type === 'error');
-    }
   }
 
   function syncRbStatusChips() {
@@ -1878,29 +2323,7 @@
       j2d.classList.toggle('is-error', j2dDot.classList.contains('is-error'));
     }
 
-    const filesChip = document.getElementById('rbChipFiles');
-    const filesLabel = document.getElementById('regFilesChipLabel');
-    const attachHost = document.getElementById('regGeneratedAttachments');
-    const attachCount = attachHost
-      ? attachHost.querySelectorAll('.register-attach-chip').length
-      : 0;
-    const summary = document.getElementById('regFilesSummary');
-    const hasManual = summary && !summary.hidden && String(summary.textContent || '').trim();
-    if (filesChip) {
-      if (attachCount > 0 || hasManual) {
-        filesChip.hidden = false;
-        if (filesLabel) {
-          filesLabel.textContent =
-            attachCount > 0
-              ? `${attachCount} generated file${attachCount === 1 ? '' : 's'}`
-              : 'Files attached';
-        }
-        filesChip.classList.add('is-ok');
-      } else {
-        filesChip.hidden = true;
-        filesChip.classList.remove('is-ok');
-      }
-    }
+    // Attachment state is shown by the apply tracker's Files step.
   }
 
   function setRbButtonLoading(btn, loading) {
@@ -1983,6 +2406,9 @@
     } catch (_) {
       /* non-fatal: copy already succeeded */
     }
+
+    promptCopiedAt = Date.now();
+    syncTabSession();
 
     let message = 'Final prompt copied to clipboard. Paste into GPT, then open Resume JSON.';
     if (missingPlaceholders.length) {
@@ -2164,7 +2590,11 @@
     wireResumeBuilderChrome();
     void refreshPromptKitUi({ fillEditor: true });
     syncRbStatusChips();
-    document.addEventListener('rwh-json2docx-ui', () => syncRbStatusChips());
+    document.addEventListener('rwh-json2docx-ui', () => {
+      syncRbStatusChips();
+      // json2docx availability gates the Generate Files step.
+      refreshApplyProgress();
+    });
   }
 
   function initRegisterResumeDb(showStatus) {
@@ -2176,7 +2606,7 @@
     wireProfileSelectPersistence();
     wireDuplicateWindowSetting();
     wireResumeJsonLiveFill(showStatus);
-    wireResumeJsonTabCleanup();
+    wireRegisterTabSession();
     wireJson2docxGenerate(showStatus);
     wirePromptKitControls(showStatus);
     wirePromptKitStorageSync();
@@ -2236,6 +2666,7 @@
             'info'
           );
           const result = await registerJobToBackend();
+          registeredRecord = { id: String(result.id || ''), at: Date.now() };
           const sourceNote = result._draftFromJson ? ' (from resume JSON draft)' : '';
           const fileNote =
             result.resumeUrl || result.coverLetterUrl ? ' Files saved.' : '';
@@ -2285,10 +2716,9 @@
     hasActiveResumeJsonOverride,
     applyResumeJsonToRegisterForm,
     clearResumeJsonOverride,
-    persistResumeJsonForTab,
-    restoreResumeJsonForTab,
-    switchResumeJsonTabContext,
     prepareRegisterDraftForSubmit,
+    computeApplyProgress,
+    refreshApplyProgress,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND

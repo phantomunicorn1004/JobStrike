@@ -8,7 +8,6 @@ const DAILY_LIMIT_KEY = 'job_scraper_daily_limit';
 const PROFILE_KEY = 'autofill_profile';
 const CUSTOM_QUESTIONS_KEY = 'custom_question_bank';
 const SETTINGS_KEY = 'autofill_settings';
-const SESSION_SCAN_KEY = 'autofill_session_scan';
 const HERO_DISMISSED_KEY = 'autofill_hero_dismissed';
 const TOTAL_FILLED_KEY = 'autofill_total_filled';
 const HIDE_FILLED_KEY = 'autofill_hide_filled_fields';
@@ -689,6 +688,7 @@ function init() {
   ensureOpenAiModelSelect();
   bindEvents();
   wireOptimizedUi();
+  registerPageTabSession();
   loadAllData();
   watchActiveTabChanges();
 }
@@ -696,6 +696,10 @@ function init() {
 function bindEvents() {
   const globalRefreshBtn = document.getElementById('globalRefreshBtn');
   if (globalRefreshBtn) globalRefreshBtn.addEventListener('click', () => globalRefreshCurrentTab());
+  // Rewinding to step 1 clears the scraped job description, so re-read the page.
+  document.addEventListener('rwh-request-rescrape', () => {
+    void scrapeCurrentJob(false);
+  });
   const fillBtn = document.getElementById('regAutofillBtn') || document.getElementById('fillSelectedBtn');
   if (fillBtn) fillBtn.addEventListener('click', () => autofillThisPage({ useAi: false }));
   const fillAiBtn = document.getElementById('fillSelectedAiBtn');
@@ -1068,7 +1072,7 @@ function saveSettings(event) {
     [DAILY_LIMIT_KEY]: settings.dailyLimit
   }, () => {
     currentSettings = settings;
-    if (!settings.persistScanState) clearScanState();
+    // persistScanState only controls the durable copy; the live scan stays.
     regeneratePlan();
     showStatus('Settings saved.', 'success');
   });
@@ -1167,10 +1171,7 @@ function loadAllData() {
       persistApplicationKits({ mirror: currentProfile });
     }
 
-    restoreScanState().then((restored) => {
-      if (restored) openPreviewSection();
-      scrapeCurrentJob(false);
-    });
+    // Job info and scan state are restored by the per-tab session on bind.
   });
 }
 
@@ -1215,78 +1216,107 @@ function openPreviewSection() {
   if (section && !section.open) section.open = true;
 }
 
-function getSessionStorage() {
-  return (chrome.storage && chrome.storage.session) ? chrome.storage.session : null;
-}
-
+/** Scan state now lives in the per-tab session; this just triggers a capture. */
 function saveScanState() {
-  if (!currentSettings.persistScanState) return;
-  const session = getSessionStorage();
-  if (!session) return;
-  const payload = {
-    fields: currentFields,
-    plan: currentPlan.map((row) => ({
-      fieldId: row.field.id,
-      suggestedValue: row.suggestedValue,
-      source: row.source,
-      status: row.status,
-      fillOutcome: row.fillOutcome || null,
-      fillError: row.fillError || '',
-      confidence: row.confidence,
-      customQuestionId: row.customQuestionId
-    })),
-    url: currentScanUrl,
-    skipped: lastSkippedCount,
-    savedAt: Date.now()
-  };
-  session.set({ [SESSION_SCAN_KEY]: payload });
-}
-
-function restoreScanState() {
-  return new Promise((resolve) => {
-    const session = getSessionStorage();
-    if (!session || !currentSettings.persistScanState) {
-      resolve(false);
-      return;
-    }
-    session.get([SESSION_SCAN_KEY], (result) => {
-      const saved = result[SESSION_SCAN_KEY];
-      if (!saved || !Array.isArray(saved.fields) || !saved.fields.length) {
-        resolve(false);
-        return;
-      }
-      currentFields = saved.fields;
-      currentScanUrl = saved.url || '';
-      lastSkippedCount = Number.isFinite(saved.skipped) ? saved.skipped : 0;
-      const planById = new Map((saved.plan || []).map((row) => [row.fieldId, row]));
-      currentPlan = currentFields.map((field) => {
-        const fresh = createPlanRow(field);
-        const stored = planById.get(field.id);
-        if (!stored) return fresh;
-        return {
-          ...fresh,
-          suggestedValue: stored.suggestedValue !== undefined ? stored.suggestedValue : fresh.suggestedValue,
-          source: stored.source || fresh.source,
-          status: stored.status || fresh.status,
-          fillOutcome: stored.fillOutcome || fresh.fillOutcome || null,
-          fillError: stored.fillError || fresh.fillError || '',
-          confidence: stored.confidence ?? fresh.confidence,
-          customQuestionId: stored.customQuestionId || fresh.customQuestionId
-        };
-      });
-      const urlEl = document.getElementById('currentUrl');
-      if (urlEl) urlEl.textContent = currentScanUrl || 'Not scanned';
-      const detectedCount = document.getElementById('detectedCount');
-      if (detectedCount) detectedCount.textContent = currentFields.length;
-      renderFieldPlan();
-      resolve(true);
-    });
-  });
+  window.SmartJobTabSession?.sync();
 }
 
 function clearScanState() {
-  const session = getSessionStorage();
-  if (session) session.remove([SESSION_SCAN_KEY]);
+  currentFields = [];
+  currentPlan = [];
+  currentScanUrl = '';
+  lastSkippedCount = 0;
+  const detectedCount = document.getElementById('detectedCount');
+  if (detectedCount) detectedCount.textContent = '0';
+  renderFieldPlan();
+  window.SmartJobTabSession?.sync();
+}
+
+/* --------------------------------------------------- per-tab session slice */
+
+function capturePageSession() {
+  const scrapeForm = {};
+  ['jobCompany', 'jobTitle', 'jobLink'].forEach((id) => {
+    scrapeForm[id] = document.getElementById(id)?.value || '';
+  });
+  return {
+    scrapeForm,
+    autofill: {
+      fields: currentFields,
+      plan: currentPlan.map((row) => ({
+        fieldId: row.field.id,
+        suggestedValue: row.suggestedValue,
+        source: row.source,
+        status: row.status,
+        fillOutcome: row.fillOutcome || null,
+        fillError: row.fillError || '',
+        confidence: row.confidence,
+        customQuestionId: row.customQuestionId
+      })),
+      url: currentScanUrl,
+      skipped: lastSkippedCount
+    }
+  };
+}
+
+function restorePageSession(data) {
+  const state = data || {};
+
+  ['jobCompany', 'jobTitle', 'jobLink'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = state.scrapeForm?.[id] || '';
+  });
+
+  const saved = state.autofill || {};
+  currentFields = Array.isArray(saved.fields) ? saved.fields : [];
+  currentScanUrl = saved.url || '';
+  lastSkippedCount = Number.isFinite(saved.skipped) ? saved.skipped : 0;
+
+  const planById = new Map((saved.plan || []).map((row) => [row.fieldId, row]));
+  currentPlan = currentFields.map((field) => {
+    const fresh = createPlanRow(field);
+    const stored = planById.get(field.id);
+    if (!stored) return fresh;
+    return {
+      ...fresh,
+      suggestedValue: stored.suggestedValue !== undefined ? stored.suggestedValue : fresh.suggestedValue,
+      source: stored.source || fresh.source,
+      status: stored.status || fresh.status,
+      fillOutcome: stored.fillOutcome || fresh.fillOutcome || null,
+      fillError: stored.fillError || fresh.fillError || '',
+      confidence: stored.confidence ?? fresh.confidence,
+      customQuestionId: stored.customQuestionId || fresh.customQuestionId
+    };
+  });
+
+  invalidateAiContextCache();
+  const detectedCount = document.getElementById('detectedCount');
+  if (detectedCount) detectedCount.textContent = currentFields.length;
+  renderFieldPlan();
+  if (currentFields.length) openPreviewSection();
+}
+
+function pageSessionToPersist(data) {
+  if (!data) return null;
+  // Honour the existing "don't keep my scan" setting for the durable copy only;
+  // in-memory per-tab isolation always applies.
+  if (!currentSettings.persistScanState) {
+    return { scrapeForm: data.scrapeForm || {}, autofill: null };
+  }
+  return data;
+}
+
+function pageSessionHasWork(data) {
+  return Boolean(data?.autofill?.fields?.length);
+}
+
+function registerPageTabSession() {
+  window.SmartJobTabSession?.registerSlice('page', {
+    capture: capturePageSession,
+    restore: restorePageSession,
+    toPersist: pageSessionToPersist,
+    hasWork: pageSessionHasWork
+  });
 }
 
 function getTodayKey() {
@@ -1420,85 +1450,111 @@ function summarizeTabUrl(url) {
   }
 }
 
+/**
+ * Shows which page the panel's current state belongs to, and flags when the tab
+ * has since navigated somewhere else.
+ */
+function renderPinnedJobBar(tabId, liveUrl) {
+  const bar = document.getElementById('pinnedJobBar');
+  if (!bar) return;
+  const TS = window.SmartJobTabSession;
+  const boundUrl = TS?.getBoundUrl(tabId) || '';
+  if (!boundUrl) {
+    bar.hidden = true;
+    return;
+  }
+  const moved = Boolean(TS?.isPinnedElsewhere(tabId, liveUrl));
+  bar.hidden = false;
+  bar.classList.toggle('is-moved', moved);
+  const urlEl = document.getElementById('pinnedJobUrl');
+  if (urlEl) {
+    urlEl.textContent = summarizeTabUrl(boundUrl);
+    urlEl.title = boundUrl;
+  }
+  const noteEl = document.getElementById('pinnedJobNote');
+  if (noteEl) {
+    noteEl.hidden = !moved;
+    noteEl.title = moved ? 'Use Refresh to bind this panel to the current page.' : '';
+  }
+}
+
+/** First scrape for a tab. Later visits restore the session instead. */
+function scheduleFirstBindScrape(tabId, url) {
+  if (tabSwitchScrapeTimer) {
+    clearTimeout(tabSwitchScrapeTimer);
+    tabSwitchScrapeTimer = null;
+  }
+  const TS = window.SmartJobTabSession;
+  TS?.bindUrl(tabId, url);
+  renderPinnedJobBar(tabId, url);
+
+  const seq = ++tabSwitchScrapeSeq;
+  const token = TS?.getGeneration();
+  tabSwitchScrapeTimer = setTimeout(async () => {
+    tabSwitchScrapeTimer = null;
+    if (TS && !TS.isCurrentGeneration(token)) return;
+    try {
+      showStatus('Loading job info…', 'info', 0);
+      try {
+        await sendToActiveTab({ action: 'prepareForScan' });
+      } catch (_) {
+        /* optional */
+      }
+      await scrapeJobInfoToAllForms({ showSuccess: false });
+      if (seq !== tabSwitchScrapeSeq) return;
+      if (TS && !TS.isCurrentGeneration(token)) return;
+      showStatus('Job info loaded from this tab.', 'success', 3200);
+    } catch (error) {
+      if (seq !== tabSwitchScrapeSeq) return;
+      if (TS && !TS.isCurrentGeneration(token)) return;
+      const msg = error.message || String(error);
+      const friendly = /receiving end does not exist/i.test(msg)
+        ? 'Cannot read this tab yet. Reload the page, or use Refresh in the header.'
+        : msg;
+      showStatus(friendly, 'error', 4500);
+    }
+  }, 350);
+}
+
 async function notifyActiveTabChange(source = 'switch') {
   try {
+    const TS = window.SmartJobTabSession;
+    if (source === 'ready') await TS?.hydrate();
+
     const tab = await getActiveTab();
     if (!tab || !tab.id) return;
     const url = String(tab.url || '');
-    if (tab.id === lastObservedTabId && url === lastObservedTabUrl) return;
 
-    const previousTabId = lastObservedTabId;
+    // A session is pinned to the page it was bound to, so navigating a tab
+    // never changes panel state. Only Refresh re-binds.
+    if (source === 'updated') {
+      lastObservedTabUrl = url;
+      renderPinnedJobBar(tab.id, url);
+      return;
+    }
+
+    const previousTabId = TS?.getBoundTabId() ?? lastObservedTabId;
+    if (previousTabId === tab.id && source !== 'ready') {
+      renderPinnedJobBar(tab.id, url);
+      return;
+    }
+
     lastObservedTabId = tab.id;
     lastObservedTabUrl = url;
 
-    const urlEl = document.getElementById('currentUrl');
-    if (urlEl && /^https?:\/\//.test(url)) urlEl.textContent = url;
+    const hadSession = Boolean(TS?.hasSession(tab.id));
+    TS?.switchTo(previousTabId, tab.id);
+    renderPinnedJobBar(tab.id, url);
 
-    const resumeApi = window.SmartJobRegisterResumeDb;
-
-    // Bind / restore per-tab Built Resume JSON (side panel).
-    if (source === 'ready') {
-      resumeApi?.restoreResumeJsonForTab?.(tab.id, { silent: true });
-      return;
-    }
-    if (source === 'focus' || source === 'updated') {
-      // Keep JSON bound to this tab id if we landed here without a switch event.
-      if (!previousTabId) resumeApi?.restoreResumeJsonForTab?.(tab.id, { silent: true });
-      return;
-    }
-
-    // Side panel: tab switch → swap per-tab resume JSON, then scrape job fields.
-    if (source !== 'switch') return;
-
-    if (tabSwitchScrapeTimer) {
-      clearTimeout(tabSwitchScrapeTimer);
-      tabSwitchScrapeTimer = null;
-    }
-
-    const hadJson = Boolean(
-      resumeApi?.switchResumeJsonTabContext?.(previousTabId, tab.id, { silent: true })
-    );
+    // Known tab: restore only. Re-scraping would overwrite its pinned draft.
+    if (hadSession) return;
 
     if (!/^https?:\/\//.test(url)) {
-      showStatus(
-        hadJson
-          ? 'Switched tab is not a web page — restored that tab’s resume JSON only.'
-          : 'Switched tab is not a web page — open a job listing to scrape.',
-        'info',
-        2800
-      );
+      showStatus('This tab is not a web page — open a job listing to scrape.', 'info', 2800);
       return;
     }
 
-    const seq = ++tabSwitchScrapeSeq;
-    tabSwitchScrapeTimer = setTimeout(async () => {
-      tabSwitchScrapeTimer = null;
-      try {
-        showStatus('Tab switched — loading job info…', 'info', 0);
-        try {
-          await sendToActiveTab({ action: 'prepareForScan' });
-        } catch (_) {
-          /* optional */
-        }
-        await scrapeJobInfoToAllForms({ showSuccess: false });
-        if (seq !== tabSwitchScrapeSeq) return;
-        const preferResumeJson = Boolean(resumeApi?.hasActiveResumeJsonOverride?.());
-        showStatus(
-          preferResumeJson
-            ? 'Tab switched — restored this tab’s resume JSON; job link updated.'
-            : 'Tab switched — job info loaded from current tab.',
-          'success',
-          3200
-        );
-      } catch (error) {
-        if (seq !== tabSwitchScrapeSeq) return;
-        const msg = error.message || String(error);
-        const friendly = /receiving end does not exist/i.test(msg)
-          ? 'Cannot read this tab yet. Reload the page, or use Refresh in the header.'
-          : msg;
-        showStatus(friendly, 'error', 4500);
-      }
-    }, 350);
+    scheduleFirstBindScrape(tab.id, url);
   } catch (_) {}
 }
 
@@ -1509,7 +1565,7 @@ function watchActiveTabChanges() {
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (!tab || !tab.active) return;
     if (changeInfo.status !== 'complete' && !Object.prototype.hasOwnProperty.call(changeInfo, 'url')) return;
-    // Same-tab navigations: track URL only; do not auto-scrape.
+    // Same-tab navigation: refresh the pinned-URL bar only.
     notifyActiveTabChange('updated');
   });
   chrome.windows.onFocusChanged.addListener(() => {
@@ -2609,6 +2665,8 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
     regStatus.hidden = false;
   }
 
+  window.SmartJobTabSession?.sync();
+
   if (showSuccess) {
     showStatus(
       preferResumeJson
@@ -2647,6 +2705,26 @@ async function globalRefreshCurrentTab() {
     if (!tab?.url || !/^https?:\/\//.test(tab.url)) {
       throw new Error('Open a normal web page first.');
     }
+
+    // Refresh is the only thing that re-binds a tab. Landing on a different
+    // page means a different job, so the previous draft must not carry over.
+    const TS = window.SmartJobTabSession;
+    TS?.captureActive();
+    if (TS?.isPinnedElsewhere(tab.id, tab.url)) {
+      if (TS.hasWork(tab.id)) {
+        const proceed = window.confirm(
+          'This tab has moved to a different page.\n\n' +
+            'Refreshing will clear the resume JSON and generated files saved for the previous job. Continue?'
+        );
+        if (!proceed) {
+          showStatus('Refresh cancelled — previous job draft kept.', 'info', 3000);
+          return;
+        }
+      }
+      TS.resetSession(tab.id);
+    }
+    TS?.bindUrl(tab.id, tab.url);
+    renderPinnedJobBar(tab.id, tab.url);
 
     try {
       await sendToActiveTab({ action: 'prepareForScan' });
@@ -4620,8 +4698,31 @@ function collectOptUiState() {
       title: el.title || ''
     };
   };
+  let progress = null;
+  try {
+    const full = window.SmartJobRegisterResumeDb?.computeApplyProgress?.();
+    if (full) {
+      progress = {
+        currentIndex: full.currentIndex,
+        doneCount: full.doneCount,
+        total: full.total,
+        complete: full.complete,
+        steps: full.steps.map((step) => ({
+          key: step.key,
+          label: step.label,
+          number: step.number,
+          state: step.state,
+          reason: step.reason
+        }))
+      };
+    }
+  } catch (_) {
+    /* ignore */
+  }
+
   return {
     buttons,
+    progress,
     dots: {
       website: dotInfo('backendConnectionDot'),
       drive: dotInfo('driveConnectionDot'),

@@ -3,7 +3,7 @@
  * Supports movable, dock-left, and dock-right modes.
  */
 (function () {
-  const OVERLAY_VERSION = 15;
+  const OVERLAY_VERSION = 16;
   if (window.__remoteHelperAssistantOverlayVersion >= OVERLAY_VERSION) return;
   try {
     document
@@ -485,6 +485,39 @@
           background: #64748b;
           box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25);
         }
+        .rh-opt-progress {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 3px;
+          width: 100%;
+        }
+        .rh-opt-progress-count {
+          font-size: 9px;
+          font-weight: 700;
+          line-height: 1;
+          opacity: 0.75;
+        }
+        .rh-opt-progress-bar {
+          width: 20px;
+          height: 3px;
+          border-radius: 999px;
+          background: rgba(148, 163, 184, 0.35);
+          overflow: hidden;
+        }
+        .rh-opt-progress-fill {
+          display: block;
+          width: 0;
+          height: 100%;
+          background: #22c55e;
+        }
+        .rh-opt-btn.is-done-step { color: #22c55e; }
+        .rh-opt-btn.is-current-step {
+          box-shadow: 0 0 0 2px rgba(102, 102, 255, 0.55);
+        }
+        .rh-opt-btn.is-blocked-step {
+          box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55);
+        }
         .rh-opt-dot.is-ok,
         .rh-opt-dot.connected { background: #22c55e; }
         .rh-opt-dot.is-warn { background: #f59e0b; }
@@ -735,6 +768,12 @@
             <span class="rh-opt-dot" id="rhOptWebsiteDot" title="Website"></span>
             <span class="rh-opt-dot" id="rhOptDriveDot" title="Google Drive"></span>
             <span class="rh-opt-dot" id="rhOptJson2docxDot" title="Json2Docx"></span>
+          </div>
+          <div class="rh-opt-progress" id="rhOptProgress" hidden aria-live="polite">
+            <span class="rh-opt-progress-count" id="rhOptProgressCount">0/5</span>
+            <span class="rh-opt-progress-bar" aria-hidden="true">
+              <span class="rh-opt-progress-fill" id="rhOptProgressFill"></span>
+            </span>
           </div>
           <div class="rh-opt-actions" role="toolbar" aria-label="Resume workflow">
             <button type="button" class="rh-opt-btn" data-opt-action="pasteJd" title="Job Description (paste / edit)">
@@ -1265,6 +1304,54 @@
       if (!el || !info) return;
       el.className = `rh-opt-dot ${info.className || ''}`.trim();
       if (info.title) el.title = info.title;
+    });
+    applyOptProgress(state.progress);
+  }
+
+  /** Rail step keys mirror the side panel's apply tracker. */
+  const OPT_STEP_ACTIONS = {
+    job: 'pasteJd',
+    prompt: 'buildCopyPrompt',
+    json: 'pasteResumeJson',
+    files: 'generateFiles',
+    register: 'register'
+  };
+
+  function applyOptProgress(progress) {
+    const wrap = shadow?.getElementById('rhOptProgress');
+    if (!wrap) return;
+    if (!progress || !Array.isArray(progress.steps) || !progress.steps.length) {
+      wrap.hidden = true;
+      return;
+    }
+    wrap.hidden = false;
+
+    const count = shadow.getElementById('rhOptProgressCount');
+    if (count) count.textContent = `${progress.doneCount}/${progress.total}`;
+    const fill = shadow.getElementById('rhOptProgressFill');
+    if (fill) {
+      const pct = progress.total ? (progress.doneCount / progress.total) * 100 : 0;
+      fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    }
+
+    const current = progress.steps[progress.currentIndex];
+    wrap.title = progress.complete
+      ? 'Registered'
+      : `Step ${progress.currentIndex + 1} of ${progress.total}: ${current?.label || ''}${
+          current?.reason ? ` — ${current.reason}` : ''
+        }`;
+
+    progress.steps.forEach((step) => {
+      const action = OPT_STEP_ACTIONS[step.key];
+      const button = action ? optRailEl.querySelector(`[data-opt-action="${action}"]`) : null;
+      if (!button) return;
+      button.classList.toggle('is-done-step', step.state === 'done');
+      button.classList.toggle(
+        'is-current-step',
+        step.state === 'current' || step.state === 'active'
+      );
+      button.classList.toggle('is-blocked-step', step.state === 'blocked' || step.state === 'warn');
+      if (step.reason) button.title = `${step.number}. ${step.label} — ${step.reason}`;
     });
   }
 

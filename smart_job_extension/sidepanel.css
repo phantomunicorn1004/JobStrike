@@ -1122,15 +1122,20 @@ input:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3p
 .saved-job a { color: var(--primary); font-size: 11px; word-break: break-all; }
 
 /* Floating toast (dark pill) */
+/* Both left and right are set so the shrink-to-fit width can use the full
+   panel; with only left: 50% it was capped at half the viewport. */
 .toast {
   position: fixed;
-  left: 50%;
+  left: 10px;
+  right: 10px;
   bottom: 20px;
   z-index: 10000;
-  display: inline-flex;
+  display: flex;
+  width: fit-content;
+  margin: 0 auto;
   align-items: flex-start;
   gap: 10px;
-  max-width: min(340px, calc(100vw - 20px));
+  max-width: calc(100vw - 20px);
   padding: 11px 16px;
   border-radius: 10px;
   background: #121826;
@@ -1140,7 +1145,7 @@ input:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3p
   line-height: 1.35;
   border: none;
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.45), 0 2px 8px rgba(0, 0, 0, 0.2);
-  transform: translateX(-50%) translateY(10px);
+  transform: translateY(10px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease, transform 0.2s ease;
@@ -1148,13 +1153,13 @@ input:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3p
 
 .toast.toast-visible {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
   pointer-events: auto;
 }
 
 .toast.toast-exit {
   opacity: 0;
-  transform: translateX(-50%) translateY(8px);
+  transform: translateY(8px);
 }
 
 .toast-icon {
@@ -1175,7 +1180,8 @@ input:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3p
   flex: 1;
   min-width: 0;
   white-space: normal;
-  overflow-wrap: anywhere;
+  /* break-word, not anywhere: "anywhere" collapses the intrinsic min-content
+     width so long filenames wrap one character per line. */
   word-break: break-word;
 }
 
@@ -2106,31 +2112,6 @@ input[type="range"] { padding: 0; height: 24px; }
   flex-shrink: 0;
 }
 
-.register-generate-progress {
-  display: grid;
-  gap: 4px;
-  margin-top: 8px;
-}
-
-.register-generate-progress[hidden] {
-  display: none !important;
-}
-
-.register-progress-track {
-  height: 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--muted) 25%, transparent);
-  overflow: hidden;
-}
-
-.register-progress-fill {
-  height: 100%;
-  width: 0%;
-  border-radius: inherit;
-  background: var(--accent, #2563eb);
-  transition: width 0.2s ease;
-}
-
 .register-generated-attachments {
   display: flex;
   flex-direction: row;
@@ -2179,6 +2160,16 @@ input[type="range"] { padding: 0; height: 24px; }
 
 .register-attach-chip-remove:hover {
   color: var(--danger);
+}
+
+.register-attach-chip.is-pending {
+  border-style: dashed;
+  border-color: var(--warn, #f59e0b);
+  background: transparent;
+}
+
+.register-attach-chip.is-pending .register-attach-chip-label {
+  color: var(--warn, #f59e0b);
 }
 
 #regResumeJsonHint.is-error {
