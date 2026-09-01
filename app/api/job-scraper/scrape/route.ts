@@ -12,6 +12,7 @@ import {
 import {
   listBlockedAts,
   listBlockedCompanies,
+  listBlockedJobs,
   listDistinctResumeDbCompanies,
   listRegisteredJobsForCandidate,
 } from "@/lib/job-scraper-repository";
@@ -35,6 +36,8 @@ export async function POST(request: NextRequest) {
     const candidateFilter =
       typeof body.candidateFilter === "string" ? body.candidateFilter.trim() : "";
 
+    const excludeBlockedJobs = body.excludeBlockedJobs !== false;
+
     const needsCandidateData = excludeRegisteredJobs || excludeRegisteredCompanies;
     if (needsCandidateData && !candidateFilter) {
       return corsJson(
@@ -43,11 +46,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const [scraped, blockedCompanies, blockedAts, registeredCompanies, registeredJobs] =
+    const [scraped, blockedCompanies, blockedAts, blockedJobs, registeredCompanies, registeredJobs] =
       await Promise.all([
         scrapeHiringCafeJobs(dateWindow as JobScraperDateWindow),
         listBlockedCompanies(user.id),
         listBlockedAts(user.id),
+        listBlockedJobs(user.id),
         needsCandidateData
           ? listDistinctResumeDbCompanies(user.id, candidateFilter)
           : Promise.resolve([] as string[]),
@@ -66,10 +70,16 @@ export async function POST(request: NextRequest) {
     const { filtered, stats: optionalStats } = applyOptionalScrapeFilters(baseJobs, {
       excludeRegisteredJobs,
       excludeRegisteredCompanies,
+      excludeBlockedJobs,
       excludeBlockedCompanies: excludeBlocked,
       excludeBlockedAts,
       registeredJobs,
       registeredCompanies,
+      blockedJobs: blockedJobs.map((job) => ({
+        jobLink: job.jobLink,
+        jobTitle: job.jobTitle,
+        companyName: job.companyName,
+      })),
       blockedCompanies: blockedCompanies.map((company) => company.companyName),
       blockedAts: blockedAts.map((ats) => ats.atsName),
     });
@@ -81,6 +91,11 @@ export async function POST(request: NextRequest) {
       filterContext: {
         blockedCompanies: blockedCompanies.map((company) => company.companyName),
         blockedAts: blockedAts.map((ats) => ats.atsName),
+        blockedJobs: blockedJobs.map((job) => ({
+          jobLink: job.jobLink,
+          jobTitle: job.jobTitle,
+          companyName: job.companyName,
+        })),
         registeredCompanies,
         registeredJobs,
         registeredJobCount: registeredJobs.length,
@@ -97,6 +112,7 @@ export async function POST(request: NextRequest) {
         removedRegisteredCompanies: excludeRegisteredCompanies
           ? optionalStats.removedRegisteredCompanies
           : 0,
+        removedBlockedJobs: excludeBlockedJobs ? optionalStats.removedBlockedJobs : 0,
         removedBlocked: excludeBlocked ? optionalStats.removedBlocked : 0,
         removedAts: excludeBlockedAts ? optionalStats.removedAts : 0,
         remaining: filtered.length,

@@ -6,6 +6,7 @@ import {
   deleteBlockedCompany,
   listBlockedAts,
   listBlockedCompanies,
+  listBlockedJobs,
   listDistinctResumeDbCompanies,
   listJobScraperCandidates,
   listRegisteredJobsForCandidate,
@@ -20,10 +21,11 @@ export async function GET(request: NextRequest) {
     const user = await requireRequestUser(request);
     const candidateFilter =
       new URL(request.url).searchParams.get("candidateFilter")?.trim() || "";
-    const [blockedCompanies, blockedAts, candidates, resumeDbCompanies, registeredJobs] =
+    const [blockedCompanies, blockedAts, blockedJobs, candidates, resumeDbCompanies, registeredJobs] =
       await Promise.all([
         listBlockedCompanies(user.id),
         listBlockedAts(user.id),
+        listBlockedJobs(user.id),
         listJobScraperCandidates(user.id),
         listDistinctResumeDbCompanies(user.id, candidateFilter),
         listRegisteredJobsForCandidate(user.id, candidateFilter),
@@ -31,6 +33,7 @@ export async function GET(request: NextRequest) {
     return corsJson({
       blockedCompanies,
       blockedAts,
+      blockedJobs,
       candidates,
       candidateFilter: candidateFilter || null,
       resumeDbCompanies,

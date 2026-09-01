@@ -574,6 +574,14 @@
     'regCompanyDupBtn',
     'regJobLinkDupBtn'
   ];
+  const FIELD_BLOCK_BUTTON_IDS = ['regJobLinkBlockBtn'];
+
+  function syncJobLinkBlockButton() {
+    const btn = document.getElementById('regJobLinkBlockBtn');
+    const jobLink = document.getElementById('regJobLink')?.value?.trim();
+    if (!btn) return;
+    btn.disabled = !backendConnected || !jobLink;
+  }
 
   function setFieldDupBusy(buttonId, busy) {
     FIELD_DUP_BUTTON_IDS.forEach((id) => {
@@ -1005,6 +1013,68 @@
     }, 450);
   }
 
+  async function blockCurrentJobFromRegister(showStatus) {
+    const connected = await checkBackendConnection();
+    if (!connected) {
+      throw new Error(
+        'Not signed in. Open Settings → Website connection and sign in to block jobs.'
+      );
+    }
+
+    const jobLink = document.getElementById('regJobLink')?.value?.trim();
+    if (!jobLink) {
+      throw new Error('Job link is required to block this job.');
+    }
+
+    const jobTitle = document.getElementById('regJobTitle')?.value?.trim() || '';
+    const companyName = document.getElementById('regCompany')?.value?.trim() || '';
+    const config = await getBackendConfig();
+    const res = await fetch(`${config.baseUrl}/api/job-scraper/blocked-jobs`, {
+      method: 'POST',
+      headers: { ...apiHeaders(config), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobLink, jobTitle, companyName })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to block job.');
+    }
+
+    const message = data.alreadyBlocked
+      ? 'This job is already on your blocked list.'
+      : 'Job blocked — it will be hidden in the website job scraper.';
+    setRegisterStatus(message, data.alreadyBlocked ? 'warn' : 'success');
+    if (showStatus) showStatus(message, data.alreadyBlocked ? 'warn' : 'success');
+    return data;
+  }
+
+  function wireRegisterFieldBlock(buttonId, showStatus) {
+    const btn = document.getElementById(buttonId);
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.classList.add('is-busy');
+      try {
+        await blockCurrentJobFromRegister(showStatus);
+      } catch (err) {
+        const msg = err.message || String(err);
+        setRegisterStatus(msg, 'error');
+        if (showStatus) showStatus(msg, 'error');
+      } finally {
+        btn.classList.remove('is-busy');
+        syncJobLinkBlockButton();
+      }
+    });
+  }
+
+  function wireJobLinkBlockAutoSync() {
+    const input = document.getElementById('regJobLink');
+    if (!input || input.dataset.blockSyncWired === '1') return;
+    input.dataset.blockSyncWired = '1';
+    const onEdit = () => syncJobLinkBlockButton();
+    input.addEventListener('input', onEdit);
+    input.addEventListener('change', onEdit);
+  }
+
   function setConnectionStatus(state, detail, username) {
     const headerChip = document.getElementById('rbChipWebsite');
     const headerLabel = document.getElementById('backendConnectionLabel');
@@ -1084,6 +1154,11 @@
       const btn = document.getElementById(id);
       if (btn) btn.disabled = !connected;
     });
+    FIELD_BLOCK_BUTTON_IDS.forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn && id !== 'regJobLinkBlockBtn') btn.disabled = !connected;
+    });
+    syncJobLinkBlockButton();
     if (profileSelect) profileSelect.disabled = !connected;
     if (offlineBanner) offlineBanner.hidden = true;
     if (registerTabBtn) registerTabBtn.classList.toggle('is-auth-required', !connected);
@@ -2822,6 +2897,7 @@
     wireRegisterTabSession();
     wireJobLinkDuplicateAutoCheck(showStatus);
     wireCompanyDuplicateAutoCheck(showStatus);
+    wireJobLinkBlockAutoSync();
     wireJson2docxGenerate(showStatus);
     wirePromptKitControls(showStatus);
     wirePromptKitStorageSync();
@@ -2926,6 +3002,8 @@
     wireRegisterFieldCopy('regJobLinkCopyBtn', 'regJobLink', 'Job link copied to clipboard.', 'Could not copy job link.', showStatus);
     wireRegisterFieldDup('regCompanyDupBtn', 'company', showStatus);
     wireRegisterFieldDup('regJobLinkDupBtn', 'link', showStatus);
+    wireRegisterFieldBlock('regJobLinkBlockBtn', showStatus);
+    syncJobLinkBlockButton();
   }
 
   function onRegisterViewShown() {
@@ -2955,6 +3033,8 @@
     refreshApplyProgress,
     notifyRegisterJobLinkFilled,
     notifyRegisterCompanyFilled,
+    blockCurrentJobFromRegister,
+    syncJobLinkBlockButton,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND

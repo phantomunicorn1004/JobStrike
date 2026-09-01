@@ -2679,6 +2679,7 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
   if (!preferResumeJson) {
     window.SmartJobRegisterResumeDb?.notifyRegisterCompanyFilled?.(showStatus, { force: true });
   }
+  window.SmartJobRegisterResumeDb?.syncJobLinkBlockButton?.();
 
   if (showSuccess) {
     showStatus(

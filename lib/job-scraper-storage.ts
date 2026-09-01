@@ -1,4 +1,9 @@
-import type { JobScraperDateWindow, RegisteredJobRef, ScrapedJob } from "@/lib/job-scraper";
+import type {
+  BlockedJobRef,
+  JobScraperDateWindow,
+  RegisteredJobRef,
+  ScrapedJob,
+} from "@/lib/job-scraper";
 
 export const JOB_SCRAPER_STORAGE_KEY = "rwh.job-scraper.session.v1";
 
@@ -9,12 +14,14 @@ export type JobScraperPersistedSession = {
   candidateFilter: string;
   excludeBlocked: boolean;
   excludeBlockedAts: boolean;
+  excludeBlockedJobs: boolean;
   excludeRegisteredJobs: boolean;
   excludeRegisteredCompanies: boolean;
   baseJobs: ScrapedJob[];
   filterContext: {
     blockedCompanies: string[];
     blockedAts: string[];
+    blockedJobs: BlockedJobRef[];
     registeredCompanies: string[];
     registeredJobs: RegisteredJobRef[];
     registeredJobCount: number;

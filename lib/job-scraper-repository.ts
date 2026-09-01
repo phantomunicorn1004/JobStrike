@@ -3,6 +3,7 @@ import "server-only";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 import { normalizeCompanyName } from "@/lib/job-scraper";
+import { canonicalJobUrl } from "@/lib/job-url";
 
 export type BlockedCompany = {
   id: string;
@@ -302,6 +303,93 @@ export async function deleteBlockedAts(userId: string, id: string): Promise<void
   const supabase = getSupabaseAdminClient();
   const { error } = await supabase
     .from("resume_db_blocked_ats")
+    .delete()
+    .eq("user_id", userId)
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+}
+
+export type BlockedJob = {
+  id: string;
+  jobLink: string;
+  jobTitle: string | null;
+  companyName: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
+type BlockedJobRow = {
+  id: string;
+  user_id: string;
+  job_link: string;
+  job_link_canonical: string;
+  job_title: string | null;
+  company_name: string | null;
+  note: string | null;
+  created_at: string;
+};
+
+function mapBlockedJob(row: BlockedJobRow): BlockedJob {
+  return {
+    id: row.id,
+    jobLink: row.job_link,
+    jobTitle: row.job_title,
+    companyName: row.company_name,
+    note: row.note,
+    createdAt: row.created_at,
+  };
+}
+
+export async function listBlockedJobs(userId: string): Promise<BlockedJob[]> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("resume_db_blocked_jobs")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as BlockedJobRow[]).map(mapBlockedJob);
+}
+
+export async function addBlockedJob(
+  userId: string,
+  input: {
+    jobLink: string;
+    jobTitle?: string | null;
+    companyName?: string | null;
+    note?: string | null;
+  },
+): Promise<BlockedJob> {
+  const jobLink = input.jobLink.trim();
+  const canonical = canonicalJobUrl(jobLink);
+  if (!canonical) {
+    throw new Error("A valid job link is required.");
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("resume_db_blocked_jobs")
+    .insert({
+      user_id: userId,
+      job_link: jobLink,
+      job_link_canonical: canonical,
+      job_title: input.jobTitle?.trim() || null,
+      company_name: input.companyName?.trim() || null,
+      note: input.note?.trim() || null,
+    } as never)
+    .select("*")
+    .single();
+
+  if (error) throw new Error(error.message);
+  return mapBlockedJob(data as BlockedJobRow);
+}
+
+export async function deleteBlockedJob(userId: string, id: string): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase
+    .from("resume_db_blocked_jobs")
     .delete()
     .eq("user_id", userId)
     .eq("id", id);

@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Filter,
   Link2,
+  Link2Off,
   ListFilter,
   Loader2,
   RefreshCw,
@@ -61,9 +62,11 @@ import {
 import {
   applyOptionalScrapeFilters,
   classifyJobAgainstResumeDb,
+  jobMatchesBlockedJobs,
   jobsToCsv,
   normalizeAtsName,
   normalizeCompanyName,
+  type BlockedJobRef,
   type JobDuplicateStatus,
   type RegisteredJobRef,
   type ScrapedJob,
@@ -92,6 +95,15 @@ type BlockedAts = {
   createdAt: string;
 };
 
+type BlockedJob = {
+  id: string;
+  jobLink: string;
+  jobTitle: string | null;
+  companyName: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
 type CandidateOption = {
   key: string;
   label: string;
@@ -102,6 +114,7 @@ type JobRow = ScrapedJob;
 type FilterContext = {
   blockedCompanies: string[];
   blockedAts: string[];
+  blockedJobs: BlockedJobRef[];
   registeredCompanies: string[];
   registeredJobs: RegisteredJobRef[];
   registeredJobCount: number;
@@ -115,6 +128,7 @@ type ScrapeStats = {
   baseRemaining: number;
   removedRegisteredJobs: number;
   removedRegisteredCompanies: number;
+  removedBlockedJobs: number;
   removedBlocked: number;
   removedAts: number;
   remaining: number;
@@ -331,12 +345,14 @@ export function JobScraperPageClient() {
   const [dateWindow, setDateWindow] = useState<DateWindow>("3d");
   const [excludeBlocked, setExcludeBlocked] = useState(true);
   const [excludeBlockedAts, setExcludeBlockedAts] = useState(true);
+  const [excludeBlockedJobs, setExcludeBlockedJobs] = useState(true);
   const [excludeRegisteredJobs, setExcludeRegisteredJobs] = useState(true);
   const [excludeRegisteredCompanies, setExcludeRegisteredCompanies] = useState(true);
   const [candidateFilter, setCandidateFilter] = useState("");
   const [candidates, setCandidates] = useState<CandidateOption[]>([]);
   const [blockedCompanies, setBlockedCompanies] = useState<BlockedCompany[]>([]);
   const [blockedAts, setBlockedAts] = useState<BlockedAts[]>([]);
+  const [blockedJobs, setBlockedJobs] = useState<BlockedJob[]>([]);
   const [resumeDbCompanies, setResumeDbCompanies] = useState<string[]>([]);
   const [registeredJobCount, setRegisteredJobCount] = useState(0);
   const [resumeDbCompanyCount, setResumeDbCompanyCount] = useState(0);
@@ -350,6 +366,8 @@ export function JobScraperPageClient() {
   const [savingAts, setSavingAts] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingAtsId, setDeletingAtsId] = useState<string | null>(null);
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
+  const [savingBlockedJob, setSavingBlockedJob] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [baseJobs, setBaseJobs] = useState<JobRow[]>([]);
@@ -373,6 +391,7 @@ export function JobScraperPageClient() {
       setCandidateFilter(saved.candidateFilter || "");
       setExcludeBlocked(saved.excludeBlocked !== false);
       setExcludeBlockedAts(saved.excludeBlockedAts !== false);
+      setExcludeBlockedJobs(saved.excludeBlockedJobs !== false);
       setExcludeRegisteredJobs(saved.excludeRegisteredJobs !== false);
       setExcludeRegisteredCompanies(saved.excludeRegisteredCompanies !== false);
       setBaseJobs(saved.baseJobs ?? []);
@@ -415,6 +434,7 @@ export function JobScraperPageClient() {
       candidateFilter,
       excludeBlocked,
       excludeBlockedAts,
+      excludeBlockedJobs,
       excludeRegisteredJobs,
       excludeRegisteredCompanies,
       baseJobs,
@@ -427,6 +447,7 @@ export function JobScraperPageClient() {
     candidateFilter,
     excludeBlocked,
     excludeBlockedAts,
+    excludeBlockedJobs,
     excludeRegisteredJobs,
     excludeRegisteredCompanies,
     baseJobs,
@@ -476,6 +497,7 @@ export function JobScraperPageClient() {
       if (!res.ok) throw new Error(data.error || "Failed to load company lists.");
       setBlockedCompanies(data.blockedCompanies ?? []);
       setBlockedAts(data.blockedAts ?? []);
+      setBlockedJobs(data.blockedJobs ?? []);
       setCandidates(data.candidates ?? []);
       setResumeDbCompanies(data.resumeDbCompanies ?? []);
       setResumeDbCompanyCount(Number(data.resumeDbCompanyCount ?? 0));
@@ -486,6 +508,11 @@ export function JobScraperPageClient() {
             (company: BlockedCompany) => company.companyName,
           ),
         blockedAts: (data.blockedAts ?? []).map((ats: BlockedAts) => ats.atsName),
+        blockedJobs: (data.blockedJobs ?? []).map((job: BlockedJob) => ({
+          jobLink: job.jobLink,
+          jobTitle: job.jobTitle,
+          companyName: job.companyName,
+        })),
         registeredCompanies: data.resumeDbCompanies ?? current?.registeredCompanies ?? [],
         registeredJobs: data.registeredJobs ?? current?.registeredJobs ?? [],
         registeredJobCount: Number(
@@ -529,6 +556,7 @@ export function JobScraperPageClient() {
           dateWindow,
           excludeBlocked,
           excludeBlockedAts,
+          excludeBlockedJobs,
           excludeRegisteredJobs,
           excludeRegisteredCompanies,
           candidateFilter,
@@ -545,6 +573,11 @@ export function JobScraperPageClient() {
         data.filterContext ?? {
           blockedCompanies: blockedCompanies.map((c) => c.companyName),
           blockedAts: blockedAts.map((a) => a.atsName),
+          blockedJobs: blockedJobs.map((job) => ({
+            jobLink: job.jobLink,
+            jobTitle: job.jobTitle,
+            companyName: job.companyName,
+          })),
           registeredCompanies: resumeDbCompanies,
           registeredJobs: [],
           registeredJobCount: registeredJobCount,
@@ -725,11 +758,102 @@ export function JobScraperPageClient() {
     await saveBlockedAts({ atsName });
   };
 
+  const saveBlockedJob = async (payload: {
+    jobLink: string;
+    jobTitle?: string | null;
+    companyName?: string | null;
+    note?: string | null;
+  }) => {
+    setSavingBlockedJob(true);
+    try {
+      const res = await fetch("/api/job-scraper/blocked-jobs", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to block job.");
+      const nextJobs = (data.blockedJobs ?? []) as BlockedJob[];
+      setBlockedJobs(nextJobs);
+      setFilterContext((current) =>
+        current
+          ? {
+              ...current,
+              blockedJobs: nextJobs.map((job) => ({
+                jobLink: job.jobLink,
+                jobTitle: job.jobTitle,
+                companyName: job.companyName,
+              })),
+            }
+          : current,
+      );
+      toast.success(
+        data.alreadyBlocked ? "Job is already on your blocked list." : "Job blocked.",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to block job.");
+    } finally {
+      setSavingBlockedJob(false);
+    }
+  };
+
+  const removeBlockedJob = async (id: string) => {
+    setDeletingJobId(id);
+    try {
+      const res = await fetch(`/api/job-scraper/blocked-jobs?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Delete failed.");
+      setBlockedJobs((current) => current.filter((job) => job.id !== id));
+      setFilterContext((current) => {
+        if (!current) return current;
+        const removed = blockedJobs.find((job) => job.id === id);
+        if (!removed) return current;
+        return {
+          ...current,
+          blockedJobs: current.blockedJobs.filter(
+            (job) => job.jobLink.trim() !== removed.jobLink.trim(),
+          ),
+        };
+      });
+      toast.success("Blocked job removed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingJobId(null);
+    }
+  };
+
+  const addJobFromRow = async (job: JobRow) => {
+    const jobLink = job.apply_url?.trim();
+    if (!jobLink) return;
+    await saveBlockedJob({
+      jobLink,
+      jobTitle: job.title,
+      companyName: job.company_name,
+    });
+  };
+
+  const blockedJobRefs = useMemo<BlockedJobRef[]>(
+    () =>
+      (filterContext?.blockedJobs ??
+        blockedJobs.map((job) => ({
+          jobLink: job.jobLink,
+          jobTitle: job.jobTitle,
+          companyName: job.companyName,
+        }))) as BlockedJobRef[],
+    [blockedJobs, filterContext?.blockedJobs],
+  );
+
   const duplicateStatuses = useMemo(() => {
     if (!candidateFilter) return new Map<string, JobDuplicateStatus>();
     const context = filterContext ?? {
       blockedCompanies: blockedCompanies.map((c) => c.companyName),
       blockedAts: blockedAts.map((a) => a.atsName),
+      blockedJobs: blockedJobRefs,
       registeredCompanies: resumeDbCompanies,
       registeredJobs: [],
       registeredJobCount,
@@ -774,6 +898,7 @@ export function JobScraperPageClient() {
     const context = filterContext ?? {
       blockedCompanies: blockedCompanies.map((c) => c.companyName),
       blockedAts: blockedAts.map((a) => a.atsName),
+      blockedJobs: blockedJobRefs,
       registeredCompanies: resumeDbCompanies,
       registeredJobs: [],
       registeredJobCount,
@@ -782,10 +907,12 @@ export function JobScraperPageClient() {
     const { filtered, stats: optionalStats } = applyOptionalScrapeFilters(baseJobs, {
       excludeRegisteredJobs: Boolean(candidateFilter) && excludeRegisteredJobs,
       excludeRegisteredCompanies: Boolean(candidateFilter) && excludeRegisteredCompanies,
+      excludeBlockedJobs,
       excludeBlockedCompanies: excludeBlocked,
       excludeBlockedAts,
       registeredJobs: context.registeredJobs,
       registeredCompanies: context.registeredCompanies,
+      blockedJobs: context.blockedJobs,
       blockedCompanies: context.blockedCompanies,
       blockedAts: context.blockedAts,
     });
@@ -802,6 +929,7 @@ export function JobScraperPageClient() {
           candidateFilter && excludeRegisteredCompanies
             ? optionalStats.removedRegisteredCompanies
             : 0,
+        removedBlockedJobs: excludeBlockedJobs ? optionalStats.removedBlockedJobs : 0,
         removedBlocked: excludeBlocked ? optionalStats.removedBlocked : 0,
         removedAts: excludeBlockedAts ? optionalStats.removedAts : 0,
         remaining: filtered.length,
@@ -811,9 +939,11 @@ export function JobScraperPageClient() {
     baseJobs,
     blockedAts,
     blockedCompanies,
+    blockedJobRefs,
     candidateFilter,
     excludeBlocked,
     excludeBlockedAts,
+    excludeBlockedJobs,
     excludeRegisteredCompanies,
     excludeRegisteredJobs,
     filterContext,
@@ -1302,6 +1432,41 @@ export function JobScraperPageClient() {
                       </ul>
                     )}
                   </div>
+                  <div className="min-h-0 flex-1 space-y-2 overflow-auto rounded-md border p-3">
+                    <div className="text-sm font-medium">
+                      Blocked jobs ({blockedJobs.length})
+                    </div>
+                    {blockedJobs.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No blocked jobs yet.</p>
+                    ) : (
+                      <ul className="space-y-2 text-sm">
+                        {blockedJobs.map((job) => (
+                          <li
+                            key={job.id}
+                            className="rounded-md border px-2 py-1.5 hover:bg-muted/50"
+                          >
+                            <div className="font-medium">
+                              {job.companyName || "—"}
+                              {job.jobTitle ? ` · ${job.jobTitle}` : ""}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                              {job.jobLink}
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="mt-1 h-7 px-2 text-xs"
+                              onClick={() => removeBlockedJob(job.id)}
+                              disabled={deletingJobId === job.id}
+                            >
+                              {deletingJobId === job.id ? "Removing…" : "Unblock"}
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </div>
               </SheetContent>
             </Sheet>
@@ -1352,6 +1517,13 @@ export function JobScraperPageClient() {
                   onCheckedChange={(checked) => setExcludeBlockedAts(Boolean(checked))}
                 />
                 ATS ({blockedAts.length})
+              </label>
+              <label className="flex items-center gap-1.5 text-xs">
+                <Checkbox
+                  checked={excludeBlockedJobs}
+                  onCheckedChange={(checked) => setExcludeBlockedJobs(Boolean(checked))}
+                />
+                Blocked jobs ({blockedJobs.length})
               </label>
               <label className="flex items-center gap-1.5 text-xs">
                 <Checkbox
@@ -1413,6 +1585,9 @@ export function JobScraperPageClient() {
                     </Badge>
                     <Badge variant="secondary">
                       Reg. companies {filteredResult.stats.removedRegisteredCompanies}
+                    </Badge>
+                    <Badge variant="secondary">
+                      Blocked jobs {filteredResult.stats.removedBlockedJobs ?? 0}
                     </Badge>
                     {candidateFilter ? (
                       <>
@@ -1620,6 +1795,12 @@ export function JobScraperPageClient() {
                               </div>
                             ) : null}
                             <JobDuplicateBadges status={duplicateStatus} />
+                            {job.apply_url &&
+                            jobMatchesBlockedJobs(job.apply_url, blockedJobRefs) ? (
+                              <Badge variant="secondary" className="mt-1 text-[10px]">
+                                Blocked
+                              </Badge>
+                            ) : null}
                           </TableCell>
                           <TableCell className="max-w-[280px] whitespace-normal">
                             <div>{job.title || "—"}</div>
@@ -1649,6 +1830,22 @@ export function JobScraperPageClient() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center justify-center gap-0.5">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                    onClick={() => addJobFromRow(job)}
+                                    disabled={!job.apply_url || savingBlockedJob}
+                                    aria-label="Block job"
+                                  >
+                                    <Link2Off className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Block job</TooltipContent>
+                              </Tooltip>
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <Button

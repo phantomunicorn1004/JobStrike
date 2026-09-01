@@ -10,14 +10,16 @@ import {
   type JobDuplicateStatus,
   type RegisteredJobRef,
 } from "@/lib/job-duplicate";
+import { jobMatchesBlockedJobs, type BlockedJobRef } from "@/lib/job-block";
 import { canonicalJobUrl } from "@/lib/job-url";
 
-export type { JobDuplicateStatus, RegisteredJobRef };
+export type { BlockedJobRef, JobDuplicateStatus, RegisteredJobRef };
 export {
   classifyJobAgainstResumeDb,
   companiesMatch,
   companyMatchLevelInList,
   companyMatchesList,
+  jobMatchesBlockedJobs,
   jobMatchesRegisteredJobRef,
   normalizeCompanyName,
 };
@@ -309,10 +311,12 @@ export function jobMatchesRegisteredJobs(
 export type OptionalScrapeFilters = {
   excludeRegisteredJobs?: boolean;
   excludeRegisteredCompanies?: boolean;
+  excludeBlockedJobs?: boolean;
   excludeBlockedCompanies?: boolean;
   excludeBlockedAts?: boolean;
   registeredJobs?: RegisteredJobRef[];
   registeredCompanies?: string[];
+  blockedJobs?: BlockedJobRef[];
   blockedCompanies?: string[];
   blockedAts?: string[];
 };
@@ -320,6 +324,7 @@ export type OptionalScrapeFilters = {
 export type OptionalFilterStats = {
   removedRegisteredJobs: number;
   removedRegisteredCompanies: number;
+  removedBlockedJobs: number;
   removedBlocked: number;
   removedAts: number;
 };
@@ -332,17 +337,24 @@ export function applyOptionalScrapeFilters(
     filters.excludeRegisteredJobs === true ? filters.registeredJobs ?? [] : [];
   const registeredCompanies =
     filters.excludeRegisteredCompanies === true ? filters.registeredCompanies ?? [] : [];
+  const blockedJobs =
+    filters.excludeBlockedJobs === true ? filters.blockedJobs ?? [] : [];
   const blockedCompanies =
     filters.excludeBlockedCompanies === true ? filters.blockedCompanies ?? [] : [];
   const blockedAts = filters.excludeBlockedAts === true ? filters.blockedAts ?? [] : [];
 
   let removedRegisteredJobs = 0;
   let removedRegisteredCompanies = 0;
+  let removedBlockedJobs = 0;
   let removedBlocked = 0;
   let removedAts = 0;
   const filtered: ScrapedJob[] = [];
 
   for (const job of jobs) {
+    if (blockedJobs.length > 0 && jobMatchesBlockedJobs(job.apply_url, blockedJobs)) {
+      removedBlockedJobs += 1;
+      continue;
+    }
     if (registeredJobs.length > 0 && jobMatchesRegisteredJobs(job, registeredJobs)) {
       removedRegisteredJobs += 1;
       continue;
@@ -373,6 +385,7 @@ export function applyOptionalScrapeFilters(
     stats: {
       removedRegisteredJobs,
       removedRegisteredCompanies,
+      removedBlockedJobs,
       removedBlocked,
       removedAts,
     },
