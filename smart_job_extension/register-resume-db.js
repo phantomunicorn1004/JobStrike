@@ -25,7 +25,10 @@
   let lastAutoCheckedCompanyKey = '';
   let lastAutoCheckedJobLinkKey = '';
   let jobLinkDupTimer = null;
+  let companyDupTimer = null;
   let jobLinkDuplicateActive = false;
+  /** @type {'none' | 'definite' | 'possible'} */
+  let companyDuplicateLevel = 'none';
   let generatedFileMeta = { resumeName: '', coverName: '', generatedAt: 0 };
   /** Set when a reload left file metadata behind but the File objects are gone. */
   let filesNeedRegeneration = false;
@@ -231,7 +234,11 @@
       files: hasFiles ? '' : 'Optional — generate or attach files, or register without them.',
       register: jobLinkDuplicateActive
         ? 'Duplicate job link — already in Resume DB for this profile.'
-        : ''
+        : companyDuplicateLevel === 'definite'
+          ? 'Duplicate company — already in Resume DB for this profile.'
+          : companyDuplicateLevel === 'possible'
+            ? 'Similar company name — review before registering.'
+            : ''
     };
 
     // A later step being complete implies the earlier ones were. This matters
@@ -263,6 +270,12 @@
         reason = blockedReason.files;
       } else if (step.key === 'register' && jobLinkDuplicateActive) {
         state = 'blocked';
+        reason = blockedReason.register;
+      } else if (step.key === 'register' && companyDuplicateLevel === 'definite') {
+        state = 'warn';
+        reason = blockedReason.register;
+      } else if (step.key === 'register' && companyDuplicateLevel === 'possible') {
+        state = 'warn';
         reason = blockedReason.register;
       } else if (index === currentIndex) {
         reason = blockedReason[step.key];
@@ -597,11 +610,38 @@
     return left === right;
   }
 
+  function companyNameApi() {
+    return global.SmartJobCompanyName || null;
+  }
+
+  function normalizeCompanyKey(value) {
+    const api = companyNameApi();
+    if (api?.normalizeCompanyName) return api.normalizeCompanyName(value);
+    return normalizeMatchKey(value);
+  }
+
+  function companiesMatchNames(a, b) {
+    const api = companyNameApi();
+    if (api?.companiesMatch) return api.companiesMatch(a, b);
+    return matchKeysEqual(a, b);
+  }
+
+  function companyMatchLevelNames(a, b) {
+    const api = companyNameApi();
+    if (api?.companyMatchLevel) return api.companyMatchLevel(a, b);
+    return companiesMatchNames(a, b) ? 'definite' : 'none';
+  }
+
   function applicationSameCompany(app, job) {
     return (
-      matchKeysEqual(app.company, job.companyName) &&
+      companiesMatchNames(app.company, job.companyName) &&
       hasMatchKey(job.companyName)
     );
+  }
+
+  function setCompanyDuplicateLevel(level) {
+    companyDuplicateLevel = level === 'definite' || level === 'possible' ? level : 'none';
+    syncResumeBuilderActionButtons();
   }
 
   function jobUrlApi() {
@@ -771,6 +811,59 @@
       .filter((app) => String(app.profileId) === String(profileId))
       .filter((app) => isWithinDuplicateCheckWindow(app, windowDays));
 
+    if (field === 'company') {
+      let definiteMatch = null;
+      let possibleMatch = null;
+      for (const app of forCandidate) {
+        const level = companyMatchLevelNames(app.company, fields.companyName);
+        if (level === 'definite') {
+          definiteMatch = app;
+          break;
+        }
+        if (level === 'possible' && !possibleMatch) {
+          possibleMatch = app;
+        }
+      }
+
+      if (definiteMatch) {
+        const { when, detail } = formatApplicationSummary(definiteMatch, fields);
+        const message = `Duplicate company — already in Resume DB for this profile${windowSuffix}${
+          when ? ` (${when}${detail ? `: ${detail}` : ''})` : detail ? ` (${detail})` : ''
+        }.`;
+        if (!jobLinkDuplicateActive) {
+          setRegisterStatus(message, 'error');
+          if (showStatus) showStatus('Duplicate company for this profile.', 'error');
+        }
+        setCompanyDuplicateLevel('definite');
+        return { level: 'duplicate', match: definiteMatch, windowDays, field };
+      }
+
+      if (possibleMatch) {
+        const { when, detail } = formatApplicationSummary(possibleMatch, fields);
+        const registeredCompany = possibleMatch.company || 'registered company';
+        const message = `Possible duplicate company — similar to "${registeredCompany}" in Resume DB for this profile${windowSuffix}${
+          when ? ` (${when}${detail ? `: ${detail}` : ''})` : detail ? ` (${detail})` : ''
+        }.`;
+        if (!jobLinkDuplicateActive) {
+          setRegisterStatus(message, 'warn');
+          if (showStatus) showStatus('Possible duplicate company for this profile.', 'warn');
+        }
+        setCompanyDuplicateLevel('possible');
+        return { level: 'possible', match: possibleMatch, windowDays, field };
+      }
+
+      setCompanyDuplicateLevel('none');
+      const noCompanyMessage =
+        windowDays > 0
+          ? `No matching company in the last ${windowDays} day${windowDays === 1 ? '' : 's'} for this profile.`
+          : 'No matching company for this profile.';
+      if (!quietIfNone && !jobLinkDuplicateActive) {
+        setRegisterStatus(noCompanyMessage, 'success');
+        if (showStatus) showStatus(noCompanyMessage, 'success');
+      }
+      return { level: 'none', match: null, windowDays, field };
+    }
+
     const match = forCandidate.find((app) => config.matches(app));
     if (match) {
       const { when, detail } = formatApplicationSummary(match, fields);
@@ -850,19 +943,28 @@
     input.addEventListener('change', onEdit);
   }
 
-  function scheduleCompanyDuplicateCheckFromResumeJson(companyName, showStatus) {
-    const key = normalizeMatchKey(companyName);
-    if (!key) return;
-    if (key === lastAutoCheckedCompanyKey) return;
-    if (resumeJsonDupTimer) clearTimeout(resumeJsonDupTimer);
-    resumeJsonDupTimer = setTimeout(() => {
-      void runAutoCompanyDuplicateCheck(companyName, showStatus);
+  function scheduleCompanyDuplicateCheck(showStatus, { force = false } = {}) {
+    const key = normalizeCompanyKey(document.getElementById('regCompany')?.value);
+    if (!key) {
+      lastAutoCheckedCompanyKey = '';
+      setCompanyDuplicateLevel('none');
+      return;
+    }
+    if (!force && key === lastAutoCheckedCompanyKey) return;
+    if (companyDupTimer) clearTimeout(companyDupTimer);
+    companyDupTimer = setTimeout(() => {
+      void runAutoCompanyDuplicateCheck(showStatus, { force });
     }, 450);
   }
 
-  async function runAutoCompanyDuplicateCheck(companyName, showStatus) {
-    const key = normalizeMatchKey(companyName);
-    if (!key || key === lastAutoCheckedCompanyKey) return;
+  async function runAutoCompanyDuplicateCheck(showStatus, { force = false } = {}) {
+    const key = normalizeCompanyKey(document.getElementById('regCompany')?.value);
+    if (!key) {
+      lastAutoCheckedCompanyKey = '';
+      setCompanyDuplicateLevel('none');
+      return;
+    }
+    if (!force && key === lastAutoCheckedCompanyKey) return;
     if (!backendConnected) return;
     const profileId = document.getElementById('regProfileId')?.value?.trim();
     if (!profileId) return;
@@ -872,7 +974,35 @@
       await checkFieldDuplicate('company', showStatus, { quietIfNone: true });
     } catch (_) {
       lastAutoCheckedCompanyKey = '';
+      setCompanyDuplicateLevel('none');
     }
+  }
+
+  function notifyRegisterCompanyFilled(showStatus, { force = false } = {}) {
+    if (isRestoringSession) return;
+    scheduleCompanyDuplicateCheck(showStatus, { force });
+  }
+
+  function wireCompanyDuplicateAutoCheck(showStatus) {
+    const input = document.getElementById('regCompany');
+    if (!input || input.dataset.companyDupWired === '1') return;
+    input.dataset.companyDupWired = '1';
+    const onEdit = () => {
+      lastAutoCheckedCompanyKey = '';
+      scheduleCompanyDuplicateCheck(showStatus);
+    };
+    input.addEventListener('input', onEdit);
+    input.addEventListener('change', onEdit);
+  }
+
+  function scheduleCompanyDuplicateCheckFromResumeJson(companyName, showStatus) {
+    const key = normalizeCompanyKey(companyName);
+    if (!key) return;
+    if (key === lastAutoCheckedCompanyKey) return;
+    if (resumeJsonDupTimer) clearTimeout(resumeJsonDupTimer);
+    resumeJsonDupTimer = setTimeout(() => {
+      void runAutoCompanyDuplicateCheck(showStatus, { force: true });
+    }, 450);
   }
 
   function setConnectionStatus(state, detail, username) {
@@ -1179,7 +1309,9 @@
       void saveSelectedProfileId(select.value);
       void refreshPromptKitUi();
       lastAutoCheckedJobLinkKey = '';
+      lastAutoCheckedCompanyKey = '';
       scheduleJobLinkDuplicateCheck(null);
+      scheduleCompanyDuplicateCheck(null);
       syncResumeBuilderActionButtons();
     });
   }
@@ -1872,6 +2004,7 @@
       lastAutoCheckedCompanyKey,
       lastAutoCheckedJobLinkKey,
       jobLinkDuplicateActive,
+      companyDuplicateLevel,
       files: {
         resume: inputs.resume?.files?.[0] || null,
         cover: inputs.cover?.files?.[0] || null
@@ -1900,11 +2033,19 @@
         clearTimeout(jobLinkDupTimer);
         jobLinkDupTimer = null;
       }
+      if (companyDupTimer) {
+        clearTimeout(companyDupTimer);
+        companyDupTimer = null;
+      }
 
       // Globals first, so the renderers below read the right precedence.
       lastAutoCheckedCompanyKey = String(state.lastAutoCheckedCompanyKey || '');
       lastAutoCheckedJobLinkKey = String(state.lastAutoCheckedJobLinkKey || '');
       jobLinkDuplicateActive = Boolean(state.jobLinkDuplicateActive);
+      companyDuplicateLevel =
+        state.companyDuplicateLevel === 'definite' || state.companyDuplicateLevel === 'possible'
+          ? state.companyDuplicateLevel
+          : 'none';
       autoAttachedFromJson2docx = {
         resume: Boolean(state.autoAttachedFromJson2docx?.resume),
         cover: Boolean(state.autoAttachedFromJson2docx?.cover)
@@ -1971,6 +2112,7 @@
       lastAutoCheckedCompanyKey: data.lastAutoCheckedCompanyKey || '',
       lastAutoCheckedJobLinkKey: data.lastAutoCheckedJobLinkKey || '',
       jobLinkDuplicateActive: Boolean(data.jobLinkDuplicateActive),
+      companyDuplicateLevel: data.companyDuplicateLevel || 'none',
       fileMeta: data.fileMeta || null,
       autoAttachedFromJson2docx: data.autoAttachedFromJson2docx || null,
       promptCopiedAt: Number(data.promptCopiedAt || 0),
@@ -2031,6 +2173,7 @@
   function clearResumeJsonOverride({ clearTextarea = true } = {}) {
     resumeJsonOverrideActive = false;
     lastAutoCheckedCompanyKey = '';
+    setCompanyDuplicateLevel('none');
     if (clearTextarea) {
       const ta = document.getElementById('regResumeJson');
       if (ta) ta.value = '';
@@ -2060,6 +2203,7 @@
 
     if (!text) {
       lastAutoCheckedCompanyKey = '';
+    setCompanyDuplicateLevel('none');
       clearResumeJsonOverride({ clearTextarea: false });
       if (clearBtn) clearBtn.hidden = true;
       syncResumeBuilderActionButtons();
@@ -2677,6 +2821,7 @@
     wireResumeJsonLiveFill(showStatus);
     wireRegisterTabSession();
     wireJobLinkDuplicateAutoCheck(showStatus);
+    wireCompanyDuplicateAutoCheck(showStatus);
     wireJson2docxGenerate(showStatus);
     wirePromptKitControls(showStatus);
     wirePromptKitStorageSync();
@@ -2809,6 +2954,7 @@
     computeApplyProgress,
     refreshApplyProgress,
     notifyRegisterJobLinkFilled,
+    notifyRegisterCompanyFilled,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND

@@ -1,4 +1,26 @@
-import { canonicalJobUrl, jobLinksMatch } from "@/lib/job-url";
+import {
+  companiesMatch,
+  companyMatchLevelInList,
+  companyMatchesList,
+  normalizeCompanyName,
+} from "@/lib/company-name";
+import {
+  classifyJobAgainstResumeDb,
+  jobMatchesRegisteredJobRef,
+  type JobDuplicateStatus,
+  type RegisteredJobRef,
+} from "@/lib/job-duplicate";
+import { canonicalJobUrl } from "@/lib/job-url";
+
+export type { JobDuplicateStatus, RegisteredJobRef };
+export {
+  classifyJobAgainstResumeDb,
+  companiesMatch,
+  companyMatchLevelInList,
+  companyMatchesList,
+  jobMatchesRegisteredJobRef,
+  normalizeCompanyName,
+};
 
 export type JobScraperDateWindow = "1d" | "3d" | "7d";
 
@@ -97,15 +119,6 @@ function serializeField(value: unknown): string | null {
   } catch {
     return String(value);
   }
-}
-
-export function normalizeCompanyName(value: string | null | undefined): string {
-  return (value ?? "")
-    .toLowerCase()
-    .replace(/[.,]/g, " ")
-    .replace(/\b(inc|llc|ltd|corp|corporation|co|company)\b/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function normalizeText(value: string | null | undefined): string {
@@ -274,19 +287,6 @@ export function normalizeAtsName(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
-/** registered.includes(jobCompany) — preferred company match. */
-export function companyMatchesList(
-  jobCompany: string | null | undefined,
-  companyList: string[],
-): boolean {
-  const jobKey = normalizeCompanyName(jobCompany);
-  if (!jobKey) return false;
-  return companyList.some((company) => {
-    const listKey = normalizeCompanyName(company);
-    return Boolean(listKey) && listKey.includes(jobKey);
-  });
-}
-
 export function atsMatchesList(
   jobAts: string | null | undefined,
   atsList: string[],
@@ -299,36 +299,11 @@ export function atsMatchesList(
   });
 }
 
-export type RegisteredJobRef = {
-  jobLink: string | null;
-  jobTitle: string | null;
-  company: string | null;
-};
-
 export function jobMatchesRegisteredJobs(
   job: ScrapedJob,
   registeredJobs: RegisteredJobRef[],
 ): boolean {
-  const jobCompany = normalizeCompanyName(job.company_name);
-  const jobTitle = normalizeText(job.title);
-
-  for (const registered of registeredJobs) {
-    if (jobLinksMatch(job.apply_url, registered.jobLink)) return true;
-
-    const registeredCompany = normalizeCompanyName(registered.company);
-    const registeredTitle = normalizeText(registered.jobTitle);
-    if (
-      jobCompany &&
-      jobTitle &&
-      registeredCompany &&
-      registeredTitle &&
-      jobCompany === registeredCompany &&
-      jobTitle === registeredTitle
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return registeredJobs.some((registered) => jobMatchesRegisteredJobRef(job, registered));
 }
 
 export type OptionalScrapeFilters = {

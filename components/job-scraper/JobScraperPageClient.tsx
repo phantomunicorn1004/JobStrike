@@ -60,9 +60,11 @@ import {
 } from "@/components/ui/tooltip";
 import {
   applyOptionalScrapeFilters,
+  classifyJobAgainstResumeDb,
   jobsToCsv,
   normalizeAtsName,
   normalizeCompanyName,
+  type JobDuplicateStatus,
   type RegisteredJobRef,
   type ScrapedJob,
 } from "@/lib/job-scraper";
@@ -165,6 +167,29 @@ function getJobKey(job: JobRow): string {
     job.estimated_publish_date ?? "",
     job.application_site ?? "",
   ].join("||");
+}
+
+function JobDuplicateBadges({ status }: { status?: JobDuplicateStatus }) {
+  if (!status) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {status.registeredJob ? (
+        <Badge variant="destructive" className="text-[10px]">
+          Reg. job
+        </Badge>
+      ) : null}
+      {status.registeredCompany ? (
+        <Badge variant="destructive" className="text-[10px]">
+          Reg. company
+        </Badge>
+      ) : null}
+      {status.similarCompany ? (
+        <Badge variant="outline" className="text-[10px]">
+          Similar co.
+        </Badge>
+      ) : null}
+    </div>
+  );
 }
 
 const UNCATEGORIZED_CATEGORY = "__uncategorized__";
@@ -699,6 +724,50 @@ export function JobScraperPageClient() {
     if (!atsName?.trim() || atsName === "Unknown") return;
     await saveBlockedAts({ atsName });
   };
+
+  const duplicateStatuses = useMemo(() => {
+    if (!candidateFilter) return new Map<string, JobDuplicateStatus>();
+    const context = filterContext ?? {
+      blockedCompanies: blockedCompanies.map((c) => c.companyName),
+      blockedAts: blockedAts.map((a) => a.atsName),
+      registeredCompanies: resumeDbCompanies,
+      registeredJobs: [],
+      registeredJobCount,
+      registeredCompanyCount: resumeDbCompanyCount,
+    };
+    const map = new Map<string, JobDuplicateStatus>();
+    for (const job of baseJobs) {
+      map.set(
+        getJobKey(job),
+        classifyJobAgainstResumeDb(job, {
+          registeredJobs: context.registeredJobs,
+          registeredCompanies: context.registeredCompanies,
+        }),
+      );
+    }
+    return map;
+  }, [
+    baseJobs,
+    blockedAts,
+    blockedCompanies,
+    candidateFilter,
+    filterContext,
+    registeredJobCount,
+    resumeDbCompanies,
+    resumeDbCompanyCount,
+  ]);
+
+  const duplicateSummary = useMemo(() => {
+    let registeredJob = 0;
+    let registeredCompany = 0;
+    let similarCompany = 0;
+    duplicateStatuses.forEach((status) => {
+      if (status.registeredJob) registeredJob += 1;
+      if (status.registeredCompany) registeredCompany += 1;
+      if (status.similarCompany) similarCompany += 1;
+    });
+    return { registeredJob, registeredCompany, similarCompany };
+  }, [duplicateStatuses]);
 
   const filteredResult = useMemo(() => {
     if (!scrapeMeta) return null;
@@ -1345,6 +1414,19 @@ export function JobScraperPageClient() {
                     <Badge variant="secondary">
                       Reg. companies {filteredResult.stats.removedRegisteredCompanies}
                     </Badge>
+                    {candidateFilter ? (
+                      <>
+                        <Badge variant="outline">
+                          Reg. job tags {duplicateSummary.registeredJob}
+                        </Badge>
+                        <Badge variant="outline">
+                          Reg. co. tags {duplicateSummary.registeredCompany}
+                        </Badge>
+                        <Badge variant="outline">
+                          Similar co. {duplicateSummary.similarCompany}
+                        </Badge>
+                      </>
+                    ) : null}
                     <Badge variant="secondary">
                       Blocked {filteredResult.stats.removedBlocked}
                     </Badge>
@@ -1514,6 +1596,7 @@ export function JobScraperPageClient() {
                     pagedJobs.map((job, index) => {
                       const jobKey = getJobKey(job);
                       const selected = selectedKeys.has(jobKey);
+                      const duplicateStatus = duplicateStatuses.get(jobKey);
                       return (
                         <TableRow
                           key={`${jobKey}-${rangeStart + index}`}
@@ -1536,6 +1619,7 @@ export function JobScraperPageClient() {
                                 {job.company_tagline}
                               </div>
                             ) : null}
+                            <JobDuplicateBadges status={duplicateStatus} />
                           </TableCell>
                           <TableCell className="max-w-[280px] whitespace-normal">
                             <div>{job.title || "—"}</div>
