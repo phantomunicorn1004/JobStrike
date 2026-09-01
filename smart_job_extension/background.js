@@ -376,6 +376,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request && request.action === 'showPageToastOnActiveTab') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id || !/^https?:\/\//i.test(tab.url || '')) {
+        sendResponse({ success: false });
+        return;
+      }
+      try {
+        const response = await ensureContentScriptAndSendMessage(tab.id, {
+          action: 'showPageToast',
+          message: request.message,
+          type: request.type,
+          timeout: request.timeout
+        });
+        sendResponse(response?.success ? { success: true } : { success: false });
+      } catch (_) {
+        sendResponse({ success: false });
+      }
+    });
+    return true;
+  }
+
   if (request && request.action === 'copyTextOnActiveTab') {
     const tabId = request.tabId || sender.tab?.id;
     const copyOnTab = async (id) => {

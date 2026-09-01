@@ -3,7 +3,7 @@
  * Supports movable, dock-left, and dock-right modes.
  */
 (function () {
-  const OVERLAY_VERSION = 17;
+  const OVERLAY_VERSION = 18;
   if (window.__remoteHelperAssistantOverlayVersion >= OVERLAY_VERSION) return;
   try {
     document
@@ -42,8 +42,8 @@
   let panelEl = null;
   let iframeEl = null;
   let optRailEl = null;
-  let optRailToastEl = null;
-  let optRailToastTimer = null;
+  let pageToastEl = null;
+  let pageToastTimer = null;
   /** Last Initial-rail action — toast anchors beside this button. */
   let lastOptAction = null;
   let themeBtn = null;
@@ -580,28 +580,35 @@
         @keyframes rh-opt-spin {
           to { transform: rotate(360deg); }
         }
-        .rh-opt-toast {
+        .rh-page-toast {
           position: fixed;
+          right: 20px;
+          bottom: 20px;
+          left: auto;
+          top: auto;
           z-index: 2147483647;
-          max-width: min(320px, calc(100vw - 24px));
-          padding: 10px 14px;
+          max-width: min(380px, calc(100vw - 40px));
+          padding: 11px 16px;
           border-radius: 10px;
-          font: 12px/1.35 system-ui, -apple-system, Segoe UI, sans-serif;
+          font: 13px/1.35 system-ui, -apple-system, Segoe UI, sans-serif;
+          font-weight: 500;
           color: #f8fafc;
-          background: rgba(15, 23, 42, 0.92);
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+          background: rgba(18, 24, 38, 0.96);
+          box-shadow: 0 10px 28px rgba(15, 23, 42, 0.45), 0 2px 8px rgba(0, 0, 0, 0.2);
           pointer-events: none;
           opacity: 0;
-          transform: translateY(4px);
-          transition: opacity 0.18s ease, transform 0.18s ease;
+          transform: translateY(10px);
+          transition: opacity 0.2s ease, transform 0.2s ease;
+          overflow-wrap: break-word;
+          word-break: break-word;
         }
-        .rh-opt-toast.is-visible {
+        .rh-page-toast.is-visible {
           opacity: 1;
           transform: translateY(0);
         }
-        .rh-opt-toast.is-success { background: rgba(22, 101, 52, 0.94); }
-        .rh-opt-toast.is-error { background: rgba(153, 27, 27, 0.94); }
-        .rh-opt-toast.is-warn { background: rgba(146, 64, 14, 0.94); }
+        .rh-page-toast.is-success { background: rgba(22, 101, 52, 0.96); }
+        .rh-page-toast.is-error { background: rgba(153, 27, 27, 0.96); }
+        .rh-page-toast.is-warn { background: rgba(146, 64, 14, 0.96); }
         .rh-header {
           display: flex;
           align-items: center;
@@ -813,7 +820,7 @@
             </svg>
           </button>
         </aside>
-        <div class="rh-opt-toast" id="rhOptToast" hidden aria-live="polite"></div>
+        <div class="rh-page-toast" id="rhPageToast" hidden aria-live="polite"></div>
         <div class="rh-text-dlg" id="rhTextDlg" hidden>
           <div class="rh-text-dlg-card" role="dialog" aria-modal="true" aria-labelledby="rhTextDlgTitle">
             <h3 id="rhTextDlgTitle">Edit</h3>
@@ -836,7 +843,7 @@
       });
     }
     optRailEl = shadow.getElementById('rhOptRail');
-    optRailToastEl = shadow.getElementById('rhOptToast');
+    pageToastEl = shadow.getElementById('rhPageToast');
     textDlgEl = shadow.getElementById('rhTextDlg');
     textDlgTitleEl = shadow.getElementById('rhTextDlgTitle');
     textDlgInputEl = shadow.getElementById('rhTextDlgInput');
@@ -1071,52 +1078,38 @@
     setTimeout(sync, 1200);
   }
 
-  function showOptRailToast(message, type = 'info', timeout = 4200, actionKey) {
-    if (!optRailToastEl) return;
+  /** Bottom-right toast on the host page (not inside the extension panel). */
+  function showPageToast(message, type = 'info', timeout = 4200) {
+    if (!pageToastEl) return;
     const text = String(message || '').trim();
     if (!text) return;
-    if (optRailToastTimer) {
-      clearTimeout(optRailToastTimer);
-      optRailToastTimer = null;
+    if (pageToastTimer) {
+      clearTimeout(pageToastTimer);
+      pageToastTimer = null;
     }
-    optRailToastEl.textContent = text;
-    optRailToastEl.className = 'rh-opt-toast';
+    pageToastEl.textContent = text;
+    pageToastEl.className = 'rh-page-toast';
     if (type === 'success' || type === 'error' || type === 'warn') {
-      optRailToastEl.classList.add(`is-${type}`);
+      pageToastEl.classList.add(`is-${type}`);
     }
-    optRailToastEl.hidden = false;
+    pageToastEl.hidden = false;
+    pageToastEl.style.left = '';
+    pageToastEl.style.top = '';
 
-    const key = actionKey || lastOptAction;
-    const btn =
-      key && optRailEl ? optRailEl.querySelector(`[data-opt-action="${key}"]`) : null;
-    const anchor = btn || optRailEl;
-    const toastWidth = Math.min(320, window.innerWidth - 24);
-    const toastHeight = 44;
-
-    if (anchor && optRailEl && !optRailEl.hidden) {
-      const btnRect = (btn || optRailEl).getBoundingClientRect();
-      const railRect = optRailEl.getBoundingClientRect();
-      let left = railRect.right + 10;
-      if (left + toastWidth > window.innerWidth - 12) {
-        left = Math.max(12, railRect.left - toastWidth - 10);
-      }
-      // Align vertically with the triggering button (center), clamp to viewport.
-      let top = btnRect.top + btnRect.height / 2 - toastHeight / 2;
-      top = Math.max(8, Math.min(top, window.innerHeight - toastHeight - 8));
-      optRailToastEl.style.left = `${left}px`;
-      optRailToastEl.style.top = `${top}px`;
-    } else {
-      optRailToastEl.style.left = '12px';
-      optRailToastEl.style.top = '8px';
+    requestAnimationFrame(() => pageToastEl.classList.add('is-visible'));
+    if (timeout > 0) {
+      pageToastTimer = setTimeout(() => {
+        pageToastEl.classList.remove('is-visible');
+        setTimeout(() => {
+          if (pageToastEl) pageToastEl.hidden = true;
+        }, 200);
+        pageToastTimer = null;
+      }, timeout);
     }
+  }
 
-    requestAnimationFrame(() => optRailToastEl.classList.add('is-visible'));
-    optRailToastTimer = setTimeout(() => {
-      optRailToastEl.classList.remove('is-visible');
-      setTimeout(() => {
-        if (optRailToastEl) optRailToastEl.hidden = true;
-      }, 200);
-    }, timeout);
+  function showOptRailToast(message, type = 'info', timeout = 4200) {
+    showPageToast(message, type, timeout);
   }
 
   function postToSidepanel(payload) {
@@ -1699,7 +1692,7 @@
               ? 'success'
               : 'info';
       if (data.actionName) lastOptAction = String(data.actionName);
-      showOptRailToast(data.message || '', toastType, 4200, data.actionName || lastOptAction);
+      showPageToast(data.message || '', toastType, Number(data.timeout) || 4200);
       return;
     }
   });
@@ -1745,6 +1738,12 @@
 
     if (request.action === 'optUiState') {
       applyOptUiState(request.state);
+      sendResponse({ success: true });
+      return true;
+    }
+
+    if (request.action === 'showPageToast') {
+      showPageToast(request.message, request.type, Number(request.timeout) || 4200);
       sendResponse({ success: true });
       return true;
     }

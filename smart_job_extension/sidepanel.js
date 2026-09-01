@@ -1325,20 +1325,28 @@ function getTodayKey() {
 }
 
 function showStatus(message, type = 'info', timeout = 4000) {
-  if (typeof showToast === 'function') {
-    showToast(message, type, timeout);
-  } else {
-    const status = document.getElementById('status');
-    if (status) {
-      status.textContent = message;
-      status.className = `toast toast-${type}`;
-      status.classList.remove('hidden');
-      if (timeout) setTimeout(() => status.classList.add('hidden'), timeout);
-    }
-  }
-  // Initial rail logic host: mirror every toast onto the page floating rail.
+  const text = String(message || '').trim();
+  if (!text) return;
+
+  // Hidden dialog iframe: parent page shows the toast.
   if (IS_ASSISTANT_DIALOG) {
-    notifyOptActionFeedback(message, type);
+    notifyOptActionFeedback(message, type, timeout);
+    return;
+  }
+
+  // Side panel: show on the active tab (bottom-right), not inside the narrow panel.
+  try {
+    chrome.runtime.sendMessage(
+      { action: 'showPageToastOnActiveTab', message: text, type, timeout },
+      (response) => {
+        void chrome.runtime.lastError;
+        if (!response?.success && typeof showToast === 'function') {
+          showToast(message, type, timeout);
+        }
+      }
+    );
+  } catch (_) {
+    if (typeof showToast === 'function') showToast(message, type, timeout);
   }
 }
 
@@ -4807,7 +4815,7 @@ function replyOptFieldValue(field, id) {
   }
 }
 
-function notifyOptActionFeedback(message, type = 'info') {
+function notifyOptActionFeedback(message, type = 'info', timeout = 4000) {
   try {
     if (window.parent && window.parent !== window) {
       window.parent.postMessage(
@@ -4815,7 +4823,8 @@ function notifyOptActionFeedback(message, type = 'info') {
           source: 'remote-helper-sidepanel',
           action: 'optActionFeedback',
           message: String(message || ''),
-          type: type || 'info'
+          type: type || 'info',
+          timeout
         },
         '*'
       );
