@@ -1,3 +1,8 @@
+import { ProxyAgent } from "undici";
+import { loadEnvFiles } from "./load-env.mjs";
+
+loadEnvFiles();
+
 const HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -5,10 +10,35 @@ const HEADERS = {
   Referer: "https://hiringcafe.com/",
 };
 
+function getProxyUrl() {
+  const direct = process.env.HIRING_CAFE_PROXY_URL?.replace(/^["']|["']$/g, "").trim();
+  if (direct) return direct;
+
+  const proxyConfig = process.env.HIRING_CAFE_PROXY?.replace(/^["']|["']$/g, "").trim();
+  if (!proxyConfig) return undefined;
+
+  const parts = proxyConfig.split(":");
+  if (parts.length < 4) return undefined;
+
+  const [host, port, username, ...passwordParts] = parts;
+  const password = passwordParts.join(":");
+  return `http://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`;
+}
+
+const proxyUrl = getProxyUrl();
+const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
+
+if (proxyUrl) {
+  console.log("Using proxy:", proxyUrl.replace(/:[^:@/]+@/, ":***@"));
+} else {
+  console.log("No proxy configured (set HIRING_CAFE_PROXY_URL or HIRING_CAFE_PROXY in .env.local)");
+}
+
 async function req(url, extra = {}) {
   const response = await fetch(url, {
     headers: { ...HEADERS, ...extra },
     redirect: "follow",
+    ...(dispatcher ? { dispatcher } : {}),
   });
   const text = await response.text();
   return { status: response.status, url: response.url, len: text.length, text };
@@ -38,7 +68,7 @@ if (nextDataMatch) {
     const json = JSON.parse(data.text);
     const hits = json?.pageProps?.ssrHits?.length ?? 0;
     console.log("ssrHits", hits, "total", json?.pageProps?.ssrTotalCount);
-  } catch (e) {
+  } catch {
     console.log("data preview", data.text.slice(0, 300));
   }
 } else {

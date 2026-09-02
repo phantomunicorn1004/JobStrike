@@ -12,6 +12,7 @@ import {
 } from "@/lib/job-duplicate";
 import { jobMatchesBlockedJobs, type BlockedJobRef } from "@/lib/job-block";
 import { canonicalJobUrl } from "@/lib/job-url";
+import { ProxyAgent, type Dispatcher } from "undici";
 
 export type { BlockedJobRef, JobDuplicateStatus, RegisteredJobRef };
 export {
@@ -57,6 +58,39 @@ const HIRING_CAFE_FETCH_HEADERS = {
 } as const;
 
 const RETRYABLE_HTTP_STATUSES = new Set([403, 429, 500, 502, 503, 504]);
+
+type HiringCafeFetchInit = RequestInit & { dispatcher?: Dispatcher };
+
+let hiringCafeProxyAgent: ProxyAgent | undefined;
+let hiringCafeProxyAgentUrl: string | undefined;
+
+/** Full URL (`http://user:pass@host:port`) or `host:port:username:password` (Proxy-Seller style). */
+export function getHiringCafeProxyUrl(): string | undefined {
+  const direct = process.env.HIRING_CAFE_PROXY_URL?.replace(/^["']|["']$/g, "").trim();
+  if (direct) return direct;
+
+  const proxyConfig = process.env.HIRING_CAFE_PROXY?.replace(/^["']|["']$/g, "").trim();
+  if (!proxyConfig) return undefined;
+
+  const parts = proxyConfig.split(":");
+  if (parts.length < 4) return undefined;
+
+  const [host, port, username, ...passwordParts] = parts;
+  const password = passwordParts.join(":");
+  return `http://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`;
+}
+
+function getHiringCafeProxyAgent(): ProxyAgent | undefined {
+  const proxyUrl = getHiringCafeProxyUrl();
+  if (!proxyUrl) return undefined;
+
+  if (!hiringCafeProxyAgent || hiringCafeProxyAgentUrl !== proxyUrl) {
+    hiringCafeProxyAgent = new ProxyAgent(proxyUrl);
+    hiringCafeProxyAgentUrl = proxyUrl;
+  }
+
+  return hiringCafeProxyAgent;
+}
 
 const DEFAULT_SEARCH_STATE = {
   locations: [
@@ -209,6 +243,7 @@ async function fetchHiringCafe(
 
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
     try {
+      const dispatcher = getHiringCafeProxyAgent();
       const response = await fetch(url, {
         headers: {
           ...HIRING_CAFE_FETCH_HEADERS,
@@ -216,7 +251,8 @@ async function fetchHiringCafe(
         },
         cache: "no-store",
         redirect: "follow",
-      });
+        ...(dispatcher ? { dispatcher } : {}),
+      } as HiringCafeFetchInit);
       lastStatus = response.status;
       lastText = await response.text();
 
@@ -259,8 +295,11 @@ async function fetchBuildId(): Promise<string> {
   const home = await fetchHiringCafe(HIRING_CAFE_BASE, { Accept: "text/html,application/xhtml+xml" });
   if (!home.ok) {
     if (home.status === 403 || home.text.includes("Just a moment")) {
+      const proxyHint = getHiringCafeProxyUrl()
+        ? ""
+        : " Set HIRING_CAFE_PROXY_URL (or HIRING_CAFE_PROXY) to route through an ISP proxy.";
       throw new Error(
-        "HiringCafe blocked the scrape request (HTTP 403). Try again later or scrape from a different network.",
+        `HiringCafe blocked the scrape request (HTTP 403).${proxyHint} Try again later or scrape from a different network.`,
       );
     }
     throw new Error(`Could not reach HiringCafe (HTTP ${home.status || "unknown"}).`);
