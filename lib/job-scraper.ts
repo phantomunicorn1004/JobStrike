@@ -46,9 +46,17 @@ export type ScrapeJobsResult = {
   reportedTotal: number | null;
 };
 
-const HIRING_CAFE_BASE = "https://hiring.cafe/";
+const HIRING_CAFE_BASE = "https://hiringcafe.com/";
 const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+const HIRING_CAFE_FETCH_HEADERS = {
+  "User-Agent": USER_AGENT,
+  "Accept-Language": "en-US,en;q=0.9",
+  Referer: HIRING_CAFE_BASE,
+} as const;
+
+const RETRYABLE_HTTP_STATUSES = new Set([403, 429, 500, 502, 503, 504]);
 
 const DEFAULT_SEARCH_STATE = {
   locations: [
@@ -166,6 +174,18 @@ export function filterJobsByPublishDate(
   return { filtered, removedByDate, cutoffIso: new Date(cutoffMs).toISOString() };
 }
 
+export function buildHiringCafeDataUrl(
+  buildId: string,
+  dateWindow: JobScraperDateWindow,
+  page: number,
+): string {
+  const url = new URL(`_next/data/${buildId}/index.json`, HIRING_CAFE_BASE);
+  url.searchParams.set("searchState", JSON.stringify(buildSearchState(dateWindow)));
+  url.searchParams.set("page", String(page));
+  return url.toString();
+}
+
+/** @deprecated Use buildHiringCafeDataUrl — hiring.cafe now redirects to hiringcafe.com. */
 export function buildHiringCafeUrl(dateWindow: JobScraperDateWindow, page: number): string {
   const url = new URL(HIRING_CAFE_BASE);
   url.searchParams.set("searchState", JSON.stringify(buildSearchState(dateWindow)));
@@ -173,58 +193,119 @@ export function buildHiringCafeUrl(dateWindow: JobScraperDateWindow, page: numbe
   return url.toString();
 }
 
-async function fetchPageHtml(url: string, maxRetries = 3): Promise<string | null> {
+type HiringCafeFetchResult = {
+  ok: boolean;
+  status: number;
+  text: string;
+};
+
+async function fetchHiringCafe(
+  url: string,
+  extraHeaders: Record<string, string> = {},
+  maxRetries = 3,
+): Promise<HiringCafeFetchResult> {
+  let lastStatus = 0;
+  let lastText = "";
+
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
     try {
       const response = await fetch(url, {
         headers: {
-          "User-Agent": USER_AGENT,
+          ...HIRING_CAFE_FETCH_HEADERS,
+          ...extraHeaders,
         },
         cache: "no-store",
+        redirect: "follow",
       });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      lastStatus = response.status;
+      lastText = await response.text();
+
+      if (response.ok) {
+        return { ok: true, status: response.status, text: lastText };
       }
-      return await response.text();
+
+      if (!RETRYABLE_HTTP_STATUSES.has(response.status)) {
+        break;
+      }
     } catch {
-      if (attempt < maxRetries - 1) {
-        await sleep(2 ** attempt * 1000);
-      }
+      // retry below
+    }
+
+    if (attempt < maxRetries - 1) {
+      await sleep(2 ** attempt * 1000);
     }
   }
-  return null;
+
+  return { ok: false, status: lastStatus, text: lastText };
 }
 
-function extractPageProps(html: string): Record<string, unknown> | null {
+function extractBuildIdFromHtml(html: string): string | null {
   const nextDataMatch = html.match(
     /<script id="__NEXT_DATA__"[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/i,
   );
-  if (nextDataMatch?.[1]) {
-    try {
-      const parsed = JSON.parse(nextDataMatch[1]) as {
-        props?: { pageProps?: Record<string, unknown> };
-      };
-      return parsed.props?.pageProps ?? null;
-    } catch {
-      // fall through
+  if (!nextDataMatch?.[1]) return null;
+
+  try {
+    const parsed = JSON.parse(nextDataMatch[1]) as { buildId?: string };
+    return typeof parsed.buildId === "string" && parsed.buildId.trim()
+      ? parsed.buildId.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchBuildId(): Promise<string> {
+  const home = await fetchHiringCafe(HIRING_CAFE_BASE, { Accept: "text/html,application/xhtml+xml" });
+  if (!home.ok) {
+    if (home.status === 403 || home.text.includes("Just a moment")) {
+      throw new Error(
+        "HiringCafe blocked the scrape request (HTTP 403). Try again later or scrape from a different network.",
+      );
     }
+    throw new Error(`Could not reach HiringCafe (HTTP ${home.status || "unknown"}).`);
   }
 
-  const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
-  for (const match of html.matchAll(scriptRegex)) {
-    const content = match[1] ?? "";
-    if (!content.includes('"pageProps"')) continue;
-    try {
-      const parsed = JSON.parse(content) as {
-        props?: { pageProps?: Record<string, unknown> };
-      };
-      return parsed.props?.pageProps ?? null;
-    } catch {
-      // keep scanning
-    }
+  const buildId = extractBuildIdFromHtml(home.text);
+  if (!buildId) {
+    throw new Error("Could not read HiringCafe build ID. The site layout may have changed.");
   }
 
-  return null;
+  return buildId;
+}
+
+function extractPagePropsFromJson(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text) as { pageProps?: Record<string, unknown> };
+    return parsed.pageProps ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSearchPageProps(
+  buildId: string,
+  dateWindow: JobScraperDateWindow,
+  page: number,
+): Promise<{ pageProps: Record<string, unknown> | null; staleBuildId: boolean }> {
+  const url = buildHiringCafeDataUrl(buildId, dateWindow, page);
+  const response = await fetchHiringCafe(url, {
+    Accept: "*/*",
+    "x-nextjs-data": "1",
+  });
+
+  if (response.status === 404) {
+    return { pageProps: null, staleBuildId: true };
+  }
+
+  if (!response.ok) {
+    return { pageProps: null, staleBuildId: false };
+  }
+
+  return {
+    pageProps: extractPagePropsFromJson(response.text),
+    staleBuildId: false,
+  };
 }
 
 function extractJobFields(hit: Record<string, unknown>): ScrapedJob {
@@ -425,12 +506,16 @@ export async function scrapeHiringCafeJobs(
   let reportedTotal: number | null = null;
   let lastHitId = "";
   let pagesFetched = 0;
+  let buildId = await fetchBuildId();
 
   for (let page = 0; page < maxPages; page += 1) {
-    const html = await fetchPageHtml(buildHiringCafeUrl(dateWindow, page));
-    if (!html) break;
+    let { pageProps, staleBuildId } = await fetchSearchPageProps(buildId, dateWindow, page);
 
-    const pageProps = extractPageProps(html);
+    if (staleBuildId) {
+      buildId = await fetchBuildId();
+      ({ pageProps, staleBuildId } = await fetchSearchPageProps(buildId, dateWindow, page));
+    }
+
     if (!pageProps) break;
 
     const hits = Array.isArray(pageProps.ssrHits)
@@ -458,6 +543,12 @@ export async function scrapeHiringCafeJobs(
     if (page < maxPages - 1) {
       await sleep(delayMs);
     }
+  }
+
+  if (pagesFetched === 0) {
+    throw new Error(
+      "HiringCafe returned no job pages. The site may be blocking automated requests.",
+    );
   }
 
   return {

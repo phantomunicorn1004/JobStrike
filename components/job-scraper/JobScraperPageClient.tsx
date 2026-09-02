@@ -1154,7 +1154,7 @@ export function JobScraperPageClient() {
           <div>
             <h1 className="text-lg font-semibold">Job Scraper</h1>
             <p className="text-xs text-muted-foreground">
-              Results-first scrape review for hiring.cafe.
+              Results-first scrape review for hiringcafe.com.
             </p>
           </div>
 
@@ -1713,7 +1713,7 @@ export function JobScraperPageClient() {
                 <span className="text-xs text-muted-foreground">
                   Pages fetched: {filteredResult.stats.pagesFetched}
                   {filteredResult.stats.reportedTotal != null
-                    ? ` · hiring.cafe total: ${filteredResult.stats.reportedTotal}`
+                    ? ` · hiringcafe.com total: ${filteredResult.stats.reportedTotal}`
                     : ""}
                 </span>
               ) : null}
