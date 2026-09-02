@@ -6,9 +6,9 @@ import {
   dedupeJobs,
   filterJobsByPublishDate,
   jobsToCsv,
-  scrapeHiringCafeJobs,
   type JobScraperDateWindow,
 } from "@/lib/job-scraper";
+import { scrapeHiringCafeJobs } from "@/lib/job-scraper-hiringcafe";
 import {
   listBlockedAts,
   listBlockedCompanies,
