@@ -126,7 +126,13 @@ type HiringCafeFetchResult = {
   ok: boolean;
   status: number;
   text: string;
+  error?: string;
 };
+
+function formatFetchError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
 
 async function fetchHiringCafe(
   url: string,
@@ -135,6 +141,7 @@ async function fetchHiringCafe(
 ): Promise<HiringCafeFetchResult> {
   let lastStatus = 0;
   let lastText = "";
+  let lastError: string | undefined;
 
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
     try {
@@ -150,6 +157,7 @@ async function fetchHiringCafe(
       } as HiringCafeFetchInit);
       lastStatus = response.status;
       lastText = await response.text();
+      lastError = undefined;
 
       if (response.ok) {
         return { ok: true, status: response.status, text: lastText };
@@ -158,8 +166,8 @@ async function fetchHiringCafe(
       if (!RETRYABLE_HTTP_STATUSES.has(response.status)) {
         break;
       }
-    } catch {
-      // retry below
+    } catch (error) {
+      lastError = formatFetchError(error);
     }
 
     if (attempt < maxRetries - 1) {
@@ -167,7 +175,7 @@ async function fetchHiringCafe(
     }
   }
 
-  return { ok: false, status: lastStatus, text: lastText };
+  return { ok: false, status: lastStatus, text: lastText, error: lastError };
 }
 
 function extractBuildIdFromHtml(html: string): string | null {
@@ -197,7 +205,14 @@ async function fetchBuildId(): Promise<string> {
         `HiringCafe blocked the scrape request (HTTP 403).${proxyHint} Try again later or scrape from a different network.`,
       );
     }
-    throw new Error(`Could not reach HiringCafe (HTTP ${home.status || "unknown"}).`);
+
+    const usingProxy = Boolean(getHiringCafeProxyUrl());
+    const statusLabel = home.status > 0 ? `HTTP ${home.status}` : "no HTTP response";
+    const detail = home.error ? ` ${home.error}` : "";
+    const proxyHint = usingProxy
+      ? " Check HIRING_CAFE_PROXY_URL / HIRING_CAFE_PROXY (host, port, user, pass) and that Proxy-Seller allows Vercel's IP."
+      : "";
+    throw new Error(`Could not reach HiringCafe (${statusLabel}).${detail}${proxyHint}`);
   }
 
   const buildId = extractBuildIdFromHtml(home.text);
