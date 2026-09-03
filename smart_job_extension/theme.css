@@ -714,3 +714,14 @@ body.sidepanel ::-webkit-scrollbar-track {
   background: var(--bg-subtle);
   border-color: var(--border);
 }
+
+.js-search-import {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+}
+
+.js-search-url-field textarea {
+  background: var(--input-bg);
+  color: var(--text);
+  border-color: var(--border);
+}

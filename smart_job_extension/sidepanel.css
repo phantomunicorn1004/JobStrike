@@ -2638,6 +2638,82 @@ html.assistant-dialog body.ui-optimized .app-shell {
   color: var(--muted);
 }
 
+.js-search-import {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg-subtle);
+}
+
+.js-search-import.is-custom {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+}
+
+.js-search-import > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--text);
+}
+
+.js-search-import > summary .muted {
+  color: var(--muted);
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.js-search-import > summary::-webkit-details-marker {
+  display: none;
+}
+
+.js-search-help {
+  margin: 8px 0;
+}
+
+.js-search-url-field {
+  width: 100%;
+  min-width: 0;
+}
+
+.js-search-url-field textarea {
+  width: 100%;
+  min-height: 52px;
+  resize: vertical;
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.35;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.js-search-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+#jsSearchSource {
+  margin: 8px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .js-field select,
 .js-add-row input,
 #jsDateWindow,

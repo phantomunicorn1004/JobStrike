@@ -321,6 +321,26 @@
               </div>
             </div>
 
+            <details class="js-search-import" id="jsSearchImportPanel">
+              <summary>
+                HiringCafe search
+                <span class="muted" id="jsSearchSummary">Built-in default</span>
+              </summary>
+              <p class="muted small js-search-help">
+                Set filters on hiringcafe.com, copy the browser URL, then import it here. Date window above still overrides <code>dateFetchedPastNDays</code> on scrape.
+              </p>
+              <label class="js-field js-search-url-field">
+                <span>Search URL</span>
+                <textarea id="jsSearchUrlInput" rows="2" spellcheck="false" placeholder="https://hiringcafe.com/?searchState=…"></textarea>
+              </label>
+              <div class="js-search-actions">
+                <button type="button" class="btn small primary" id="jsImportSearchUrlBtn">Import URL</button>
+                <button type="button" class="btn small" id="jsImportSearchTabBtn" title="Read searchState from the active HiringCafe tab">Import from tab</button>
+                <button type="button" class="btn small" id="jsResetSearchBtn">Reset default</button>
+              </div>
+              <p class="muted small" id="jsSearchSource" hidden></p>
+            </details>
+
             <div class="js-filter-toggles" role="group" aria-label="Filters">
               <label class="js-toggle">
                 <input type="checkbox" id="jsFilterBlockedCompanies" checked>

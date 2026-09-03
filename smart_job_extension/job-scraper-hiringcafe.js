@@ -61,8 +61,159 @@
     ['JazzHR', (h) => h.includes('jazz.co') || h.includes('applytojob.com')],
   ];
 
+  function dateWindowFromDays(days) {
+    const n = Number(days);
+    if (n === 1) return '1d';
+    if (n === 7) return '7d';
+    return '3d';
+  }
+
   function dateWindowDays(dateWindow) {
     return dateWindow === '1d' ? 1 : dateWindow === '7d' ? 7 : 3;
+  }
+
+  function cloneDefaultSearchState(dateWindow) {
+    return {
+      ...DEFAULT_SEARCH_STATE,
+      dateFetchedPastNDays: dateWindowDays(dateWindow || '3d'),
+    };
+  }
+
+  function buildSearchState(dateWindow, customSearchState) {
+    if (customSearchState && typeof customSearchState === 'object') {
+      return {
+        ...customSearchState,
+        dateFetchedPastNDays: dateWindowDays(dateWindow),
+      };
+    }
+    return cloneDefaultSearchState(dateWindow);
+  }
+
+  function buildHiringCafeUrl(dateWindow, page, customSearchState) {
+    const url = new URL(HIRING_CAFE_BASE);
+    url.searchParams.set(
+      'searchState',
+      JSON.stringify(buildSearchState(dateWindow, customSearchState))
+    );
+    url.searchParams.set('page', String(page));
+    return url.toString();
+  }
+
+  /**
+   * Parse searchState from a HiringCafe URL, pasted query, or raw JSON object string.
+   * @returns {{ ok: true, searchState: object, sourceUrl: string } | { ok: false, error: string }}
+   */
+  function parseSearchStateFromInput(rawInput) {
+    const raw = String(rawInput || '').trim();
+    if (!raw) {
+      return { ok: false, error: 'Paste a HiringCafe URL that includes searchState.' };
+    }
+
+    let searchStateRaw = '';
+    let sourceUrl = '';
+
+    // Raw JSON object
+    if (raw.startsWith('{')) {
+      searchStateRaw = raw;
+      sourceUrl = '';
+    } else {
+      try {
+        let url;
+        if (/^https?:\/\//i.test(raw)) {
+          url = new URL(raw);
+        } else if (raw.includes('searchState=')) {
+          url = new URL(raw.startsWith('?') ? raw : `?${raw}`, HIRING_CAFE_BASE);
+        } else {
+          return {
+            ok: false,
+            error: 'Paste a full HiringCafe URL, or text containing searchState=…',
+          };
+        }
+
+        const host = url.hostname.toLowerCase().replace(/^www\./, '');
+        if (
+          host &&
+          host !== 'hiringcafe.com' &&
+          host !== 'hiring.cafe' &&
+          !host.endsWith('.hiringcafe.com')
+        ) {
+          return {
+            ok: false,
+            error: 'URL must be from hiringcafe.com (or hiring.cafe).',
+          };
+        }
+
+        searchStateRaw = url.searchParams.get('searchState') || '';
+        sourceUrl = url.toString();
+        if (!searchStateRaw) {
+          return {
+            ok: false,
+            error: 'No searchState found in that URL. Set filters on HiringCafe, then copy the address bar URL.',
+          };
+        }
+      } catch (_) {
+        return { ok: false, error: 'Could not parse that URL.' };
+      }
+    }
+
+    try {
+      const parsed = JSON.parse(searchStateRaw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { ok: false, error: 'searchState must be a JSON object.' };
+      }
+      return { ok: true, searchState: parsed, sourceUrl };
+    } catch (err) {
+      return {
+        ok: false,
+        error: `Invalid searchState JSON: ${err?.message || String(err)}`,
+      };
+    }
+  }
+
+  function summarizeSearchState(searchState) {
+    if (!searchState || typeof searchState !== 'object') return 'Built-in default search';
+
+    const parts = [];
+    const days = Number(searchState.dateFetchedPastNDays);
+    if (Number.isFinite(days) && days > 0) parts.push(`${days}d`);
+
+    const loc = Array.isArray(searchState.locations) ? searchState.locations[0] : null;
+    const workplace = Array.isArray(loc?.workplace_types)
+      ? loc.workplace_types.join('/')
+      : Array.isArray(searchState.workplaceTypes)
+        ? searchState.workplaceTypes.join('/')
+        : '';
+    if (workplace) parts.push(workplace);
+
+    const place =
+      loc?.formatted_address ||
+      loc?.address_components?.[0]?.short_name ||
+      '';
+    if (place) parts.push(place);
+
+    const depts = Array.isArray(searchState.departments) ? searchState.departments : [];
+    if (depts.length) {
+      parts.push(
+        depts.length <= 2
+          ? depts.join(', ')
+          : `${depts.slice(0, 2).join(', ')} +${depts.length - 2}`
+      );
+    }
+
+    if (searchState.sortBy) parts.push(`sort:${searchState.sortBy}`);
+
+    const title = String(searchState.jobTitleQuery || searchState.searchQuery || '').trim();
+    if (title) {
+      parts.push(title.length > 42 ? `${title.slice(0, 42)}…` : title);
+    }
+
+    const tech = String(searchState.technologyKeywordsQuery || '').trim();
+    if (tech) parts.push('tech keywords');
+
+    const hide = Array.isArray(searchState.hideJobTypes) ? searchState.hideJobTypes : [];
+    if (hide.length) parts.push(`hide ${hide.join('/')}`);
+
+    return parts.length ? parts.join(' · ') : 'Custom searchState imported';
   }
 
   function serializeField(value) {
@@ -89,20 +240,6 @@
     } catch (_) {
       return 'Unknown';
     }
-  }
-
-  function buildSearchState(dateWindow) {
-    return {
-      ...DEFAULT_SEARCH_STATE,
-      dateFetchedPastNDays: dateWindowDays(dateWindow),
-    };
-  }
-
-  function buildHiringCafeUrl(dateWindow, page) {
-    const url = new URL(HIRING_CAFE_BASE);
-    url.searchParams.set('searchState', JSON.stringify(buildSearchState(dateWindow)));
-    url.searchParams.set('page', String(page));
-    return url.toString();
   }
 
   function extractJobFields(hit) {
@@ -384,8 +521,14 @@
 
   global.SmartJobHiringCafeScraper = {
     HIRING_CAFE_BASE,
+    DEFAULT_SEARCH_STATE,
     dateWindowDays,
+    dateWindowFromDays,
+    cloneDefaultSearchState,
+    buildSearchState,
     buildHiringCafeUrl,
+    parseSearchStateFromInput,
+    summarizeSearchState,
     extractJobFields,
     detectPlatform,
     normalizeAtsName,

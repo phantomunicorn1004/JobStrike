@@ -9,6 +9,7 @@
     blockedJobs: 'job_scraper_blocked_jobs',
     lastResults: 'job_scraper_last_results',
     scrapeTabId: 'job_scraper_tab_id',
+    customSearch: 'job_scraper_custom_search',
   };
 
   const DEFAULT_PREFS = {
@@ -32,6 +33,8 @@
     registeredCompanies: [],
     registeredJobs: [],
     profileLoading: false,
+    customSearchState: null,
+    customSearchSourceUrl: '',
     rawJobs: [],
     filteredJobs: [],
     selectedKeys: new Set(),
@@ -106,6 +109,7 @@
       STORAGE.blockedAts,
       STORAGE.blockedJobs,
       STORAGE.lastResults,
+      STORAGE.customSearch,
     ]);
 
     state.prefs = { ...DEFAULT_PREFS, ...(result[STORAGE.prefs] || {}) };
@@ -119,6 +123,15 @@
       ? result[STORAGE.blockedJobs]
       : [];
 
+    const custom = result[STORAGE.customSearch];
+    if (custom && custom.searchState && typeof custom.searchState === 'object') {
+      state.customSearchState = custom.searchState;
+      state.customSearchSourceUrl = String(custom.sourceUrl || '');
+    } else {
+      state.customSearchState = null;
+      state.customSearchSourceUrl = '';
+    }
+
     const last = result[STORAGE.lastResults];
     if (last && Array.isArray(last.jobs)) {
       state.rawJobs = last.rawJobs || last.jobs;
@@ -130,6 +143,20 @@
 
   async function persistPrefs() {
     await storageSet({ [STORAGE.prefs]: state.prefs });
+  }
+
+  async function persistCustomSearch() {
+    if (state.customSearchState) {
+      await storageSet({
+        [STORAGE.customSearch]: {
+          searchState: state.customSearchState,
+          sourceUrl: state.customSearchSourceUrl || '',
+          importedAt: new Date().toISOString(),
+        },
+      });
+    } else {
+      await chrome.storage.local.remove(STORAGE.customSearch);
+    }
   }
 
   async function persistBlockLists() {
@@ -257,6 +284,8 @@
     if (jobCount) jobCount.textContent = String(state.registeredJobs.length);
     if (coCount) coCount.textContent = String(state.registeredCompanies.length);
 
+    renderSearchImportUi();
+
     const hint = document.getElementById('jsProfileHint');
     if (hint) {
       if (!state.candidates.length && !state.profileLoading) {
@@ -291,6 +320,97 @@
     renderMeta();
   }
 
+  function renderSearchImportUi() {
+    const scraper = api();
+    const summaryEl = document.getElementById('jsSearchSummary');
+    const sourceEl = document.getElementById('jsSearchSource');
+    const panel = document.getElementById('jsSearchImportPanel');
+    const resetBtn = document.getElementById('jsResetSearchBtn');
+
+    const summary = state.customSearchState
+      ? scraper?.summarizeSearchState?.(state.customSearchState) || 'Custom search imported'
+      : 'Built-in default';
+
+    if (summaryEl) {
+      summaryEl.textContent = summary;
+      summaryEl.title = summary;
+    }
+    if (panel) panel.classList.toggle('is-custom', Boolean(state.customSearchState));
+    if (resetBtn) resetBtn.disabled = !state.customSearchState;
+
+    if (sourceEl) {
+      if (state.customSearchSourceUrl) {
+        sourceEl.hidden = false;
+        sourceEl.textContent = `Source: ${state.customSearchSourceUrl}`;
+        sourceEl.title = state.customSearchSourceUrl;
+      } else if (state.customSearchState) {
+        sourceEl.hidden = false;
+        sourceEl.textContent = 'Source: pasted searchState JSON';
+      } else {
+        sourceEl.hidden = true;
+        sourceEl.textContent = '';
+      }
+    }
+  }
+
+  async function applyImportedSearch(searchState, sourceUrl) {
+    const scraper = api();
+    state.customSearchState = searchState;
+    state.customSearchSourceUrl = sourceUrl || '';
+
+    if (searchState?.dateFetchedPastNDays != null && scraper?.dateWindowFromDays) {
+      state.prefs.dateWindow = scraper.dateWindowFromDays(searchState.dateFetchedPastNDays);
+    }
+
+    await persistPrefs();
+    await persistCustomSearch();
+    syncControlsFromState();
+  }
+
+  async function resetImportedSearch() {
+    state.customSearchState = null;
+    state.customSearchSourceUrl = '';
+    const input = document.getElementById('jsSearchUrlInput');
+    if (input) input.value = '';
+    await persistCustomSearch();
+    syncControlsFromState();
+    showToast('Restored built-in HiringCafe search default.', 'success');
+  }
+
+  async function importSearchFromText(raw, { silent = false } = {}) {
+    const scraper = api();
+    if (!scraper?.parseSearchStateFromInput) {
+      showToast('Search import is unavailable. Reload the extension.', 'error');
+      return false;
+    }
+    const parsed = scraper.parseSearchStateFromInput(raw);
+    if (!parsed.ok) {
+      showToast(parsed.error, 'error');
+      return false;
+    }
+    await applyImportedSearch(parsed.searchState, parsed.sourceUrl);
+    if (!silent) {
+      showToast(
+        `Search imported. ${scraper.summarizeSearchState(parsed.searchState)}`,
+        'success'
+      );
+    }
+    return true;
+  }
+
+  async function importSearchFromActiveTab() {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs?.[0];
+    const url = tab?.url || '';
+    if (!/hiringcafe\.com|hiring\.cafe/i.test(url)) {
+      showToast('Open a hiringcafe.com search tab first, then try Import from tab.', 'warn');
+      return;
+    }
+    const input = document.getElementById('jsSearchUrlInput');
+    if (input) input.value = url;
+    await importSearchFromText(url);
+  }
+
   function renderMeta() {
     const meta = document.getElementById('jsMeta');
     if (!meta) return;
@@ -313,6 +433,7 @@
     }
     const profileLabel = state.candidates.find((c) => c.key === state.prefs.candidateFilter)?.label;
     if (profileLabel) parts.push(`profile ${profileLabel}`);
+    if (state.customSearchState) parts.push('custom search');
     meta.textContent = parts.join(' · ') || 'Click Scrape to load HiringCafe jobs.';
   }
 
@@ -599,7 +720,11 @@
         if (!state.scraping) break;
 
         setStatus(`Fetching HiringCafe page ${page + 1}…`, 'info');
-        const url = scraper.buildHiringCafeUrl(dateWindow, page);
+        const url = scraper.buildHiringCafeUrl(
+          dateWindow,
+          page,
+          state.customSearchState
+        );
         const tabId = await ensureScrapeTab(url);
         const extracted = await waitUntilPageReady(tabId);
 
@@ -838,11 +963,34 @@
         ? event.target.value
         : '3d';
       await persistPrefs();
+      if (state.customSearchState) {
+        renderSearchImportUi();
+      }
       if (state.rawJobs.length) {
         recomputeFiltered();
         await persistResults();
         renderResults();
         renderMeta();
+      }
+    });
+
+    document.getElementById('jsImportSearchUrlBtn')?.addEventListener('click', async () => {
+      const raw = document.getElementById('jsSearchUrlInput')?.value || '';
+      await importSearchFromText(raw);
+    });
+
+    document.getElementById('jsImportSearchTabBtn')?.addEventListener('click', () => {
+      void importSearchFromActiveTab();
+    });
+
+    document.getElementById('jsResetSearchBtn')?.addEventListener('click', () => {
+      void resetImportedSearch();
+    });
+
+    document.getElementById('jsSearchUrlInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void importSearchFromText(event.target.value || '');
       }
     });
 
