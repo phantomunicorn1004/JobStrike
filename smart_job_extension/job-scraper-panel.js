@@ -1,5 +1,5 @@
 /**
- * Job Scraper tab: HiringCafe scrape in a real browser tab + local filters/export.
+ * Job Scraper tab: HiringCafe scrape in a real browser tab + website-synced filters/export.
  */
 (function () {
   const STORAGE = {
@@ -113,15 +113,17 @@
     ]);
 
     state.prefs = { ...DEFAULT_PREFS, ...(result[STORAGE.prefs] || {}) };
-    state.blockedCompanies = Array.isArray(result[STORAGE.blockedCompanies])
-      ? result[STORAGE.blockedCompanies]
-      : [];
-    state.blockedAts = Array.isArray(result[STORAGE.blockedAts])
-      ? result[STORAGE.blockedAts]
-      : [];
-    state.blockedJobs = Array.isArray(result[STORAGE.blockedJobs])
-      ? result[STORAGE.blockedJobs]
-      : [];
+    applyWebsiteBlockedLists({
+      blockedCompanies: Array.isArray(result[STORAGE.blockedCompanies])
+        ? result[STORAGE.blockedCompanies]
+        : [],
+      blockedAts: Array.isArray(result[STORAGE.blockedAts])
+        ? result[STORAGE.blockedAts]
+        : [],
+      blockedJobs: Array.isArray(result[STORAGE.blockedJobs])
+        ? result[STORAGE.blockedJobs]
+        : [],
+    });
 
     const custom = result[STORAGE.customSearch];
     if (custom && custom.searchState && typeof custom.searchState === 'object') {
@@ -167,6 +169,77 @@
     });
   }
 
+  function blockedRecordId(item) {
+    if (!item || typeof item === 'string') return '';
+    return String(item.id || '').trim();
+  }
+
+  function blockedCompanyName(item) {
+    if (typeof item === 'string') return item.trim();
+    return String(item?.companyName || '').trim();
+  }
+
+  function blockedAtsName(item) {
+    if (typeof item === 'string') return item.trim();
+    return String(item?.atsName || '').trim();
+  }
+
+  function normalizeBlockedCompany(item) {
+    if (typeof item === 'string') {
+      return item.trim() ? { id: '', companyName: item.trim() } : null;
+    }
+    const companyName = String(item?.companyName || '').trim();
+    if (!companyName) return null;
+    return { id: String(item.id || '').trim(), companyName };
+  }
+
+  function normalizeBlockedAts(item) {
+    if (typeof item === 'string') {
+      return item.trim() ? { id: '', atsName: item.trim() } : null;
+    }
+    const atsName = String(item?.atsName || '').trim();
+    if (!atsName) return null;
+    return { id: String(item.id || '').trim(), atsName };
+  }
+
+  function normalizeBlockedJob(item) {
+    if (typeof item === 'string') {
+      return item.trim() ? { id: '', jobLink: item.trim(), jobTitle: '', companyName: '' } : null;
+    }
+    const jobLink = String(item?.jobLink || item?.apply_url || '').trim();
+    if (!jobLink) return null;
+    return {
+      id: String(item.id || '').trim(),
+      jobLink,
+      jobTitle: String(item.jobTitle || item.title || '').trim(),
+      companyName: String(item.companyName || item.company_name || '').trim(),
+    };
+  }
+
+  function blockedCompanyNames() {
+    return state.blockedCompanies.map(blockedCompanyName).filter(Boolean);
+  }
+
+  function blockedAtsNames() {
+    return state.blockedAts.map(blockedAtsName).filter(Boolean);
+  }
+
+  function blockedJobRefs() {
+    return state.blockedJobs.map(normalizeBlockedJob).filter(Boolean);
+  }
+
+  function applyWebsiteBlockedLists(data) {
+    if (Array.isArray(data.blockedCompanies)) {
+      state.blockedCompanies = data.blockedCompanies.map(normalizeBlockedCompany).filter(Boolean);
+    }
+    if (Array.isArray(data.blockedAts)) {
+      state.blockedAts = data.blockedAts.map(normalizeBlockedAts).filter(Boolean);
+    }
+    if (Array.isArray(data.blockedJobs)) {
+      state.blockedJobs = data.blockedJobs.map(normalizeBlockedJob).filter(Boolean);
+    }
+  }
+
   async function persistResults() {
     await storageSet({
       [STORAGE.lastResults]: {
@@ -197,9 +270,9 @@
       excludeBlockedJobs: state.prefs.excludeBlockedJobs,
       excludeRegisteredJobs: hasProfile && state.prefs.excludeRegisteredJobs,
       excludeRegisteredCompanies: hasProfile && state.prefs.excludeRegisteredCompanies,
-      blockedCompanies: state.blockedCompanies,
-      blockedAts: state.blockedAts,
-      blockedJobs: state.blockedJobs,
+      blockedCompanies: blockedCompanyNames(),
+      blockedAts: blockedAtsNames(),
+      blockedJobs: blockedJobRefs(),
       registeredJobs: state.registeredJobs,
       registeredCompanies: state.registeredCompanies,
     });
@@ -368,7 +441,7 @@
     if (hint) {
       if (!state.candidates.length && !state.profileLoading) {
         hint.textContent =
-          'Sign in under Settings, then Refresh to load profiles for Resume DB filters.';
+          'Sign in under Settings, then Refresh to load website block lists and profiles.';
         hint.hidden = false;
       } else if (!hasProfile) {
         hint.textContent = 'Select a profile to hide registered jobs/companies for that profile.';
@@ -520,29 +593,36 @@
 
     if (companyUl) {
       companyUl.innerHTML = state.blockedCompanies
-        .map(
-          (name, i) =>
+        .map((item, i) => {
+          const name = blockedCompanyName(item);
+          const id = blockedRecordId(item);
+          return (
             `<li><span title="${escapeHtml(name)}">${escapeHtml(name)}</span>` +
-            `<button type="button" class="btn small js-unblock" data-kind="company" data-index="${i}">Remove</button></li>`
-        )
+            `<button type="button" class="btn small js-unblock" data-kind="company" data-index="${i}" data-id="${escapeHtml(id)}">Remove</button></li>`
+          );
+        })
         .join('');
     }
     if (atsUl) {
       atsUl.innerHTML = state.blockedAts
-        .map(
-          (name, i) =>
+        .map((item, i) => {
+          const name = blockedAtsName(item);
+          const id = blockedRecordId(item);
+          return (
             `<li><span title="${escapeHtml(name)}">${escapeHtml(name)}</span>` +
-            `<button type="button" class="btn small js-unblock" data-kind="ats" data-index="${i}">Remove</button></li>`
-        )
+            `<button type="button" class="btn small js-unblock" data-kind="ats" data-index="${i}" data-id="${escapeHtml(id)}">Remove</button></li>`
+          );
+        })
         .join('');
     }
     if (jobUl) {
       jobUl.innerHTML = state.blockedJobs
         .map((job, i) => {
-          const label = [job.jobTitle, job.companyName].filter(Boolean).join(' · ') || job.jobLink;
+          const ref = normalizeBlockedJob(job);
+          const label = [ref.jobTitle, ref.companyName].filter(Boolean).join(' · ') || ref.jobLink;
           return (
-            `<li><span title="${escapeHtml(job.jobLink || '')}">${escapeHtml(label)}</span>` +
-            `<button type="button" class="btn small js-unblock" data-kind="job" data-index="${i}">Remove</button></li>`
+            `<li><span title="${escapeHtml(ref.jobLink)}">${escapeHtml(label)}</span>` +
+            `<button type="button" class="btn small js-unblock" data-kind="job" data-index="${i}" data-id="${escapeHtml(ref.id)}">Remove</button></li>`
           );
         })
         .join('');
@@ -860,51 +940,116 @@
     }
   }
 
-  async function addBlockedCompany(name) {
-    const cleaned = String(name || '').trim();
-    if (!cleaned) return;
-    const matcher = window.SmartJobCompanyName?.companiesMatch;
-    const exists = state.blockedCompanies.some((item) =>
-      matcher ? matcher(item, cleaned) : item.toLowerCase() === cleaned.toLowerCase()
-    );
-    if (!exists) state.blockedCompanies.push(cleaned);
+  async function websiteRequest(path, options = {}) {
+    const config = await getAuthConfig();
+    if (!config?.extensionApiKey || !config?.baseUrl) {
+      throw new Error('Sign in under Settings to sync block lists with the website.');
+    }
+    const headers = {
+      'X-Extension-Key': config.extensionApiKey,
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {}),
+    };
+    const res = await fetch(`${config.baseUrl}${path}`, {
+      ...options,
+      headers,
+      cache: 'no-store',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Request failed (${res.status})`);
+    }
+    return data;
+  }
+
+  async function refreshAfterBlockChange() {
     await persistBlockLists();
     recomputeFiltered();
     await persistResults();
     syncControlsFromState();
+  }
+
+  async function addBlockedCompany(name) {
+    const cleaned = String(name || '').trim();
+    if (!cleaned) return;
+    try {
+      const data = await websiteRequest('/api/job-scraper/blocked-companies', {
+        method: 'POST',
+        body: JSON.stringify({ companyName: cleaned }),
+      });
+      applyWebsiteBlockedLists(data);
+      await refreshAfterBlockChange();
+      showToast('Company blocked on the website.', 'success');
+    } catch (err) {
+      showToast(err?.message || String(err), 'error');
+    }
   }
 
   async function addBlockedAts(name) {
     const cleaned = String(name || '').trim();
     if (!cleaned) return;
-    const key = cleaned.toLowerCase();
-    if (!state.blockedAts.some((item) => item.toLowerCase() === key)) {
-      state.blockedAts.push(cleaned);
+    try {
+      const data = await websiteRequest('/api/job-scraper/blocked-ats', {
+        method: 'POST',
+        body: JSON.stringify({ atsName: cleaned }),
+      });
+      applyWebsiteBlockedLists(data);
+      await refreshAfterBlockChange();
+      showToast('ATS blocked on the website.', 'success');
+    } catch (err) {
+      showToast(err?.message || String(err), 'error');
     }
-    await persistBlockLists();
-    recomputeFiltered();
-    await persistResults();
-    syncControlsFromState();
   }
 
   async function addBlockedJob(job) {
     const jobLink = String(job?.apply_url || job?.jobLink || '').trim();
     if (!jobLink) return;
-    const linksMatch = window.SmartJobJobUrl?.jobLinksMatch;
-    const exists = state.blockedJobs.some((item) =>
-      linksMatch ? linksMatch(item.jobLink, jobLink) : item.jobLink === jobLink
-    );
-    if (!exists) {
-      state.blockedJobs.push({
-        jobLink,
-        jobTitle: job.title || job.jobTitle || '',
-        companyName: job.company_name || job.companyName || '',
+    try {
+      const data = await websiteRequest('/api/job-scraper/blocked-jobs', {
+        method: 'POST',
+        body: JSON.stringify({
+          jobLink,
+          jobTitle: job.title || job.jobTitle || '',
+          companyName: job.company_name || job.companyName || '',
+        }),
       });
+      applyWebsiteBlockedLists(data);
+      await refreshAfterBlockChange();
+      showToast(
+        data.alreadyBlocked ? 'Job was already blocked on the website.' : 'Job blocked on the website.',
+        'success'
+      );
+    } catch (err) {
+      showToast(err?.message || String(err), 'error');
     }
-    await persistBlockLists();
-    recomputeFiltered();
-    await persistResults();
-    syncControlsFromState();
+  }
+
+  async function removeBlockedItem(kind, id) {
+    const routes = {
+      company: '/api/job-scraper/blocked-companies',
+      ats: '/api/job-scraper/blocked-ats',
+      job: '/api/job-scraper/blocked-jobs',
+    };
+    const path = routes[kind];
+    if (!path) return;
+    if (!id) {
+      showToast('Refresh lists from the website, then try Remove again.', 'warn');
+      return;
+    }
+    try {
+      await websiteRequest(`${path}?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (kind === 'company') {
+        state.blockedCompanies = state.blockedCompanies.filter((item) => blockedRecordId(item) !== id);
+      } else if (kind === 'ats') {
+        state.blockedAts = state.blockedAts.filter((item) => blockedRecordId(item) !== id);
+      } else {
+        state.blockedJobs = state.blockedJobs.filter((item) => blockedRecordId(item) !== id);
+      }
+      await refreshAfterBlockChange();
+      showToast('Removed on the website.', 'success');
+    } catch (err) {
+      showToast(err?.message || String(err), 'error');
+    }
   }
 
   async function getAuthConfig() {
@@ -945,7 +1090,7 @@
         state.registeredJobs = [];
         state.registeredCompanies = [];
         if (!silent) {
-          showToast('Sign in under Settings to use per-profile Resume DB filters.', 'warn');
+          showToast('Sign in under Settings to load website block lists and profiles.', 'warn');
         }
         return;
       }
@@ -972,6 +1117,9 @@
         throw new Error(data.error || 'Failed to load profile filter lists.');
       }
 
+      applyWebsiteBlockedLists(data);
+      await persistBlockLists();
+
       state.candidates = Array.isArray(data.candidates) ? data.candidates : [];
       state.registeredCompanies = Array.isArray(data.resumeDbCompanies)
         ? data.resumeDbCompanies
@@ -997,12 +1145,16 @@
       recomputeFiltered();
       await persistResults();
       if (!silent) {
-        showToast(
-          state.prefs.candidateFilter
-            ? `Profile lists loaded (${state.registeredJobs.length} jobs, ${state.registeredCompanies.length} companies).`
-            : `Loaded ${state.candidates.length} profile(s).`,
-          'success'
-        );
+        const bits = [
+          `${state.blockedCompanies.length} companies`,
+          `${state.blockedAts.length} ATS`,
+          `${state.blockedJobs.length} jobs`,
+        ];
+        if (state.prefs.candidateFilter) {
+          bits.push(`${state.registeredJobs.length} reg. jobs`);
+          bits.push(`${state.registeredCompanies.length} reg. cos`);
+        }
+        showToast(`Website lists loaded (${bits.join(', ')}).`, 'success');
       }
     } catch (err) {
       if (!silent) showToast(err?.message || String(err), 'error');
@@ -1171,15 +1323,7 @@
       const btn = event.target.closest('.js-unblock');
       if (!btn) return;
       const kind = btn.dataset.kind;
-      const index = Number(btn.dataset.index);
-      if (!Number.isFinite(index)) return;
-      if (kind === 'company') state.blockedCompanies.splice(index, 1);
-      if (kind === 'ats') state.blockedAts.splice(index, 1);
-      if (kind === 'job') state.blockedJobs.splice(index, 1);
-      await persistBlockLists();
-      recomputeFiltered();
-      await persistResults();
-      syncControlsFromState();
+      await removeBlockedItem(kind, String(btn.dataset.id || '').trim());
     });
   }
 
