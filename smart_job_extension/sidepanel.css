@@ -2584,12 +2584,13 @@ html.assistant-dialog body.ui-optimized .app-shell {
   background: color-mix(in srgb, var(--brand, #6666ff) 16%, transparent);
 }
 
-/* ── Job Scraper tab ─────────────────────────────────────────────────────── */
+/* ── Job Scraper tab (theme-aware) ───────────────────────────────────────── */
 .js-scraper {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding-bottom: 12px;
+  color: var(--text);
 }
 
 .js-card {
@@ -2600,11 +2601,13 @@ html.assistant-dialog body.ui-optimized .app-shell {
 .js-title {
   margin: 0;
   font-size: 14px;
+  color: var(--text);
 }
 
 .js-subtitle {
   margin: 2px 0 0;
   font-size: 11px;
+  color: var(--muted);
 }
 
 .js-controls {
@@ -2615,6 +2618,16 @@ html.assistant-dialog body.ui-optimized .app-shell {
   margin-top: 10px;
 }
 
+.js-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 120px;
+  color: var(--text-secondary);
+}
+
 .js-field-profile {
   min-width: 160px;
   flex: 1 1 160px;
@@ -2622,17 +2635,40 @@ html.assistant-dialog body.ui-optimized .app-shell {
 
 .js-profile-hint {
   margin: 6px 0 0;
+  color: var(--muted);
 }
 
 .js-field select,
-.js-add-row input {
+.js-add-row input,
+#jsDateWindow,
+#jsProfileFilter,
+#jsAddBlockedCompany,
+#jsAddBlockedAts,
+#jsAddBlockedJob {
   font-weight: 500;
   font-size: 12px;
-  border: 1px solid var(--border, #dbe3ef);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 7px 8px;
-  background: var(--surface, #fff);
-  color: inherit;
+  background: var(--input-bg);
+  color: var(--text);
+  color-scheme: inherit;
+}
+
+.js-field select:focus,
+.js-add-row input:focus,
+#jsDateWindow:focus,
+#jsProfileFilter:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(102, 102, 255, 0.2);
+}
+
+.js-field select option,
+#jsDateWindow option,
+#jsProfileFilter option {
+  background: var(--bg-elevated);
+  color: var(--text);
 }
 
 .js-control-actions {
@@ -2640,6 +2676,47 @@ html.assistant-dialog body.ui-optimized .app-shell {
   flex-wrap: wrap;
   gap: 6px;
   margin-left: auto;
+}
+
+.js-control-actions .btn,
+.js-results-actions .btn,
+.js-row-actions .btn,
+.js-block-list .btn,
+.js-add-row .btn {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.js-control-actions .btn:hover:not(:disabled),
+.js-results-actions .btn:hover:not(:disabled),
+.js-row-actions .btn:hover:not(:disabled),
+.js-block-list .btn:hover:not(:disabled),
+.js-add-row .btn:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+}
+
+.js-control-actions .btn.primary,
+#jsScrapeBtn.btn.primary {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.js-control-actions .btn.primary:hover:not(:disabled),
+#jsScrapeBtn.btn.primary:hover:not(:disabled) {
+  background: var(--primary-dark);
+  border-color: var(--primary-dark);
+  color: #fff;
+}
+
+.js-results-actions .btn:disabled,
+.js-control-actions .btn:disabled {
+  opacity: 0.55;
+  color: var(--muted);
+  background: var(--bg-subtle);
+  border-color: var(--border);
 }
 
 .js-filter-toggles {
@@ -2656,6 +2733,13 @@ html.assistant-dialog body.ui-optimized .app-shell {
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.js-toggle:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+  color: var(--muted);
 }
 
 .js-status {
@@ -2663,30 +2747,35 @@ html.assistant-dialog body.ui-optimized .app-shell {
   padding: 8px 10px;
   border-radius: 8px;
   font-size: 12px;
-  border: 1px solid var(--border, #dbe3ef);
-  background: color-mix(in srgb, var(--surface, #fff) 88%, #94a3b8);
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text);
 }
 
 .js-status[data-kind="success"] {
-  border-color: color-mix(in srgb, var(--success, #16a34a) 35%, transparent);
-  background: color-mix(in srgb, var(--success, #16a34a) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+  background: color-mix(in srgb, var(--success) 14%, var(--bg-elevated));
+  color: var(--text);
 }
 
 .js-status[data-kind="warn"] {
-  border-color: color-mix(in srgb, #f59e0b 40%, transparent);
-  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  border-color: color-mix(in srgb, #f59e0b 45%, var(--border));
+  background: var(--warning-bg);
+  color: var(--text);
 }
 
 .js-status[data-kind="error"] {
-  border-color: color-mix(in srgb, var(--danger, #dc2626) 35%, transparent);
-  background: color-mix(in srgb, var(--danger, #dc2626) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
+  color: var(--text);
 }
 
 .js-lists {
   margin-top: 10px;
-  border: 1px solid var(--border, #dbe3ef);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px;
+  background: var(--bg-subtle);
 }
 
 .js-lists > summary {
@@ -2698,6 +2787,12 @@ html.assistant-dialog body.ui-optimized .app-shell {
   flex-wrap: wrap;
   gap: 6px;
   align-items: baseline;
+  color: var(--text);
+}
+
+.js-lists > summary .muted {
+  color: var(--muted);
+  font-weight: 500;
 }
 
 .js-lists > summary::-webkit-details-marker {
@@ -2713,7 +2808,7 @@ html.assistant-dialog body.ui-optimized .app-shell {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #64748b;
+  color: var(--muted);
 }
 
 .js-add-row {
@@ -2744,7 +2839,8 @@ html.assistant-dialog body.ui-optimized .app-shell {
   justify-content: space-between;
   font-size: 11px;
   padding: 4px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border, #dbe3ef) 70%, transparent);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
 }
 
 .js-block-list li span {
@@ -2752,6 +2848,7 @@ html.assistant-dialog body.ui-optimized .app-shell {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text);
 }
 
 .js-results-toolbar {
@@ -2768,6 +2865,7 @@ html.assistant-dialog body.ui-optimized .app-shell {
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .js-results-actions {
@@ -2780,6 +2878,7 @@ html.assistant-dialog body.ui-optimized .app-shell {
 .js-results-empty {
   margin: 0;
   font-size: 12px;
+  color: var(--muted);
 }
 
 .js-results-list {
@@ -2793,9 +2892,10 @@ html.assistant-dialog body.ui-optimized .app-shell {
   grid-template-columns: auto 1fr;
   gap: 8px;
   padding: 8px;
-  border: 1px solid var(--border, #dbe3ef);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface, #fff) 92%, #cbd5e1);
+  background: var(--bg-subtle);
+  color: var(--text);
 }
 
 .js-row-check {
@@ -2806,6 +2906,7 @@ html.assistant-dialog body.ui-optimized .app-shell {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.3;
+  color: var(--text);
 }
 
 .js-row-meta {
@@ -2814,7 +2915,7 @@ html.assistant-dialog body.ui-optimized .app-shell {
   gap: 6px;
   margin-top: 4px;
   font-size: 11px;
-  color: #64748b;
+  color: var(--muted);
 }
 
 .js-badge {
@@ -2822,9 +2923,9 @@ html.assistant-dialog body.ui-optimized .app-shell {
   align-items: center;
   padding: 1px 6px;
   border-radius: 999px;
-  border: 1px solid var(--border, #dbe3ef);
-  background: var(--surface, #fff);
-  color: inherit;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
   font-weight: 600;
 }
 
@@ -2835,6 +2936,11 @@ html.assistant-dialog body.ui-optimized .app-shell {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--muted);
+}
+
+.js-row-link:hover {
+  color: var(--brand-hover);
 }
 
 .js-row-actions {
@@ -2847,4 +2953,8 @@ html.assistant-dialog body.ui-optimized .app-shell {
 
 #jsScrapeBtn.is-busy {
   opacity: 0.85;
+}
+
+#jsActionScope {
+  color: var(--muted);
 }

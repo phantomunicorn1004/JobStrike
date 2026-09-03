@@ -670,3 +670,47 @@ body.sidepanel ::-webkit-scrollbar-track {
   background: var(--bg-subtle);
   color: var(--text-secondary);
 }
+
+/* Job Scraper — keep inputs/buttons on design tokens */
+.js-field select,
+.js-add-row input,
+#jsDateWindow,
+#jsProfileFilter {
+  background: var(--input-bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.js-field select option,
+#jsDateWindow option,
+#jsProfileFilter option {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.js-control-actions .btn:not(.primary),
+.js-results-actions .btn,
+.js-row-actions .btn,
+.js-add-row .btn,
+.js-block-list .btn {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.js-row {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.js-badge {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.js-lists {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+}
