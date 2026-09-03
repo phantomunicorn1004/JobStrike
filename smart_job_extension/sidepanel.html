@@ -60,6 +60,15 @@
       <span class="pinned-job-note" id="pinnedJobNote" hidden>tab moved on</span>
     </div>
 
+    <nav class="nav-primary" aria-label="Main">
+      <button type="button" class="tab-main active" data-tab="register" data-tier="main">
+        <span class="tab-label">Register</span>
+      </button>
+      <button type="button" class="tab-main" data-tab="job-scraper" data-tier="main">
+        <span class="tab-label">Job Scraper</span>
+      </button>
+    </nav>
+
     <main class="app-main">
       <section class="tab-panel active" id="tab-register">
         <div class="card register-card register-fit rb-card" id="resumeBuilderRoot">
@@ -275,6 +284,108 @@
             <div class="rb-secondary-actions">
               <button type="button" class="btn primary" id="rbMaxModalApplyBtn">Apply</button>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-job-scraper">
+        <div class="tab-panel-scroll js-scraper">
+          <div class="card js-card">
+            <div class="js-head">
+              <div>
+                <h2 class="js-title">HiringCafe scrape</h2>
+                <p class="muted js-subtitle" id="jsMeta">Click Scrape to load HiringCafe jobs.</p>
+              </div>
+            </div>
+
+            <div class="js-controls">
+              <label class="js-field">
+                <span>Date window</span>
+                <select id="jsDateWindow" aria-label="Date window">
+                  <option value="1d">Last 1 day</option>
+                  <option value="3d" selected>Last 3 days</option>
+                  <option value="7d">Last 7 days</option>
+                </select>
+              </label>
+              <div class="js-control-actions">
+                <button type="button" class="btn primary" id="jsScrapeBtn">Scrape</button>
+                <button type="button" class="btn" id="jsResumeBtn" hidden>Resume</button>
+                <button type="button" class="btn" id="jsStopBtn" hidden>Stop</button>
+              </div>
+            </div>
+
+            <div class="js-filter-toggles" role="group" aria-label="Local filters">
+              <label class="js-toggle">
+                <input type="checkbox" id="jsFilterBlockedCompanies" checked>
+                <span>Blocked companies</span>
+              </label>
+              <label class="js-toggle">
+                <input type="checkbox" id="jsFilterBlockedAts" checked>
+                <span>Blocked ATS</span>
+              </label>
+              <label class="js-toggle">
+                <input type="checkbox" id="jsFilterBlockedJobs" checked>
+                <span>Blocked jobs</span>
+              </label>
+            </div>
+
+            <p class="js-status" id="jsStatus" hidden data-kind="info"></p>
+
+            <details class="js-lists" id="jsListsPanel">
+              <summary>
+                Manage block lists
+                <span class="muted">
+                  (<span id="jsBlockedCompanyCount">0</span> co ·
+                  <span id="jsBlockedAtsCount">0</span> ATS ·
+                  <span id="jsBlockedJobCount">0</span> jobs)
+                </span>
+              </summary>
+
+              <div class="js-list-block">
+                <h3>Companies</h3>
+                <div class="js-add-row">
+                  <input type="text" id="jsAddBlockedCompany" placeholder="Company name">
+                  <button type="button" class="btn small" id="jsAddBlockedCompanyBtn">Add</button>
+                </div>
+                <ul class="js-block-list" id="jsBlockedCompanyList"></ul>
+              </div>
+
+              <div class="js-list-block">
+                <h3>ATS</h3>
+                <div class="js-add-row">
+                  <input type="text" id="jsAddBlockedAts" placeholder="e.g. Workday">
+                  <button type="button" class="btn small" id="jsAddBlockedAtsBtn">Add</button>
+                </div>
+                <ul class="js-block-list" id="jsBlockedAtsList"></ul>
+              </div>
+
+              <div class="js-list-block">
+                <h3>Jobs</h3>
+                <div class="js-add-row">
+                  <input type="url" id="jsAddBlockedJob" placeholder="https://… apply URL">
+                  <button type="button" class="btn small" id="jsAddBlockedJobBtn">Add</button>
+                </div>
+                <ul class="js-block-list" id="jsBlockedJobList"></ul>
+              </div>
+            </details>
+          </div>
+
+          <div class="card js-card js-results-card">
+            <div class="js-results-toolbar">
+              <label class="js-select-all">
+                <input type="checkbox" id="jsSelectAll">
+                <span>Select all</span>
+              </label>
+              <span class="muted small" id="jsActionScope"></span>
+              <div class="js-results-actions">
+                <button type="button" class="btn small" id="jsCsvBtn" disabled>CSV</button>
+                <button type="button" class="btn small" id="jsLinksBtn" disabled>Links</button>
+                <button type="button" class="btn small" id="jsCopyLinksBtn" disabled>Copy</button>
+                <button type="button" class="btn small" id="jsClearResultsBtn" disabled>Clear</button>
+              </div>
+            </div>
+            <p class="muted js-results-empty" id="jsResultsEmpty">Click Scrape to load HiringCafe jobs.</p>
+            <div class="js-results-list" id="jsResultsList"></div>
           </div>
         </div>
       </section>
@@ -521,6 +632,8 @@
   <script src="prompt-kit-client.js"></script>
   <script src="job-url.js"></script>
   <script src="company-name.js"></script>
+  <script src="job-scraper-hiringcafe.js"></script>
+  <script src="job-scraper-panel.js"></script>
   <script src="register-resume-db.js"></script>
   <script src="sidepanel.js"></script>
 </body>

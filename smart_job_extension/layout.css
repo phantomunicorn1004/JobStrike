@@ -183,6 +183,10 @@ main {
   gap: 0;
 }
 
+#tab-job-scraper {
+  gap: 0;
+}
+
 .register-card.register-fit {
   display: flex;
   flex-direction: column;
