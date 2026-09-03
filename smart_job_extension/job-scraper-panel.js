@@ -16,6 +16,9 @@
     excludeBlockedCompanies: true,
     excludeBlockedAts: true,
     excludeBlockedJobs: true,
+    excludeRegisteredJobs: true,
+    excludeRegisteredCompanies: true,
+    candidateFilter: '',
     maxPages: 8,
     delayMs: 700,
   };
@@ -25,6 +28,10 @@
     blockedCompanies: [],
     blockedAts: [],
     blockedJobs: [],
+    candidates: [],
+    registeredCompanies: [],
+    registeredJobs: [],
+    profileLoading: false,
     rawJobs: [],
     filteredJobs: [],
     selectedKeys: new Set(),
@@ -151,6 +158,7 @@
       return;
     }
 
+    const hasProfile = Boolean(state.prefs.candidateFilter);
     const deduped = scraper.dedupeJobs(state.rawJobs);
     const { filtered: dated, removedByDate } = scraper.filterJobsByPublishDate(
       deduped,
@@ -160,9 +168,13 @@
       excludeBlockedCompanies: state.prefs.excludeBlockedCompanies,
       excludeBlockedAts: state.prefs.excludeBlockedAts,
       excludeBlockedJobs: state.prefs.excludeBlockedJobs,
+      excludeRegisteredJobs: hasProfile && state.prefs.excludeRegisteredJobs,
+      excludeRegisteredCompanies: hasProfile && state.prefs.excludeRegisteredCompanies,
       blockedCompanies: state.blockedCompanies,
       blockedAts: state.blockedAts,
       blockedJobs: state.blockedJobs,
+      registeredJobs: state.registeredJobs,
+      registeredCompanies: state.registeredCompanies,
     });
 
     state.filteredJobs = filtered;
@@ -174,7 +186,11 @@
       removedBlockedJobs: stats.removedBlockedJobs,
       removedBlockedCompanies: stats.removedBlockedCompanies,
       removedAts: stats.removedAts,
+      removedRegisteredJobs: stats.removedRegisteredJobs,
+      removedRegisteredCompanies: stats.removedRegisteredCompanies,
       remaining: filtered.length,
+      registeredJobCount: state.registeredJobs.length,
+      registeredCompanyCount: state.registeredCompanies.length,
     };
 
     const validKeys = new Set(filtered.map((job, i) => jobKey(job, i)));
@@ -194,15 +210,69 @@
     const dateSel = document.getElementById('jsDateWindow');
     if (dateSel) dateSel.value = state.prefs.dateWindow;
 
+    const profileSel = document.getElementById('jsProfileFilter');
+    if (profileSel) {
+      const options =
+        '<option value="">Select profile…</option>' +
+        state.candidates
+          .map(
+            (candidate) =>
+              `<option value="${escapeHtml(candidate.key)}">${escapeHtml(candidate.label)}</option>`
+          )
+          .join('');
+      const previous = profileSel.value;
+      profileSel.innerHTML = options;
+      const preferred = state.prefs.candidateFilter || previous;
+      if (preferred && state.candidates.some((c) => c.key === preferred)) {
+        profileSel.value = preferred;
+      } else {
+        profileSel.value = '';
+        if (state.prefs.candidateFilter && !state.candidates.some((c) => c.key === state.prefs.candidateFilter)) {
+          state.prefs.candidateFilter = '';
+        }
+      }
+      profileSel.disabled = state.profileLoading;
+    }
+
     const map = [
       ['jsFilterBlockedCompanies', 'excludeBlockedCompanies'],
       ['jsFilterBlockedAts', 'excludeBlockedAts'],
       ['jsFilterBlockedJobs', 'excludeBlockedJobs'],
+      ['jsFilterRegisteredJobs', 'excludeRegisteredJobs'],
+      ['jsFilterRegisteredCompanies', 'excludeRegisteredCompanies'],
     ];
     for (const [id, key] of map) {
       const el = document.getElementById(id);
       if (el) el.checked = Boolean(state.prefs[key]);
     }
+
+    const hasProfile = Boolean(state.prefs.candidateFilter);
+    const regJobs = document.getElementById('jsFilterRegisteredJobs');
+    const regCos = document.getElementById('jsFilterRegisteredCompanies');
+    if (regJobs) regJobs.disabled = !hasProfile;
+    if (regCos) regCos.disabled = !hasProfile;
+
+    const jobCount = document.getElementById('jsRegisteredJobCount');
+    const coCount = document.getElementById('jsRegisteredCompanyCount');
+    if (jobCount) jobCount.textContent = String(state.registeredJobs.length);
+    if (coCount) coCount.textContent = String(state.registeredCompanies.length);
+
+    const hint = document.getElementById('jsProfileHint');
+    if (hint) {
+      if (!state.candidates.length && !state.profileLoading) {
+        hint.textContent =
+          'Sign in under Settings, then Refresh to load profiles for Resume DB filters.';
+        hint.hidden = false;
+      } else if (!hasProfile) {
+        hint.textContent = 'Select a profile to hide registered jobs/companies for that profile.';
+        hint.hidden = false;
+      } else {
+        hint.hidden = true;
+      }
+    }
+
+    const refreshBtn = document.getElementById('jsRefreshProfileBtn');
+    if (refreshBtn) refreshBtn.disabled = state.profileLoading;
 
     const resumeBtn = document.getElementById('jsResumeBtn');
     if (resumeBtn) resumeBtn.hidden = !state.pausedForChallenge;
@@ -231,10 +301,18 @@
     if (state.stats) {
       parts.push(`${state.stats.remaining ?? state.filteredJobs.length} shown`);
       if (state.stats.scraped != null) parts.push(`${state.stats.scraped} scraped`);
+      if (state.stats.removedRegisteredJobs) {
+        parts.push(`${state.stats.removedRegisteredJobs} reg. jobs hidden`);
+      }
+      if (state.stats.removedRegisteredCompanies) {
+        parts.push(`${state.stats.removedRegisteredCompanies} reg. cos hidden`);
+      }
       if (state.stats.reportedTotal != null) {
         parts.push(`HiringCafe total ${state.stats.reportedTotal}`);
       }
     }
+    const profileLabel = state.candidates.find((c) => c.key === state.prefs.candidateFilter)?.label;
+    if (profileLabel) parts.push(`profile ${profileLabel}`);
     meta.textContent = parts.join(' · ') || 'Click Scrape to load HiringCafe jobs.';
   }
 
@@ -649,6 +727,111 @@
     syncControlsFromState();
   }
 
+  async function getAuthConfig() {
+    const register = window.SmartJobRegisterResumeDb;
+    if (register?.getBackendConfig) {
+      return register.getBackendConfig();
+    }
+    return new Promise((resolve) => {
+      chrome.storage.local.get(
+        ['resume_db_backend_url', 'resume_db_extension_api_key', 'resume_db_api_key'],
+        (result) => {
+          resolve({
+            baseUrl: String(result.resume_db_backend_url || '').replace(/\/+$/, ''),
+            extensionApiKey: String(
+              result.resume_db_extension_api_key || result.resume_db_api_key || ''
+            ).trim(),
+          });
+        }
+      );
+    });
+  }
+
+  async function preferredCandidateFromRegister() {
+    const select = document.getElementById('regProfileId');
+    const profileId = select?.value?.trim();
+    if (profileId) return `profile-${profileId}`;
+    return state.prefs.candidateFilter || '';
+  }
+
+  async function loadProfileFilterContext({ silent = false } = {}) {
+    state.profileLoading = true;
+    syncControlsFromState();
+
+    try {
+      const config = await getAuthConfig();
+      if (!config?.extensionApiKey || !config?.baseUrl) {
+        state.candidates = [];
+        state.registeredJobs = [];
+        state.registeredCompanies = [];
+        if (!silent) {
+          showToast('Sign in under Settings to use per-profile Resume DB filters.', 'warn');
+        }
+        return;
+      }
+
+      if (!state.prefs.candidateFilter) {
+        const preferred = await preferredCandidateFromRegister();
+        if (preferred) state.prefs.candidateFilter = preferred;
+      }
+
+      const params = new URLSearchParams();
+      if (state.prefs.candidateFilter) {
+        params.set('candidateFilter', state.prefs.candidateFilter);
+      }
+
+      const res = await fetch(
+        `${config.baseUrl}/api/job-scraper/blocked-companies?${params.toString()}`,
+        {
+          headers: { 'X-Extension-Key': config.extensionApiKey },
+          cache: 'no-store',
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to load profile filter lists.');
+      }
+
+      state.candidates = Array.isArray(data.candidates) ? data.candidates : [];
+      state.registeredCompanies = Array.isArray(data.resumeDbCompanies)
+        ? data.resumeDbCompanies
+        : [];
+      state.registeredJobs = Array.isArray(data.registeredJobs)
+        ? data.registeredJobs.map((job) => ({
+            jobLink: job.jobLink || '',
+            jobTitle: job.jobTitle || '',
+            company: job.company || '',
+          }))
+        : [];
+
+      if (
+        state.prefs.candidateFilter &&
+        !state.candidates.some((c) => c.key === state.prefs.candidateFilter)
+      ) {
+        state.prefs.candidateFilter = '';
+        state.registeredCompanies = [];
+        state.registeredJobs = [];
+      }
+
+      await persistPrefs();
+      recomputeFiltered();
+      await persistResults();
+      if (!silent) {
+        showToast(
+          state.prefs.candidateFilter
+            ? `Profile lists loaded (${state.registeredJobs.length} jobs, ${state.registeredCompanies.length} companies).`
+            : `Loaded ${state.candidates.length} profile(s).`,
+          'success'
+        );
+      }
+    } catch (err) {
+      if (!silent) showToast(err?.message || String(err), 'error');
+    } finally {
+      state.profileLoading = false;
+      syncControlsFromState();
+    }
+  }
+
   function wireUi() {
     document.getElementById('jsDateWindow')?.addEventListener('change', async (event) => {
       state.prefs.dateWindow = event.target.value === '1d' || event.target.value === '7d'
@@ -667,6 +850,8 @@
       ['jsFilterBlockedCompanies', 'excludeBlockedCompanies'],
       ['jsFilterBlockedAts', 'excludeBlockedAts'],
       ['jsFilterBlockedJobs', 'excludeBlockedJobs'],
+      ['jsFilterRegisteredJobs', 'excludeRegisteredJobs'],
+      ['jsFilterRegisteredCompanies', 'excludeRegisteredCompanies'],
     ].forEach(([id, key]) => {
       document.getElementById(id)?.addEventListener('change', async (event) => {
         state.prefs[key] = Boolean(event.target.checked);
@@ -675,6 +860,22 @@
         await persistResults();
         renderResults();
         renderMeta();
+      });
+    });
+
+    document.getElementById('jsProfileFilter')?.addEventListener('change', async (event) => {
+      state.prefs.candidateFilter = String(event.target.value || '').trim();
+      await persistPrefs();
+      await loadProfileFilterContext({ silent: true });
+    });
+
+    document.getElementById('jsRefreshProfileBtn')?.addEventListener('click', () => {
+      void loadProfileFilterContext({ silent: false });
+    });
+
+    document.querySelectorAll('.tab-main[data-tab="job-scraper"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        void loadProfileFilterContext({ silent: true });
       });
     });
 
@@ -836,6 +1037,7 @@
     await loadState();
     wireUi();
     syncControlsFromState();
+    void loadProfileFilterContext({ silent: true });
   }
 
   if (document.readyState === 'loading') {

@@ -2615,13 +2615,13 @@ html.assistant-dialog body.ui-optimized .app-shell {
   margin-top: 10px;
 }
 
-.js-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  min-width: 120px;
+.js-field-profile {
+  min-width: 160px;
+  flex: 1 1 160px;
+}
+
+.js-profile-hint {
+  margin: 6px 0 0;
 }
 
 .js-field select,

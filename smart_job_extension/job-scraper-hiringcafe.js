@@ -165,6 +165,35 @@
     return blockedJobs.some((blocked) => linksMatch(applyUrl, blocked?.jobLink));
   }
 
+  function normalizeTitle(value) {
+    return String(value ?? '')
+      .trim()
+      .toLowerCase();
+  }
+
+  function jobMatchesRegisteredJobRef(job, registered) {
+    const linksMatch = global.SmartJobJobUrl?.jobLinksMatch;
+    if (linksMatch?.(job?.apply_url, registered?.jobLink)) return true;
+
+    const jobTitle = normalizeTitle(job?.title);
+    const registeredTitle = normalizeTitle(registered?.jobTitle);
+    const companiesMatch = global.SmartJobCompanyName?.companiesMatch;
+    if (
+      jobTitle &&
+      registeredTitle &&
+      jobTitle === registeredTitle &&
+      companiesMatch?.(job?.company_name, registered?.company)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function jobMatchesRegisteredJobs(job, registeredJobs) {
+    if (!Array.isArray(registeredJobs) || !registeredJobs.length) return false;
+    return registeredJobs.some((registered) => jobMatchesRegisteredJobRef(job, registered));
+  }
+
   function filterJobsByPublishDate(jobs, dateWindow, nowMs = Date.now()) {
     const days = dateWindowDays(dateWindow);
     const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000;
@@ -226,19 +255,36 @@
       excludeBlockedCompanies = true,
       excludeBlockedAts = true,
       excludeBlockedJobs = true,
+      excludeRegisteredJobs = false,
+      excludeRegisteredCompanies = false,
       blockedCompanies = [],
       blockedAts = [],
       blockedJobs = [],
+      registeredJobs = [],
+      registeredCompanies = [],
     } = options;
 
     let removedBlockedJobs = 0;
     let removedBlockedCompanies = 0;
     let removedAts = 0;
+    let removedRegisteredJobs = 0;
+    let removedRegisteredCompanies = 0;
     const filtered = [];
 
     for (const job of jobs) {
       if (excludeBlockedJobs && jobMatchesBlocked(job.apply_url, blockedJobs)) {
         removedBlockedJobs += 1;
+        continue;
+      }
+      if (excludeRegisteredJobs && jobMatchesRegisteredJobs(job, registeredJobs)) {
+        removedRegisteredJobs += 1;
+        continue;
+      }
+      if (
+        excludeRegisteredCompanies &&
+        companyMatchesBlocked(job.company_name, registeredCompanies)
+      ) {
+        removedRegisteredCompanies += 1;
         continue;
       }
       if (excludeBlockedAts && atsMatchesList(job.application_site, blockedAts)) {
@@ -257,7 +303,13 @@
 
     return {
       filtered,
-      stats: { removedBlockedJobs, removedBlockedCompanies, removedAts },
+      stats: {
+        removedBlockedJobs,
+        removedBlockedCompanies,
+        removedAts,
+        removedRegisteredJobs,
+        removedRegisteredCompanies,
+      },
     };
   }
 
@@ -343,5 +395,7 @@
     applyLocalFilters,
     jobsToCsv,
     extractPagePropsInTab,
+    jobMatchesRegisteredJobRef,
+    jobMatchesRegisteredJobs,
   };
 })(typeof window !== 'undefined' ? window : self);

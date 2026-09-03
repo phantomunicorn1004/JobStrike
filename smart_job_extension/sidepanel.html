@@ -307,14 +307,21 @@
                   <option value="7d">Last 7 days</option>
                 </select>
               </label>
+              <label class="js-field js-field-profile">
+                <span>Profile</span>
+                <select id="jsProfileFilter" aria-label="Profile">
+                  <option value="">Select profile…</option>
+                </select>
+              </label>
               <div class="js-control-actions">
+                <button type="button" class="btn" id="jsRefreshProfileBtn" title="Refresh profile lists from website">Refresh</button>
                 <button type="button" class="btn primary" id="jsScrapeBtn">Scrape</button>
                 <button type="button" class="btn" id="jsResumeBtn" hidden>Resume</button>
                 <button type="button" class="btn" id="jsStopBtn" hidden>Stop</button>
               </div>
             </div>
 
-            <div class="js-filter-toggles" role="group" aria-label="Local filters">
+            <div class="js-filter-toggles" role="group" aria-label="Filters">
               <label class="js-toggle">
                 <input type="checkbox" id="jsFilterBlockedCompanies" checked>
                 <span>Blocked companies</span>
@@ -327,7 +334,16 @@
                 <input type="checkbox" id="jsFilterBlockedJobs" checked>
                 <span>Blocked jobs</span>
               </label>
+              <label class="js-toggle" id="jsFilterRegJobsLabel" title="Requires a profile">
+                <input type="checkbox" id="jsFilterRegisteredJobs" checked disabled>
+                <span>Reg. jobs (<span id="jsRegisteredJobCount">0</span>)</span>
+              </label>
+              <label class="js-toggle" id="jsFilterRegCompaniesLabel" title="Requires a profile">
+                <input type="checkbox" id="jsFilterRegisteredCompanies" checked disabled>
+                <span>Reg. companies (<span id="jsRegisteredCompanyCount">0</span>)</span>
+              </label>
             </div>
+            <p class="muted small js-profile-hint" id="jsProfileHint">Sign in under Settings, then select a profile to hide Resume DB jobs/companies.</p>
 
             <p class="js-status" id="jsStatus" hidden data-kind="info"></p>
 
