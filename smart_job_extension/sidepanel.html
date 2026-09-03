@@ -290,17 +290,42 @@
 
       <section class="tab-panel" id="tab-job-scraper">
         <div class="tab-panel-scroll js-scraper">
-          <div class="card js-card">
-            <div class="js-head">
-              <div>
-                <h2 class="js-title">HiringCafe scrape</h2>
-                <p class="muted js-subtitle" id="jsMeta">Click Scrape to load HiringCafe jobs.</p>
-              </div>
-            </div>
+          <header class="js-head">
+            <h2 class="js-title">HiringCafe scrape</h2>
+            <p class="muted js-subtitle" id="jsMeta">Set search and filters, then Scrape.</p>
+          </header>
 
-            <div class="js-controls">
+          <section class="js-section js-section-search card js-card" aria-labelledby="jsSearchHeading">
+            <div class="js-section-label" id="jsSearchHeading">
+              Search
+              <span class="js-badge-custom" id="jsSearchCustomBadge" hidden>Custom</span>
+            </div>
+            <details class="js-search-import" id="jsSearchImportPanel">
+              <summary>
+                <span class="js-search-summary-label">HiringCafe searchState</span>
+                <span class="muted" id="jsSearchSummary">Built-in default</span>
+              </summary>
+              <p class="muted small js-search-help">
+                Set filters on hiringcafe.com, copy the URL, then import. Date window below still overrides date on scrape.
+              </p>
+              <label class="js-field js-search-url-field">
+                <span>Search URL</span>
+                <textarea id="jsSearchUrlInput" rows="2" spellcheck="false" placeholder="https://hiringcafe.com/?searchState=…"></textarea>
+              </label>
+              <div class="js-search-actions">
+                <button type="button" class="btn small primary" id="jsImportSearchUrlBtn">Import URL</button>
+                <button type="button" class="btn small" id="jsImportSearchTabBtn" title="Read searchState from the active HiringCafe tab">From tab</button>
+                <button type="button" class="btn small" id="jsResetSearchBtn">Reset</button>
+              </div>
+              <p class="muted small" id="jsSearchSource" hidden></p>
+            </details>
+          </section>
+
+          <section class="js-section js-section-filters card js-card" aria-labelledby="jsFiltersHeading">
+            <div class="js-section-label" id="jsFiltersHeading">Filters</div>
+            <div class="js-select-row">
               <label class="js-field">
-                <span>Date window</span>
+                <span>Date</span>
                 <select id="jsDateWindow" aria-label="Date window">
                   <option value="1d">Last 1 day</option>
                   <option value="3d" selected>Last 3 days</option>
@@ -313,78 +338,43 @@
                   <option value="">Select profile…</option>
                 </select>
               </label>
-              <div class="js-control-actions">
-                <button type="button" class="btn" id="jsRefreshProfileBtn" title="Refresh profile lists from website">Refresh</button>
-                <button type="button" class="btn primary" id="jsScrapeBtn">Scrape</button>
-                <button type="button" class="btn" id="jsResumeBtn" hidden>Resume</button>
-                <button type="button" class="btn" id="jsStopBtn" hidden>Stop</button>
-              </div>
             </div>
+            <p class="muted small js-profile-hint" id="jsProfileHint">Sign in under Settings, then select a profile for Resume DB filters.</p>
 
-            <details class="js-search-import" id="jsSearchImportPanel">
-              <summary>
-                HiringCafe search
-                <span class="muted" id="jsSearchSummary">Built-in default</span>
-              </summary>
-              <p class="muted small js-search-help">
-                Set filters on hiringcafe.com, copy the browser URL, then import it here. Date window above still overrides <code>dateFetchedPastNDays</code> on scrape.
-              </p>
-              <label class="js-field js-search-url-field">
-                <span>Search URL</span>
-                <textarea id="jsSearchUrlInput" rows="2" spellcheck="false" placeholder="https://hiringcafe.com/?searchState=…"></textarea>
-              </label>
-              <div class="js-search-actions">
-                <button type="button" class="btn small primary" id="jsImportSearchUrlBtn">Import URL</button>
-                <button type="button" class="btn small" id="jsImportSearchTabBtn" title="Read searchState from the active HiringCafe tab">Import from tab</button>
-                <button type="button" class="btn small" id="jsResetSearchBtn">Reset default</button>
-              </div>
-              <p class="muted small" id="jsSearchSource" hidden></p>
-            </details>
-
-            <div class="js-filter-toggles" role="group" aria-label="Filters">
-              <label class="js-toggle">
-                <input type="checkbox" id="jsFilterBlockedCompanies" checked>
-                <span>Blocked companies</span>
-              </label>
-              <label class="js-toggle">
-                <input type="checkbox" id="jsFilterBlockedAts" checked>
-                <span>Blocked ATS</span>
-              </label>
-              <label class="js-toggle">
-                <input type="checkbox" id="jsFilterBlockedJobs" checked>
-                <span>Blocked jobs</span>
-              </label>
-              <label class="js-toggle" id="jsFilterRegJobsLabel" title="Requires a profile">
-                <input type="checkbox" id="jsFilterRegisteredJobs" checked disabled>
-                <span>Reg. jobs (<span id="jsRegisteredJobCount">0</span>)</span>
-              </label>
-              <label class="js-toggle" id="jsFilterRegCompaniesLabel" title="Requires a profile">
-                <input type="checkbox" id="jsFilterRegisteredCompanies" checked disabled>
-                <span>Reg. companies (<span id="jsRegisteredCompanyCount">0</span>)</span>
-              </label>
-            </div>
-            <p class="muted small js-profile-hint" id="jsProfileHint">Sign in under Settings, then select a profile to hide Resume DB jobs/companies.</p>
-
-            <div class="js-progress" id="jsProgress" hidden data-kind="info" role="status" aria-live="polite">
-              <div class="js-progress-top">
-                <span class="js-progress-label" id="jsProgressLabel"></span>
-                <span class="js-progress-pct" id="jsProgressPct" hidden></span>
-              </div>
-              <div class="js-progress-track" aria-hidden="true">
-                <div class="js-progress-bar" id="jsProgressBar"></div>
+            <div class="js-hide-group">
+              <div class="js-hide-label">Hide from results</div>
+              <div class="js-filter-toggles" role="group" aria-label="Hide filters">
+                <div class="js-filter-subgroup">
+                  <span class="js-subgroup-title">Local</span>
+                  <label class="js-toggle">
+                    <input type="checkbox" id="jsFilterBlockedCompanies" checked>
+                    <span>Blocked companies (<span id="jsBlockedCompanyCount">0</span>)</span>
+                  </label>
+                  <label class="js-toggle">
+                    <input type="checkbox" id="jsFilterBlockedAts" checked>
+                    <span>Blocked ATS (<span id="jsBlockedAtsCount">0</span>)</span>
+                  </label>
+                  <label class="js-toggle">
+                    <input type="checkbox" id="jsFilterBlockedJobs" checked>
+                    <span>Blocked jobs (<span id="jsBlockedJobCount">0</span>)</span>
+                  </label>
+                </div>
+                <div class="js-filter-subgroup">
+                  <span class="js-subgroup-title">Resume DB</span>
+                  <label class="js-toggle" id="jsFilterRegJobsLabel" title="Requires a profile">
+                    <input type="checkbox" id="jsFilterRegisteredJobs" checked disabled>
+                    <span>Reg. jobs (<span id="jsRegisteredJobCount">0</span>)</span>
+                  </label>
+                  <label class="js-toggle" id="jsFilterRegCompaniesLabel" title="Requires a profile">
+                    <input type="checkbox" id="jsFilterRegisteredCompanies" checked disabled>
+                    <span>Reg. companies (<span id="jsRegisteredCompanyCount">0</span>)</span>
+                  </label>
+                </div>
               </div>
             </div>
 
             <details class="js-lists" id="jsListsPanel">
-              <summary>
-                Manage block lists
-                <span class="muted">
-                  (<span id="jsBlockedCompanyCount">0</span> co ·
-                  <span id="jsBlockedAtsCount">0</span> ATS ·
-                  <span id="jsBlockedJobCount">0</span> jobs)
-                </span>
-              </summary>
-
+              <summary>Manage lists</summary>
               <div class="js-list-block">
                 <h3>Companies</h3>
                 <div class="js-add-row">
@@ -393,7 +383,6 @@
                 </div>
                 <ul class="js-block-list" id="jsBlockedCompanyList"></ul>
               </div>
-
               <div class="js-list-block">
                 <h3>ATS</h3>
                 <div class="js-add-row">
@@ -402,7 +391,6 @@
                 </div>
                 <ul class="js-block-list" id="jsBlockedAtsList"></ul>
               </div>
-
               <div class="js-list-block">
                 <h3>Jobs</h3>
                 <div class="js-add-row">
@@ -412,11 +400,38 @@
                 <ul class="js-block-list" id="jsBlockedJobList"></ul>
               </div>
             </details>
-          </div>
+          </section>
 
-          <div class="card js-card js-results-card">
+          <section class="js-section js-section-actions" aria-label="Actions">
+            <div class="js-action-row">
+              <button type="button" class="btn" id="jsRefreshProfileBtn" title="Refresh profile lists from website">Refresh</button>
+              <button type="button" class="btn primary" id="jsScrapeBtn">Scrape</button>
+              <button type="button" class="btn" id="jsResumeBtn" hidden>Resume</button>
+              <button type="button" class="btn" id="jsStopBtn" hidden>Stop</button>
+            </div>
+          </section>
+
+          <section class="js-section js-section-progress card js-card" id="jsProgressSection" hidden>
+            <div class="js-section-label">Progress</div>
+            <div class="js-progress" id="jsProgress" data-kind="info" role="status" aria-live="polite">
+              <div class="js-progress-top">
+                <span class="js-progress-label" id="jsProgressLabel"></span>
+                <span class="js-progress-pct" id="jsProgressPct" hidden></span>
+              </div>
+              <div class="js-progress-track" aria-hidden="true">
+                <div class="js-progress-bar" id="jsProgressBar"></div>
+              </div>
+              <p class="js-progress-detail" id="jsProgressDetail" hidden></p>
+            </div>
+          </section>
+
+          <section class="js-section js-section-results card js-card js-results-card" aria-labelledby="jsResultsHeading">
+            <div class="js-section-label" id="jsResultsHeading">Results</div>
             <div class="js-results-toolbar">
-              <span class="js-results-count" id="jsActionScope">No results yet</span>
+              <div class="js-results-text">
+                <span class="js-results-count" id="jsActionScope">No results yet</span>
+                <span class="muted small js-results-sub" id="jsResultsSub" hidden></span>
+              </div>
               <div class="js-results-actions">
                 <button type="button" class="btn small" id="jsCsvBtn" disabled>CSV</button>
                 <button type="button" class="btn small" id="jsLinksBtn" disabled>Links</button>
@@ -425,13 +440,8 @@
               </div>
             </div>
             <p class="muted js-results-empty" id="jsResultsEmpty">Click Scrape to load HiringCafe jobs.</p>
-            <!-- Job row list kept in DOM for optional future use, hidden in UI -->
-            <label class="js-select-all" id="jsSelectAllWrap" hidden>
-              <input type="checkbox" id="jsSelectAll">
-              <span>Select all</span>
-            </label>
             <div class="js-results-list" id="jsResultsList" hidden></div>
-          </div>
+          </section>
         </div>
       </section>
 

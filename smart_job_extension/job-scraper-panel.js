@@ -227,6 +227,7 @@
   function setProgress(options = {}) {
     const {
       text = '',
+      detail = '',
       kind = 'info',
       current = null,
       total = null,
@@ -235,13 +236,18 @@
     } = options;
 
     state.status = text || '';
+    const section = document.getElementById('jsProgressSection');
     const root = document.getElementById('jsProgress');
     const label = document.getElementById('jsProgressLabel');
     const pctEl = document.getElementById('jsProgressPct');
     const bar = document.getElementById('jsProgressBar');
+    const detailEl = document.getElementById('jsProgressDetail');
     if (!root || !label || !bar) return;
 
+    const clean = (value) => String(value || '').replace(/\u2014|\u2013/g, '-');
+
     if (hidden || !text) {
+      if (section) section.hidden = true;
       root.hidden = true;
       root.dataset.kind = 'info';
       root.classList.remove('is-indeterminate');
@@ -250,12 +256,27 @@
         pctEl.hidden = true;
         pctEl.textContent = '';
       }
+      if (detailEl) {
+        detailEl.hidden = true;
+        detailEl.textContent = '';
+      }
       return;
     }
 
+    if (section) section.hidden = false;
     root.hidden = false;
     root.dataset.kind = kind || 'info';
-    label.textContent = String(text).replace(/\u2014|\u2013/g, '-');
+    label.textContent = clean(text);
+
+    if (detailEl) {
+      if (detail) {
+        detailEl.hidden = false;
+        detailEl.textContent = clean(detail);
+      } else {
+        detailEl.hidden = true;
+        detailEl.textContent = '';
+      }
+    }
 
     const hasNumbers =
       Number.isFinite(current) && Number.isFinite(total) && total > 0;
@@ -383,6 +404,8 @@
     const sourceEl = document.getElementById('jsSearchSource');
     const panel = document.getElementById('jsSearchImportPanel');
     const resetBtn = document.getElementById('jsResetSearchBtn');
+    const badge = document.getElementById('jsSearchCustomBadge');
+    const searchCard = document.querySelector('.js-section-search');
 
     const summary = state.customSearchState
       ? scraper?.summarizeSearchState?.(state.customSearchState) || 'Custom search imported'
@@ -393,6 +416,8 @@
       summaryEl.title = summary;
     }
     if (panel) panel.classList.toggle('is-custom', Boolean(state.customSearchState));
+    if (searchCard) searchCard.classList.toggle('is-custom', Boolean(state.customSearchState));
+    if (badge) badge.hidden = !state.customSearchState;
     if (resetBtn) resetBtn.disabled = !state.customSearchState;
 
     if (sourceEl) {
@@ -460,7 +485,7 @@
     const tab = tabs?.[0];
     const url = tab?.url || '';
     if (!/hiringcafe\.com|hiring\.cafe/i.test(url)) {
-      showToast('Open a hiringcafe.com search tab first, then try Import from tab.', 'warn');
+      showToast('Open a hiringcafe.com search tab first, then try From tab.', 'warn');
       return;
     }
     const input = document.getElementById('jsSearchUrlInput');
@@ -473,25 +498,12 @@
     if (!meta) return;
     const parts = [];
     if (state.lastScrapedAt) {
-      parts.push(`Last scrape ${new Date(state.lastScrapedAt).toLocaleString()}`);
-    }
-    if (state.stats) {
-      parts.push(`${state.stats.remaining ?? state.filteredJobs.length} shown`);
-      if (state.stats.scraped != null) parts.push(`${state.stats.scraped} scraped`);
-      if (state.stats.removedRegisteredJobs) {
-        parts.push(`${state.stats.removedRegisteredJobs} reg. jobs hidden`);
-      }
-      if (state.stats.removedRegisteredCompanies) {
-        parts.push(`${state.stats.removedRegisteredCompanies} reg. cos hidden`);
-      }
-      if (state.stats.reportedTotal != null) {
-        parts.push(`HiringCafe total ${state.stats.reportedTotal}`);
-      }
+      parts.push(`Last run ${new Date(state.lastScrapedAt).toLocaleString()}`);
     }
     const profileLabel = state.candidates.find((c) => c.key === state.prefs.candidateFilter)?.label;
-    if (profileLabel) parts.push(`profile ${profileLabel}`);
+    if (profileLabel) parts.push(profileLabel);
     if (state.customSearchState) parts.push('custom search');
-    meta.textContent = parts.join(' · ') || 'Click Scrape to load HiringCafe jobs.';
+    meta.textContent = parts.join(' · ') || 'Set search and filters, then Scrape.';
   }
 
   function renderBlockLists() {
@@ -584,12 +596,27 @@
     const scope = document.getElementById('jsActionScope');
     if (scope) {
       if (state.filteredJobs.length) {
-        scope.textContent = `${state.filteredJobs.length} jobs ready to export`;
+        scope.textContent = `${state.filteredJobs.length} jobs ready`;
       } else if (state.rawJobs.length) {
         scope.textContent = '0 jobs after filters';
       } else {
         scope.textContent = 'No results yet';
       }
+    }
+
+    const sub = document.getElementById('jsResultsSub');
+    if (sub) {
+      const bits = [];
+      if (state.stats?.scraped != null) bits.push(`${state.stats.scraped} scraped`);
+      if (state.stats?.removedRegisteredJobs) {
+        bits.push(`${state.stats.removedRegisteredJobs} reg. jobs hidden`);
+      }
+      if (state.stats?.removedRegisteredCompanies) {
+        bits.push(`${state.stats.removedRegisteredCompanies} reg. cos hidden`);
+      }
+      if (state.stats?.pagesFetched) bits.push(`${state.stats.pagesFetched} pages`);
+      sub.textContent = bits.join(' · ');
+      sub.hidden = bits.length === 0;
     }
   }
 
@@ -685,7 +712,8 @@
         state.pausedForChallenge = true;
         syncControlsFromState();
         setProgress({
-          text: 'HiringCafe browser check detected. Complete it in the open tab, then click Resume.',
+          text: 'Browser check required',
+          detail: 'Complete it in the open HiringCafe tab, then click Resume.',
           kind: 'warn',
           indeterminate: true,
         });
@@ -732,7 +760,8 @@
         if (!state.scraping) break;
 
         setProgress({
-          text: `Fetching HiringCafe page ${page + 1} of ${maxPages}`,
+          text: `Page ${page + 1} of ${maxPages}`,
+          detail: `Collected ${jobs.length}${reportedTotal != null ? ` / ${reportedTotal}` : ''} so far`,
           kind: 'info',
           current: page,
           total: maxPages,
@@ -779,8 +808,9 @@
         pagesFetched += 1;
 
         setProgress({
-          text:
-            `Page ${page + 1}: ${hits.length} hits, collected ${jobs.length}` +
+          text: `Page ${page + 1} of ${maxPages}`,
+          detail:
+            `${hits.length} hits this page · collected ${jobs.length}` +
             (reportedTotal != null ? ` / ${reportedTotal}` : ''),
           kind: 'info',
           current: page + 1,
@@ -803,9 +833,11 @@
       recomputeFiltered();
       await persistResults();
       setProgress({
-        text:
-          `Done: ${state.filteredJobs.length} jobs after filters` +
-          (pagesFetched ? ` (${pagesFetched} pages)` : ''),
+        text: `Done · ${state.filteredJobs.length} jobs ready`,
+        detail:
+          `${jobs.length} scraped` +
+          (pagesFetched ? ` · ${pagesFetched} pages` : '') +
+          (reportedTotal != null ? ` · HiringCafe total ${reportedTotal}` : ''),
         kind: 'success',
         current: 1,
         total: 1,
@@ -816,7 +848,7 @@
       );
     } catch (err) {
       const message = err?.message || String(err);
-      setProgress({ text: message, kind: 'error', indeterminate: true });
+      setProgress({ text: 'Scrape failed', detail: message, kind: 'error', indeterminate: true });
       showToast(message, 'error');
       state.pausedForChallenge = false;
       state.scrapeCursor = null;
@@ -1059,7 +1091,7 @@
     document.getElementById('jsStopBtn')?.addEventListener('click', () => {
       state.scraping = false;
       state.pausedForChallenge = false;
-      setProgress({ text: 'Scrape stopped.', kind: 'warn', indeterminate: true });
+      setProgress({ text: 'Scrape stopped', detail: 'Partial results were kept if any pages finished.', kind: 'warn', indeterminate: true });
       syncControlsFromState();
     });
 

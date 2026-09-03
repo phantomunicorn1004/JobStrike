@@ -2594,9 +2594,48 @@ html.assistant-dialog body.ui-optimized .app-shell {
   font-size: 13px;
 }
 
+.js-head {
+  margin: 0 0 2px;
+}
+
 .js-card {
   margin-bottom: 0;
   padding: 12px;
+}
+
+.js-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.js-section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.js-badge-custom {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--border));
+}
+
+.js-section-search.is-custom {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
 }
 
 .js-title {
@@ -2611,12 +2650,11 @@ html.assistant-dialog body.ui-optimized .app-shell {
   color: var(--muted);
 }
 
-.js-controls {
+.js-select-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: end;
-  margin-top: 10px;
 }
 
 .js-field {
@@ -2635,13 +2673,13 @@ html.assistant-dialog body.ui-optimized .app-shell {
 }
 
 .js-profile-hint {
-  margin: 6px 0 0;
+  margin: 0;
   color: var(--muted);
   font-size: 12px;
 }
 
 .js-search-import {
-  margin-top: 10px;
+  margin-top: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px;
@@ -2661,6 +2699,10 @@ html.assistant-dialog body.ui-optimized .app-shell {
   flex-wrap: wrap;
   gap: 6px;
   align-items: baseline;
+  color: var(--text);
+}
+
+.js-search-summary-label {
   color: var(--text);
 }
 
@@ -2749,41 +2791,84 @@ html.assistant-dialog body.ui-optimized .app-shell {
   color: var(--text);
 }
 
-.js-control-actions {
+.js-hide-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-subtle);
+}
+
+.js-hide-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.js-filter-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 0;
+}
+
+.js-filter-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 140px;
+  flex: 1 1 140px;
+}
+
+.js-subgroup-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.js-action-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-left: auto;
+  align-items: center;
 }
 
-.js-control-actions .btn,
+.js-action-row .btn,
 .js-results-actions .btn,
 .js-row-actions .btn,
 .js-block-list .btn,
-.js-add-row .btn {
+.js-add-row .btn,
+.js-search-actions .btn {
   background: var(--bg-elevated);
   color: var(--text);
   border-color: var(--border);
   font-size: 12px;
 }
 
-.js-control-actions .btn:hover:not(:disabled),
+.js-action-row .btn:hover:not(:disabled),
 .js-results-actions .btn:hover:not(:disabled),
 .js-row-actions .btn:hover:not(:disabled),
 .js-block-list .btn:hover:not(:disabled),
-.js-add-row .btn:hover:not(:disabled) {
+.js-add-row .btn:hover:not(:disabled),
+.js-search-actions .btn:hover:not(:disabled) {
   background: var(--bg-subtle);
   border-color: var(--border-strong);
 }
 
-.js-control-actions .btn.primary,
+.js-action-row .btn.primary,
+.js-search-actions .btn.primary,
 #jsScrapeBtn.btn.primary {
   background: var(--primary);
   color: #fff;
   border-color: var(--primary);
 }
 
-.js-control-actions .btn.primary:hover:not(:disabled),
+.js-action-row .btn.primary:hover:not(:disabled),
+.js-search-actions .btn.primary:hover:not(:disabled),
 #jsScrapeBtn.btn.primary:hover:not(:disabled) {
   background: var(--primary-dark);
   border-color: var(--primary-dark);
@@ -2791,18 +2876,11 @@ html.assistant-dialog body.ui-optimized .app-shell {
 }
 
 .js-results-actions .btn:disabled,
-.js-control-actions .btn:disabled {
+.js-action-row .btn:disabled {
   opacity: 0.55;
   color: var(--muted);
   background: var(--bg-subtle);
   border-color: var(--border);
-}
-
-.js-filter-toggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  margin-top: 10px;
 }
 
 .js-toggle {
@@ -2821,8 +2899,16 @@ html.assistant-dialog body.ui-optimized .app-shell {
   color: var(--muted);
 }
 
+.js-section-progress .js-progress {
+  margin-top: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
 .js-progress {
-  margin-top: 10px;
+  margin-top: 0;
   padding: 10px;
   border-radius: 10px;
   border: 1px solid var(--border);
@@ -2842,6 +2928,15 @@ html.assistant-dialog body.ui-optimized .app-shell {
 .js-progress[data-kind="error"] {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
   background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
+}
+
+.js-section-progress .js-progress[data-kind="success"],
+.js-section-progress .js-progress[data-kind="warn"],
+.js-section-progress .js-progress[data-kind="error"],
+.js-section-progress .js-progress {
+  border: none;
+  background: transparent;
+  padding: 0;
 }
 
 .js-progress-top {
@@ -2900,6 +2995,13 @@ html.assistant-dialog body.ui-optimized .app-shell {
   background: var(--danger);
 }
 
+.js-progress-detail {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 @keyframes js-progress-slide {
   0% { transform: translateX(-120%); }
   100% { transform: translateX(320%); }
@@ -2910,7 +3012,7 @@ html.assistant-dialog body.ui-optimized .app-shell {
 }
 
 .js-lists {
-  margin-top: 10px;
+  margin-top: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px;
@@ -2998,10 +3100,22 @@ html.assistant-dialog body.ui-optimized .app-shell {
   margin-bottom: 0;
 }
 
+.js-results-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .js-results-count {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text);
+}
+
+.js-results-sub {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .js-select-all {
@@ -3031,5 +3145,5 @@ html.assistant-dialog body.ui-optimized .app-shell {
 }
 
 #jsActionScope {
-  color: var(--text-secondary);
+  color: var(--text);
 }
