@@ -1,5 +1,5 @@
 /**
- * Job Scraper tab — HiringCafe scrape in a real browser tab + local filters/export.
+ * Job Scraper tab: HiringCafe scrape in a real browser tab + local filters/export.
  */
 (function () {
   const STORAGE = {
@@ -81,7 +81,7 @@
   }
 
   function formatDate(iso) {
-    if (!iso) return '—';
+    if (!iso) return '';
     const ms = Date.parse(iso);
     if (Number.isNaN(ms)) return String(iso).slice(0, 10);
     return new Date(ms).toLocaleDateString(undefined, {
@@ -224,13 +224,70 @@
     state.selectedKeys = new Set([...state.selectedKeys].filter((k) => validKeys.has(k)));
   }
 
-  function setStatus(text, kind) {
+  function setProgress(options = {}) {
+    const {
+      text = '',
+      kind = 'info',
+      current = null,
+      total = null,
+      indeterminate = false,
+      hidden = false,
+    } = options;
+
     state.status = text || '';
-    const el = document.getElementById('jsStatus');
-    if (!el) return;
-    el.textContent = state.status;
-    el.dataset.kind = kind || 'info';
-    el.hidden = !state.status;
+    const root = document.getElementById('jsProgress');
+    const label = document.getElementById('jsProgressLabel');
+    const pctEl = document.getElementById('jsProgressPct');
+    const bar = document.getElementById('jsProgressBar');
+    if (!root || !label || !bar) return;
+
+    if (hidden || !text) {
+      root.hidden = true;
+      root.dataset.kind = 'info';
+      root.classList.remove('is-indeterminate');
+      bar.style.width = '0%';
+      if (pctEl) {
+        pctEl.hidden = true;
+        pctEl.textContent = '';
+      }
+      return;
+    }
+
+    root.hidden = false;
+    root.dataset.kind = kind || 'info';
+    label.textContent = String(text).replace(/\u2014|\u2013/g, '-');
+
+    const hasNumbers =
+      Number.isFinite(current) && Number.isFinite(total) && total > 0;
+    if (indeterminate || !hasNumbers) {
+      root.classList.add('is-indeterminate');
+      bar.style.width = '35%';
+      if (pctEl) {
+        pctEl.hidden = true;
+        pctEl.textContent = '';
+      }
+      return;
+    }
+
+    root.classList.remove('is-indeterminate');
+    const pct = Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+    bar.style.width = `${pct}%`;
+    if (pctEl) {
+      pctEl.hidden = false;
+      pctEl.textContent = `${pct}%`;
+    }
+  }
+
+  function setStatus(text, kind) {
+    if (!text) {
+      setProgress({ hidden: true });
+      return;
+    }
+    setProgress({
+      text,
+      kind: kind || 'info',
+      indeterminate: kind === 'info' || kind === 'warn',
+    });
   }
 
   function syncControlsFromState() {
@@ -489,73 +546,26 @@
   }
 
   function actionJobs() {
-    if (state.selectedKeys.size === 0) return state.filteredJobs;
-    return state.filteredJobs.filter((job, i) => state.selectedKeys.has(jobKey(job, i)));
+    return state.filteredJobs;
   }
 
   function renderResults() {
-    const list = document.getElementById('jsResultsList');
     const empty = document.getElementById('jsResultsEmpty');
-    const selectAll = document.getElementById('jsSelectAll');
-    if (!list) return;
-
-    if (state.filteredJobs.length === 0) {
+    const list = document.getElementById('jsResultsList');
+    if (list) {
       list.innerHTML = '';
-      if (empty) {
+      list.hidden = true;
+    }
+
+    if (empty) {
+      if (state.filteredJobs.length === 0) {
         empty.hidden = false;
         empty.textContent = state.rawJobs.length
           ? '0 jobs after filters. Adjust date or unblock lists.'
           : 'Click Scrape to load HiringCafe jobs.';
+      } else {
+        empty.hidden = true;
       }
-      if (selectAll) {
-        selectAll.checked = false;
-        selectAll.indeterminate = false;
-      }
-      updateActionButtons();
-      return;
-    }
-
-    if (empty) empty.hidden = true;
-
-    list.innerHTML = state.filteredJobs
-      .map((job, index) => {
-        const key = jobKey(job, index);
-        const checked = state.selectedKeys.has(key) ? 'checked' : '';
-        const title = escapeHtml(job.title || 'Untitled');
-        const company = escapeHtml(job.company_name || 'Unknown company');
-        const ats = escapeHtml(job.application_site || 'Unknown');
-        const date = escapeHtml(formatDate(job.estimated_publish_date));
-        const url = escapeHtml(job.apply_url || '');
-        return `
-          <article class="js-row" data-key="${escapeHtml(key)}" data-index="${index}">
-            <label class="js-row-check">
-              <input type="checkbox" class="js-row-select" data-key="${escapeHtml(key)}" ${checked}>
-            </label>
-            <div class="js-row-body">
-              <div class="js-row-title">${title}</div>
-              <div class="js-row-meta">
-                <span>${company}</span>
-                <span class="js-badge">${ats}</span>
-                <span>${date}</span>
-              </div>
-              ${url ? `<a class="js-row-link muted" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>` : ''}
-            </div>
-            <div class="js-row-actions">
-              <button type="button" class="btn small" data-action="open" ${url ? '' : 'disabled'}>Open</button>
-              <button type="button" class="btn small" data-action="block-job" ${url ? '' : 'disabled'}>Block job</button>
-              <button type="button" class="btn small" data-action="block-company" ${job.company_name ? '' : 'disabled'}>Block co.</button>
-            </div>
-          </article>`;
-      })
-      .join('');
-
-    if (selectAll) {
-      const allSelected =
-        state.filteredJobs.length > 0 &&
-        state.filteredJobs.every((job, i) => state.selectedKeys.has(jobKey(job, i)));
-      const someSelected = state.selectedKeys.size > 0 && !allSelected;
-      selectAll.checked = allSelected;
-      selectAll.indeterminate = someSelected;
     }
 
     updateActionButtons();
@@ -564,21 +574,22 @@
   function updateActionButtons() {
     const jobs = actionJobs();
     const disabled = jobs.length === 0;
-    ['jsCsvBtn', 'jsLinksBtn', 'jsCopyLinksBtn', 'jsClearResultsBtn'].forEach((id) => {
+    ['jsCsvBtn', 'jsLinksBtn', 'jsCopyLinksBtn'].forEach((id) => {
       const el = document.getElementById(id);
-      if (el && id !== 'jsClearResultsBtn') el.disabled = disabled;
+      if (el) el.disabled = disabled;
     });
     const clearBtn = document.getElementById('jsClearResultsBtn');
     if (clearBtn) clearBtn.disabled = state.rawJobs.length === 0 && state.filteredJobs.length === 0;
 
     const scope = document.getElementById('jsActionScope');
     if (scope) {
-      scope.textContent =
-        state.selectedKeys.size > 0
-          ? `${state.selectedKeys.size} selected`
-          : state.filteredJobs.length
-            ? `all ${state.filteredJobs.length}`
-            : '';
+      if (state.filteredJobs.length) {
+        scope.textContent = `${state.filteredJobs.length} jobs ready to export`;
+      } else if (state.rawJobs.length) {
+        scope.textContent = '0 jobs after filters';
+      } else {
+        scope.textContent = 'No results yet';
+      }
     }
   }
 
@@ -673,10 +684,11 @@
       if (extracted?.challenge && allowPause) {
         state.pausedForChallenge = true;
         syncControlsFromState();
-        setStatus(
-          'HiringCafe browser check detected. Complete it in the open tab, then click Resume.',
-          'warn'
-        );
+        setProgress({
+          text: 'HiringCafe browser check detected. Complete it in the open tab, then click Resume.',
+          kind: 'warn',
+          indeterminate: true,
+        });
         showToast('Complete the HiringCafe check, then click Resume.', 'warn');
         return { paused: true };
       }
@@ -719,7 +731,12 @@
       for (; page < maxPages; page += 1) {
         if (!state.scraping) break;
 
-        setStatus(`Fetching HiringCafe page ${page + 1}…`, 'info');
+        setProgress({
+          text: `Fetching HiringCafe page ${page + 1} of ${maxPages}`,
+          kind: 'info',
+          current: page,
+          total: maxPages,
+        });
         const url = scraper.buildHiringCafeUrl(
           dateWindow,
           page,
@@ -761,11 +778,14 @@
         }
         pagesFetched += 1;
 
-        setStatus(
-          `Page ${page + 1}: ${hits.length} hits · collected ${jobs.length}` +
+        setProgress({
+          text:
+            `Page ${page + 1}: ${hits.length} hits, collected ${jobs.length}` +
             (reportedTotal != null ? ` / ${reportedTotal}` : ''),
-          'info'
-        );
+          kind: 'info',
+          current: page + 1,
+          total: maxPages,
+        });
 
         if (extracted.pageProps.ssrIsLastPage) break;
         if (page < maxPages - 1) await sleep(delayMs);
@@ -782,18 +802,21 @@
       state.selectedKeys = new Set();
       recomputeFiltered();
       await persistResults();
-      setStatus(
-        `Done — ${state.filteredJobs.length} jobs after filters` +
+      setProgress({
+        text:
+          `Done: ${state.filteredJobs.length} jobs after filters` +
           (pagesFetched ? ` (${pagesFetched} pages)` : ''),
-        'success'
-      );
+        kind: 'success',
+        current: 1,
+        total: 1,
+      });
       showToast(
         `Scraped ${jobs.length} jobs · ${state.filteredJobs.length} after filters.`,
         'success'
       );
     } catch (err) {
       const message = err?.message || String(err);
-      setStatus(message, 'error');
+      setProgress({ text: message, kind: 'error', indeterminate: true });
       showToast(message, 'error');
       state.pausedForChallenge = false;
       state.scrapeCursor = null;
@@ -1036,7 +1059,7 @@
     document.getElementById('jsStopBtn')?.addEventListener('click', () => {
       state.scraping = false;
       state.pausedForChallenge = false;
-      setStatus('Scrape stopped.', 'warn');
+      setProgress({ text: 'Scrape stopped.', kind: 'warn', indeterminate: true });
       syncControlsFromState();
     });
 
@@ -1048,19 +1071,8 @@
       state.lastScrapedAt = null;
       state.scrapeCursor = null;
       await storageSet({ [STORAGE.lastResults]: null });
-      setStatus('', 'info');
+      setProgress({ hidden: true });
       syncControlsFromState();
-    });
-
-    document.getElementById('jsSelectAll')?.addEventListener('change', (event) => {
-      if (event.target.checked) {
-        state.selectedKeys = new Set(
-          state.filteredJobs.map((job, i) => jobKey(job, i))
-        );
-      } else {
-        state.selectedKeys = new Set();
-      }
-      renderResults();
     });
 
     document.getElementById('jsCsvBtn')?.addEventListener('click', () => {
@@ -1069,7 +1081,7 @@
       const csv = api().jobsToCsv(jobs);
       downloadTextFile(
         csv,
-        state.selectedKeys.size ? 'hiringcafe-selected.csv' : 'hiringcafe-jobs.csv',
+        'hiringcafe-jobs.csv',
         'text/csv;charset=utf-8'
       );
       showToast(`CSV downloaded (${jobs.length}).`, 'success');
@@ -1085,7 +1097,7 @@
       }
       downloadTextFile(
         links.join('\n'),
-        state.selectedKeys.size ? 'hiringcafe-selected-links.txt' : 'hiringcafe-links.txt',
+        'hiringcafe-links.txt',
         'text/plain;charset=utf-8'
       );
       showToast(`Links file downloaded (${links.length}).`, 'success');
@@ -1136,47 +1148,6 @@
       recomputeFiltered();
       await persistResults();
       syncControlsFromState();
-    });
-
-    document.getElementById('jsResultsList')?.addEventListener('change', (event) => {
-      const input = event.target.closest('.js-row-select');
-      if (!input) return;
-      const key = input.dataset.key;
-      if (!key) return;
-      if (input.checked) state.selectedKeys.add(key);
-      else state.selectedKeys.delete(key);
-      updateActionButtons();
-      const selectAll = document.getElementById('jsSelectAll');
-      if (selectAll) {
-        const allSelected =
-          state.filteredJobs.length > 0 &&
-          state.filteredJobs.every((job, i) => state.selectedKeys.has(jobKey(job, i)));
-        selectAll.checked = allSelected;
-        selectAll.indeterminate = state.selectedKeys.size > 0 && !allSelected;
-      }
-    });
-
-    document.getElementById('jsResultsList')?.addEventListener('click', async (event) => {
-      const btn = event.target.closest('[data-action]');
-      if (!btn) return;
-      const row = btn.closest('.js-row');
-      const index = Number(row?.dataset.index);
-      const job = state.filteredJobs[index];
-      if (!job) return;
-      const action = btn.dataset.action;
-      if (action === 'open' && job.apply_url) {
-        chrome.tabs.create({ url: job.apply_url, active: true });
-        return;
-      }
-      if (action === 'block-job') {
-        await addBlockedJob(job);
-        showToast('Job blocked locally.', 'success');
-        return;
-      }
-      if (action === 'block-company') {
-        await addBlockedCompany(job.company_name);
-        showToast('Company blocked locally.', 'success');
-      }
     });
   }
 

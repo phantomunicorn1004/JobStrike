@@ -365,7 +365,15 @@
             </div>
             <p class="muted small js-profile-hint" id="jsProfileHint">Sign in under Settings, then select a profile to hide Resume DB jobs/companies.</p>
 
-            <p class="js-status" id="jsStatus" hidden data-kind="info"></p>
+            <div class="js-progress" id="jsProgress" hidden data-kind="info" role="status" aria-live="polite">
+              <div class="js-progress-top">
+                <span class="js-progress-label" id="jsProgressLabel"></span>
+                <span class="js-progress-pct" id="jsProgressPct" hidden></span>
+              </div>
+              <div class="js-progress-track" aria-hidden="true">
+                <div class="js-progress-bar" id="jsProgressBar"></div>
+              </div>
+            </div>
 
             <details class="js-lists" id="jsListsPanel">
               <summary>
@@ -408,11 +416,7 @@
 
           <div class="card js-card js-results-card">
             <div class="js-results-toolbar">
-              <label class="js-select-all">
-                <input type="checkbox" id="jsSelectAll">
-                <span>Select all</span>
-              </label>
-              <span class="muted small" id="jsActionScope"></span>
+              <span class="js-results-count" id="jsActionScope">No results yet</span>
               <div class="js-results-actions">
                 <button type="button" class="btn small" id="jsCsvBtn" disabled>CSV</button>
                 <button type="button" class="btn small" id="jsLinksBtn" disabled>Links</button>
@@ -421,7 +425,12 @@
               </div>
             </div>
             <p class="muted js-results-empty" id="jsResultsEmpty">Click Scrape to load HiringCafe jobs.</p>
-            <div class="js-results-list" id="jsResultsList"></div>
+            <!-- Job row list kept in DOM for optional future use, hidden in UI -->
+            <label class="js-select-all" id="jsSelectAllWrap" hidden>
+              <input type="checkbox" id="jsSelectAll">
+              <span>Select all</span>
+            </label>
+            <div class="js-results-list" id="jsResultsList" hidden></div>
           </div>
         </div>
       </section>
