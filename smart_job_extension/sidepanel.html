@@ -342,64 +342,57 @@
             <p class="muted small js-profile-hint" id="jsProfileHint">Sign in under Settings, then Refresh to load website block lists and profiles.</p>
 
             <div class="js-hide-group">
-              <div class="js-hide-label">Hide from results</div>
-              <div class="js-filter-toggles" role="group" aria-label="Hide filters">
-                <div class="js-filter-subgroup">
-                  <span class="js-subgroup-title">Website</span>
-                  <label class="js-toggle">
+              <div class="js-hide-header">
+                <div class="js-hide-label">Hide from results</div>
+                <span class="muted small js-sync-status" id="jsListsSyncStatus">Not synced</span>
+              </div>
+              <div class="js-hide-grid">
+                <div class="js-hide-col">
+                  <div class="js-hide-col-title">Website</div>
+                  <label class="js-hide-row">
                     <input type="checkbox" id="jsFilterBlockedCompanies" checked>
-                    <span>Blocked companies (<span id="jsBlockedCompanyCount">0</span>)</span>
+                    <span class="js-hide-name" data-edit-list="company" title="Double-click to edit">Companies</span>
+                    <span class="js-hide-count" id="jsBlockedCompanyCount" data-edit-list="company">0</span>
                   </label>
-                  <label class="js-toggle">
+                  <label class="js-hide-row">
                     <input type="checkbox" id="jsFilterBlockedAts" checked>
-                    <span>Blocked ATS (<span id="jsBlockedAtsCount">0</span>)</span>
+                    <span class="js-hide-name" data-edit-list="ats" title="Double-click to edit">ATS</span>
+                    <span class="js-hide-count" id="jsBlockedAtsCount" data-edit-list="ats">0</span>
                   </label>
-                  <label class="js-toggle">
+                  <label class="js-hide-row">
                     <input type="checkbox" id="jsFilterBlockedJobs" checked>
-                    <span>Blocked jobs (<span id="jsBlockedJobCount">0</span>)</span>
+                    <span class="js-hide-name" data-edit-list="job" title="Double-click to edit">Jobs</span>
+                    <span class="js-hide-count" id="jsBlockedJobCount" data-edit-list="job">0</span>
                   </label>
                 </div>
-                <div class="js-filter-subgroup">
-                  <span class="js-subgroup-title">Resume DB</span>
-                  <label class="js-toggle" id="jsFilterRegJobsLabel" title="Requires a profile">
+                <div class="js-hide-col">
+                  <div class="js-hide-col-title">Resume DB</div>
+                  <label class="js-hide-row" id="jsFilterRegJobsLabel" title="Requires a profile">
                     <input type="checkbox" id="jsFilterRegisteredJobs" checked disabled>
-                    <span>Reg. jobs (<span id="jsRegisteredJobCount">0</span>)</span>
+                    <span class="js-hide-name">Reg. jobs</span>
+                    <span class="js-hide-count" id="jsRegisteredJobCount">0</span>
                   </label>
-                  <label class="js-toggle" id="jsFilterRegCompaniesLabel" title="Requires a profile">
+                  <label class="js-hide-row" id="jsFilterRegCompaniesLabel" title="Requires a profile">
                     <input type="checkbox" id="jsFilterRegisteredCompanies" checked disabled>
-                    <span>Reg. companies (<span id="jsRegisteredCompanyCount">0</span>)</span>
+                    <span class="js-hide-name">Reg. companies</span>
+                    <span class="js-hide-count" id="jsRegisteredCompanyCount">0</span>
                   </label>
                 </div>
+              </div>
+              <p class="muted small js-hide-hint">Double-click a Website list to edit. Resume DB is read-only.</p>
+
+              <div class="js-list-editor" id="jsListEditor" hidden>
+                <div class="js-list-editor-head">
+                  <strong id="jsListEditorTitle">Blocked companies</strong>
+                  <button type="button" class="btn small" id="jsListEditorClose">Done</button>
+                </div>
+                <div class="js-add-row">
+                  <input type="text" id="jsListEditorInput" placeholder="Add item…">
+                  <button type="button" class="btn small" id="jsListEditorAddBtn">Add</button>
+                </div>
+                <ul class="js-block-list" id="jsListEditorItems"></ul>
               </div>
             </div>
-
-            <details class="js-lists" id="jsListsPanel">
-              <summary>Manage website lists</summary>
-              <div class="js-list-block">
-                <h3>Companies</h3>
-                <div class="js-add-row">
-                  <input type="text" id="jsAddBlockedCompany" placeholder="Company name">
-                  <button type="button" class="btn small" id="jsAddBlockedCompanyBtn">Add</button>
-                </div>
-                <ul class="js-block-list" id="jsBlockedCompanyList"></ul>
-              </div>
-              <div class="js-list-block">
-                <h3>ATS</h3>
-                <div class="js-add-row">
-                  <input type="text" id="jsAddBlockedAts" placeholder="e.g. Workday">
-                  <button type="button" class="btn small" id="jsAddBlockedAtsBtn">Add</button>
-                </div>
-                <ul class="js-block-list" id="jsBlockedAtsList"></ul>
-              </div>
-              <div class="js-list-block">
-                <h3>Jobs</h3>
-                <div class="js-add-row">
-                  <input type="url" id="jsAddBlockedJob" placeholder="https://… apply URL">
-                  <button type="button" class="btn small" id="jsAddBlockedJobBtn">Add</button>
-                </div>
-                <ul class="js-block-list" id="jsBlockedJobList"></ul>
-              </div>
-            </details>
           </section>
 
           <section class="js-section js-section-actions" aria-label="Actions">

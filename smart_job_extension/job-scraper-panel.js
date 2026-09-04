@@ -33,6 +33,9 @@
     registeredCompanies: [],
     registeredJobs: [],
     profileLoading: false,
+    listsSyncedAt: null,
+    listsSyncError: '',
+    openListEditor: null,
     customSearchState: null,
     customSearchSourceUrl: '',
     rawJobs: [],
@@ -44,6 +47,24 @@
     status: '',
     lastScrapedAt: null,
     stats: null,
+  };
+
+  const LIST_EDITOR_META = {
+    company: {
+      title: 'Blocked companies',
+      placeholder: 'Company name',
+      inputType: 'text',
+    },
+    ats: {
+      title: 'Blocked ATS',
+      placeholder: 'e.g. Workday',
+      inputType: 'text',
+    },
+    job: {
+      title: 'Blocked jobs',
+      placeholder: 'https://… apply URL',
+      inputType: 'url',
+    },
   };
 
   function api() {
@@ -452,6 +473,7 @@
     if (coCount) coCount.textContent = String(state.registeredCompanies.length);
 
     renderSearchImportUi();
+    renderSyncStatus();
 
     const hint = document.getElementById('jsProfileHint');
     if (hint) {
@@ -582,6 +604,74 @@
     await importSearchFromText(url);
   }
 
+  function formatSyncAge(ms) {
+    const sec = Math.max(0, Math.round(ms / 1000));
+    if (sec < 5) return 'just now';
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.round(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.round(min / 60);
+    return `${hr}h ago`;
+  }
+
+  function renderSyncStatus() {
+    const el = document.getElementById('jsListsSyncStatus');
+    if (!el) return;
+    el.classList.remove('is-syncing', 'is-ready', 'is-error', 'is-stale');
+
+    if (state.profileLoading) {
+      el.textContent = 'Syncing…';
+      el.classList.add('is-syncing');
+      return;
+    }
+    if (state.listsSyncError) {
+      el.textContent = 'Sync failed';
+      el.title = state.listsSyncError;
+      el.classList.add('is-error');
+      return;
+    }
+    if (!state.listsSyncedAt) {
+      el.textContent = 'Not synced';
+      el.title = 'Click Refresh to load website lists.';
+      el.classList.add('is-stale');
+      return;
+    }
+
+    const ageMs = Date.now() - state.listsSyncedAt;
+    const stale = ageMs > 5 * 60 * 1000;
+    el.textContent = stale
+      ? `Stale · ${formatSyncAge(ageMs)}`
+      : `Synced ${formatSyncAge(ageMs)}`;
+    el.title = new Date(state.listsSyncedAt).toLocaleString();
+    el.classList.add(stale ? 'is-stale' : 'is-ready');
+  }
+
+  function closeListEditor() {
+    state.openListEditor = null;
+    const editor = document.getElementById('jsListEditor');
+    if (editor) editor.hidden = true;
+    const input = document.getElementById('jsListEditorInput');
+    if (input) input.value = '';
+  }
+
+  function openListEditor(kind) {
+    if (!LIST_EDITOR_META[kind]) return;
+    state.openListEditor = kind;
+    const editor = document.getElementById('jsListEditor');
+    const title = document.getElementById('jsListEditorTitle');
+    const input = document.getElementById('jsListEditorInput');
+    const meta = LIST_EDITOR_META[kind];
+    if (title) title.textContent = meta.title;
+    if (input) {
+      input.type = meta.inputType;
+      input.placeholder = meta.placeholder;
+      input.value = '';
+    }
+    if (editor) editor.hidden = false;
+    renderBlockLists();
+    input?.focus();
+  }
+
   function renderMeta() {
     const meta = document.getElementById('jsMeta');
     if (!meta) return;
@@ -603,12 +693,22 @@
     if (atsCount) atsCount.textContent = String(state.blockedAts.length);
     if (jobCount) jobCount.textContent = String(state.blockedJobs.length);
 
-    const companyUl = document.getElementById('jsBlockedCompanyList');
-    const atsUl = document.getElementById('jsBlockedAtsList');
-    const jobUl = document.getElementById('jsBlockedJobList');
+    const editor = document.getElementById('jsListEditor');
+    const listEl = document.getElementById('jsListEditorItems');
+    if (!editor || !listEl) return;
 
-    if (companyUl) {
-      companyUl.innerHTML = state.blockedCompanies
+    if (!state.openListEditor) {
+      editor.hidden = true;
+      listEl.innerHTML = '';
+      return;
+    }
+
+    editor.hidden = false;
+    const kind = state.openListEditor;
+    let itemsHtml = '';
+
+    if (kind === 'company') {
+      itemsHtml = state.blockedCompanies
         .map((item, i) => {
           const name = blockedCompanyName(item);
           const id = blockedRecordId(item);
@@ -618,9 +718,8 @@
           );
         })
         .join('');
-    }
-    if (atsUl) {
-      atsUl.innerHTML = state.blockedAts
+    } else if (kind === 'ats') {
+      itemsHtml = state.blockedAts
         .map((item, i) => {
           const name = blockedAtsName(item);
           const id = blockedRecordId(item);
@@ -630,9 +729,8 @@
           );
         })
         .join('');
-    }
-    if (jobUl) {
-      jobUl.innerHTML = state.blockedJobs
+    } else if (kind === 'job') {
+      itemsHtml = state.blockedJobs
         .map((job, i) => {
           const ref = normalizeBlockedJob(job);
           const label = [ref.jobTitle, ref.companyName].filter(Boolean).join(' · ') || ref.jobLink;
@@ -643,6 +741,16 @@
         })
         .join('');
     }
+
+    listEl.innerHTML =
+      itemsHtml ||
+      '<li class="muted" style="border:none;justify-content:flex-start">No items yet.</li>';
+
+    document.querySelectorAll('.js-hide-row').forEach((row) => {
+      const editEl = row.querySelector('[data-edit-list]');
+      const kind = editEl?.dataset?.editList;
+      row.classList.toggle('is-editing', Boolean(kind && kind === state.openListEditor));
+    });
   }
 
   function escapeHtml(value) {
@@ -993,6 +1101,8 @@
   }
 
   async function refreshAfterBlockChange() {
+    state.listsSyncedAt = Date.now();
+    state.listsSyncError = '';
     await persistBlockLists();
     recomputeFiltered();
     await persistResults();
@@ -1111,6 +1221,7 @@
 
   async function loadProfileFilterContext({ silent = false } = {}) {
     state.profileLoading = true;
+    state.listsSyncError = '';
     syncControlsFromState();
 
     try {
@@ -1119,6 +1230,8 @@
         state.candidates = [];
         state.registeredJobs = [];
         state.registeredCompanies = [];
+        state.listsSyncedAt = null;
+        state.listsSyncError = 'Sign in under Settings to sync website lists.';
         if (!silent) {
           showToast('Sign in under Settings to load website block lists and profiles.', 'warn');
         }
@@ -1171,6 +1284,8 @@
         state.registeredJobs = [];
       }
 
+      state.listsSyncedAt = Date.now();
+      state.listsSyncError = '';
       await persistPrefs();
       recomputeFiltered();
       await persistResults();
@@ -1187,6 +1302,7 @@
         showToast(`Website lists loaded (${bits.join(', ')}).`, 'success');
       }
     } catch (err) {
+      state.listsSyncError = err?.message || String(err);
       if (!silent) showToast(err?.message || String(err), 'error');
     } finally {
       state.profileLoading = false;
@@ -1333,23 +1449,37 @@
       }
     });
 
-    document.getElementById('jsAddBlockedCompanyBtn')?.addEventListener('click', async () => {
-      const input = document.getElementById('jsAddBlockedCompany');
-      await addBlockedCompany(input?.value);
-      if (input) input.value = '';
+    document.getElementById('jsListEditorClose')?.addEventListener('click', () => {
+      closeListEditor();
     });
-    document.getElementById('jsAddBlockedAtsBtn')?.addEventListener('click', async () => {
-      const input = document.getElementById('jsAddBlockedAts');
-      await addBlockedAts(input?.value);
-      if (input) input.value = '';
-    });
-    document.getElementById('jsAddBlockedJobBtn')?.addEventListener('click', async () => {
-      const input = document.getElementById('jsAddBlockedJob');
-      await addBlockedJob({ apply_url: input?.value });
+
+    document.getElementById('jsListEditorAddBtn')?.addEventListener('click', async () => {
+      const input = document.getElementById('jsListEditorInput');
+      const value = input?.value || '';
+      const kind = state.openListEditor;
+      if (kind === 'company') await addBlockedCompany(value);
+      else if (kind === 'ats') await addBlockedAts(value);
+      else if (kind === 'job') await addBlockedJob({ apply_url: value });
       if (input) input.value = '';
     });
 
-    document.getElementById('jsListsPanel')?.addEventListener('click', async (event) => {
+    document.getElementById('jsListEditorInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        document.getElementById('jsListEditorAddBtn')?.click();
+      } else if (event.key === 'Escape') {
+        closeListEditor();
+      }
+    });
+
+    document.querySelector('.js-hide-group')?.addEventListener('dblclick', (event) => {
+      const target = event.target.closest('[data-edit-list]');
+      if (!target) return;
+      event.preventDefault();
+      openListEditor(String(target.dataset.editList || ''));
+    });
+
+    document.getElementById('jsListEditorItems')?.addEventListener('click', async (event) => {
       const btn = event.target.closest('.js-unblock');
       if (!btn) return;
       const kind = btn.dataset.kind;

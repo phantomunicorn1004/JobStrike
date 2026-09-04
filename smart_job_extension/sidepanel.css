@@ -2762,9 +2762,7 @@ html.assistant-dialog body.ui-optimized .app-shell {
 .js-add-row input,
 #jsDateWindow,
 #jsProfileFilter,
-#jsAddBlockedCompany,
-#jsAddBlockedAts,
-#jsAddBlockedJob {
+#jsListEditorInput {
   font-weight: 500;
   font-size: 13px;
   border: 1px solid var(--border);
@@ -2794,11 +2792,18 @@ html.assistant-dialog body.ui-optimized .app-shell {
 .js-hide-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--bg-subtle);
+}
+
+.js-hide-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .js-hide-label {
@@ -2809,25 +2814,138 @@ html.assistant-dialog body.ui-optimized .app-shell {
   color: var(--muted);
 }
 
-.js-filter-toggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  margin-top: 0;
+.js-sync-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted);
 }
 
-.js-filter-subgroup {
+.js-sync-status.is-syncing {
+  color: var(--text-secondary);
+}
+
+.js-sync-status.is-ready {
+  color: var(--success, #22c55e);
+}
+
+.js-sync-status.is-error,
+.js-sync-status.is-stale {
+  color: #f59e0b;
+}
+
+.js-hide-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+
+.js-hide-col {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  min-width: 140px;
-  flex: 1 1 140px;
+  gap: 4px;
+  min-width: 0;
 }
 
-.js-subgroup-title {
+.js-hide-col-title {
   font-size: 11px;
   font-weight: 700;
   color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.js-hide-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 24px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.js-hide-row input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.js-hide-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  user-select: none;
+}
+
+.js-hide-name[data-edit-list] {
+  cursor: pointer;
+}
+
+.js-hide-name[data-edit-list]:hover,
+.js-hide-count[data-edit-list]:hover {
+  color: var(--brand, var(--primary));
+}
+
+.js-hide-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: right;
+  min-width: 2.5ch;
+  user-select: none;
+}
+
+.js-hide-row.is-editing .js-hide-name,
+.js-hide-row.is-editing .js-hide-count {
+  color: var(--brand, var(--primary));
+}
+
+.js-hide-row:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.js-hide-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.js-list-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.js-list-editor[hidden] {
+  display: none !important;
+}
+
+.js-list-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.js-list-editor-head strong {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.js-list-editor .js-add-row {
+  margin: 0;
+}
+
+.js-list-editor .js-block-list {
+  max-height: 160px;
 }
 
 .js-action-row {
@@ -2842,7 +2960,8 @@ html.assistant-dialog body.ui-optimized .app-shell {
 .js-row-actions .btn,
 .js-block-list .btn,
 .js-add-row .btn,
-.js-search-actions .btn {
+.js-search-actions .btn,
+.js-list-editor .btn {
   background: var(--bg-elevated);
   color: var(--text);
   border-color: var(--border);
@@ -2854,7 +2973,8 @@ html.assistant-dialog body.ui-optimized .app-shell {
 .js-row-actions .btn:hover:not(:disabled),
 .js-block-list .btn:hover:not(:disabled),
 .js-add-row .btn:hover:not(:disabled),
-.js-search-actions .btn:hover:not(:disabled) {
+.js-search-actions .btn:hover:not(:disabled),
+.js-list-editor .btn:hover:not(:disabled) {
   background: var(--bg-subtle);
   border-color: var(--border-strong);
 }
@@ -2881,22 +3001,6 @@ html.assistant-dialog body.ui-optimized .app-shell {
   color: var(--muted);
   background: var(--bg-subtle);
   border-color: var(--border);
-}
-
-.js-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  color: var(--text-secondary);
-}
-
-.js-toggle:has(input:disabled) {
-  opacity: 0.55;
-  cursor: not-allowed;
-  color: var(--muted);
 }
 
 .js-section-progress .js-progress {
@@ -3011,47 +3115,6 @@ html.assistant-dialog body.ui-optimized .app-shell {
   display: none;
 }
 
-.js-lists {
-  margin-top: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: var(--bg-subtle);
-}
-
-.js-lists > summary {
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: baseline;
-  color: var(--text);
-}
-
-.js-lists > summary .muted {
-  color: var(--muted);
-  font-weight: 500;
-}
-
-.js-lists > summary::-webkit-details-marker {
-  display: none;
-}
-
-.js-list-block {
-  margin-top: 10px;
-}
-
-.js-list-block h3 {
-  margin: 0 0 6px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
 .js-add-row {
   display: flex;
   gap: 6px;
@@ -3060,11 +3123,19 @@ html.assistant-dialog body.ui-optimized .app-shell {
 .js-add-row input {
   flex: 1;
   min-width: 0;
+  font-weight: 500;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: var(--input-bg);
+  color: var(--text);
+  color-scheme: inherit;
 }
 
 .js-block-list {
   list-style: none;
-  margin: 6px 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
