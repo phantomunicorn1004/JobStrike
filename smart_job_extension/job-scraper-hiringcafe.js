@@ -266,7 +266,11 @@
       job_category: serializeField(processed.job_category),
       estimated_publish_date: serializeField(processed.estimated_publish_date),
       role_activities: serializeField(processed.role_activities),
-      company_name: serializeField(company.name),
+      company_name:
+        serializeField(company.name) ||
+        serializeField(processed.company_name) ||
+        serializeField(jobInfo.company_name) ||
+        serializeField(hit?.company_name),
       company_tagline: serializeField(company.tagline),
       application_site: detectPlatform(applyUrl),
     };
@@ -290,16 +294,42 @@
     });
   }
 
-  function companyMatchesBlocked(companyName, blockedCompanies) {
-    const matcher = global.SmartJobCompanyName?.companiesMatch;
-    if (!matcher || !Array.isArray(blockedCompanies) || !blockedCompanies.length) return false;
-    return blockedCompanies.some((blocked) => matcher(companyName, blocked));
+  function fallbackNormalizeCompanyName(value) {
+    let name = String(value ?? '')
+      .toLowerCase()
+      .replace(/[.,]/g, ' ')
+      .replace(/\b(inc|llc|ltd|corp|corporation|co|company)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (name.startsWith('the ')) name = name.slice(4).trim();
+    return name;
   }
 
-  function jobMatchesBlocked(applyUrl, blockedJobs) {
-    const linksMatch = global.SmartJobJobUrl?.jobLinksMatch;
-    if (!linksMatch || !Array.isArray(blockedJobs) || !blockedJobs.length) return false;
-    return blockedJobs.some((blocked) => linksMatch(applyUrl, blocked?.jobLink));
+  function fallbackCompaniesMatch(a, b) {
+    const left = fallbackNormalizeCompanyName(a);
+    const right = fallbackNormalizeCompanyName(b);
+    if (!left || !right) return false;
+    if (left === right) return true;
+    if (left.length < 4 || right.length < 4) return false;
+    return left.includes(right) || right.includes(left);
+  }
+
+  function companiesMatch(a, b) {
+    const matcher = global.SmartJobCompanyName?.companiesMatch || fallbackCompaniesMatch;
+    return Boolean(matcher(a, b));
+  }
+
+  function companyMatchesBlocked(companyName, companyList) {
+    if (!Array.isArray(companyList) || !companyList.length) return false;
+    const name = String(companyName ?? '').trim();
+    if (!name) return false;
+    return companyList.some((blocked) => {
+      const blockedName =
+        typeof blocked === 'string'
+          ? blocked
+          : blocked?.companyName || blocked?.company || blocked?.name || '';
+      return companiesMatch(name, blockedName);
+    });
   }
 
   function normalizeTitle(value) {
@@ -308,22 +338,36 @@
       .toLowerCase();
   }
 
+  function jobTitleCompanyMatch(job, ref) {
+    const jobTitle = normalizeTitle(job?.title);
+    const refTitle = normalizeTitle(ref?.jobTitle || ref?.title);
+    const refCompany = ref?.companyName || ref?.company || '';
+    if (!jobTitle || !refTitle || jobTitle !== refTitle) return false;
+    return companiesMatch(job?.company_name, refCompany);
+  }
+
+  function jobMatchesBlocked(jobOrUrl, blockedJobs) {
+    if (!Array.isArray(blockedJobs) || !blockedJobs.length) return false;
+    const linksMatch = global.SmartJobJobUrl?.jobLinksMatch;
+    const applyUrl =
+      typeof jobOrUrl === 'string' || jobOrUrl == null
+        ? jobOrUrl
+        : jobOrUrl.apply_url;
+    const job =
+      typeof jobOrUrl === 'object' && jobOrUrl
+        ? jobOrUrl
+        : { apply_url: applyUrl, title: '', company_name: '' };
+
+    return blockedJobs.some((blocked) => {
+      if (linksMatch?.(applyUrl, blocked?.jobLink)) return true;
+      return jobTitleCompanyMatch(job, blocked);
+    });
+  }
+
   function jobMatchesRegisteredJobRef(job, registered) {
     const linksMatch = global.SmartJobJobUrl?.jobLinksMatch;
     if (linksMatch?.(job?.apply_url, registered?.jobLink)) return true;
-
-    const jobTitle = normalizeTitle(job?.title);
-    const registeredTitle = normalizeTitle(registered?.jobTitle);
-    const companiesMatch = global.SmartJobCompanyName?.companiesMatch;
-    if (
-      jobTitle &&
-      registeredTitle &&
-      jobTitle === registeredTitle &&
-      companiesMatch?.(job?.company_name, registered?.company)
-    ) {
-      return true;
-    }
-    return false;
+    return jobTitleCompanyMatch(job, registered);
   }
 
   function jobMatchesRegisteredJobs(job, registeredJobs) {
@@ -409,7 +453,7 @@
     const filtered = [];
 
     for (const job of jobs) {
-      if (excludeBlockedJobs && jobMatchesBlocked(job.apply_url, blockedJobs)) {
+      if (excludeBlockedJobs && jobMatchesBlocked(job, blockedJobs)) {
         removedBlockedJobs += 1;
         continue;
       }

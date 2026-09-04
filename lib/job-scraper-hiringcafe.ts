@@ -272,7 +272,11 @@ function extractJobFields(hit: Record<string, unknown>): ScrapedJob {
     job_category: serializeField(processed.job_category),
     estimated_publish_date: serializeField(processed.estimated_publish_date),
     role_activities: serializeField(processed.role_activities),
-    company_name: serializeField(company.name),
+    company_name:
+      serializeField(company.name) ||
+      serializeField(processed.company_name) ||
+      serializeField(jobInfo.company_name) ||
+      serializeField(hit.company_name),
     company_tagline: serializeField(company.tagline),
     application_site: detectPlatform(applyUrl),
   };

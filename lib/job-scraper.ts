@@ -208,7 +208,7 @@ export function applyOptionalScrapeFilters(
   const filtered: ScrapedJob[] = [];
 
   for (const job of jobs) {
-    if (blockedJobs.length > 0 && jobMatchesBlockedJobs(job.apply_url, blockedJobs)) {
+    if (blockedJobs.length > 0 && jobMatchesBlockedJobs(job, blockedJobs)) {
       removedBlockedJobs += 1;
       continue;
     }

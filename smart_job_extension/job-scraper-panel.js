@@ -251,6 +251,22 @@
     });
   }
 
+  function formatFilterRemovalDetail(stats) {
+    if (!stats) return '';
+    const bits = [];
+    if (stats.removedByDate) bits.push(`${stats.removedByDate} by date`);
+    if (stats.removedBlockedJobs) bits.push(`${stats.removedBlockedJobs} blocked jobs`);
+    if (stats.removedBlockedCompanies) {
+      bits.push(`${stats.removedBlockedCompanies} blocked cos`);
+    }
+    if (stats.removedAts) bits.push(`${stats.removedAts} blocked ATS`);
+    if (stats.removedRegisteredJobs) bits.push(`${stats.removedRegisteredJobs} reg. jobs`);
+    if (stats.removedRegisteredCompanies) {
+      bits.push(`${stats.removedRegisteredCompanies} reg. cos`);
+    }
+    return bits.length ? `Hidden: ${bits.join(' · ')}` : 'No matches hidden by lists';
+  }
+
   function recomputeFiltered() {
     const scraper = api();
     if (!scraper) {
@@ -688,11 +704,19 @@
     if (sub) {
       const bits = [];
       if (state.stats?.scraped != null) bits.push(`${state.stats.scraped} scraped`);
+      if (state.stats?.removedByDate) bits.push(`${state.stats.removedByDate} by date`);
+      if (state.stats?.removedBlockedJobs) {
+        bits.push(`${state.stats.removedBlockedJobs} blocked jobs`);
+      }
+      if (state.stats?.removedBlockedCompanies) {
+        bits.push(`${state.stats.removedBlockedCompanies} blocked cos`);
+      }
+      if (state.stats?.removedAts) bits.push(`${state.stats.removedAts} blocked ATS`);
       if (state.stats?.removedRegisteredJobs) {
-        bits.push(`${state.stats.removedRegisteredJobs} reg. jobs hidden`);
+        bits.push(`${state.stats.removedRegisteredJobs} reg. jobs`);
       }
       if (state.stats?.removedRegisteredCompanies) {
-        bits.push(`${state.stats.removedRegisteredCompanies} reg. cos hidden`);
+        bits.push(`${state.stats.removedRegisteredCompanies} reg. cos`);
       }
       if (state.stats?.pagesFetched) bits.push(`${state.stats.pagesFetched} pages`);
       sub.textContent = bits.join(' · ');
@@ -819,6 +843,9 @@
 
     if (state.scraping && !state.pausedForChallenge && !resume) return;
 
+    // Refresh website/Resume DB hide lists before filtering scrape results.
+    await loadProfileFilterContext({ silent: true });
+
     state.scraping = true;
     state.pausedForChallenge = false;
     syncControlsFromState();
@@ -912,18 +939,21 @@
       state.selectedKeys = new Set();
       recomputeFiltered();
       await persistResults();
+      const removalDetail = formatFilterRemovalDetail(state.stats);
       setProgress({
         text: `Done · ${state.filteredJobs.length} jobs ready`,
         detail:
           `${jobs.length} scraped` +
           (pagesFetched ? ` · ${pagesFetched} pages` : '') +
-          (reportedTotal != null ? ` · HiringCafe total ${reportedTotal}` : ''),
+          (reportedTotal != null ? ` · HiringCafe total ${reportedTotal}` : '') +
+          (removalDetail ? ` · ${removalDetail}` : ''),
         kind: 'success',
         current: 1,
         total: 1,
       });
       showToast(
-        `Scraped ${jobs.length} jobs · ${state.filteredJobs.length} after filters.`,
+        `Scraped ${jobs.length} · ${state.filteredJobs.length} after filters.` +
+          (removalDetail ? ` ${removalDetail}` : ''),
         'success'
       );
     } catch (err) {
