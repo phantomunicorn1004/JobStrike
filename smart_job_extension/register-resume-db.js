@@ -2527,7 +2527,13 @@
     setRegisterStatus('Generating resume files via json2docx…', 'info');
 
     try {
+      const config = await api.getJson2docxConfig?.();
+      // Register always needs DOCX to attach; upgrade PDF-only to both.
+      const outputMode =
+        config?.outputMode === 'pdf' ? 'both' : config?.outputMode || 'both';
+
       const result = await api.generateAndDownloadFiles(parsed.data, {
+        outputMode,
         onProgress: ({ percent, message }) => {
           setGenerateProgress({
             hidden: false,
@@ -2542,7 +2548,15 @@
       if (attached.resumeFile) names.push(attached.resumeFile.name);
       if (attached.coverFile) names.push(attached.coverFile.name);
       if (!names.length) {
-        throw new Error('No resume/cover files were returned to attach.');
+        throw new Error(
+          'No DOCX resume/cover files to attach. Use output mode DOCX only or DOCX + PDF (Register never attaches PDF).'
+        );
+      }
+      if (attached.resumeFile && !/\.docx$/i.test(attached.resumeFile.name || '')) {
+        throw new Error('Resume auto-attach must be a .docx file.');
+      }
+      if (attached.coverFile && !/\.docx$/i.test(attached.coverFile.name || '')) {
+        throw new Error('Cover letter auto-attach must be a .docx file.');
       }
 
       const msg = `Generated and attached: ${names.join(' · ')}`;

@@ -17,7 +17,7 @@ export const JSON2DOCX_STORAGE_KEYS = {
 export const DEFAULT_JSON2DOCX_SETTINGS: Json2docxSettings = {
   enabled: false,
   baseUrl: "http://127.0.0.1:8765",
-  outputMode: "docx",
+  outputMode: "both",
 };
 
 export function normalizeJson2docxBaseUrl(value: string | null | undefined): string {

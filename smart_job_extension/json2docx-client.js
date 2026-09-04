@@ -8,7 +8,7 @@
   const BASE_URL_KEY = 'json2docx_base_url';
   const OUTPUT_MODE_KEY = 'json2docx_output_mode';
   const DEFAULT_BASE_URL = 'http://127.0.0.1:8765';
-  const DEFAULT_OUTPUT_MODE = 'docx';
+  const DEFAULT_OUTPUT_MODE = 'both';
   const OUTPUT_MODES = ['docx', 'pdf', 'both'];
 
   let lastHealth = {
@@ -100,20 +100,17 @@
     }
   }
 
-  function pickPreferredGeneratedFiles(files, outputMode) {
+  function pickPreferredGeneratedFiles(files, _outputMode) {
     const list = Array.isArray(files) ? files : [];
-    const mode = normalizeOutputMode(outputMode);
-    const preferPdf = mode === 'pdf';
 
+    // Register auto-attach always uses DOCX (PDFs may still be generated/downloaded).
     function pickKind(kind) {
       const matches = list.filter((f) => f && f.kind === kind && f.file);
       if (!matches.length) return null;
-      const preferredExt = preferPdf ? 'pdf' : 'docx';
       return (
-        matches.find((f) => String(f.format || '').toLowerCase() === preferredExt) ||
         matches.find((f) => String(f.format || '').toLowerCase() === 'docx') ||
-        matches.find((f) => String(f.format || '').toLowerCase() === 'pdf') ||
-        matches[0]
+        matches.find((f) => String(f.filename || f.file?.name || '').toLowerCase().endsWith('.docx')) ||
+        null
       );
     }
 

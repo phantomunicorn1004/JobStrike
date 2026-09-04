@@ -217,6 +217,9 @@ export function Json2DocxSettingsCard() {
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Extension Register auto-attaches DOCX only. PDFs still save to Downloads when using DOCX + PDF.
+          </p>
         </div>
 
         <div className="flex flex-wrap justify-end gap-2">

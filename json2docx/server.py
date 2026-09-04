@@ -60,8 +60,8 @@ class GenerateRequest(BaseModel):
         description="Built resume JSON object or raw JSON string",
     )
     output_mode: str = Field(
-        default="docx",
-        description="docx | pdf | both (default: docx)",
+        default="both",
+        description="docx | pdf | both (default: both)",
     )
 
 
