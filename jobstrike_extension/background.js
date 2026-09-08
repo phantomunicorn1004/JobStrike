@@ -1,5 +1,5 @@
-// Background service worker for Smart Job Autofill Assistant.
-// Opens the movable Job Assistant dialog on the active tab (popup fallback if needed).
+// Background service worker for JobStrike.
+// Opens the movable JobStrike dialog on the active tab (popup fallback if needed).
 
 const STORAGE_KEYS = {
   jobs: 'scraped_jobs',
@@ -72,7 +72,7 @@ async function restoreAssistantDialogOnTab(tabId, url) {
       .catch(() => null);
     await ensureContentScriptAndSendMessage(tabId, { action: 'showAssistantDialog' });
   } catch (error) {
-    console.warn('Could not restore Job Assistant dialog:', error?.message || error);
+    console.warn('Could not restore JobStrike dialog:', error?.message || error);
   }
 }
 
@@ -84,7 +84,7 @@ function configureSidePanelBehavior() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Smart Job Autofill Assistant installed');
+  console.log('JobStrike installed');
   configureSidePanelBehavior();
 });
 
@@ -184,7 +184,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (!tab?.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
         sendResponse({
           success: false,
-          error: 'Open a regular web page (http/https) before opening Job Assistant.'
+          error: 'Open a regular web page (http/https) before opening JobStrike.'
         });
         return;
       }
@@ -236,7 +236,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse(response);
           return;
         }
-        throw new Error(response?.error || 'Could not open Job Assistant overlay.');
+        throw new Error(response?.error || 'Could not open JobStrike overlay.');
       } catch (error) {
         try {
           await chrome.windows.create({
@@ -574,7 +574,7 @@ chrome.commands.onCommand.addListener((command) => {
           mode: assistantMode
         });
         if (!response?.success) {
-          throw new Error(response?.error || 'Could not open Job Assistant.');
+          throw new Error(response?.error || 'Could not open JobStrike.');
         }
         await setAssistantDialogOpen(tab.id, true);
       } catch (error) {

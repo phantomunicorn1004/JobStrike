@@ -1,4 +1,4 @@
-# Smart Job Autofill Assistant
+# JobStrike
 
 A Chrome Manifest V3 extension for job application workflows.
 

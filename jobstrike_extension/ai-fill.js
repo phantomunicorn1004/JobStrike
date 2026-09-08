@@ -1,4 +1,4 @@
-// OpenAI-assisted field value generation for Smart Job Autofill Assistant.
+// OpenAI-assisted field value generation for JobStrike.
 (function (root) {
   'use strict';
 

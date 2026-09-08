@@ -135,7 +135,7 @@ export default function JobsLayout({
           >
             <Link
               href="/dashboard"
-              aria-label="Remote Helper"
+              aria-label="JobStrike"
               className={cn(
                 "flex min-w-0 flex-1 items-center gap-3.5",
                 "group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center",
@@ -157,10 +157,10 @@ export default function JobsLayout({
                 )}
               >
                 <span className="block text-sm font-bold tracking-[0.22em] text-foreground uppercase">
-                  Remote
+                  Job
                 </span>
                 <span className="mt-1.5 block text-sm font-bold tracking-[0.28em] text-primary uppercase">
-                  Helper
+                  Strike
                 </span>
               </div>
             </Link>

@@ -1,5 +1,5 @@
 /**
- * Resume DB registration tab — communicates with remote-work-helper backend only.
+ * Resume DB registration tab — communicates with JobStrike backend only.
  */
 (function (global) {
   const BACKEND_URL_KEY = 'resume_db_backend_url';

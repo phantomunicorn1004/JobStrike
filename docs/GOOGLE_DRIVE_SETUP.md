@@ -1,6 +1,6 @@
 # Google Drive setup — detailed guide
 
-This guide walks you through connecting **Google Drive** to **remote-work-helper** so the Chrome extension can:
+This guide walks you through connecting **Google Drive** to **JobStrike** so the Chrome extension can:
 
 1. Upload resume + cover letter to Google Drive (via your website API)
 2. Save the job in **Resume DB** with Drive view links
@@ -27,7 +27,7 @@ This guide walks you through connecting **Google Drive** to **remote-work-helper
 
 1. Top bar → click the **project** dropdown.
 2. Click **New Project**.
-3. Name it e.g. `remote-work-helper`.
+3. Name it e.g. `JobStrike`.
 4. Click **Create** and wait until it is selected.
 
 ### Step 1.3: Enable Google Drive API
@@ -110,7 +110,7 @@ Open the JSON file in a text editor. You need two fields:
 
 ### Step 4.1: Local development (`.env.local`)
 
-In your project root (`remote-work-helper`), create or edit **`.env.local`**:
+In your project root (`JobStrike`), create or edit **`.env.local`**:
 
 ```env
 # Existing Supabase vars (you should already have these)
@@ -175,7 +175,7 @@ Expected:
 ```json
 {
   "ok": true,
-  "service": "remote-work-helper",
+  "service": "jobstrike",
   "googleDrive": { "configured": true }
 }
 ```

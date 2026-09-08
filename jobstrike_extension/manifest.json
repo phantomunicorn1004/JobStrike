@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Remote Helper Ext",
+  "name": "JobStrike",
   "version": "4.12.7",
-  "description": "Chrome extension for Remote Helper — autofill job applications, custom Q&A, Resume DB registration, and HiringCafe job scraping.",
+  "description": "Chrome extension for JobStrike — autofill job applications, custom Q&A, Resume DB registration, and HiringCafe job scraping.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -32,7 +32,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Remote Helper Ext",
+    "default_title": "JobStrike",
     "default_popup": "launcher.html",
     "default_icon": {
       "16": "icons/icon-16.png",
@@ -59,16 +59,16 @@
       "description": "Extract text from a page element"
     },
     "open-assistant-left": {
-      "description": "Open Job Assistant docked on the left"
+      "description": "Open JobStrike docked on the left"
     },
     "open-assistant-movable": {
-      "description": "Open Job Assistant as a movable dialog"
+      "description": "Open JobStrike as a movable dialog"
     },
     "open-assistant-right": {
-      "description": "Open Job Assistant docked on the right"
+      "description": "Open JobStrike docked on the right"
     },
     "open-assistant-panel": {
-      "description": "Open Job Assistant in Chrome right-side pinned panel"
+      "description": "Open JobStrike in Chrome right-side pinned panel"
     }
   },
   "content_scripts": [

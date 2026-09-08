@@ -1,5 +1,5 @@
 /**
- * Flexible Job Assistant shell injected on the page.
+ * Flexible JobStrike shell injected on the page.
  * Supports movable, dock-left, and dock-right modes.
  */
 (function () {
@@ -747,7 +747,7 @@
       <div class="rh-root">
         <div class="rh-panel" id="rhPanel" hidden>
           <div class="rh-header" id="rhHeader" title="Drag to move">
-            <div class="rh-title">Job Assistant</div>
+            <div class="rh-title">JobStrike</div>
             <button type="button" class="rh-theme" id="rhTheme" aria-label="Switch to light mode" title="Light mode">
               <svg class="rh-theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
@@ -764,7 +764,7 @@
             </div>
             <button type="button" class="rh-close" id="rhClose" aria-label="Close">×</button>
           </div>
-          <iframe class="rh-frame" id="rhFrame" title="Job Assistant" allow="clipboard-write"></iframe>
+          <iframe class="rh-frame" id="rhFrame" title="JobStrike" allow="clipboard-write"></iframe>
           <div class="rh-resize" id="rhResize" aria-hidden="true"></div>
         </div>
         <aside class="rh-opt-rail" id="rhOptRail" hidden aria-label="Initial UI actions">

@@ -138,7 +138,7 @@ function LoginPageContent() {
         <div className="flex flex-col items-center gap-3 text-center">
           <img src="/logo-icon.png" alt="" className="h-16 w-16 rounded-2xl" />
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Remote Helper</h1>
+            <h1 className="text-2xl font-bold tracking-tight">JobStrike</h1>
             <p className="text-sm text-muted-foreground">
               Sign in or create an account to continue
             </p>

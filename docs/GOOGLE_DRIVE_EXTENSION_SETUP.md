@@ -25,9 +25,9 @@ You need these **before** creating the OAuth client in Google Cloud.
 2. Go to `chrome://extensions`
 3. Turn on **Developer mode** (top-right).
 
-### A2. Find Smart Job Autofill Assistant
+### A2. Find JobStrike
 
-1. Find **Smart Job Autofill Assistant** in the list.
+1. Find **JobStrike** in the list.
 2. Copy the **ID** (long string like `abcdefghijklmnopqrstuvwxyzabcdef`).
 
 ### A3. Get the redirect URI from the extension
@@ -57,7 +57,7 @@ You need these **before** creating the OAuth client in Google Cloud.
 ### B2. Create or select a project
 
 1. Top bar → click the **project** name.
-2. **New Project** → name e.g. `Smart Job Autofill` → **Create**.
+2. **New Project** → name e.g. `JobStrike` → **Create**.
 3. Wait until the new project is selected.
 
 ### B3. Enable Google Drive API
@@ -78,7 +78,7 @@ You need these **before** creating the OAuth client in Google Cloud.
 
 ### C2. App information
 
-1. **App name:** e.g. `Smart Job Autofill`
+1. **App name:** e.g. `JobStrike`
 2. **User support email:** your email
 3. **Developer contact:** your email
 4. Click **Save and Continue**.
@@ -106,7 +106,7 @@ You need these **before** creating the OAuth client in Google Cloud.
 1. **APIs & Services** → **Credentials**.
 2. **+ Create Credentials** → **OAuth client ID**.
 3. Application type: **Web application** (not “Chrome extension” for this flow).
-4. Name: e.g. `Smart Job Extension`.
+4. Name: e.g. `JobStrike Extension`.
 
 ### D2. Add redirect URI (critical)
 
@@ -131,7 +131,7 @@ You need these **before** creating the OAuth client in Google Cloud.
 
 ### E1. Reload extension
 
-1. `chrome://extensions` → **Reload** on Smart Job Autofill Assistant.
+1. `chrome://extensions` → **Reload** on JobStrike.
 
 ### E2. Open Google Drive settings
 

@@ -95,7 +95,7 @@ PDF mode needs **Windows + Microsoft Word + `pywin32`**.
 
 ## Extension setup
 
-1. Load unpacked: `smart_job_extension/` (`chrome://extensions` → Developer mode).
+1. Load unpacked: `jobstrike_extension/` (`chrome://extensions` → Developer mode).
 2. **Settings → Website connection:** sign in (loads profiles).
 3. **Settings → json2docx:** enable, URL `http://127.0.0.1:8765`, output mode (default DOCX).
 4. Start `json2docx/server.py`, then **Test connection** (or watch the Register status dot).
@@ -169,5 +169,5 @@ Reload the extension after code updates.
 ## Related docs
 
 - [`json2docx/README.md`](../json2docx/README.md) — CLI + server modules
-- [`smart_job_extension/README.md`](../smart_job_extension/README.md) — load / autofill overview
+- [`jobstrike_extension/README.md`](../jobstrike_extension/README.md) — load / autofill overview
 - [`docs/RESUME_TEMPLATE_GUIDE.md`](./RESUME_TEMPLATE_GUIDE.md) — resume JSON / template structure

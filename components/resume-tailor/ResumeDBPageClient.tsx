@@ -1099,7 +1099,7 @@ export function ResumeDBPageClient() {
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Resume DB</h1>
             <p className="text-xs text-muted-foreground sm:text-sm">
               {totalCount} application{totalCount === 1 ? "" : "s"} — register via
-              the Smart Job extension. Set status to move jobs through the{" "}
+              the JobStrike Extension. Set status to move jobs through the{" "}
               <Link href="/jobs" className="text-primary underline-offset-4 hover:underline">
                 pipeline
               </Link>

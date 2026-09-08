@@ -121,7 +121,7 @@
         if (!tab?.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
           reject(
             new Error(
-              'Open a regular web page (http/https) before opening Job Assistant.'
+              'Open a regular web page (http/https) before opening JobStrike.'
             )
           );
           return;
@@ -163,7 +163,7 @@
   async function openAssistantDialog() {
     const sidebarBtn = document.getElementById('openSidebarBtn');
     if (sidebarBtn) sidebarBtn.disabled = true;
-    setStatus('Opening Job Assistant…', 'info');
+    setStatus('Opening JobStrike…', 'info');
 
     try {
       if (assistantMode === 'panel') {
@@ -177,12 +177,12 @@
         mode: assistantMode
       });
       if (!response?.success) {
-        throw new Error(response?.error || 'Could not open Job Assistant.');
+        throw new Error(response?.error || 'Could not open JobStrike.');
       }
       window.close();
     } catch (err) {
       if (sidebarBtn) sidebarBtn.disabled = false;
-      setStatus(err.message || 'Could not open Job Assistant.', 'error');
+      setStatus(err.message || 'Could not open JobStrike.', 'error');
     }
   }
 

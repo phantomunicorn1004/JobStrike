@@ -152,7 +152,7 @@
     const metadata = { name: file.name || 'document' };
     if (folderId) metadata.parents = [folderId];
 
-    const boundary = 'smart_job_' + Date.now();
+    const boundary = 'jobstrike_' + Date.now();
     const metaPart =
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
       JSON.stringify(metadata) +

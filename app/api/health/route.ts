@@ -9,7 +9,7 @@ export function OPTIONS() {
 export async function GET() {
   return corsJson({
     ok: true,
-    service: "remote-work-helper",
+    service: "jobstrike",
     timestamp: new Date().toISOString(),
     googleDrive: {
       serviceAccountConfigured: isGoogleDriveConfigured(),

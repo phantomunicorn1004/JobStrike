@@ -1,4 +1,4 @@
-// Side panel main app for Smart Job Autofill Assistant.
+// Side panel main app for JobStrike.
 
 const STORAGE_KEY = 'scraped_jobs';
 const USER_NAME_KEY = 'job_scraper_user_name';

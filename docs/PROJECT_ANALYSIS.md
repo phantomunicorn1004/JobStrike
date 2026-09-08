@@ -1,8 +1,8 @@
-# RemoteWorkSheet - Project Analysis & Update Plan
+# JobStrike - Project Analysis & Update Plan
 
 ## Project Overview
 
-**RemoteWorkSheet** is a Next.js 16 job tracking application for managing remote team job applications. It uses Supabase as the backend database and shadcn/ui for the UI components.
+**JobStrike** is a Next.js 16 job tracking application for managing remote team job applications. It uses Supabase as the backend database and shadcn/ui for the UI components.
 
 ### Key Features
 - **Jobs Applied**: Track all job applications with notes
@@ -160,7 +160,7 @@
 ## File Structure Analysis
 
 ```
-RemoteWorkSheet/
+JobStrike/
 ├── app/                          # Next.js App Router
 │   ├── jobs-applied/            # Applied jobs page
 │   ├── jobs-technical/          # Technical stage page

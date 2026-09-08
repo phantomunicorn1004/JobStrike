@@ -14,8 +14,8 @@ Build failed: project path contains '#' which breaks Tailwind CSS on Windows.
   Current path: ${cwd}
 
 Fix: Move the project to a path without '#'.
-  - Example: C:\\GitHub_proj\\remote-work-helper  (no #)
-  - Or:      C:\\dev\\remote-work-helper
+  - Example: C:\\GitHub_proj\\JobStrike  (no #)
+  - Or:      C:\\dev\\JobStrike
 `);
   process.exit(1);
 }

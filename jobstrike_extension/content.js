@@ -1,4 +1,4 @@
-// Content script for Smart Job Autofill Assistant.
+// Content script for JobStrike.
 // Scans application forms, scrapes basic job info, and safely fills selected fields.
 
 (function () {

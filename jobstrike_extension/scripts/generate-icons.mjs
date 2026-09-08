@@ -1,5 +1,5 @@
 /**
- * Generate Chrome extension PNG icons from the Remote Helper website logo.
+ * Generate Chrome extension PNG icons from the JobStrike website logo.
  *
  *   node scripts/generate-icons.mjs
  */
