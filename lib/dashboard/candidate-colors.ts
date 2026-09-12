@@ -1,6 +1,6 @@
 /** Stable per-candidate colors shared across dashboard charts. */
 export const CANDIDATE_COLOR_PALETTE = [
-  "#6666ff",
+  "#2563eb",
   "#22c55e",
   "#f59e0b",
   "#ec4899",

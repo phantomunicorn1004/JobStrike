@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { BrandLogo } from "@/components/brand-logo";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { defaultHomeForRole } from "@/lib/auth/constants";
@@ -136,13 +137,15 @@ function LoginPageContent() {
 
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center gap-3 text-center">
-          <img src="/logo-icon.png" alt="" className="h-16 w-16 rounded-2xl" />
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">JobStrike</h1>
-            <p className="text-sm text-muted-foreground">
+          <BrandLogo
+            href="/login"
+            className="justify-center gap-3"
+            markClassName="h-11 w-11"
+            wordmarkClassName="text-2xl"
+          />
+          <p className="text-sm text-muted-foreground">
               Sign in or create an account to continue
             </p>
-          </div>
         </div>
 
         <Card className="rounded-xl shadow-sm">

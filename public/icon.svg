@@ -1,22 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" fill="none" aria-hidden="true">
   <defs>
-    <linearGradient id="bg" x1="90" y1="0" x2="90" y2="180" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#8888ff"/>
-      <stop offset="1" stop-color="#6666ff"/>
+    <linearGradient id="js-mark" x1="40" y1="160" x2="140" y2="20" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3b82f6"/>
+      <stop offset="0.55" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
     </linearGradient>
   </defs>
-  <rect width="180" height="180" rx="40" fill="url(#bg)"/>
-  <path d="M36 68h108v8H36z" fill="none"/>
-  <path d="M48 68l42-22 42 22v12H48V68z" stroke="#fff" stroke-width="5" stroke-linejoin="round" fill="none"/>
-  <path d="M132 68v8h10v-14l-8-4" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <path d="M90 52v78" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
-  <path d="M78 64l12-18 12 18" fill="#fff"/>
-  <path d="M78 64h24v10H78z" fill="#fff"/>
-  <circle cx="62" cy="98" r="11" fill="#dcdcff"/>
-  <circle cx="118" cy="98" r="11" fill="#dcdcff"/>
-  <path d="M51 98h18" stroke="#dcdcff" stroke-width="5" stroke-linecap="round"/>
-  <path d="M111 98h18" stroke="#dcdcff" stroke-width="5" stroke-linecap="round"/>
-  <path d="M54 118h72" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
-  <path d="M54 118v8h72v-8" stroke="#fff" stroke-width="5" stroke-linejoin="round" fill="none"/>
-  <path d="M62 126h56" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+  <rect width="180" height="180" rx="40" fill="#eff6ff"/>
+  <!-- Stylized upward J / strike mark -->
+  <path
+    fill="url(#js-mark)"
+    d="M92 28c2.2 0 4 1.8 4 4v78c0 18.8-12.8 32-34 32-14.2 0-25.4-6.4-31.2-16.8-1.4-2.5-.4-5.6 2.2-6.8 2.4-1.2 5.4-.3 6.8 2 3.8 6.6 10.6 10.6 22.2 10.6 14.2 0 24-8.2 24-22V32c0-2.2 1.8-4 4-4z"
+  />
+  <path
+    fill="url(#js-mark)"
+    d="M70 28h64c3.2 0 5.2 3.5 3.4 6.2L112 72.5c-1.2 1.8-3.8 1.8-5 0L81.6 34.2C79.8 31.5 81.8 28 85 28H70z"
+  />
+  <path
+    fill="#93c5fd"
+    d="M118 28h16c2.8 0 4.6 3 3.2 5.4L122 58c-1 1.6-3.4 1.4-4.2-.4L106.4 33c-1.2-2.6 0.8-5 3.6-5H118z"
+  />
+  <!-- White swoosh arrow -->
+  <path
+    fill="#ffffff"
+    d="M58 118c18-22 36-36 58-44 2.2-.8 4.4.8 4.4 3.2v10.4c0 1.4-.8 2.8-2 3.4-16.8 8.2-30.4 20-42.6 36.2-1.4 1.8-4.2 1.2-4.8-1L68 116.4c-.6-2.2.6-4.4 2.8-5.2z"
+  />
+  <path
+    fill="#ffffff"
+    d="M108 72l28 6-18 24c-1.2 1.6-3.8 1.2-4.4-.8l-6.2-22.4c-.6-2.2 1.2-4.2 3.4-3.8z"
+  />
 </svg>

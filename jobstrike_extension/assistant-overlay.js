@@ -513,7 +513,7 @@
         }
         .rh-opt-btn.is-done-step { color: #22c55e; }
         .rh-opt-btn.is-current-step {
-          box-shadow: 0 0 0 2px rgba(102, 102, 255, 0.55);
+          box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.55);
         }
         .rh-opt-btn.is-blocked-step {
           box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55);

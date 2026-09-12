@@ -28,9 +28,9 @@ export interface NodeDefinition {
 }
 
 const STYLE_INPUT = {
-  iconBg: "bg-primary/15 text-primary dark:text-[#8888ff]",
+  iconBg: "bg-primary/15 text-primary dark:text-[#3b82f6]",
   border: "border-primary/40",
-  badge: "bg-primary/10 text-[#4343b8] dark:text-[#dcdcff]",
+  badge: "bg-primary/10 text-[#1e3a8a] dark:text-[#dbeafe]",
 };
 const STYLE_AI = {
   iconBg: "bg-violet-500/20 text-violet-600 dark:text-violet-400",

@@ -4,20 +4,22 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  ClipboardList,
+  Columns3,
   FileEdit,
   Database,
   LayoutDashboard,
   LogOut,
-  MessageSquareText,
   NotebookPen,
   SearchCode,
   Settings,
+  Sparkles,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { BrandLogo } from "@/components/brand-logo";
 import {
   Sidebar,
   SidebarContent,
@@ -59,7 +61,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     href: "/jobs",
     label: "Job Pipeline",
-    icon: ClipboardList,
+    icon: Columns3,
     isActive: (pathname) => pathname === "/jobs",
   },
   {
@@ -77,7 +79,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     href: "/prompt-builder",
     label: "Prompt Builder",
-    icon: MessageSquareText,
+    icon: Sparkles,
     isActive: (pathname) => pathname.startsWith("/prompt-builder"),
   },
   {
@@ -125,45 +127,15 @@ export default function JobsLayout({
 
   return (
     <SidebarProvider defaultOpen>
-      <Sidebar collapsible="icon" className="border-r border-sidebar-border shadow-[2px_0_16px_rgba(102,102,255,0.06)]">
+      <Sidebar collapsible="icon" className="border-r border-sidebar-border shadow-[2px_0_16px_rgba(37,99,235,0.06)]">
         <SidebarHeader className="min-w-0 overflow-hidden border-b border-sidebar-border px-3 py-4">
           <div
             className={cn(
-              "flex min-w-0 items-start justify-between gap-2",
+              "flex min-w-0 items-center justify-between gap-2",
               "group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center",
             )}
           >
-            <Link
-              href="/dashboard"
-              aria-label="JobStrike"
-              className={cn(
-                "flex min-w-0 flex-1 items-center gap-3.5",
-                "group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center",
-              )}
-            >
-              <img
-                src="/logo-icon.png"
-                alt=""
-                aria-hidden="true"
-                className={cn(
-                  "h-[4.5rem] w-[4.5rem] shrink-0 rounded-2xl object-contain",
-                  "group-data-[collapsible=icon]:h-10 group-data-[collapsible=icon]:w-10 group-data-[collapsible=icon]:rounded-xl",
-                )}
-              />
-              <div
-                className={cn(
-                  "min-w-0 leading-none",
-                  "group-data-[collapsible=icon]:hidden",
-                )}
-              >
-                <span className="block text-sm font-bold tracking-[0.22em] text-foreground uppercase">
-                  Job
-                </span>
-                <span className="mt-1.5 block text-sm font-bold tracking-[0.28em] text-primary uppercase">
-                  Strike
-                </span>
-              </div>
-            </Link>
+            <BrandLogo className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none" />
             <div
               className={cn(
                 "flex shrink-0 items-center gap-1",
@@ -199,18 +171,14 @@ export default function JobsLayout({
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
-                tooltip="Profile"
+                tooltip="Profiles"
                 size="lg"
                 isActive={pathname.startsWith("/profile")}
                 className="rounded-lg"
               >
                 <Link href="/profile" className="justify-center md:justify-start">
-                  <img
-                    src="/placeholder-user.jpg"
-                    alt="Profile"
-                    className="h-8 w-8 shrink-0 rounded-full border-2 border-border object-cover transition hover:border-primary"
-                  />
-                  <span>Profile</span>
+                  <Users className="h-4 w-4 shrink-0" />
+                  <span>Profiles</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>

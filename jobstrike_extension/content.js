@@ -6343,7 +6343,7 @@
     if (!el || !(el instanceof Element)) return;
     const prevStyle = el.getAttribute('style') || '';
     try {
-      el.style.setProperty('outline', '3px solid #6666ff', 'important');
+      el.style.setProperty('outline', '3px solid #2563eb', 'important');
       el.style.setProperty('outline-offset', '2px', 'important');
       el.style.setProperty('box-shadow', '0 0 0 8px rgba(37, 99, 235, 0.22)', 'important');
       el.style.setProperty('border-radius', el.style.borderRadius || '8px', 'important');
@@ -6540,7 +6540,7 @@
         z-index: 2147483646;
         border: 4px solid;
         border-image: linear-gradient(90deg, #ff1744, #ff9100, #ffea00, #00e676, #00b0ff, #651fff, #f500d4) 1;
-        background: rgba(102, 102, 255, .08);
+        background: rgba(37, 99, 235, .08);
         animation: __rwhRainbowBorder 1.2s linear infinite;
       }
     `;
