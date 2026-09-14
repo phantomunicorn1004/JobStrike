@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import JobsLayout from "@/app/jobs-layout";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -287,8 +286,7 @@ export function ResumeBuilderPageClient() {
   })();
 
   return (
-    <JobsLayout>
-      <div className="flex h-full min-h-0 w-full flex-col gap-4">
+    <div className="flex h-full min-h-0 w-full flex-col gap-4">
         <header className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-lg font-semibold">Resume Builder</h1>
@@ -422,6 +420,5 @@ export function ResumeBuilderPageClient() {
           />
         </div>
       </div>
-    </JobsLayout>
   );
 }

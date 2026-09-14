@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import JobsLayout from "@/app/jobs-layout";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -190,8 +189,7 @@ export function PromptBuilderPageClient() {
   };
 
   return (
-    <JobsLayout>
-      <div className="flex h-full min-h-0 w-full flex-col gap-4">
+    <div className="flex h-full min-h-0 w-full flex-col gap-4">
         <header className="shrink-0">
           <h1 className="text-lg font-semibold">Prompt Builder</h1>
           <p className="text-xs text-muted-foreground">
@@ -277,6 +275,5 @@ export function PromptBuilderPageClient() {
           />
         </div>
       </div>
-    </JobsLayout>
   );
 }

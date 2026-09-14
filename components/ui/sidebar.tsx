@@ -78,7 +78,7 @@ function SidebarProvider({
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  // Restore persisted collapse state (each page remounts JobsLayout on navigate).
+  // Restore persisted collapse state from cookie on first mount.
   const [_open, _setOpen] = React.useState(() =>
     readSidebarOpenCookie(defaultOpen),
   )

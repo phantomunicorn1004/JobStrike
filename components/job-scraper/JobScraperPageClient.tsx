@@ -18,7 +18,6 @@ import {
   Search,
   ShieldBan,
 } from "lucide-react";
-import JobsLayout from "@/app/jobs-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1148,8 +1147,7 @@ export function JobScraperPageClient() {
     selectedKeys.size > 0 ? `${selectedKeys.size} selected` : "all results";
 
   return (
-    <JobsLayout>
-      <div className="relative flex h-full min-h-0 w-full flex-col gap-2.5 text-sm [&_button]:text-xs [&_input]:text-xs [&_textarea]:text-xs [&_[data-slot=badge]]:text-[11px] [&_[data-slot=table]]:text-xs">
+    <div className="relative flex h-full min-h-0 w-full flex-col gap-2.5 text-sm [&_button]:text-xs [&_input]:text-xs [&_textarea]:text-xs [&_[data-slot=badge]]:text-[11px] [&_[data-slot=table]]:text-xs">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h1 className="text-lg font-semibold">Job Scraper</h1>
@@ -1941,6 +1939,5 @@ export function JobScraperPageClient() {
           </CardContent>
         </Card>
       </div>
-    </JobsLayout>
   );
 }

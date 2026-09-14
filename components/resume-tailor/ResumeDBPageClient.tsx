@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import JobsLayout from "@/app/jobs-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -1092,8 +1091,7 @@ export function ResumeDBPageClient() {
   };
 
   return (
-    <JobsLayout>
-      <div className="flex min-h-0 w-full flex-1 flex-col gap-2 sm:gap-3">
+    <div className="flex min-h-0 w-full flex-1 flex-col gap-2 sm:gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
           <div className="min-w-0 space-y-0.5">
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Resume DB</h1>
@@ -1696,6 +1694,5 @@ export function ResumeDBPageClient() {
           </DialogContent>
         </Dialog>
       </div>
-    </JobsLayout>
   );
 }

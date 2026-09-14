@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import JobsLayout from "@/app/jobs-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -20,6 +19,7 @@ import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { colorForCandidateKey } from "@/lib/dashboard/candidate-colors";
+import type { DashboardData as ServerDashboardData } from "@/lib/dashboard/load-dashboard";
 import { DEFAULT_TIMEZONE, formatYmdInTimeZone, todayInTimeZone } from "@/lib/timezone";
 import { toast } from "sonner";
 
@@ -29,28 +29,7 @@ type StageCount = { stageId: string; stageName: string; count: number };
 type HourlyActivityPoint = { hour: number; count: number };
 type RangeMode = "week" | "month" | "custom";
 
-type DashboardData = {
-  timezone: string;
-  today: string;
-  rangeMode: RangeMode;
-  appliedDate: string;
-  appliedCount: number;
-  appliedCountByCandidate: CandidateCount[];
-  appliedInBidRange: number;
-  bidsStackedByDate: Array<Record<string, string | number>>;
-  bidSeriesCandidates: CandidateCount[];
-  bidFrom: string;
-  bidTo: string;
-  activityDate: string;
-  hourlyActivity: HourlyActivityPoint[];
-  stageCounts: StageCount[];
-  pipelineByStage: Array<Record<string, string | number>>;
-  pipelineSeriesCandidates: CandidateCount[];
-  totalApplications: number;
-  totalApplicationsAll: number;
-  applicationsByCandidate: CandidateCount[];
-  candidates: CandidateOption[];
-};
+type DashboardData = ServerDashboardData;
 
 function formatChartDate(ymd: string, timeZone: string): string {
   return formatYmdInTimeZone(ymd, timeZone, { month: "short", day: "numeric" });
@@ -78,18 +57,39 @@ function hourLabel(hour: number): string {
   return `${h}${suffix}`;
 }
 
-export function DashboardPageClient() {
-  const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
+export function DashboardPageClient({
+  initialData = null,
+}: {
+  initialData?: DashboardData | null;
+}) {
+  const [timezone, setTimezone] = useState(
+    () => initialData?.timezone || DEFAULT_TIMEZONE,
+  );
   const today = todayInTimeZone(timezone);
-  const [rangeMode, setRangeMode] = useState<RangeMode>("month");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
-  const [activityDate, setActivityDate] = useState("");
-  const [appliedDate, setAppliedDate] = useState("");
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
-  const selectionInitializedRef = useRef(false);
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [rangeMode, setRangeMode] = useState<RangeMode>(
+    () => initialData?.rangeMode || "month",
+  );
+  const [customFrom, setCustomFrom] = useState(() => initialData?.bidFrom || "");
+  const [customTo, setCustomTo] = useState(() => initialData?.bidTo || "");
+  const [activityDate, setActivityDate] = useState(
+    () => initialData?.activityDate || "",
+  );
+  const [appliedDate, setAppliedDate] = useState(
+    () => initialData?.appliedDate || "",
+  );
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => {
+    if (!initialData) return new Set();
+    const defaults = (
+      initialData.bidSeriesCandidates.length
+        ? initialData.bidSeriesCandidates
+        : initialData.applicationsByCandidate
+    ).map((c) => c.key);
+    return new Set(defaults);
+  });
+  const selectionInitializedRef = useRef(Boolean(initialData));
+  const [data, setData] = useState<DashboardData | null>(() => initialData);
+  const [isLoading, setIsLoading] = useState(() => !initialData);
+  const skipInitialFetchRef = useRef(Boolean(initialData));
 
   const loadDashboard = useCallback(async (overrides?: {
     activityDate?: string;
@@ -148,6 +148,10 @@ export function DashboardPageClient() {
   // Initial + range-mode/custom-range loads only — date picks call loadDashboard directly
   // so setting dates from the response does not trigger a second full fetch.
   useEffect(() => {
+    if (skipInitialFetchRef.current) {
+      skipInitialFetchRef.current = false;
+      return;
+    }
     void loadDashboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: avoid activity/applied date loop
   }, [rangeMode, rangeMode === "custom" ? customFrom : "", rangeMode === "custom" ? customTo : ""]);
@@ -299,8 +303,7 @@ export function DashboardPageClient() {
   const clearCandidates = () => setSelectedKeys(new Set());
 
   return (
-    <JobsLayout>
-      <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4">
+    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
@@ -717,6 +720,5 @@ export function DashboardPageClient() {
           </>
         )}
       </div>
-    </JobsLayout>
   );
 }

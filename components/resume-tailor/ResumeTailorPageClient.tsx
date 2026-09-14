@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import JobsLayout from "@/app/jobs-layout";
 import { ResumeTailor } from "@/components/resume-tailor/ResumeTailor";
 import { ResumeTailorWorkflow } from "@/components/resume-tailor/workflow";
 import { Button } from "@/components/ui/button";
@@ -12,8 +11,7 @@ export function ResumeTailorPageClient() {
   const [view, setView] = useState<"workflow" | "classic">("workflow");
 
   return (
-    <JobsLayout>
-      <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full">
         <div className="flex items-center justify-between mb-4">
           <div className="flex rounded-lg border border-border p-1 bg-muted/30">
             <Button
@@ -42,6 +40,5 @@ export function ResumeTailorPageClient() {
           <ResumeTailor />
         )}
       </div>
-    </JobsLayout>
   );
 }
