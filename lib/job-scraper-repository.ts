@@ -69,14 +69,27 @@ export async function addBlockedCompany(
 }
 
 export async function deleteBlockedCompany(userId: string, id: string): Promise<void> {
+  await deleteBlockedCompanies(userId, [id]);
+}
+
+export async function deleteBlockedCompanies(
+  userId: string,
+  ids: string[],
+): Promise<number> {
+  const uniqueIds = Array.from(
+    new Set(ids.map((id) => id.trim()).filter(Boolean)),
+  );
+  if (uniqueIds.length === 0) return 0;
+
   const supabase = getSupabaseAdminClient();
-  const { error } = await supabase
+  const { error, count } = await supabase
     .from("resume_db_blocked_companies")
-    .delete()
+    .delete({ count: "exact" })
     .eq("user_id", userId)
-    .eq("id", id);
+    .in("id", uniqueIds);
 
   if (error) throw new Error(error.message);
+  return count ?? uniqueIds.length;
 }
 
 export type CandidateOption = {

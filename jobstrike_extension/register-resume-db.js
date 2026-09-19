@@ -34,6 +34,9 @@
   let filesNeedRegeneration = false;
   let promptCopiedAt = 0;
   let registeredRecord = { id: '', at: 0 };
+  /** Latest Bid fit preflight result (gates Copy Prompt). */
+  let lastBidFitResult = null;
+  let bidFitRefreshTimer = null;
   /** Live percent while json2docx runs, mirrored into the Generate Files step. */
   let generateActivity = null;
   /** Suppresses side effects (duplicate checks, session writes) while restoring. */
@@ -162,11 +165,17 @@
   }
 
   function setRegisterStatus(message, type) {
-    const el = document.getElementById('registerStatus');
-    if (!el) return;
-    el.textContent = message || '';
-    el.className = 'register-status' + (type ? ` is-${type}` : '');
-    el.hidden = !message;
+    // Status strip removed — route through panel toast (showStatus / showToast).
+    const text = String(message || '').trim();
+    if (!text) return;
+    const kind = type || 'info';
+    if (typeof showStatus === 'function') {
+      showStatus(text, kind);
+      return;
+    }
+    if (typeof global.showToast === 'function') {
+      global.showToast(text, kind === 'warn' ? 'info' : kind);
+    }
   }
 
   function setSettingsHint(message, type) {
@@ -197,11 +206,16 @@
   /* ------------------------------------------------------- apply progress */
 
   const APPLY_STEPS = [
-    { key: 'job', label: 'Job', target: 'regNote' },
-    { key: 'prompt', label: 'Prompt', target: 'regBuildCopyPromptBtn' },
-    { key: 'json', label: 'JSON', target: 'regOpenResumeJsonBtn' },
-    { key: 'files', label: 'Files', target: 'regGenerateFilesBtn' },
-    { key: 'register', label: 'Register', target: 'registerJobBtn' }
+    { key: 'job', label: 'Job', target: 'regNote', nextCue: 'Next: Add job description (paste or Refresh)' },
+    { key: 'prompt', label: 'Prompt', target: 'regBuildCopyPromptBtn', nextCue: 'Next: Copy Prompt' },
+    { key: 'json', label: 'JSON', target: 'regOpenResumeJsonBtn', nextCue: 'Next: Edit JSON' },
+    {
+      key: 'files',
+      label: 'Files',
+      target: 'regGenerateFilesBtn',
+      nextCue: 'Next: Generate files — or skip to Register'
+    },
+    { key: 'register', label: 'Register', target: 'registerJobBtn', nextCue: 'Next: Register this job' }
   ];
 
   /**
@@ -394,66 +408,83 @@
     requestJobRescrape();
   }
 
-  /** Built once so the live generate fill can animate instead of jumping. */
+  /** Wire reset once; stepper DOM was removed in favor of the cue strip. */
   function ensureApplyProgressDom() {
-    const track = document.getElementById('applyProgressTrack');
-    if (!track) return null;
-    if (track.dataset.built === '1') return track;
-
-    track.innerHTML = APPLY_STEPS.map(
-      (step, index) => `
-      <li class="apply-step" data-apply-step="${step.key}">
-        <span class="apply-step-node">
-          <span class="apply-step-fill"></span>
-          <span class="apply-step-num">${index + 1}</span>
-        </span>
-        <span class="apply-step-label">${escapeHtml(step.label)}</span>
-      </li>`
-    ).join('');
-    track.dataset.built = '1';
-
-    track.querySelectorAll('[data-apply-step]').forEach((li) => {
-      li.addEventListener('click', () => handleApplyStepClick(li.getAttribute('data-apply-step')));
-    });
-
     const resetBtn = document.getElementById('applyProgressReset');
     if (resetBtn && resetBtn.dataset.wired !== '1') {
       resetBtn.dataset.wired = '1';
-      resetBtn.addEventListener('click', resetApplyProgress);
+      resetBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        resetApplyProgress();
+      });
     }
-    return track;
+    return document.getElementById('rbNextCue') || resetBtn || true;
   }
 
   function renderApplyProgress(progress) {
-    const root = document.getElementById('applyProgress');
-    const track = ensureApplyProgressDom();
-    if (!track || !root) return;
-
-    progress.steps.forEach((step) => {
-      const li = track.querySelector(`[data-apply-step="${step.key}"]`);
-      if (!li) return;
-      li.className = `apply-step is-${step.state}`;
-      li.title = applyStepTooltip(step);
-      const fill = li.querySelector('.apply-step-fill');
-      if (fill) {
-        fill.style.width =
-          step.percent != null ? `${Math.max(0, Math.min(100, step.percent))}%` : '';
-      }
-    });
+    if (!ensureApplyProgressDom()) return;
 
     const current = progress.steps[progress.currentIndex];
-    root.setAttribute(
-      'aria-label',
-      progress.complete
-        ? 'Job application progress: registered'
-        : `Job application progress: step ${progress.currentIndex + 1} of ${progress.total}, ${
-            current?.label || ''
-          }`
-    );
-    root.classList.toggle('is-complete', progress.complete);
+    const cue = document.getElementById('rbNextCue');
+    if (cue) {
+      cue.setAttribute(
+        'aria-label',
+        progress.complete
+          ? 'Job application progress: registered'
+          : `Job application progress: step ${progress.currentIndex + 1} of ${progress.total}, ${
+              current?.label || ''
+            }`
+      );
+    }
 
     const resetBtn = document.getElementById('applyProgressReset');
     if (resetBtn) resetBtn.hidden = progress.doneCount === 0;
+
+    updateNextCue(progress);
+  }
+
+  function updateNextCue(progress) {
+    const cue = document.getElementById('rbNextCue');
+    const stepEl = document.getElementById('rbNextCueStep');
+    const msgEl = document.getElementById('rbNextCueMsg');
+    if (!cue) return;
+
+    cue.classList.remove('is-complete', 'is-blocked', 'is-working');
+    cue.dataset.focusStep = '';
+
+    if (progress.complete) {
+      if (stepEl) stepEl.textContent = `${progress.total} / ${progress.total}`;
+      if (msgEl) msgEl.textContent = 'Done — job registered';
+      else cue.textContent = 'Done — job registered';
+      cue.classList.add('is-complete');
+      cue.title = 'Bid pipeline complete';
+      return;
+    }
+
+    const current = progress.steps[progress.currentIndex];
+    if (!current) {
+      if (stepEl) stepEl.textContent = `— / ${progress.total}`;
+      if (msgEl) msgEl.textContent = 'Next: Continue the bid pipeline';
+      cue.title = 'Continue the bid pipeline';
+      return;
+    }
+
+    cue.dataset.focusStep = current.key;
+    if (stepEl) stepEl.textContent = `${current.number} / ${progress.total}`;
+
+    let message = current.nextCue || `Next: ${current.label}`;
+    if (current.state === 'blocked' || current.state === 'warn') {
+      message = current.reason ? `Fix: ${current.reason}` : message;
+      cue.classList.add('is-blocked');
+    } else if (current.state === 'active') {
+      message = current.reason || 'Working…';
+      cue.classList.add('is-working');
+    }
+
+    if (msgEl) msgEl.textContent = message;
+    else cue.textContent = message;
+    cue.title = `Go to step ${current.number}: ${current.label}`;
   }
 
   /** Clicking a step jumps to the control that advances it. */
@@ -463,6 +494,17 @@
     if (!el) return;
     const details = el.closest('details');
     if (details && !details.open) details.open = true;
+    // Highlight job note block when focusing that step.
+    if (key === 'job') {
+      const block = document.getElementById('regNoteBlock');
+      if (block) {
+        try {
+          block.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        } catch (_) {
+          block.scrollIntoView();
+        }
+      }
+    }
     try {
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     } catch (_) {
@@ -471,17 +513,73 @@
     if (typeof el.focus === 'function') el.focus({ preventScroll: true });
   }
 
-  /** Static step numbers plus a ring on whichever button is current. */
+  /** Buttons + note field reflect live pipeline state for glanceable bidding. */
   function syncApplyStepButtons(progress) {
+    const actions = document.querySelector('.rb-actions');
+    const noteBlock = document.getElementById('regNoteBlock');
+    const current = progress.steps[progress.currentIndex];
+    const currentKey = progress.complete ? '' : current?.key || '';
+
+    if (actions) {
+      actions.dataset.pipeline = '1';
+      actions.dataset.currentStep = currentKey;
+    }
+
+    if (noteBlock) {
+      const jobStep = progress.steps.find((s) => s.key === 'job');
+      const jobCurrent =
+        jobStep &&
+        (jobStep.state === 'current' ||
+          jobStep.state === 'active' ||
+          jobStep.state === 'blocked' ||
+          jobStep.state === 'warn');
+      noteBlock.classList.toggle('is-current-step', Boolean(jobCurrent) && !progress.complete);
+      noteBlock.classList.toggle('is-blocked-step', jobStep?.state === 'blocked' || jobStep?.state === 'warn');
+      noteBlock.classList.toggle('is-done-step', jobStep?.state === 'done');
+    }
+
     progress.steps.forEach((step) => {
+      const isCurrent = step.state === 'current' || step.state === 'active';
+      const isDone = step.state === 'done';
+      const isBlocked = step.state === 'blocked' || step.state === 'warn';
+      const isUpcoming = step.state === 'pending';
+
       document.querySelectorAll(`[data-step-btn="${step.key}"]`).forEach((btn) => {
-        btn.classList.toggle('is-current-step', step.state === 'current' || step.state === 'active');
-        btn.classList.toggle('is-blocked-step', step.state === 'blocked');
-        btn.classList.toggle('is-done-step', step.state === 'done');
-        const badge = btn.querySelector('.rb-step-badge');
-        if (badge) badge.textContent = String(step.number);
+        btn.classList.toggle('is-current-step', isCurrent);
+        btn.classList.toggle('is-blocked-step', isBlocked && !isDone);
+        btn.classList.toggle('is-done-step', isDone);
+        btn.classList.toggle('is-upcoming-step', isUpcoming);
       });
     });
+  }
+
+  function wireApplyNextCue() {
+    const cue = document.getElementById('rbNextCue');
+    if (!cue || cue.dataset.wired === '1') return;
+    cue.dataset.wired = '1';
+    cue.addEventListener('click', () => {
+      const key = cue.dataset.focusStep;
+      if (key) focusApplyStep(key);
+    });
+  }
+
+  function wireApplyProgressLiveInputs() {
+    const note = document.getElementById('regNote');
+    if (note && note.dataset.applyProgressWired !== '1') {
+      note.dataset.applyProgressWired = '1';
+      note.addEventListener('input', () => {
+        refreshApplyProgress();
+        scheduleBidFitRefresh();
+      });
+    }
+    const profile = document.getElementById('regProfileId');
+    if (profile && profile.dataset.applyProgressWired !== '1') {
+      profile.dataset.applyProgressWired = '1';
+      profile.addEventListener('change', () => {
+        refreshApplyProgress();
+        scheduleBidFitRefresh();
+      });
+    }
   }
 
   function refreshApplyProgress() {
@@ -494,6 +592,7 @@
   function syncResumeBuilderActionButtons({ registerBusy = false } = {}) {
     const generateBtn = document.getElementById('regGenerateFilesBtn');
     const registerBtn = document.getElementById('registerJobBtn');
+    const buildBtn = document.getElementById('regBuildCopyPromptBtn');
 
     if (generateBtn && !generateBtn.classList.contains('is-loading')) {
       generateBtn.disabled = false;
@@ -506,6 +605,23 @@
       registerBtn.title = blockedByDuplicate
         ? 'Duplicate job link — already in Resume DB for this profile'
         : 'Register this job to Resume DB';
+    }
+
+    if (buildBtn && !buildBtn.classList.contains('is-loading')) {
+      const profileId = document.getElementById('regProfileId')?.value?.trim();
+      const fitBlocked = lastBidFitResult?.level === 'blocked';
+      buildBtn.disabled = !profileId || fitBlocked;
+      if (!profileId) {
+        buildBtn.title = 'Select a profile first';
+      } else if (fitBlocked) {
+        buildBtn.title =
+          lastBidFitResult.reasons?.[0]?.message ||
+          'Preflight: skip — don’t waste a ChatGPT run';
+      } else if (lastBidFitResult?.level === 'risky') {
+        buildBtn.title = 'Preflight weak — you can still copy if you want to try';
+      } else {
+        buildBtn.title = 'Build final prompt from kit + Note and copy to clipboard';
+      }
     }
 
     const autofillBtn = document.getElementById('regAutofillBtn');
@@ -2044,22 +2160,11 @@
   const MAX_PERSISTED_TEXT = 50000;
 
   function captureRegisterStatus() {
-    const el = document.getElementById('registerStatus');
-    if (!el || el.hidden) return null;
-    return { text: el.textContent || '', className: el.className || '' };
+    return null;
   }
 
-  function restoreRegisterStatus(state) {
-    const el = document.getElementById('registerStatus');
-    if (!el) return;
-    if (!state?.text) {
-      el.textContent = '';
-      el.hidden = true;
-      return;
-    }
-    el.textContent = state.text;
-    el.className = state.className || 'register-status';
-    el.hidden = false;
+  function restoreRegisterStatus(_state) {
+    /* Register status strip removed */
   }
 
   function captureRegisterSession() {
@@ -2235,6 +2340,10 @@
     el.value = value == null ? '' : String(value);
     if (source) el.dataset.fillSource = source;
     else delete el.dataset.fillSource;
+    if (id === 'regNote') {
+      refreshApplyProgress();
+      scheduleBidFitRefresh();
+    }
   }
 
   function updateResumeJsonHint(message, type) {
@@ -2340,6 +2449,7 @@
     }
 
     syncResumeBuilderActionButtons();
+    scheduleBidFitRefresh();
     return { ok: true, fields, data: result.data };
   }
 
@@ -2635,6 +2745,74 @@
     if (spinner) spinner.hidden = !loading;
   }
 
+  function renderBidFitCard(result) {
+    const cue = document.getElementById('rbFitCue');
+    const text = document.getElementById('rbFitCueText');
+    if (!cue || !text) return;
+
+    if (!result) {
+      cue.hidden = true;
+      text.textContent = 'Preflight: —';
+      return;
+    }
+
+    const preflight = global.SmartJobBidFitPreflight;
+    cue.hidden = false;
+    cue.dataset.level = result.level || 'ready';
+    text.textContent = preflight?.summarizeFit?.(result) || 'Preflight: —';
+    const detail = result.reasons?.[0]?.message || '';
+    cue.title = detail;
+  }
+
+  async function collectBidFitInputs() {
+    const api = global.SmartJobPromptKit;
+    const noteText = document.getElementById('regNote')?.value || '';
+    const profileId = getSelectedRegisterProfileId();
+    let template = document.getElementById('regPromptKitTemplate')?.value || '';
+    let resumeTemplateJson =
+      document.getElementById('regPromptKitResumeJson')?.value || '';
+
+    if (api && profileId) {
+      try {
+        const { kit } = await api.getPromptKit(profileId);
+        if (!template.trim()) template = kit.template || '';
+        if (!resumeTemplateJson.trim()) resumeTemplateJson = kit.resumeTemplateJson || '';
+        const jobDescription = api.resolveJobDescription({ noteText, kit });
+        return { jobDescription, template, resumeTemplateJson };
+      } catch (_) {
+        /* fall through to editor fields */
+      }
+    }
+
+    return {
+      jobDescription: noteText,
+      template,
+      resumeTemplateJson,
+    };
+  }
+
+  async function refreshBidFitPreflight() {
+    const engine = global.SmartJobBidFitPreflight;
+    if (!engine?.evaluateBidFit) {
+      lastBidFitResult = null;
+      renderBidFitCard(null);
+      return null;
+    }
+    const inputs = await collectBidFitInputs();
+    lastBidFitResult = engine.evaluateBidFit(inputs);
+    renderBidFitCard(lastBidFitResult);
+    syncResumeBuilderActionButtons();
+    return lastBidFitResult;
+  }
+
+  function scheduleBidFitRefresh() {
+    if (bidFitRefreshTimer) clearTimeout(bidFitRefreshTimer);
+    bidFitRefreshTimer = setTimeout(() => {
+      bidFitRefreshTimer = null;
+      void refreshBidFitPreflight();
+    }, 320);
+  }
+
   async function refreshPromptKitUi({ fillEditor = false } = {}) {
     const api = global.SmartJobPromptKit;
     const profileId = getSelectedRegisterProfileId();
@@ -2660,10 +2838,9 @@
       }
       syncRbStatusChips();
       syncResumeBuilderActionButtons();
+      void refreshBidFitPreflight();
       return;
     }
-
-    if (buildBtn) buildBtn.disabled = false;
 
     try {
       const { kit, exists } = await api.getPromptKit(profileId);
@@ -2678,10 +2855,10 @@
       updatePromptKitStatus(err.message || 'Failed to load prompt kit.', 'error');
     }
     syncRbStatusChips();
-    syncResumeBuilderActionButtons();
+    await refreshBidFitPreflight();
   }
 
-  async function buildAndCopyPromptFromKit(showStatus) {
+  async function buildAndCopyPromptFromKit(showStatus, { force = false } = {}) {
     const api = global.SmartJobPromptKit;
     if (!api) throw new Error('Prompt kit module not loaded.');
 
@@ -2691,6 +2868,27 @@
     const { kit } = await api.getPromptKit(profileId);
     const noteText = document.getElementById('regNote')?.value || '';
     const jobDescription = api.resolveJobDescription({ noteText, kit });
+
+    const fit = global.SmartJobBidFitPreflight?.evaluateBidFit?.({
+      jobDescription,
+      template: kit.template,
+      resumeTemplateJson: kit.resumeTemplateJson,
+    });
+    if (fit) {
+      lastBidFitResult = fit;
+      renderBidFitCard(fit);
+      syncResumeBuilderActionButtons();
+    }
+
+    if (fit && !fit.canCopy && !force) {
+      const top =
+        fit.reasons.find((r) => r.severity === 'block')?.message ||
+        'Preflight: skip — don’t waste a ChatGPT run.';
+      throw new Error(top);
+    }
+
+    // Risky is advisory only — still allow Copy Prompt (quiet cue already shown).
+
     const { prompt, missingPlaceholders } = api.buildPrompt(
       kit.template,
       kit.resumeTemplateJson,
@@ -2717,12 +2915,16 @@
       message = `Copied (empty: ${missingPlaceholders.join(', ')}). Fill kit / Note, then rebuild.`;
       setRegisterStatus(message, 'warn');
       if (showStatus) showStatus(message, 'error');
+    } else if (fit?.level === 'risky') {
+      message = 'Copied (preflight weak). Paste into GPT if you still want to try.';
+      setRegisterStatus(message, 'warn');
+      if (showStatus) showStatus(message, 'warn');
     } else {
       setRegisterStatus(message, 'success');
       if (showStatus) showStatus(message, 'success');
     }
     void refreshPromptKitUi();
-    return { prompt, missingPlaceholders };
+    return { prompt, missingPlaceholders, fit };
   }
 
   async function savePromptKitFromEditor(showStatus) {
@@ -2859,11 +3061,12 @@
       buildBtn.addEventListener('click', () => {
         setRegisterStatus('Building prompt…', 'info');
         setRbButtonLoading(buildBtn, true);
-        buildAndCopyPromptFromKit(showStatus)
+        buildAndCopyPromptFromKit(showStatus, { force: false })
           .catch((err) => {
             const msg = err.message || String(err);
             setRegisterStatus(msg, 'error');
             if (showStatus) showStatus(msg, 'error');
+            void refreshBidFitPreflight();
           })
           .finally(() => setRbButtonLoading(buildBtn, false));
       });
@@ -2872,11 +3075,13 @@
     if (saveBtn && saveBtn.dataset.wired !== '1') {
       saveBtn.dataset.wired = '1';
       saveBtn.addEventListener('click', () => {
-        savePromptKitFromEditor(showStatus).catch((err) => {
-          const msg = err.message || String(err);
-          setRegisterStatus(msg, 'error');
-          if (showStatus) showStatus(msg, 'error');
-        });
+        savePromptKitFromEditor(showStatus)
+          .then(() => refreshBidFitPreflight())
+          .catch((err) => {
+            const msg = err.message || String(err);
+            setRegisterStatus(msg, 'error');
+            if (showStatus) showStatus(msg, 'error');
+          });
       });
     }
 
@@ -2886,8 +3091,17 @@
         const ta = document.getElementById('regPromptKitTemplate');
         if (ta && api) ta.value = api.DEFAULT_PROMPT_TEMPLATE;
         setRegisterStatus('Template reset to default (Save kit to keep).', 'info');
+        scheduleBidFitRefresh();
       });
     }
+
+    ['regPromptKitTemplate', 'regPromptKitResumeJson'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && el.dataset.bidFitWired !== '1') {
+        el.dataset.bidFitWired = '1';
+        el.addEventListener('input', () => scheduleBidFitRefresh());
+      }
+    });
 
     wireResumeBuilderChrome();
     void refreshPromptKitUi({ fillEditor: true });
@@ -2918,6 +3132,9 @@
     startConnectionPolling();
     syncResumeBuilderActionButtons();
     setGenerateProgress({ hidden: true, percent: 0, message: '' });
+    wireApplyNextCue();
+    wireApplyProgressLiveInputs();
+    refreshApplyProgress();
 
     document.querySelectorAll('[data-tab="settings"]').forEach((tabBtn) => {
       tabBtn.addEventListener('click', () => {
@@ -3037,6 +3254,7 @@
     onRegisterViewShown,
     syncResumeBuilderActionButtons,
     buildAndCopyPromptFromKit,
+    refreshBidFitPreflight,
     updateRegisterDriveBadge,
     loadBackendSettingsForm,
     hasActiveResumeJsonOverride,

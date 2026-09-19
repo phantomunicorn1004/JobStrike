@@ -1324,29 +1324,48 @@ function getTodayKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+let lastStatusToastKey = '';
+let lastStatusToastAt = 0;
+
 function showStatus(message, type = 'info', timeout = 4000) {
   const text = String(message || '').trim();
   if (!text) return;
 
+  // Errors need more time to read (Register failures especially).
+  const safeType = type === 'error' || type === 'warn' || type === 'success' ? type : 'info';
+  const resolvedTimeout =
+    timeout > 0 && safeType === 'error' ? Math.max(timeout, 7000) : timeout;
+
+  // Dedupe identical back-to-back toasts (setRegisterStatus + showStatus pairs).
+  const dedupeKey = `${safeType}:${text}`;
+  const now = Date.now();
+  if (dedupeKey === lastStatusToastKey && now - lastStatusToastAt < 800) {
+    return;
+  }
+  lastStatusToastKey = dedupeKey;
+  lastStatusToastAt = now;
+
   // Hidden dialog iframe: parent page shows the toast.
   if (IS_ASSISTANT_DIALOG) {
-    notifyOptActionFeedback(message, type, timeout);
+    notifyOptActionFeedback(message, safeType, resolvedTimeout);
     return;
   }
 
-  // Side panel: show on the active tab (bottom-right), not inside the narrow panel.
+  // Always show in the side panel so Bid/Register feedback is visible here.
+  if (typeof showToast === 'function') {
+    showToast(text, safeType === 'warn' ? 'info' : safeType, resolvedTimeout);
+  }
+
+  // Also mirror to the active tab when possible (non-blocking).
   try {
     chrome.runtime.sendMessage(
-      { action: 'showPageToastOnActiveTab', message: text, type, timeout },
-      (response) => {
+      { action: 'showPageToastOnActiveTab', message: text, type: safeType, timeout: resolvedTimeout },
+      () => {
         void chrome.runtime.lastError;
-        if (!response?.success && typeof showToast === 'function') {
-          showToast(message, type, timeout);
-        }
       }
     );
   } catch (_) {
-    if (typeof showToast === 'function') showToast(message, type, timeout);
+    /* panel toast already shown */
   }
 }
 
@@ -1534,10 +1553,20 @@ async function notifyActiveTabChange(source = 'switch') {
     const url = String(tab.url || '');
 
     // A session is pinned to the page it was bound to, so navigating a tab
-    // never changes panel state. Only Refresh re-binds.
+    // never changes panel state. Only Refresh re-binds — except when a brand-new
+    // tab first activates as about:blank and only later lands on http(s).
     if (source === 'updated') {
       lastObservedTabUrl = url;
       renderPinnedJobBar(tab.id, url);
+      const unbound = !String(TS?.getBoundUrl?.(tab.id) || '').trim();
+      if (unbound && /^https?:\/\//i.test(url)) {
+        if (lastObservedTabId !== tab.id) {
+          const previousTabId = TS?.getBoundTabId() ?? lastObservedTabId;
+          lastObservedTabId = tab.id;
+          TS?.switchTo(previousTabId, tab.id);
+        }
+        scheduleFirstBindScrape(tab.id, url);
+      }
       return;
     }
 
@@ -1557,8 +1586,17 @@ async function notifyActiveTabChange(source = 'switch') {
     // Known tab: restore only. Re-scraping would overwrite its pinned draft.
     if (hadSession) return;
 
-    if (!/^https?:\/\//.test(url)) {
-      showStatus('This tab is not a web page — open a job listing to scrape.', 'info', 2800);
+    if (!/^https?:\/\//i.test(url)) {
+      // New tabs often report about:blank before navigation finishes — wait for
+      // the 'updated' path instead of treating that as a hard non-web page.
+      const pendingLoad =
+        !url ||
+        url === 'about:blank' ||
+        /^chrome:\/\/newtab/i.test(url) ||
+        /^chrome:\/\/new-tab-page/i.test(url);
+      if (!pendingLoad) {
+        showStatus('This tab is not a web page — open a job listing to scrape.', 'info', 2800);
+      }
       return;
     }
 
@@ -2664,15 +2702,6 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
   const urlEl = document.getElementById('currentUrl');
   if (urlEl) urlEl.textContent = jobLink;
 
-  const regStatus = document.getElementById('registerStatus');
-  if (regStatus) {
-    regStatus.textContent = preferResumeJson
-      ? 'Job link refreshed from tab. Title/company/note kept from resume JSON.'
-      : 'Job info loaded from current tab.';
-    regStatus.className = 'register-status is-success';
-    regStatus.hidden = false;
-  }
-
   window.SmartJobTabSession?.sync();
 
   window.SmartJobRegisterResumeDb?.notifyRegisterJobLinkFilled?.(showStatus, { force: true });
@@ -2680,6 +2709,9 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
     window.SmartJobRegisterResumeDb?.notifyRegisterCompanyFilled?.(showStatus, { force: true });
   }
   window.SmartJobRegisterResumeDb?.syncJobLinkBlockButton?.();
+  // Programmatic Note fill does not fire input — refresh Bid preflight explicitly.
+  void window.SmartJobRegisterResumeDb?.refreshBidFitPreflight?.();
+  window.SmartJobRegisterResumeDb?.refreshApplyProgress?.();
 
   if (showSuccess) {
     showStatus(
@@ -2763,12 +2795,6 @@ async function globalRefreshCurrentTab() {
       ? 'Cannot refresh this tab. Reload the page, then try again.'
       : msg;
     showStatus(friendly, 'error');
-    const regStatus = document.getElementById('registerStatus');
-    if (regStatus) {
-      regStatus.textContent = friendly;
-      regStatus.className = 'register-status is-error';
-      regStatus.hidden = false;
-    }
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -4853,7 +4879,7 @@ async function runBuildCopyPromptAction() {
   btn.classList.add('is-loading');
   publishOptUiState();
   try {
-    await api.buildAndCopyPromptFromKit(showStatus);
+    await api.buildAndCopyPromptFromKit(showStatus, { force: false });
   } finally {
     btn.classList.remove('is-loading');
     publishOptUiState();

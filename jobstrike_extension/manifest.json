@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "JobStrike",
-  "version": "4.12.7",
-  "description": "Chrome extension for JobStrike — autofill job applications, custom Q&A, Resume DB registration, and HiringCafe job scraping.",
+  "version": "4.15.10",
+  "description": "Chrome extension for JobStrike — autofill job applications, custom Q&A, Resume DB registration, and HiringCafe / Jobright job scraping.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -17,7 +17,8 @@
     "downloads",
     "sidePanel",
     "tabs",
-    "identity"
+    "identity",
+    "cookies"
   ],
   "host_permissions": [
     "<all_urls>",
@@ -90,10 +91,15 @@
         "tab-session.js",
         "clipboard.js",
         "ai-fill.js",
+        "prompt-kit-client.js",
+        "bid-fit-preflight.js",
         "job-url.js",
         "company-name.js",
         "job-scraper-hiringcafe.js",
+        "job-scraper-jobright.js",
         "job-scraper-panel.js",
+        "resume-json-mapper.js",
+        "json2docx-client.js",
         "register-resume-db.js",
         "sidepanel.js",
         "icons/*"

@@ -449,7 +449,7 @@
           color: inherit;
         }
         .rh-text-dlg-apply {
-          background: #4f46e5;
+          background: #3b6fd4;
           color: #fff;
         }
         .rh-opt-drag {
@@ -509,17 +509,17 @@
           display: block;
           width: 0;
           height: 100%;
-          background: #22c55e;
+          background: #3b6fd4;
         }
-        .rh-opt-btn.is-done-step { color: #22c55e; }
+        .rh-opt-btn.is-done-step { color: #7ba3e8; }
         .rh-opt-btn.is-current-step {
-          box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.55);
+          box-shadow: 0 0 0 2px rgba(59, 111, 212, 0.55);
         }
         .rh-opt-btn.is-blocked-step {
           box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55);
         }
         .rh-opt-dot.is-ok,
-        .rh-opt-dot.connected { background: #22c55e; }
+        .rh-opt-dot.connected { background: #3b6fd4; }
         .rh-opt-dot.is-warn { background: #f59e0b; }
         .rh-opt-dot.is-err,
         .rh-opt-dot.disconnected,
@@ -545,13 +545,13 @@
           padding: 0;
         }
         .rh-opt-btn.is-primary {
-          background: rgba(99, 102, 241, 0.28);
+          background: rgba(59, 111, 212, 0.28);
         }
         .rh-opt-rail[data-theme="light"] .rh-opt-btn {
           background: rgba(15, 23, 42, 0.08);
         }
         .rh-opt-rail[data-theme="light"] .rh-opt-btn.is-primary {
-          background: rgba(79, 70, 229, 0.18);
+          background: rgba(59, 111, 212, 0.18);
         }
         .rh-opt-btn:hover:not(:disabled) {
           background: rgba(148, 163, 184, 0.28);
@@ -674,9 +674,9 @@
         .rh-mode.active,
         .rh-close:hover { background: rgba(148, 163, 184, 0.2); opacity: 1; }
         .rh-mode.active {
-          color: #a5b4fc;
+          color: #9bb8f0;
           opacity: 1;
-          box-shadow: inset 0 0 0 1px rgba(165, 180, 252, 0.32);
+          box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.35);
         }
         .rh-panel[data-theme="light"] {
           background: #f8fafc;
@@ -690,8 +690,8 @@
           border-bottom-color: rgba(15, 23, 42, 0.1);
         }
         .rh-panel[data-theme="light"] .rh-mode.active {
-          color: #4f46e5;
-          box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.28);
+          color: #3b6fd4;
+          box-shadow: inset 0 0 0 1px rgba(59, 111, 212, 0.28);
         }
         .rh-panel[data-theme="light"] .rh-frame {
           background: #fff;

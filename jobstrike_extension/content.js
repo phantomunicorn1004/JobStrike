@@ -6343,9 +6343,9 @@
     if (!el || !(el instanceof Element)) return;
     const prevStyle = el.getAttribute('style') || '';
     try {
-      el.style.setProperty('outline', '3px solid #2563eb', 'important');
+      el.style.setProperty('outline', '3px solid #3b6fd4', 'important');
       el.style.setProperty('outline-offset', '2px', 'important');
-      el.style.setProperty('box-shadow', '0 0 0 8px rgba(37, 99, 235, 0.22)', 'important');
+      el.style.setProperty('box-shadow', '0 0 0 8px rgba(59, 111, 212, 0.22)', 'important');
       el.style.setProperty('border-radius', el.style.borderRadius || '8px', 'important');
       el.style.setProperty('transition', 'outline 0.25s ease, box-shadow 0.25s ease', 'important');
     } catch (_) {}
@@ -6484,7 +6484,7 @@
       'border-radius:9px',
       'box-shadow:0 8px 30px rgba(0,0,0,.32)',
       'font:600 12px/1.4 system-ui,-apple-system,Segoe UI,sans-serif',
-      `background:${kind === 'error' ? '#b91c1c' : '#166534'}`,
+      `background:${kind === 'error' ? '#b91c1c' : '#3b6fd4'}`,
       'color:#fff'
     ].join(';');
     (document.body || document.documentElement).appendChild(toast);
@@ -6540,7 +6540,7 @@
         z-index: 2147483646;
         border: 4px solid;
         border-image: linear-gradient(90deg, #ff1744, #ff9100, #ffea00, #00e676, #00b0ff, #651fff, #f500d4) 1;
-        background: rgba(37, 99, 235, .08);
+        background: rgba(59, 111, 212, .08);
         animation: __rwhRainbowBorder 1.2s linear infinite;
       }
     `;

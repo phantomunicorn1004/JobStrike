@@ -82,9 +82,14 @@
     setStatus(`Opening ${urls.length} tab${urls.length === 1 ? '' : 's'}…`, 'info');
 
     try {
-      await chrome.tabs.create({ url: urls[0], active: true });
-      for (let i = 1; i < urls.length; i += 1) {
-        await chrome.tabs.create({ url: urls[i], active: false });
+      // Open tabs in the service worker — creating an active tab here closes
+      // the popup and would abort any remaining chrome.tabs.create calls.
+      const response = await chrome.runtime.sendMessage({
+        action: 'openPreparedJobTabs',
+        urls
+      });
+      if (!response?.success) {
+        throw new Error(response?.error || 'Could not open job tabs.');
       }
       window.close();
     } catch (err) {

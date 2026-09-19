@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
 import { requireRequestUser } from "@/lib/auth/resolve-request-user";
+import { normalizeCompanyName } from "@/lib/job-scraper";
 import {
   addBlockedCompany,
-  deleteBlockedCompany,
+  deleteBlockedCompanies,
   listBlockedAts,
   listBlockedCompanies,
   listBlockedJobs,
@@ -95,12 +96,46 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const user = await requireRequestUser(request);
-    const id = new URL(request.url).searchParams.get("id")?.trim();
-    if (!id) {
-      return corsJson({ error: "Missing id." }, { status: 400 });
+    const url = new URL(request.url);
+    const singleId = url.searchParams.get("id")?.trim();
+    const idsParam = url.searchParams.get("ids")?.trim();
+
+    let ids: string[] = [];
+    if (singleId) {
+      ids = [singleId];
+    } else if (idsParam) {
+      ids = idsParam.split(",").map((id) => id.trim()).filter(Boolean);
+    } else {
+      const body = (await request.json().catch(() => null)) as {
+        ids?: unknown;
+        companiesText?: unknown;
+      } | null;
+      if (Array.isArray(body?.ids)) {
+        ids = body.ids.map((id) => String(id).trim()).filter(Boolean);
+      } else if (typeof body?.companiesText === "string") {
+        const names = body.companiesText
+          .split(/\r?\n/)
+          .map((line) => normalizeCompanyName(line))
+          .filter(Boolean);
+        if (names.length > 0) {
+          const all = await listBlockedCompanies(user.id);
+          const nameSet = new Set(names);
+          ids = all
+            .filter((company) =>
+              nameSet.has(normalizeCompanyName(company.companyName)),
+            )
+            .map((company) => company.id);
+        }
+      }
     }
-    await deleteBlockedCompany(user.id, id);
-    return corsJson({ ok: true });
+
+    if (ids.length === 0) {
+      return corsJson({ error: "Missing id(s)." }, { status: 400 });
+    }
+
+    const deleted = await deleteBlockedCompanies(user.id, ids);
+    const blockedCompanies = await listBlockedCompanies(user.id);
+    return corsJson({ ok: true, deleted, blockedCompanies });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to delete blocked company.";

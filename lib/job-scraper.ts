@@ -67,6 +67,7 @@ const PLATFORM_RULES: Array<
   ["Breezy", (h) => h.includes("breezy.hr")],
   ["Workable", (h) => h.includes("workable.com")],
   ["JazzHR", (h) => h.includes("jazz.co") || h.includes("applytojob.com")],
+  ["Jobright", (h) => h.includes("jobright.ai")],
 ];
 
 function normalizeText(value: string | null | undefined): string {
@@ -82,16 +83,22 @@ export function filterJobsByPublishDate(
   jobs: ScrapedJob[],
   dateWindow: JobScraperDateWindow,
   nowMs: number = Date.now(),
+  options?: { keepUndated?: boolean },
 ) {
   const days = dateWindowDays(dateWindow);
   const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000;
   let removedByDate = 0;
   const filtered: ScrapedJob[] = [];
+  const keepUndated = Boolean(options?.keepUndated);
 
   for (const job of jobs) {
     const raw = job.estimated_publish_date?.trim();
     if (!raw) {
-      removedByDate += 1;
+      if (keepUndated) {
+        filtered.push(job);
+      } else {
+        removedByDate += 1;
+      }
       continue;
     }
     const publishedMs = Date.parse(raw);

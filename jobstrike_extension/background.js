@@ -121,7 +121,46 @@ async function preparePinnedSidePanel(tabId) {
   return { success: true, mode: 'panel' };
 }
 
+async function openPreparedJobTabs(urls) {
+  const list = Array.isArray(urls)
+    ? urls.map((url) => String(url || '').trim()).filter((url) => /^https?:\/\//i.test(url))
+    : [];
+  if (!list.length) {
+    return { success: false, error: 'Add at least one http(s) job link.' };
+  }
+
+  const openedIds = [];
+  try {
+    // Create every tab inactive first so focus never depends on popup lifetime.
+    for (const url of list) {
+      const tab = await chrome.tabs.create({ url, active: false });
+      if (tab?.id) openedIds.push(tab.id);
+    }
+    if (openedIds[0]) {
+      await chrome.tabs.update(openedIds[0], { active: true });
+    }
+    return { success: true, count: openedIds.length };
+  } catch (error) {
+    return {
+      success: false,
+      error: error?.message || String(error),
+      count: openedIds.length
+    };
+  }
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request && request.action === 'openPreparedJobTabs') {
+    void openPreparedJobTabs(request.urls)
+      .then((result) => sendResponse(result))
+      .catch((error) => {
+        sendResponse({
+          success: false,
+          error: error?.message || String(error)
+        });
+      });
+    return true;
+  }
   if (request && request.action === 'openSidePanel') {
     const tabId = request.tabId || (sender.tab && sender.tab.id);
     if (!tabId || !chrome.sidePanel?.open) {

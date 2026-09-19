@@ -342,6 +342,11 @@ export function JobScraperPageClient() {
   const search = searchParams.get("q") ?? "";
 
   const [dateWindow, setDateWindow] = useState<DateWindow>("3d");
+  const [scrapeSource, setScrapeSource] = useState<"hiringcafe" | "jobright">(
+    "hiringcafe",
+  );
+  const [jrKeyword, setJrKeyword] = useState("Software Engineer");
+  const [jrLocation, setJrLocation] = useState("United States");
   const [excludeBlocked, setExcludeBlocked] = useState(true);
   const [excludeBlockedAts, setExcludeBlockedAts] = useState(true);
   const [excludeBlockedJobs, setExcludeBlockedJobs] = useState(true);
@@ -357,6 +362,10 @@ export function JobScraperPageClient() {
   const [resumeDbCompanyCount, setResumeDbCompanyCount] = useState(0);
   const [newBlockedCompany, setNewBlockedCompany] = useState("");
   const [bulkBlockedCompanies, setBulkBlockedCompanies] = useState("");
+  const [bulkRemoveCompanies, setBulkRemoveCompanies] = useState("");
+  const [selectedBlockedCompanyIds, setSelectedBlockedCompanyIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [newBlockedAts, setNewBlockedAts] = useState("");
   const [bulkBlockedAts, setBulkBlockedAts] = useState("");
   const [searchDraft, setSearchDraft] = useState(search);
@@ -364,10 +373,19 @@ export function JobScraperPageClient() {
   const [savingBlocked, setSavingBlocked] = useState(false);
   const [savingAts, setSavingAts] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [bulkRemovingCompanies, setBulkRemovingCompanies] = useState(false);
   const [deletingAtsId, setDeletingAtsId] = useState<string | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [savingBlockedJob, setSavingBlockedJob] = useState(false);
   const [scraping, setScraping] = useState(false);
+  const [scrapeProgress, setScrapeProgress] = useState<{
+    message: string;
+    step?: string;
+    page?: number;
+    maxPages?: number;
+    jobsSoFar?: number;
+    pagesFetched?: number;
+  } | null>(null);
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [baseJobs, setBaseJobs] = useState<JobRow[]>([]);
   const [filterContext, setFilterContext] = useState<FilterContext | null>(null);
@@ -546,12 +564,14 @@ export function JobScraperPageClient() {
       return;
     }
     setScraping(true);
+    setScrapeProgress({ message: "Starting scrape…", step: "launching" });
     try {
       const res = await fetch("/api/job-scraper/scrape", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          source: scrapeSource,
           dateWindow,
           excludeBlocked,
           excludeBlockedAts,
@@ -559,56 +579,117 @@ export function JobScraperPageClient() {
           excludeRegisteredJobs,
           excludeRegisteredCompanies,
           candidateFilter,
+          stream: true,
+          ...(scrapeSource === "jobright"
+            ? { titleKeyword: jrKeyword, location: jrLocation }
+            : {}),
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as Partial<ScrapeResponse> & {
-        error?: string;
-      };
-      if (!res.ok) throw new Error(data.error || "Scrape failed.");
-      setBaseJobs(data.baseJobs ?? data.jobs ?? []);
-      setSelectedKeys(new Set());
-      setSelectedCategories(new Set());
-      setFilterContext(
-        data.filterContext ?? {
-          blockedCompanies: blockedCompanies.map((c) => c.companyName),
-          blockedAts: blockedAts.map((a) => a.atsName),
-          blockedJobs: blockedJobs.map((job) => ({
-            jobLink: job.jobLink,
-            jobTitle: job.jobTitle,
-            companyName: job.companyName,
-          })),
-          registeredCompanies: resumeDbCompanies,
-          registeredJobs: [],
-          registeredJobCount: registeredJobCount,
-          registeredCompanyCount: resumeDbCompanyCount,
-        },
-      );
-      if (data.stats) {
-        setScrapeMeta({
-          scraped: data.stats.scraped,
-          deduped: data.stats.deduped,
-          removedByDate: data.stats.removedByDate,
-          baseRemaining: data.stats.baseRemaining ?? (data.baseJobs ?? []).length,
-          pagesFetched: data.stats.pagesFetched,
-          reportedTotal: data.stats.reportedTotal,
-          dateCutoff: data.stats.dateCutoff,
-          dateWindow: data.stats.dateWindow,
-        });
+
+      if (!res.ok && !res.body) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Scrape failed.");
       }
-      if (data.filterContext) {
-        setResumeDbCompanies(data.filterContext.registeredCompanies ?? []);
-        setResumeDbCompanyCount(
-          Number(data.filterContext.registeredCompanyCount ?? 0),
-        );
-        setRegisteredJobCount(Number(data.filterContext.registeredJobCount ?? 0));
+
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("ndjson") || !res.body) {
+        const data = (await res.json().catch(() => ({}))) as Partial<ScrapeResponse> & {
+          error?: string;
+        };
+        if (!res.ok) throw new Error(data.error || "Scrape failed.");
+        applyScrapeResult(data);
+        toast.success("Scrape completed.");
+        return;
       }
-      updateParams({ page: "1" });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let gotResult = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          let event: Record<string, unknown>;
+          try {
+            event = JSON.parse(trimmed) as Record<string, unknown>;
+          } catch {
+            continue;
+          }
+
+          if (event.type === "progress") {
+            setScrapeProgress({
+              message: String(event.message || "Working…"),
+              step: typeof event.step === "string" ? event.step : undefined,
+              page: typeof event.page === "number" ? event.page : undefined,
+              maxPages: typeof event.maxPages === "number" ? event.maxPages : undefined,
+              jobsSoFar: typeof event.jobsSoFar === "number" ? event.jobsSoFar : undefined,
+              pagesFetched:
+                typeof event.pagesFetched === "number" ? event.pagesFetched : undefined,
+            });
+          } else if (event.type === "error") {
+            throw new Error(String(event.error || "Scrape failed."));
+          } else if (event.type === "result") {
+            gotResult = true;
+            applyScrapeResult(event as unknown as Partial<ScrapeResponse>);
+          }
+        }
+      }
+
+      if (!gotResult) throw new Error("Scrape ended without results.");
       toast.success("Scrape completed.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Scrape failed.");
     } finally {
       setScraping(false);
+      setScrapeProgress(null);
     }
+  };
+
+  const applyScrapeResult = (data: Partial<ScrapeResponse>) => {
+    setBaseJobs(data.baseJobs ?? data.jobs ?? []);
+    setSelectedKeys(new Set());
+    setSelectedCategories(new Set());
+    setFilterContext(
+      data.filterContext ?? {
+        blockedCompanies: blockedCompanies.map((c) => c.companyName),
+        blockedAts: blockedAts.map((a) => a.atsName),
+        blockedJobs: blockedJobs.map((job) => ({
+          jobLink: job.jobLink,
+          jobTitle: job.jobTitle,
+          companyName: job.companyName,
+        })),
+        registeredCompanies: resumeDbCompanies,
+        registeredJobs: [],
+        registeredJobCount: registeredJobCount,
+        registeredCompanyCount: resumeDbCompanyCount,
+      },
+    );
+    if (data.stats) {
+      setScrapeMeta({
+        scraped: data.stats.scraped,
+        deduped: data.stats.deduped,
+        removedByDate: data.stats.removedByDate,
+        baseRemaining: data.stats.baseRemaining ?? (data.baseJobs ?? []).length,
+        pagesFetched: data.stats.pagesFetched,
+        reportedTotal: data.stats.reportedTotal,
+        dateCutoff: data.stats.dateCutoff,
+        dateWindow: data.stats.dateWindow,
+      });
+    }
+    if (data.filterContext) {
+      setResumeDbCompanies(data.filterContext.registeredCompanies ?? []);
+      setResumeDbCompanyCount(Number(data.filterContext.registeredCompanyCount ?? 0));
+      setRegisteredJobCount(Number(data.filterContext.registeredJobCount ?? 0));
+    }
+    updateParams({ page: "1" });
   };
 
   const saveBlockedCompanies = async (payload: Record<string, unknown>) => {
@@ -661,11 +742,16 @@ export function JobScraperPageClient() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Delete failed.");
+      const removed = blockedCompanies.find((company) => company.id === id);
       setBlockedCompanies((current) => current.filter((company) => company.id !== id));
+      setSelectedBlockedCompanyIds((current) => {
+        if (!current.has(id)) return current;
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
       setFilterContext((current) => {
-        if (!current) return current;
-        const removed = blockedCompanies.find((company) => company.id === id);
-        if (!removed) return current;
+        if (!current || !removed) return current;
         return {
           ...current,
           blockedCompanies: current.blockedCompanies.filter(
@@ -680,6 +766,89 @@ export function JobScraperPageClient() {
       setDeletingId(null);
     }
   };
+
+  const applyBlockedCompaniesRemoval = (nextBlocked: BlockedCompany[]) => {
+    setBlockedCompanies(nextBlocked);
+    setSelectedBlockedCompanyIds(new Set());
+    setBulkRemoveCompanies("");
+    setFilterContext((current) =>
+      current
+        ? {
+            ...current,
+            blockedCompanies: nextBlocked.map((company) => company.companyName),
+          }
+        : current,
+    );
+  };
+
+  const removeBlockedCompaniesBulk = async (mode: "selected" | "text") => {
+    const ids =
+      mode === "selected"
+        ? Array.from(selectedBlockedCompanyIds)
+        : blockedCompanies
+            .filter((company) => {
+              const targets = new Set(
+                bulkRemoveCompanies
+                  .split(/\r?\n/)
+                  .map((line) => normalizeCompanyName(line))
+                  .filter(Boolean),
+              );
+              return targets.has(normalizeCompanyName(company.companyName));
+            })
+            .map((company) => company.id);
+
+    if (ids.length === 0) {
+      toast.error(
+        mode === "selected"
+          ? "Select at least one company."
+          : "No matching companies in the list.",
+      );
+      return;
+    }
+
+    setBulkRemovingCompanies(true);
+    try {
+      const res = await fetch("/api/job-scraper/blocked-companies", {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          mode === "selected"
+            ? { ids }
+            : { companiesText: bulkRemoveCompanies },
+        ),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Bulk remove failed.");
+      const nextBlocked = (data.blockedCompanies ?? []) as BlockedCompany[];
+      applyBlockedCompaniesRemoval(nextBlocked);
+      toast.success(
+        `Removed ${Number(data.deleted ?? ids.length)} blocked compan${
+          Number(data.deleted ?? ids.length) === 1 ? "y" : "ies"
+        }.`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Bulk remove failed.");
+    } finally {
+      setBulkRemovingCompanies(false);
+    }
+  };
+
+  const toggleBlockedCompanySelected = (id: string, checked: boolean) => {
+    setSelectedBlockedCompanyIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const allBlockedCompaniesSelected =
+    blockedCompanies.length > 0 &&
+    blockedCompanies.every((company) => selectedBlockedCompanyIds.has(company.id));
+  const someBlockedCompaniesSelected =
+    blockedCompanies.some((company) => selectedBlockedCompanyIds.has(company.id)) &&
+    !allBlockedCompaniesSelected;
 
   const saveBlockedAts = async (payload: Record<string, unknown>) => {
     setSavingAts(true);
@@ -1152,12 +1321,22 @@ export function JobScraperPageClient() {
           <div>
             <h1 className="text-lg font-semibold">Job Scraper</h1>
             <p className="text-xs text-muted-foreground">
-              Results-first scrape review for hiringcafe.com.
+              Results-first scrape review for{" "}
+              {scrapeSource === "jobright" ? "jobright.ai" : "hiringcafe.com"}.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Dialog open={blockedDialogOpen} onOpenChange={setBlockedDialogOpen}>
+            <Dialog
+              open={blockedDialogOpen}
+              onOpenChange={(open) => {
+                setBlockedDialogOpen(open);
+                if (!open) {
+                  setSelectedBlockedCompanyIds(new Set());
+                  setBulkRemoveCompanies("");
+                }
+              }}
+            >
               <DialogTrigger asChild>
                 <Button type="button" variant="outline" size="sm">
                   <Ban className="mr-2 h-4 w-4" />
@@ -1206,8 +1385,80 @@ export function JobScraperPageClient() {
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-sm font-medium">
-                      Current list ({blockedCompanies.length})
+                    <Textarea
+                      value={bulkRemoveCompanies}
+                      onChange={(e) => setBulkRemoveCompanies(e.target.value)}
+                      placeholder="Bulk remove, one company per line"
+                      rows={3}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => removeBlockedCompaniesBulk("text")}
+                      disabled={
+                        bulkRemovingCompanies ||
+                        savingBlocked ||
+                        !bulkRemoveCompanies.trim() ||
+                        blockedCompanies.length === 0
+                      }
+                    >
+                      {bulkRemovingCompanies ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      Bulk remove
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-medium">
+                        Current list ({blockedCompanies.length})
+                        {selectedBlockedCompanyIds.size > 0
+                          ? ` · ${selectedBlockedCompanyIds.size} selected`
+                          : ""}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {blockedCompanies.length > 0 ? (
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Checkbox
+                              checked={
+                                allBlockedCompaniesSelected
+                                  ? true
+                                  : someBlockedCompaniesSelected
+                                    ? "indeterminate"
+                                    : false
+                              }
+                              onCheckedChange={(checked) => {
+                                if (checked === true) {
+                                  setSelectedBlockedCompanyIds(
+                                    new Set(blockedCompanies.map((company) => company.id)),
+                                  );
+                                } else {
+                                  setSelectedBlockedCompanyIds(new Set());
+                                }
+                              }}
+                              aria-label="Select all blocked companies"
+                            />
+                            Select all
+                          </label>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => removeBlockedCompaniesBulk("selected")}
+                          disabled={
+                            bulkRemovingCompanies ||
+                            savingBlocked ||
+                            selectedBlockedCompanyIds.size === 0
+                          }
+                        >
+                          {bulkRemovingCompanies ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
+                          Remove selected
+                        </Button>
+                      </div>
                     </div>
                     <div className="max-h-[280px] space-y-2 overflow-auto rounded-md border p-2">
                       {loadingBlocked ? (
@@ -1225,18 +1476,33 @@ export function JobScraperPageClient() {
                             key={company.id}
                             className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
                           >
-                            <div className="min-w-0">
-                              <div className="font-medium">{company.companyName}</div>
-                              {company.note ? (
-                                <div className="text-xs text-muted-foreground">{company.note}</div>
-                              ) : null}
-                            </div>
+                            <label className="flex min-w-0 flex-1 items-start gap-2">
+                              <Checkbox
+                                className="mt-0.5"
+                                checked={selectedBlockedCompanyIds.has(company.id)}
+                                onCheckedChange={(checked) =>
+                                  toggleBlockedCompanySelected(
+                                    company.id,
+                                    checked === true,
+                                  )
+                                }
+                                aria-label={`Select ${company.companyName}`}
+                              />
+                              <div className="min-w-0">
+                                <div className="font-medium">{company.companyName}</div>
+                                {company.note ? (
+                                  <div className="text-xs text-muted-foreground">{company.note}</div>
+                                ) : null}
+                              </div>
+                            </label>
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
                               onClick={() => removeBlockedCompany(company.id)}
-                              disabled={deletingId === company.id}
+                              disabled={
+                                deletingId === company.id || bulkRemovingCompanies
+                              }
                             >
                               {deletingId === company.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1474,6 +1740,48 @@ export function JobScraperPageClient() {
         <Card className="shrink-0">
           <CardContent className="flex flex-col gap-3 p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Scrape source">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={scrapeSource === "hiringcafe" ? "default" : "outline"}
+                  onClick={() => setScrapeSource("hiringcafe")}
+                  disabled={scraping}
+                >
+                  HiringCafe
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={scrapeSource === "jobright" ? "default" : "outline"}
+                  onClick={() => setScrapeSource("jobright")}
+                  disabled={scraping}
+                >
+                  Jobright
+                </Button>
+              </div>
+
+              {scrapeSource === "jobright" ? (
+                <>
+                  <Input
+                    value={jrKeyword}
+                    onChange={(e) => setJrKeyword(e.target.value)}
+                    placeholder="Keyword"
+                    className="h-8 w-[160px] text-xs"
+                    aria-label="Jobright keyword"
+                    disabled={scraping}
+                  />
+                  <Input
+                    value={jrLocation}
+                    onChange={(e) => setJrLocation(e.target.value)}
+                    placeholder="Location"
+                    className="h-8 w-[140px] text-xs"
+                    aria-label="Jobright location"
+                    disabled={scraping}
+                  />
+                </>
+              ) : null}
+
               <div className="flex flex-wrap gap-1.5">
                 {DATE_WINDOW_OPTIONS.map((option) => (
                   <Button
@@ -1563,6 +1871,58 @@ export function JobScraperPageClient() {
                 </Button>
               </div>
             </div>
+
+            {scraping && scrapeProgress ? (
+              <div className="border-border/60 bg-muted/40 mt-3 rounded-md border px-3 py-2.5">
+                <div className="flex items-start gap-2.5">
+                  <Loader2 className="text-primary mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <p className="text-sm font-medium leading-snug">
+                      {scrapeProgress.message}
+                    </p>
+                    <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                      {typeof scrapeProgress.page === "number" &&
+                      typeof scrapeProgress.maxPages === "number" ? (
+                        <span>
+                          Page {scrapeProgress.page}
+                          {scrapeProgress.maxPages
+                            ? ` / up to ${scrapeProgress.maxPages}`
+                            : ""}
+                        </span>
+                      ) : null}
+                      {typeof scrapeProgress.jobsSoFar === "number" ? (
+                        <span>{scrapeProgress.jobsSoFar} jobs collected</span>
+                      ) : null}
+                      {typeof scrapeProgress.pagesFetched === "number" &&
+                      scrapeProgress.pagesFetched > 0 ? (
+                        <span>{scrapeProgress.pagesFetched} pages done</span>
+                      ) : null}
+                    </div>
+                    {typeof scrapeProgress.page === "number" &&
+                    typeof scrapeProgress.maxPages === "number" &&
+                    scrapeProgress.maxPages > 0 ? (
+                      <div className="bg-background/80 mt-1 h-1.5 overflow-hidden rounded-full">
+                        <div
+                          className="bg-primary h-full rounded-full transition-[width] duration-300"
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.round(
+                                (scrapeProgress.page / scrapeProgress.maxPages) * 100,
+                              ),
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="bg-background/80 mt-1 h-1.5 overflow-hidden rounded-full">
+                        <div className="bg-primary/70 h-full w-1/3 animate-pulse rounded-full" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -1711,7 +2071,7 @@ export function JobScraperPageClient() {
                 <span className="text-xs text-muted-foreground">
                   Pages fetched: {filteredResult.stats.pagesFetched}
                   {filteredResult.stats.reportedTotal != null
-                    ? ` · hiringcafe.com total: ${filteredResult.stats.reportedTotal}`
+                    ? ` · ${scrapeSource === "jobright" ? "jobright.ai" : "hiringcafe.com"} total: ${filteredResult.stats.reportedTotal}`
                     : ""}
                 </span>
               ) : null}
@@ -1762,7 +2122,9 @@ export function JobScraperPageClient() {
                   {pagedJobs.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
-                        {scraping ? "Scraping jobs…" : "No jobs on this page."}
+                        {scraping
+                          ? scrapeProgress?.message || "Scraping jobs…"
+                          : "No jobs on this page."}
                       </TableCell>
                     </TableRow>
                   ) : (

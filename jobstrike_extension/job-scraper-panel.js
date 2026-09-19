@@ -10,9 +10,11 @@
     lastResults: 'job_scraper_last_results',
     scrapeTabId: 'job_scraper_tab_id',
     customSearch: 'job_scraper_custom_search',
+    jobrightSearch: 'job_scraper_jobright_search',
   };
 
   const DEFAULT_PREFS = {
+    source: 'hiringcafe',
     dateWindow: '3d',
     excludeBlockedCompanies: true,
     excludeBlockedAts: true,
@@ -22,6 +24,11 @@
     candidateFilter: '',
     maxPages: 8,
     delayMs: 700,
+  };
+
+  const DEFAULT_JOBRIGHT_SEARCH = {
+    titleKeyword: 'Software Engineer',
+    location: 'United States',
   };
 
   const state = {
@@ -38,6 +45,8 @@
     openListEditor: null,
     customSearchState: null,
     customSearchSourceUrl: '',
+    jobrightSearch: { ...DEFAULT_JOBRIGHT_SEARCH },
+    jobrightSearchSourceUrl: '',
     rawJobs: [],
     filteredJobs: [],
     selectedKeys: new Set(),
@@ -69,6 +78,18 @@
 
   function api() {
     return window.SmartJobHiringCafeScraper;
+  }
+
+  function jrApi() {
+    return window.SmartJobJobrightScraper;
+  }
+
+  function activeSource() {
+    return state.prefs.source === 'jobright' ? 'jobright' : 'hiringcafe';
+  }
+
+  function sourceLabel(source = activeSource()) {
+    return source === 'jobright' ? 'Jobright' : 'HiringCafe';
   }
 
   function showToast(message, type) {
@@ -131,9 +152,12 @@
       STORAGE.blockedJobs,
       STORAGE.lastResults,
       STORAGE.customSearch,
+      STORAGE.jobrightSearch,
     ]);
 
     state.prefs = { ...DEFAULT_PREFS, ...(result[STORAGE.prefs] || {}) };
+    if (state.prefs.source !== 'jobright') state.prefs.source = 'hiringcafe';
+
     applyWebsiteBlockedLists({
       blockedCompanies: Array.isArray(result[STORAGE.blockedCompanies])
         ? result[STORAGE.blockedCompanies]
@@ -153,6 +177,19 @@
     } else {
       state.customSearchState = null;
       state.customSearchSourceUrl = '';
+    }
+
+    const jrStored = result[STORAGE.jobrightSearch];
+    if (jrStored && typeof jrStored === 'object') {
+      state.jobrightSearch = {
+        ...DEFAULT_JOBRIGHT_SEARCH,
+        titleKeyword: String(jrStored.titleKeyword || DEFAULT_JOBRIGHT_SEARCH.titleKeyword),
+        location: String(jrStored.location || DEFAULT_JOBRIGHT_SEARCH.location),
+      };
+      state.jobrightSearchSourceUrl = String(jrStored.sourceUrl || '');
+    } else {
+      state.jobrightSearch = { ...DEFAULT_JOBRIGHT_SEARCH };
+      state.jobrightSearchSourceUrl = '';
     }
 
     const last = result[STORAGE.lastResults];
@@ -180,6 +217,17 @@
     } else {
       await chrome.storage.local.remove(STORAGE.customSearch);
     }
+  }
+
+  async function persistJobrightSearch() {
+    await storageSet({
+      [STORAGE.jobrightSearch]: {
+        titleKeyword: state.jobrightSearch.titleKeyword,
+        location: state.jobrightSearch.location,
+        sourceUrl: state.jobrightSearchSourceUrl || '',
+        updatedAt: new Date().toISOString(),
+      },
+    });
   }
 
   async function persistBlockLists() {
@@ -472,21 +520,31 @@
     if (jobCount) jobCount.textContent = String(state.registeredJobs.length);
     if (coCount) coCount.textContent = String(state.registeredCompanies.length);
 
-    renderSearchImportUi();
+    renderSourceUi();
+    renderActiveSearchUi();
     renderSyncStatus();
 
     const hint = document.getElementById('jsProfileHint');
+    const filtersHint = document.getElementById('jsFiltersModalHint');
+    const hintText = !state.candidates.length && !state.profileLoading
+      ? 'Sign in under Settings, then open Filters → Refresh lists.'
+      : !hasProfile
+        ? 'Open Filters & lists to pick a profile for Resume DB hide rules.'
+        : '';
     if (hint) {
-      if (!state.candidates.length && !state.profileLoading) {
-        hint.textContent =
-          'Sign in under Settings, then Refresh to load website block lists and profiles.';
-        hint.hidden = false;
-      } else if (!hasProfile) {
-        hint.textContent = 'Select a profile to hide registered jobs/companies for that profile.';
+      if (hintText) {
+        hint.textContent = hintText;
         hint.hidden = false;
       } else {
         hint.hidden = true;
       }
+    }
+    if (filtersHint) {
+      filtersHint.textContent = !state.candidates.length && !state.profileLoading
+        ? 'Sign in under Settings first, then refresh to load profiles and block lists.'
+        : !hasProfile
+          ? 'Select a profile to hide registered jobs/companies for that profile.'
+          : 'Hide lists apply on the next scrape / filter refresh.';
     }
 
     const refreshBtn = document.getElementById('jsRefreshProfileBtn');
@@ -509,19 +567,46 @@
     renderMeta();
   }
 
+  function renderSourceUi() {
+    const source = activeSource();
+    document.querySelectorAll('[data-js-source]').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-js-source') === source);
+    });
+    syncImportModalPanels();
+    const title = document.getElementById('jsScraperTitle');
+    if (title) title.textContent = 'Job Scraper';
+    const empty = document.getElementById('jsResultsEmpty');
+    if (empty && !state.rawJobs.length && !state.filteredJobs.length) {
+      empty.innerHTML = `Tap <strong>Scrape jobs</strong> to load ${sourceLabel(source)} listings.`;
+    }
+    renderActiveSearchUi();
+  }
+
+  function renderActiveSearchUi() {
+    if (activeSource() === 'jobright') {
+      renderJobrightSearchUi();
+    } else {
+      renderSearchImportUi();
+    }
+  }
+
   function renderSearchImportUi() {
+    if (activeSource() !== 'hiringcafe') return;
+
     const scraper = api();
     const summaryEl = document.getElementById('jsSearchSummary');
+    const previewLabel = document.getElementById('jsSearchPreviewLabel');
     const sourceEl = document.getElementById('jsSearchSource');
     const panel = document.getElementById('jsSearchImportPanel');
     const resetBtn = document.getElementById('jsResetSearchBtn');
     const badge = document.getElementById('jsSearchCustomBadge');
-    const searchCard = document.querySelector('.js-section-search');
+    const searchCard = document.getElementById('jsSearchCard');
 
     const summary = state.customSearchState
       ? scraper?.summarizeSearchState?.(state.customSearchState) || 'Custom search imported'
       : 'Built-in default';
 
+    if (previewLabel) previewLabel.textContent = 'HiringCafe search';
     if (summaryEl) {
       summaryEl.textContent = summary;
       summaryEl.title = summary;
@@ -534,16 +619,125 @@
     if (sourceEl) {
       if (state.customSearchSourceUrl) {
         sourceEl.hidden = false;
-        sourceEl.textContent = `Source: ${state.customSearchSourceUrl}`;
+        sourceEl.textContent = `From: ${state.customSearchSourceUrl}`;
         sourceEl.title = state.customSearchSourceUrl;
       } else if (state.customSearchState) {
         sourceEl.hidden = false;
-        sourceEl.textContent = 'Source: pasted searchState JSON';
+        sourceEl.textContent = 'From: pasted searchState';
       } else {
         sourceEl.hidden = true;
         sourceEl.textContent = '';
       }
     }
+  }
+
+  function renderJobrightSearchUi() {
+    if (activeSource() !== 'jobright') return;
+
+    const jr = jrApi();
+    const summaryEl = document.getElementById('jsSearchSummary');
+    const previewLabel = document.getElementById('jsSearchPreviewLabel');
+    const sourceEl = document.getElementById('jsSearchSource');
+    const badge = document.getElementById('jsSearchCustomBadge');
+    const searchCard = document.getElementById('jsSearchCard');
+    const resetBtn = document.getElementById('jsJrResetSearchBtn');
+    const panel = document.getElementById('jsJrSearchImportPanel');
+    const isCustom =
+      Boolean(state.jobrightSearchSourceUrl) ||
+      state.jobrightSearch.titleKeyword !== DEFAULT_JOBRIGHT_SEARCH.titleKeyword ||
+      state.jobrightSearch.location !== DEFAULT_JOBRIGHT_SEARCH.location;
+
+    const summary = isCustom
+      ? jr?.summarizeSearch?.(state.jobrightSearch) ||
+        `${state.jobrightSearch.titleKeyword} · ${state.jobrightSearch.location}`
+      : 'Built-in default';
+
+    if (previewLabel) previewLabel.textContent = 'Jobright search';
+    if (summaryEl) {
+      summaryEl.textContent = summary;
+      summaryEl.title = summary;
+    }
+    if (panel) panel.classList.toggle('is-custom', isCustom);
+    if (badge) badge.hidden = !isCustom;
+    if (searchCard) searchCard.classList.toggle('is-custom', isCustom);
+    if (resetBtn) resetBtn.disabled = !isCustom;
+
+    if (sourceEl) {
+      if (state.jobrightSearchSourceUrl) {
+        sourceEl.hidden = false;
+        sourceEl.textContent = `From: ${state.jobrightSearchSourceUrl}`;
+        sourceEl.title = state.jobrightSearchSourceUrl;
+      } else {
+        sourceEl.hidden = true;
+        sourceEl.textContent = '';
+      }
+    }
+  }
+
+  async function setScrapeSource(nextSource) {
+    const source = nextSource === 'jobright' ? 'jobright' : 'hiringcafe';
+    if (state.prefs.source === source) return;
+    if (state.scraping) {
+      showToast('Stop the current scrape before switching source.', 'warn');
+      return;
+    }
+    state.prefs.source = source;
+    state.pausedForChallenge = false;
+    state.scrapeCursor = null;
+    await persistPrefs();
+    syncControlsFromState();
+  }
+
+  async function applyJobrightSearch(search, sourceUrl) {
+    const jr = jrApi();
+    state.jobrightSearch = jr?.normalizeSearch?.(search) || {
+      titleKeyword: String(search?.titleKeyword || DEFAULT_JOBRIGHT_SEARCH.titleKeyword),
+      location: String(search?.location || DEFAULT_JOBRIGHT_SEARCH.location),
+    };
+    state.jobrightSearchSourceUrl = sourceUrl || '';
+    await persistJobrightSearch();
+    syncControlsFromState();
+  }
+
+  async function resetJobrightSearch() {
+    state.jobrightSearch = { ...DEFAULT_JOBRIGHT_SEARCH };
+    state.jobrightSearchSourceUrl = '';
+    const input = document.getElementById('jsJrSearchUrlInput');
+    if (input) input.value = '';
+    await persistJobrightSearch();
+    syncControlsFromState();
+    showToast('Restored default Jobright search.', 'success');
+  }
+
+  async function importJobrightSearchFromText(raw, { silent = false } = {}) {
+    const jr = jrApi();
+    if (!jr?.parseSearchFromInput) {
+      showToast('Jobright search import is unavailable. Reload the extension.', 'error');
+      return false;
+    }
+    const parsed = jr.parseSearchFromInput(raw);
+    if (!parsed.ok) {
+      showToast(parsed.error, 'error');
+      return false;
+    }
+    await applyJobrightSearch(parsed.search, parsed.sourceUrl);
+    if (!silent) {
+      showToast(`Jobright search imported. ${jr.summarizeSearch(parsed.search)}`, 'success');
+    }
+    return true;
+  }
+
+  async function importJobrightSearchFromActiveTab() {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs?.[0];
+    const url = tab?.url || '';
+    if (!/jobright\.ai/i.test(url)) {
+      showToast('Open a jobright.ai search tab first, then try From tab.', 'warn');
+      return;
+    }
+    const input = document.getElementById('jsJrSearchUrlInput');
+    if (input) input.value = url;
+    await importJobrightSearchFromText(url);
   }
 
   async function applyImportedSearch(searchState, sourceUrl) {
@@ -682,7 +876,7 @@
     const profileLabel = state.candidates.find((c) => c.key === state.prefs.candidateFilter)?.label;
     if (profileLabel) parts.push(profileLabel);
     if (state.customSearchState) parts.push('custom search');
-    meta.textContent = parts.join(' · ') || 'Set search and filters, then Scrape.';
+    meta.textContent = parts.join(' · ') || 'Pick a source, set your search, then scrape.';
   }
 
   function renderBlockLists() {
@@ -850,7 +1044,7 @@
         if (done) return;
         done = true;
         chrome.tabs.onUpdated.removeListener(listener);
-        reject(new Error('Timed out waiting for HiringCafe tab to load.'));
+        reject(new Error(`Timed out waiting for ${sourceLabel()} tab to load.`));
       }, timeoutMs);
 
       function finish(ok, value) {
@@ -897,24 +1091,52 @@
     }
 
     const created = await chrome.tabs.create({ url, active: true });
-    if (!created?.id) throw new Error('Could not open HiringCafe tab.');
+    if (!created?.id) throw new Error(`Could not open ${sourceLabel()} tab.`);
     await setStoredScrapeTabId(created.id);
     await waitForTabComplete(created.id);
     await sleep(500);
     return created.id;
   }
 
+  /** Reuse an open Jobright tab without reloading (keeps session for swan-api). */
+  async function ensureJobrightApiTab(fallbackUrl) {
+    let tabId = await getStoredScrapeTabId();
+    if (tabId) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        const href = String(tab?.url || '');
+        if (
+          tab?.id &&
+          /jobright\.ai/i.test(href) &&
+          !/\/_jr\/security\/challenge/i.test(href)
+        ) {
+          return tab.id;
+        }
+      } catch (_) {
+        await setStoredScrapeTabId(null);
+      }
+    }
+    return ensureScrapeTab(fallbackUrl);
+  }
+
   async function extractFromTab(tabId) {
-    const scraper = api();
+    const extractFn =
+      activeSource() === 'jobright'
+        ? jrApi()?.extractPagePropsInTab
+        : api()?.extractPagePropsInTab;
+    if (typeof extractFn !== 'function') {
+      return { ok: false, error: `${sourceLabel()} scraper module failed to load.` };
+    }
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId },
-      func: scraper.extractPagePropsInTab,
+      func: extractFn,
     });
     return result;
   }
 
   async function waitUntilPageReady(tabId, { allowPause = true } = {}) {
-    const maxAttempts = 8;
+    const label = sourceLabel();
+    const maxAttempts = 10;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (!state.scraping) throw new Error('Scrape stopped.');
       const extracted = await extractFromTab(tabId);
@@ -925,11 +1147,24 @@
         syncControlsFromState();
         setProgress({
           text: 'Browser check required',
-          detail: 'Complete it in the open HiringCafe tab, then click Resume.',
+          detail: `Complete it in the open ${label} tab, then click Resume.`,
           kind: 'warn',
           indeterminate: true,
         });
-        showToast('Complete the HiringCafe check, then click Resume.', 'warn');
+        showToast(`Complete the ${label} check, then click Resume.`, 'warn');
+        return { paused: true };
+      }
+
+      if (extracted?.needsLogin && allowPause) {
+        state.pausedForChallenge = true;
+        syncControlsFromState();
+        setProgress({
+          text: 'Sign-in required',
+          detail: `Sign in on the ${label} tab if needed, open search results, then click Resume.`,
+          kind: 'warn',
+          indeterminate: true,
+        });
+        showToast(`Sign in on ${label} if needed, then click Resume.`, 'warn');
         return { paused: true };
       }
 
@@ -938,20 +1173,19 @@
 
     return {
       ok: false,
-      error: 'Could not read HiringCafe job data from the page.',
+      error: `Could not read ${label} job data from the page.`,
     };
   }
 
-  async function runScrape({ resume = false } = {}) {
+  async function runHiringCafeScrape({ resume = false } = {}) {
     const scraper = api();
     if (!scraper) {
-      showToast('Scraper module failed to load. Reload the extension.', 'error');
+      showToast('HiringCafe scraper module failed to load. Reload the extension.', 'error');
       return;
     }
 
     if (state.scraping && !state.pausedForChallenge && !resume) return;
 
-    // Refresh website/Resume DB hide lists before filtering scrape results.
     await loadProfileFilterContext({ silent: true });
 
     state.scraping = true;
@@ -1042,6 +1276,7 @@
         pagesFetched,
         reportedTotal,
         scraped: jobs.length,
+        source: 'hiringcafe',
       };
       state.scrapeCursor = null;
       state.selectedKeys = new Set();
@@ -1076,6 +1311,334 @@
       }
       syncControlsFromState();
     }
+  }
+
+  async function runJobrightTabFn(tabId, fn, args = []) {
+    if (typeof fn !== 'function') {
+      return { ok: false, error: 'Jobright helper missing.' };
+    }
+    try {
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: fn,
+        args,
+      });
+      return result;
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  }
+
+  async function fetchJobrightApiPage(tabId, search, position, count) {
+    const jr = jrApi();
+    const errors = [];
+
+    // 1) Extension-context fetch (bypasses page CORS; uses host cookies).
+    if (typeof jr?.fetchSearchApiPageExtension === 'function') {
+      try {
+        const ext = await jr.fetchSearchApiPageExtension(search, position, count);
+        if (ext?.ok && ext.rows?.length) return ext;
+        if (ext?.error) errors.push(`ext: ${ext.error}`);
+      } catch (err) {
+        errors.push(`ext: ${err?.message || String(err)}`);
+      }
+    }
+
+    // 2) In-tab fetch (page cookies / CORS as the site itself).
+    if (typeof jr?.fetchSearchApiPageInTab === 'function') {
+      const tabResult = await runJobrightTabFn(tabId, jr.fetchSearchApiPageInTab, [
+        search,
+        position,
+        count,
+      ]);
+      if (tabResult?.ok && tabResult.rows?.length) return tabResult;
+      if (tabResult?.error) errors.push(`tab: ${tabResult.error}`);
+    }
+
+    // 3) Scroll the live search page and harvest swan-api traffic the SPA triggers.
+    if (typeof jr?.installSwanCaptureInTab === 'function') {
+      await runJobrightTabFn(tabId, jr.installSwanCaptureInTab, []);
+    }
+    if (typeof jr?.harvestMoreJobsInTab === 'function') {
+      const harvested = await runJobrightTabFn(tabId, jr.harvestMoreJobsInTab, [3]);
+      if (harvested?.ok && harvested.rows?.length) return harvested;
+      if (harvested?.error) errors.push(`scroll: ${harvested.error}`);
+    }
+
+    return {
+      ok: false,
+      rows: [],
+      total: null,
+      error:
+        errors.filter(Boolean).slice(0, 3).join(' | ') ||
+        'Could not load more Jobright jobs (API + scroll). Sign in on jobright.ai and keep the search tab open.',
+    };
+  }
+
+  async function runJobrightScrape({ resume = false } = {}) {
+    const jr = jrApi();
+    const filters = api();
+    if (!jr) {
+      showToast('Jobright scraper module failed to load. Reload the extension.', 'error');
+      return;
+    }
+    if (!filters) {
+      showToast('Filter helpers failed to load. Reload the extension.', 'error');
+      return;
+    }
+
+    if (state.scraping && !state.pausedForChallenge && !resume) return;
+
+    if (!String(state.jobrightSearch?.titleKeyword || '').trim()) {
+      showToast('Import a Jobright search URL first.', 'warn');
+      return;
+    }
+
+    await loadProfileFilterContext({ silent: true });
+
+    state.scraping = true;
+    state.pausedForChallenge = false;
+    syncControlsFromState();
+
+    const pageSize = jr.PAGE_SIZE || 20;
+    const maxPages = Math.max(1, Math.min(Number(state.prefs.maxPages) || 8, 15));
+    const delayMs = Math.max(400, Math.min(Number(state.prefs.delayMs) || 700, 3000));
+
+    let page = resume && state.scrapeCursor ? state.scrapeCursor.page : 0;
+    let jobs = resume && state.scrapeCursor ? [...state.scrapeCursor.jobs] : [];
+    let reportedTotal =
+      resume && state.scrapeCursor ? state.scrapeCursor.reportedTotal : null;
+    let pagesFetched =
+      resume && state.scrapeCursor ? state.scrapeCursor.pagesFetched : 0;
+    const seenIds = new Set(
+      jobs.map((j) => String(j.id || j.apply_url || '').trim()).filter(Boolean)
+    );
+
+    const pushHits = (hits) => {
+      let added = 0;
+      for (const hit of hits) {
+        const mapped = jr.extractJobFields(hit);
+        const key =
+          String(mapped.id || '').trim() ||
+          String(mapped.apply_url || '').trim() ||
+          `${mapped.company_name || ''}::${mapped.title || ''}`;
+        if (!key || seenIds.has(key)) continue;
+        seenIds.add(key);
+        jobs.push(mapped);
+        added += 1;
+      }
+      return added;
+    };
+
+    let lastApiError = '';
+
+    try {
+      let tabId = null;
+
+      // Page 0: open search tab and read SSR __NEXT_DATA__.
+      if (page === 0) {
+        setProgress({
+          text: `Page 1 of ${maxPages}`,
+          detail: 'Opening Jobright search…',
+          kind: 'info',
+          current: 0,
+          total: maxPages,
+        });
+
+        const url = jr.buildJobrightSearchUrl(state.jobrightSearch, 0);
+        tabId = await ensureScrapeTab(url);
+        const extracted = await waitUntilPageReady(tabId);
+
+        if (extracted?.paused) {
+          state.scrapeCursor = {
+            page: 0,
+            jobs,
+            reportedTotal,
+            pagesFetched,
+          };
+          state.pausedForChallenge = true;
+          state.scraping = true;
+          syncControlsFromState();
+          return;
+        }
+
+        if (!extracted?.ok) {
+          throw new Error(extracted?.error || 'Jobright page did not return job data.');
+        }
+
+        const hits = extracted.pageProps.jobList || [];
+        reportedTotal = extracted.pageProps.totalJobs ?? reportedTotal;
+        pushHits(hits);
+        pagesFetched = hits.length > 0 ? 1 : 0;
+        page = 1;
+
+        // Install network capture early so later scrolls see SPA API calls.
+        if (typeof jr.installSwanCaptureInTab === 'function') {
+          await runJobrightTabFn(tabId, jr.installSwanCaptureInTab, []);
+        }
+
+        // Client-rendered results: scroll once if SSR was empty.
+        if (jobs.length === 0 && typeof jr.harvestMoreJobsInTab === 'function') {
+          setProgress({
+            text: `Page 1 of ${maxPages}`,
+            detail: 'SSR empty — scrolling for Jobright API jobs…',
+            kind: 'info',
+            current: 0,
+            total: maxPages,
+          });
+          const firstHarvest = await runJobrightTabFn(tabId, jr.harvestMoreJobsInTab, [4]);
+          if (firstHarvest?.rows?.length) {
+            pushHits(firstHarvest.rows);
+            if (firstHarvest.total != null) reportedTotal = firstHarvest.total;
+            pagesFetched = jobs.length > 0 ? 1 : 0;
+          }
+        }
+
+        setProgress({
+          text: `Page 1 of ${maxPages}`,
+          detail:
+            `${jobs.length} collected` +
+            (reportedTotal != null ? ` / ${reportedTotal}` : ''),
+          kind: 'info',
+          current: 1,
+          total: maxPages,
+        });
+      }
+
+      // Pages 1+: extension API → tab API → scroll capture.
+      for (; page < maxPages; page += 1) {
+        if (!state.scraping) break;
+        if (reportedTotal != null && jobs.length >= reportedTotal) break;
+
+        setProgress({
+          text: `Page ${page + 1} of ${maxPages}`,
+          detail: `Loading more Jobright jobs (offset ${page * pageSize})…`,
+          kind: 'info',
+          current: page,
+          total: maxPages,
+        });
+
+        tabId = await ensureJobrightApiTab(
+          jr.buildJobrightSearchUrl(state.jobrightSearch, 0)
+        );
+
+        const probe = await extractFromTab(tabId);
+        if (probe?.challenge || probe?.needsLogin) {
+          state.scrapeCursor = {
+            page,
+            jobs,
+            reportedTotal,
+            pagesFetched,
+          };
+          state.pausedForChallenge = true;
+          state.scraping = true;
+          syncControlsFromState();
+          setProgress({
+            text: probe?.needsLogin ? 'Sign-in required' : 'Browser check required',
+            detail: 'Complete it in the open Jobright tab, then click Resume.',
+            kind: 'warn',
+            indeterminate: true,
+          });
+          showToast('Complete the Jobright check, then click Resume.', 'warn');
+          return;
+        }
+
+        const before = jobs.length;
+        const apiResult = await fetchJobrightApiPage(
+          tabId,
+          state.jobrightSearch,
+          page * pageSize,
+          pageSize
+        );
+
+        if (apiResult.total != null) reportedTotal = apiResult.total;
+
+        if (!apiResult.ok || !apiResult.rows?.length) {
+          lastApiError = apiResult.error || lastApiError;
+          break;
+        }
+
+        const added = pushHits(apiResult.rows);
+        if (added === 0) break;
+
+        pagesFetched += 1;
+
+        setProgress({
+          text: `Page ${page + 1} of ${maxPages}`,
+          detail:
+            `+${added} via ${apiResult.via || 'api'} · collected ${jobs.length}` +
+            (reportedTotal != null ? ` / ${reportedTotal}` : ''),
+          kind: 'info',
+          current: page + 1,
+          total: maxPages,
+        });
+
+        if (jobs.length === before) break;
+        if (page < maxPages - 1) await sleep(delayMs);
+      }
+
+      if (jobs.length === 0) {
+        throw new Error(
+          lastApiError ||
+            'No Jobright jobs found. Sign in on jobright.ai, open search results, then scrape again.'
+        );
+      }
+
+      const deduped = filters.dedupeJobs(jobs);
+      state.rawJobs = deduped;
+      state.lastScrapedAt = new Date().toISOString();
+      state.stats = {
+        pagesFetched,
+        reportedTotal,
+        scraped: deduped.length,
+        source: 'jobright',
+      };
+      state.scrapeCursor = null;
+      state.selectedKeys = new Set();
+      recomputeFiltered();
+      await persistResults();
+      const removalDetail = formatFilterRemovalDetail(state.stats);
+      const pageNote =
+        reportedTotal != null && deduped.length < reportedTotal
+          ? ` · ${deduped.length} of ${reportedTotal} (raise Max pages for more)`
+          : '';
+      setProgress({
+        text: `Done · ${state.filteredJobs.length} jobs ready`,
+        detail:
+          `${deduped.length} scraped` +
+          (pagesFetched ? ` · ${pagesFetched} pages` : '') +
+          pageNote +
+          (removalDetail ? ` · ${removalDetail}` : ''),
+        kind: 'success',
+        current: 1,
+        total: 1,
+      });
+      showToast(
+        `Scraped ${deduped.length} · ${state.filteredJobs.length} after filters.` +
+          (removalDetail ? ` ${removalDetail}` : ''),
+        'success'
+      );
+    } catch (err) {
+      const message = err?.message || String(err);
+      setProgress({ text: 'Scrape failed', detail: message, kind: 'error', indeterminate: true });
+      showToast(message, 'error');
+      state.pausedForChallenge = false;
+      state.scrapeCursor = null;
+    } finally {
+      if (!state.pausedForChallenge) {
+        state.scraping = false;
+      }
+      syncControlsFromState();
+    }
+  }
+
+  async function runScrape({ resume = false } = {}) {
+    if (activeSource() === 'jobright') {
+      await runJobrightScrape({ resume });
+      return;
+    }
+    await runHiringCafeScrape({ resume });
   }
 
   async function websiteRequest(path, options = {}) {
@@ -1310,7 +1873,70 @@
     }
   }
 
+  function modalEl(name) {
+    if (name === 'filters') return document.getElementById('jsFiltersModal');
+    if (name === 'import') return document.getElementById('jsImportModal');
+    return null;
+  }
+
+  function syncImportModalPanels() {
+    const source = activeSource();
+    document.querySelectorAll('[data-import-panel]').forEach((panel) => {
+      panel.hidden = panel.getAttribute('data-import-panel') !== source;
+    });
+    const title = document.getElementById('jsImportModalTitle');
+    if (title) {
+      title.textContent =
+        source === 'jobright' ? 'Edit Jobright search' : 'Edit HiringCafe search';
+    }
+  }
+
+  function openJsModal(name) {
+    const modal = modalEl(name);
+    if (!modal) return;
+    if (name === 'import') syncImportModalPanels();
+    modal.hidden = false;
+  }
+
+  function closeJsModal(name) {
+    const modal = modalEl(name);
+    if (modal) modal.hidden = true;
+  }
+
+  function closeAllJsModals() {
+    closeJsModal('filters');
+    closeJsModal('import');
+  }
+
   function wireUi() {
+    document.querySelectorAll('[data-js-source]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        void setScrapeSource(btn.getAttribute('data-js-source'));
+      });
+    });
+
+    document.querySelectorAll('[data-js-open-modal]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        openJsModal(btn.getAttribute('data-js-open-modal'));
+      });
+    });
+    document.querySelectorAll('[data-js-close-modal]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        closeJsModal(btn.getAttribute('data-js-close-modal'));
+      });
+    });
+    ['jsFiltersModal', 'jsImportModal'].forEach((id) => {
+      const modal = document.getElementById(id);
+      if (!modal || modal.dataset.wiredBackdrop === '1') return;
+      modal.dataset.wiredBackdrop = '1';
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) modal.hidden = true;
+      });
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeAllJsModals();
+    });
+
     document.getElementById('jsDateWindow')?.addEventListener('change', async (event) => {
       state.prefs.dateWindow = event.target.value === '1d' || event.target.value === '7d'
         ? event.target.value
@@ -1344,6 +1970,26 @@
       if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         void importSearchFromText(event.target.value || '');
+      }
+    });
+
+    document.getElementById('jsJrImportSearchUrlBtn')?.addEventListener('click', async () => {
+      const raw = document.getElementById('jsJrSearchUrlInput')?.value || '';
+      await importJobrightSearchFromText(raw);
+    });
+
+    document.getElementById('jsJrImportSearchTabBtn')?.addEventListener('click', () => {
+      void importJobrightSearchFromActiveTab();
+    });
+
+    document.getElementById('jsJrResetSearchBtn')?.addEventListener('click', () => {
+      void resetJobrightSearch();
+    });
+
+    document.getElementById('jsJrSearchUrlInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void importJobrightSearchFromText(event.target.value || '');
       }
     });
 
@@ -1409,9 +2055,10 @@
       const jobs = actionJobs();
       if (!jobs.length) return;
       const csv = api().jobsToCsv(jobs);
+      const prefix = activeSource() === 'jobright' ? 'jobright' : 'hiringcafe';
       downloadTextFile(
         csv,
-        'hiringcafe-jobs.csv',
+        `${prefix}-jobs.csv`,
         'text/csv;charset=utf-8'
       );
       showToast(`CSV downloaded (${jobs.length}).`, 'success');
@@ -1425,9 +2072,10 @@
         showToast('No links to download.', 'error');
         return;
       }
+      const prefix = activeSource() === 'jobright' ? 'jobright' : 'hiringcafe';
       downloadTextFile(
         links.join('\n'),
-        'hiringcafe-links.txt',
+        `${prefix}-links.txt`,
         'text/plain;charset=utf-8'
       );
       showToast(`Links file downloaded (${links.length}).`, 'success');

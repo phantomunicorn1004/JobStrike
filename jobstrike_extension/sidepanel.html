@@ -62,7 +62,7 @@
 
     <nav class="nav-primary" aria-label="Main">
       <button type="button" class="tab-main active" data-tab="register" data-tier="main">
-        <span class="tab-label">Register</span>
+        <span class="tab-label">Bid</span>
       </button>
       <button type="button" class="tab-main" data-tab="job-scraper" data-tier="main">
         <span class="tab-label">Job Scraper</span>
@@ -131,7 +131,7 @@
               </div>
             </details>
 
-            <div class="rb-field-block" id="regNoteBlock">
+            <div class="rb-field-block" id="regNoteBlock" data-apply-target="job">
               <div class="rb-field-head">
                 <span>Note / job description</span>
                 <button type="button" class="btn icon-btn" id="regNoteCopyBtn" title="Copy note" aria-label="Copy note">
@@ -143,30 +143,71 @@
               <textarea id="regNote" class="rb-mini" rows="3" placeholder="JD or notes (used when building prompt)"></textarea>
             </div>
 
+            <div class="rb-cue-row">
+              <button type="button" class="rb-next-cue" id="rbNextCue" aria-live="polite" title="Jump to the next bid step">
+                <span class="rb-next-cue-step" id="rbNextCueStep">1 / 5</span>
+                <span class="rb-next-cue-msg" id="rbNextCueMsg">Next: Add job description</span>
+                <span class="rb-next-cue-go" aria-hidden="true">→</span>
+              </button>
+              <button type="button" class="rb-progress-reset" id="applyProgressReset" hidden title="Reset this job&#39;s progress" aria-label="Reset this job's progress">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
+                </svg>
+              </button>
+            </div>
+
             <div class="rb-actions" role="group" aria-label="Resume Builder actions">
-              <button type="button" class="btn primary" id="regBuildCopyPromptBtn" data-step-btn="prompt" title="Build final prompt from kit + Note and copy">
-                <span class="rb-step-badge" aria-hidden="true">2</span>
-                <span class="rb-btn-label">Build &amp; Copy Prompt</span>
-                <span class="rb-spinner" id="regBuildCopySpinner" hidden aria-hidden="true"></span>
-              </button>
-              <button type="button" class="btn" id="regOpenResumeJsonBtn" data-step-btn="json" title="Open built resume JSON editor">
-                <span class="rb-step-badge" aria-hidden="true">3</span>
-                <span class="rb-btn-label">Resume JSON</span>
-              </button>
-              <button type="button" class="btn primary" id="regGenerateFilesBtn" data-step-btn="files" title="Convert JSON via local json2docx and attach files">
-                <span class="rb-step-badge" aria-hidden="true">4</span>
-                <span class="rb-btn-label">Generate Files</span>
-                <span class="rb-spinner" id="regGenerateSpinner" hidden aria-hidden="true"></span>
-              </button>
-              <button type="button" class="btn primary register-submit-btn" id="registerJobBtn" data-step-btn="register" title="Register this job to Resume DB">
-                <span class="rb-step-badge" aria-hidden="true">5</span>
-                <span class="rb-btn-label">Register</span>
-                <span class="rb-spinner" id="regRegisterSpinner" hidden aria-hidden="true"></span>
-              </button>
-              <button type="button" class="btn primary rb-action-wide" id="regAutofillBtn" title="Fill the current job page from the selected website profile" disabled>
-                <span class="rb-btn-label">Autofill</span>
-                <span class="rb-spinner" id="regAutofillSpinner" hidden aria-hidden="true"></span>
-              </button>
+
+              <!-- Step 2: Build prompt (paired with Note textarea above) -->
+              <div class="rb-action-group rb-action-group--prompt">
+                <p class="rb-fit-cue" id="rbFitCue" hidden data-level="ready" role="status" aria-live="polite">
+                  <span class="rb-fit-cue-dot" aria-hidden="true"></span>
+                  <span class="rb-fit-cue-text" id="rbFitCueText">Preflight: —</span>
+                </p>
+                <button type="button" class="btn primary rb-action-wide" id="regBuildCopyPromptBtn" data-step-btn="prompt" title="Build final prompt from kit + Note and copy to clipboard">
+                  <svg class="rb-btn-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <span class="rb-btn-label">Copy Prompt</span>
+                  <span class="rb-spinner" id="regBuildCopySpinner" hidden aria-hidden="true"></span>
+                </button>
+              </div>
+
+              <!-- Steps 3+4: JSON review then file generation (back-to-back) -->
+              <div class="rb-action-group rb-action-group--files">
+                <button type="button" class="btn rb-action-secondary" id="regOpenResumeJsonBtn" data-step-btn="json" title="Open built resume JSON editor">
+                  <svg class="rb-btn-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="10" y1="13" x2="14" y2="13"/></svg>
+                  <span class="rb-btn-label">Edit JSON</span>
+                </button>
+                <button type="button" class="btn rb-action-soft" id="regGenerateFilesBtn" data-step-btn="files" title="Convert JSON via local json2docx and attach files">
+                  <svg class="rb-btn-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  <span class="rb-btn-label">Generate</span>
+                  <span class="rb-spinner" id="regGenerateSpinner" hidden aria-hidden="true"></span>
+                </button>
+              </div>
+
+              <!-- Step 5: Register (final commit — separate visual weight) -->
+              <div class="rb-action-group rb-action-group--register">
+                <button type="button" class="btn primary rb-action-wide register-submit-btn" id="registerJobBtn" data-step-btn="register" title="Register this job to Resume DB">
+                  <svg class="rb-btn-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <span class="rb-btn-label">Register</span>
+                  <span class="rb-spinner" id="regRegisterSpinner" hidden aria-hidden="true"></span>
+                </button>
+              </div>
+
+              <!-- Autofill: separate action — fills the job posting page -->
+              <div class="rb-action-group rb-action-group--autofill">
+                <button type="button" class="btn rb-action-wide rb-action-autofill" id="regAutofillBtn" title="Fill the current job page fields from your selected profile" disabled>
+                  <svg class="rb-btn-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  <span class="rb-btn-label">Autofill Page</span>
+                  <span class="rb-spinner" id="regAutofillSpinner" hidden aria-hidden="true"></span>
+                </button>
+              </div>
+
+            </div>
+
+            <div class="rb-feedback" id="rbFeedback">
+              <div class="rb-utility-row">
+                <button type="button" class="btn small rb-utility-btn" id="regResumeJsonClearBtn" hidden>Clear JSON</button>
+              </div>
             </div>
 
             <form class="form-grid register-form" id="registerForm" onsubmit="return false">
@@ -182,11 +223,10 @@
                 placeholder='Paste built resume JSON (resume_template, job_title, company_name, job_description)…'
               ></textarea>
               <small class="muted" id="regResumeJsonHint" hidden>Fills title, company, note from JSON. Job link from tab.</small>
-              <button type="button" class="btn small" id="regResumeJsonClearBtn" hidden>Clear JSON</button>
               <div class="register-generated-attachments full" id="regGeneratedAttachments" hidden></div>
 
               <details class="rb-config full" id="regDetailsBlock">
-                <summary>Register details</summary>
+                <summary>Bid details</summary>
                 <div class="rb-config-body rb-details-grid">
                   <label class="full">Job link
                     <span class="register-field-with-action">
@@ -260,18 +300,6 @@
               </details>
             </form>
           </div>
-
-          <div class="register-action-group">
-            <div class="apply-progress" id="applyProgress" role="group" aria-live="polite" aria-label="Job application progress">
-              <ol class="apply-progress-track" id="applyProgressTrack"></ol>
-              <button type="button" class="apply-progress-reset" id="applyProgressReset" hidden title="Reset this job&#39;s progress" aria-label="Reset this job's progress">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
-                </svg>
-              </button>
-            </div>
-            <div id="registerStatus" class="register-status" hidden></div>
-          </div>
         </div>
 
         <div id="rbMaxModal" class="rb-max-modal" hidden>
@@ -291,121 +319,68 @@
       <section class="tab-panel" id="tab-job-scraper">
         <div class="tab-panel-scroll js-scraper">
           <header class="js-head">
-            <h2 class="js-title">HiringCafe scrape</h2>
-            <p class="muted js-subtitle" id="jsMeta">Set search and filters, then Scrape.</p>
+            <div class="js-head-text">
+              <h2 class="js-title" id="jsScraperTitle">Job Scraper</h2>
+              <p class="muted js-subtitle" id="jsMeta">Source → search → scrape.</p>
+            </div>
           </header>
 
-          <section class="js-section js-section-search card js-card" aria-labelledby="jsSearchHeading">
+          <section class="js-section js-section-source" aria-label="Scrape source">
+            <div class="js-source-toggle" role="group" aria-label="Job source">
+              <button type="button" class="js-source-btn is-active" data-js-source="hiringcafe" id="jsSourceHiringCafe">
+                <span class="js-source-btn-title">HiringCafe</span>
+                <span class="js-source-btn-desc">Import search URL</span>
+              </button>
+              <button type="button" class="js-source-btn" data-js-source="jobright" id="jsSourceJobright">
+                <span class="js-source-btn-title">Jobright</span>
+                <span class="js-source-btn-desc">Import search URL</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="js-section js-section-search card js-card" aria-labelledby="jsSearchHeading" id="jsSearchCard">
             <div class="js-section-label" id="jsSearchHeading">
               Search
               <span class="js-badge-custom" id="jsSearchCustomBadge" hidden>Custom</span>
             </div>
-            <details class="js-search-import" id="jsSearchImportPanel">
-              <summary>
-                <span class="js-search-summary-label">HiringCafe searchState</span>
-                <span class="muted" id="jsSearchSummary">Built-in default</span>
-              </summary>
-              <p class="muted small js-search-help">
-                Set filters on hiringcafe.com, copy the URL, then import. Date window below still overrides date on scrape.
-              </p>
-              <label class="js-field js-search-url-field">
-                <span>Search URL</span>
-                <textarea id="jsSearchUrlInput" rows="2" spellcheck="false" placeholder="https://hiringcafe.com/?searchState=…"></textarea>
-              </label>
-              <div class="js-search-actions">
-                <button type="button" class="btn small primary" id="jsImportSearchUrlBtn">Import URL</button>
-                <button type="button" class="btn small" id="jsImportSearchTabBtn" title="Read searchState from the active HiringCafe tab">From tab</button>
-                <button type="button" class="btn small" id="jsResetSearchBtn">Reset</button>
-              </div>
+            <div class="js-search-preview" aria-live="polite">
+              <span class="js-search-preview-label" id="jsSearchPreviewLabel">Active search</span>
+              <p class="js-search-preview-value" id="jsSearchSummary">Built-in default</p>
               <p class="muted small" id="jsSearchSource" hidden></p>
-            </details>
+            </div>
+            <div class="js-inline-tools">
+              <button type="button" class="btn small primary" id="jsOpenEditSearchBtn" data-js-open-modal="import">
+                Edit search
+              </button>
+            </div>
           </section>
 
-          <section class="js-section js-section-filters card js-card" aria-labelledby="jsFiltersHeading">
-            <div class="js-section-label" id="jsFiltersHeading">Filters</div>
-            <div class="js-select-row">
-              <label class="js-field">
-                <span>Date</span>
+          <section class="js-section js-section-quick card js-card" aria-label="Scrape options">
+            <div class="js-quick-row">
+              <label class="js-field js-field-date">
+                <span>Posted within</span>
                 <select id="jsDateWindow" aria-label="Date window">
                   <option value="1d">Last 1 day</option>
                   <option value="3d" selected>Last 3 days</option>
                   <option value="7d">Last 7 days</option>
                 </select>
               </label>
-              <label class="js-field js-field-profile">
-                <span>Profile</span>
-                <select id="jsProfileFilter" aria-label="Profile">
-                  <option value="">Select profile…</option>
-                </select>
-              </label>
+              <button type="button" class="btn js-options-btn" id="jsOpenFiltersBtn" data-js-open-modal="filters">
+                Filters &amp; lists
+              </button>
             </div>
-            <p class="muted small js-profile-hint" id="jsProfileHint">Sign in under Settings, then Refresh to load website block lists and profiles.</p>
-
-            <div class="js-hide-group">
-              <div class="js-hide-header">
-                <div class="js-hide-label">Hide from results</div>
-                <span class="muted small js-sync-status" id="jsListsSyncStatus">Not synced</span>
-              </div>
-              <div class="js-hide-grid">
-                <div class="js-hide-col">
-                  <div class="js-hide-col-title">Website</div>
-                  <label class="js-hide-row">
-                    <input type="checkbox" id="jsFilterBlockedCompanies" checked>
-                    <span class="js-hide-name" data-edit-list="company" title="Double-click to edit">Companies</span>
-                    <span class="js-hide-count" id="jsBlockedCompanyCount" data-edit-list="company">0</span>
-                  </label>
-                  <label class="js-hide-row">
-                    <input type="checkbox" id="jsFilterBlockedAts" checked>
-                    <span class="js-hide-name" data-edit-list="ats" title="Double-click to edit">ATS</span>
-                    <span class="js-hide-count" id="jsBlockedAtsCount" data-edit-list="ats">0</span>
-                  </label>
-                  <label class="js-hide-row">
-                    <input type="checkbox" id="jsFilterBlockedJobs" checked>
-                    <span class="js-hide-name" data-edit-list="job" title="Double-click to edit">Jobs</span>
-                    <span class="js-hide-count" id="jsBlockedJobCount" data-edit-list="job">0</span>
-                  </label>
-                </div>
-                <div class="js-hide-col">
-                  <div class="js-hide-col-title">Resume DB</div>
-                  <label class="js-hide-row" id="jsFilterRegJobsLabel" title="Requires a profile">
-                    <input type="checkbox" id="jsFilterRegisteredJobs" checked disabled>
-                    <span class="js-hide-name">Reg. jobs</span>
-                    <span class="js-hide-count" id="jsRegisteredJobCount">0</span>
-                  </label>
-                  <label class="js-hide-row" id="jsFilterRegCompaniesLabel" title="Requires a profile">
-                    <input type="checkbox" id="jsFilterRegisteredCompanies" checked disabled>
-                    <span class="js-hide-name">Reg. companies</span>
-                    <span class="js-hide-count" id="jsRegisteredCompanyCount">0</span>
-                  </label>
-                </div>
-              </div>
-              <p class="muted small js-hide-hint">Double-click a Website list to edit. Resume DB is read-only.</p>
-
-              <div class="js-list-editor" id="jsListEditor" hidden>
-                <div class="js-list-editor-head">
-                  <strong id="jsListEditorTitle">Blocked companies</strong>
-                  <button type="button" class="btn small" id="jsListEditorClose">Done</button>
-                </div>
-                <div class="js-add-row">
-                  <input type="text" id="jsListEditorInput" placeholder="Add item…">
-                  <button type="button" class="btn small" id="jsListEditorAddBtn">Add</button>
-                </div>
-                <ul class="js-block-list" id="jsListEditorItems"></ul>
-              </div>
-            </div>
+            <p class="muted small js-profile-hint" id="jsProfileHint">Optional: open Filters to sync profile &amp; hide lists.</p>
           </section>
 
-          <section class="js-section js-section-actions" aria-label="Actions">
+          <section class="js-section js-section-actions js-actions-bar" aria-label="Actions">
             <div class="js-action-row">
-              <button type="button" class="btn" id="jsRefreshProfileBtn" title="Refresh profile lists from website">Refresh</button>
-              <button type="button" class="btn primary" id="jsScrapeBtn">Scrape</button>
+              <button type="button" class="btn primary js-scrape-primary" id="jsScrapeBtn">Scrape jobs</button>
               <button type="button" class="btn" id="jsResumeBtn" hidden>Resume</button>
               <button type="button" class="btn" id="jsStopBtn" hidden>Stop</button>
             </div>
           </section>
 
           <section class="js-section js-section-progress card js-card" id="jsProgressSection" hidden>
-            <div class="js-section-label">Progress</div>
             <div class="js-progress" id="jsProgress" data-kind="info" role="status" aria-live="polite">
               <div class="js-progress-top">
                 <span class="js-progress-label" id="jsProgressLabel"></span>
@@ -432,9 +407,123 @@
                 <button type="button" class="btn small" id="jsClearResultsBtn" disabled>Clear</button>
               </div>
             </div>
-            <p class="muted js-results-empty" id="jsResultsEmpty">Click Scrape to load HiringCafe jobs.</p>
+            <p class="muted js-results-empty" id="jsResultsEmpty">Tap <strong>Scrape jobs</strong> to load listings.</p>
             <div class="js-results-list" id="jsResultsList" hidden></div>
           </section>
+        </div>
+
+        <div id="jsFiltersModal" class="js-modal" hidden>
+          <div class="js-modal-sheet" role="dialog" aria-modal="true" aria-labelledby="jsFiltersModalTitle">
+            <div class="js-modal-head">
+              <strong id="jsFiltersModalTitle">Filters &amp; lists</strong>
+              <button type="button" class="btn small" data-js-close-modal="filters">Done</button>
+            </div>
+            <div class="js-modal-body">
+              <label class="js-field js-field-profile">
+                <span>Profile</span>
+                <select id="jsProfileFilter" aria-label="Profile">
+                  <option value="">Select profile…</option>
+                </select>
+              </label>
+              <div class="js-modal-toolbar">
+                <button type="button" class="btn small" id="jsRefreshProfileBtn" title="Refresh profile lists from website">Refresh lists</button>
+                <span class="muted small js-sync-status" id="jsListsSyncStatus">Not synced</span>
+              </div>
+              <p class="muted small" id="jsFiltersModalHint">Sign in under Settings first, then refresh to load profiles and block lists.</p>
+
+              <div class="js-hide-group">
+                <div class="js-hide-label">Hide from results</div>
+
+                <div class="js-hide-stack">
+                  <div class="js-hide-col">
+                    <div class="js-hide-col-title">Website lists</div>
+                    <p class="muted small js-hide-col-hint">Double-click a name to edit</p>
+                    <label class="js-hide-row">
+                      <input type="checkbox" id="jsFilterBlockedCompanies" checked>
+                      <span class="js-hide-name" data-edit-list="company" title="Double-click to edit">Companies</span>
+                      <span class="js-hide-count" id="jsBlockedCompanyCount" data-edit-list="company">0</span>
+                    </label>
+                    <label class="js-hide-row">
+                      <input type="checkbox" id="jsFilterBlockedAts" checked>
+                      <span class="js-hide-name" data-edit-list="ats" title="Double-click to edit">ATS</span>
+                      <span class="js-hide-count" id="jsBlockedAtsCount" data-edit-list="ats">0</span>
+                    </label>
+                    <label class="js-hide-row">
+                      <input type="checkbox" id="jsFilterBlockedJobs" checked>
+                      <span class="js-hide-name" data-edit-list="job" title="Double-click to edit">Jobs</span>
+                      <span class="js-hide-count" id="jsBlockedJobCount" data-edit-list="job">0</span>
+                    </label>
+                  </div>
+
+                  <div class="js-hide-col">
+                    <div class="js-hide-col-title">Resume DB</div>
+                    <p class="muted small js-hide-col-hint">Requires a profile · read-only lists</p>
+                    <label class="js-hide-row" id="jsFilterRegJobsLabel" title="Requires a profile">
+                      <input type="checkbox" id="jsFilterRegisteredJobs" checked disabled>
+                      <span class="js-hide-name">Registered jobs</span>
+                      <span class="js-hide-count" id="jsRegisteredJobCount">0</span>
+                    </label>
+                    <label class="js-hide-row" id="jsFilterRegCompaniesLabel" title="Requires a profile">
+                      <input type="checkbox" id="jsFilterRegisteredCompanies" checked disabled>
+                      <span class="js-hide-name">Registered companies</span>
+                      <span class="js-hide-count" id="jsRegisteredCompanyCount">0</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="js-list-editor" id="jsListEditor" hidden>
+                  <div class="js-list-editor-head">
+                    <strong id="jsListEditorTitle">Blocked companies</strong>
+                    <button type="button" class="btn small" id="jsListEditorClose">Done</button>
+                  </div>
+                  <div class="js-add-row">
+                    <input type="text" id="jsListEditorInput" placeholder="Add item…">
+                    <button type="button" class="btn small" id="jsListEditorAddBtn">Add</button>
+                  </div>
+                  <ul class="js-block-list" id="jsListEditorItems"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="jsImportModal" class="js-modal" hidden>
+          <div class="js-modal-sheet" role="dialog" aria-modal="true" aria-labelledby="jsImportModalTitle">
+            <div class="js-modal-head">
+              <strong id="jsImportModalTitle">Edit search</strong>
+              <button type="button" class="btn small" data-js-close-modal="import">Done</button>
+            </div>
+            <div class="js-modal-body">
+              <div id="jsSearchImportPanel" data-import-panel="hiringcafe">
+                <p class="muted small js-search-help">
+                  Set remote/hybrid/location on hiringcafe.com, copy the URL, then import. Posted-within on the main screen still applies.
+                </p>
+                <label class="js-field js-search-url-field">
+                  <span>HiringCafe URL</span>
+                  <textarea id="jsSearchUrlInput" rows="3" spellcheck="false" placeholder="https://hiringcafe.com/?searchState=…"></textarea>
+                </label>
+                <div class="js-search-actions">
+                  <button type="button" class="btn small primary" id="jsImportSearchUrlBtn">Import URL</button>
+                  <button type="button" class="btn small" id="jsImportSearchTabBtn" title="Read searchState from the active HiringCafe tab">From open tab</button>
+                  <button type="button" class="btn small" id="jsResetSearchBtn">Use default</button>
+                </div>
+              </div>
+              <div id="jsJrSearchImportPanel" data-import-panel="jobright" hidden>
+                <p class="muted small js-search-help">
+                  Set keyword/location on jobright.ai, copy the URL, then import. Posted-within on the main screen still applies.
+                </p>
+                <label class="js-field js-search-url-field">
+                  <span>Jobright URL</span>
+                  <textarea id="jsJrSearchUrlInput" rows="3" spellcheck="false" placeholder="https://jobright.ai/jobs/search?titleKeyword=…"></textarea>
+                </label>
+                <div class="js-search-actions">
+                  <button type="button" class="btn small primary" id="jsJrImportSearchUrlBtn">Import URL</button>
+                  <button type="button" class="btn small" id="jsJrImportSearchTabBtn" title="Read search from the active Jobright tab">From open tab</button>
+                  <button type="button" class="btn small" id="jsJrResetSearchBtn">Use default</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -477,7 +566,7 @@
         </div>
         <div class="card register-card">
           <h2>json2docx local server</h2>
-          <p class="muted">Convert built resume JSON to DOCX/PDF via the local Python server (<code>json2docx/server.py</code>). Used later for Generate Files on Register.</p>
+          <p class="muted">Convert built resume JSON to DOCX/PDF via the local Python server (<code>json2docx/server.py</code>). Used later for Generate Files on Bid.</p>
           <div class="backend-connection-row" id="settingsJson2docxConnectionRow" aria-live="polite">
             <span class="backend-connection-dot" id="settingsJson2docxConnectionDot"></span>
             <span class="backend-connection-label" id="settingsJson2docxConnectionLabel">Checking json2docx…</span>
@@ -503,7 +592,7 @@
                 <option value="pdf">PDF only</option>
                 <option value="both" selected>DOCX + PDF</option>
               </select>
-              <small class="muted">Register auto-attaches DOCX only (PDFs still save to Downloads when using DOCX + PDF).</small>
+              <small class="muted">Bid auto-attaches DOCX only (PDFs still save to Downloads when using DOCX + PDF).</small>
             </label>
             <div class="button-row full wrap">
               <button class="btn primary" type="submit" id="saveJson2docxSettingsBtn">Save</button>
@@ -514,7 +603,7 @@
         </div>
         <div class="card register-card">
           <h2>Duplicate check</h2>
-          <p class="muted">Controls how far back company and job-link duplicate checks look on Register.</p>
+          <p class="muted">Controls how far back company and job-link duplicate checks look on Bid.</p>
           <label class="full" title="Duplicate checks compare only applications within this many days. Use 0 for all time.">
             Window (days)
             <input
@@ -532,7 +621,7 @@
         <div class="card register-card">
           <h2>Google Drive uploads</h2>
           <p class="muted">Connect Google Drive on the <strong>website Settings</strong> page (same account as Website connection). The extension uploads files through the server—no Gmail sign-in in the extension.</p>
-          <p class="muted small">Open your site → <strong>Settings</strong> → Connect Google Drive. Set default resume/cover links there for the <strong>Default</strong> checkboxes on Register.</p>
+          <p class="muted small">Open your site → <strong>Settings</strong> → Connect Google Drive. Set default resume/cover links there for the <strong>Default</strong> checkboxes on Bid.</p>
         </div>
         <div class="card">
           <h2>AI autofill (hybrid mode)</h2>
@@ -679,9 +768,11 @@
   <script src="resume-json-mapper.js"></script>
   <script src="json2docx-client.js"></script>
   <script src="prompt-kit-client.js"></script>
+  <script src="bid-fit-preflight.js"></script>
   <script src="job-url.js"></script>
   <script src="company-name.js"></script>
   <script src="job-scraper-hiringcafe.js"></script>
+  <script src="job-scraper-jobright.js"></script>
   <script src="job-scraper-panel.js"></script>
   <script src="register-resume-db.js"></script>
   <script src="sidepanel.js"></script>

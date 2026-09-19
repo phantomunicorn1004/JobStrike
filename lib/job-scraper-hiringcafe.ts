@@ -1,6 +1,10 @@
 import "server-only";
 
-import { ProxyAgent, type Dispatcher } from "undici";
+import type { Browser, Page } from "playwright-core";
+import {
+  getScrapeProxyConfig,
+  launchScrapeBrowser,
+} from "@/lib/job-scraper-browser";
 import {
   detectPlatform,
   type JobScraperDateWindow,
@@ -19,7 +23,28 @@ const HIRING_CAFE_FETCH_HEADERS = {
   Referer: HIRING_CAFE_BASE,
 } as const;
 
-const RETRYABLE_HTTP_STATUSES = new Set([403, 429, 500, 502, 503, 504]);
+const PAGE_LOAD_TIMEOUT_MS = 60_000;
+
+export type HiringCafeScrapeProgress = {
+  step:
+    | "launching"
+    | "warming"
+    | "session_ready"
+    | "fetching_page"
+    | "page_done"
+    | "closing";
+  message: string;
+  page?: number;
+  maxPages?: number;
+  jobsSoFar?: number;
+  pagesFetched?: number;
+};
+
+export type HiringCafeScrapeOptions = {
+  maxPages?: number;
+  delayMs?: number;
+  onProgress?: (event: HiringCafeScrapeProgress) => void;
+};
 
 const DEFAULT_SEARCH_STATE = {
   locations: [
@@ -56,39 +81,6 @@ const DEFAULT_SEARCH_STATE = {
     'NOT ("Consultant" OR "Manager" OR "Director") AND ("Software" OR "Data" OR "AI" OR "Developer" OR "Engineer")',
 } as const;
 
-type HiringCafeFetchInit = RequestInit & { dispatcher?: Dispatcher };
-
-let hiringCafeProxyAgent: ProxyAgent | undefined;
-let hiringCafeProxyAgentUrl: string | undefined;
-
-/** Full URL (`http://user:pass@host:port`) or `host:port:username:password` (Proxy-Seller style). */
-export function getHiringCafeProxyUrl(): string | undefined {
-  const direct = process.env.HIRING_CAFE_PROXY_URL?.replace(/^["']|["']$/g, "").trim();
-  if (direct) return direct;
-
-  const proxyConfig = process.env.HIRING_CAFE_PROXY?.replace(/^["']|["']$/g, "").trim();
-  if (!proxyConfig) return undefined;
-
-  const parts = proxyConfig.split(":");
-  if (parts.length < 4) return undefined;
-
-  const [host, port, username, ...passwordParts] = parts;
-  const password = passwordParts.join(":");
-  return `http://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`;
-}
-
-function getHiringCafeProxyAgent(): ProxyAgent | undefined {
-  const proxyUrl = getHiringCafeProxyUrl();
-  if (!proxyUrl) return undefined;
-
-  if (!hiringCafeProxyAgent || hiringCafeProxyAgentUrl !== proxyUrl) {
-    hiringCafeProxyAgent = new ProxyAgent(proxyUrl);
-    hiringCafeProxyAgentUrl = proxyUrl;
-  }
-
-  return hiringCafeProxyAgent;
-}
-
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -111,6 +103,13 @@ function buildSearchState(dateWindow: JobScraperDateWindow) {
   };
 }
 
+function buildHiringCafeUrl(dateWindow: JobScraperDateWindow, page: number): string {
+  const url = new URL(HIRING_CAFE_BASE);
+  url.searchParams.set("searchState", JSON.stringify(buildSearchState(dateWindow)));
+  url.searchParams.set("page", String(page));
+  return url.toString();
+}
+
 function buildHiringCafeDataUrl(
   buildId: string,
   dateWindow: JobScraperDateWindow,
@@ -122,139 +121,190 @@ function buildHiringCafeDataUrl(
   return url.toString();
 }
 
-type HiringCafeFetchResult = {
-  ok: boolean;
-  status: number;
-  text: string;
-  error?: string;
-};
-
 function formatFetchError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
 }
 
-async function fetchHiringCafe(
-  url: string,
-  extraHeaders: Record<string, string> = {},
-  maxRetries = 3,
-): Promise<HiringCafeFetchResult> {
-  let lastStatus = 0;
-  let lastText = "";
-  let lastError: string | undefined;
+function looksLikeCloudflareChallenge(html: string): boolean {
+  const sample = html.slice(0, 12_000);
+  return (
+    /just a moment/i.test(sample) ||
+    /cf-browser-verification|challenge-platform|turnstile/i.test(sample)
+  );
+}
 
-  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
-    try {
-      const dispatcher = getHiringCafeProxyAgent();
-      const response = await fetch(url, {
-        headers: {
-          ...HIRING_CAFE_FETCH_HEADERS,
-          ...extraHeaders,
-        },
-        cache: "no-store",
-        redirect: "follow",
-        ...(dispatcher ? { dispatcher } : {}),
-      } as HiringCafeFetchInit);
-      lastStatus = response.status;
-      lastText = await response.text();
-      lastError = undefined;
-
-      if (response.ok) {
-        return { ok: true, status: response.status, text: lastText };
-      }
-
-      if (!RETRYABLE_HTTP_STATUSES.has(response.status)) {
-        break;
-      }
-    } catch (error) {
-      lastError = formatFetchError(error);
-    }
-
-    if (attempt < maxRetries - 1) {
-      await sleep(2 ** attempt * 1000);
-    }
+function parseNextDataScript(html: string): {
+  buildId: string | null;
+  pageProps: Record<string, unknown> | null;
+} {
+  const nextDataMatch = html.match(
+    /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i,
+  );
+  if (!nextDataMatch?.[1]) {
+    return { buildId: null, pageProps: null };
   }
 
-  return { ok: false, status: lastStatus, text: lastText, error: lastError };
+  try {
+    const parsed = JSON.parse(nextDataMatch[1]) as {
+      buildId?: string;
+      props?: { pageProps?: Record<string, unknown> };
+      pageProps?: Record<string, unknown>;
+    };
+    const buildId =
+      typeof parsed.buildId === "string" && parsed.buildId.trim()
+        ? parsed.buildId.trim()
+        : null;
+    const pageProps = parsed.props?.pageProps ?? parsed.pageProps ?? null;
+    return { buildId, pageProps };
+  } catch {
+    return { buildId: null, pageProps: null };
+  }
 }
 
 function extractBuildIdFromHtml(html: string): string | null {
-  const nextDataMatch = html.match(
-    /<script id="__NEXT_DATA__"[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/i,
-  );
-  if (!nextDataMatch?.[1]) return null;
-
-  try {
-    const parsed = JSON.parse(nextDataMatch[1]) as { buildId?: string };
-    return typeof parsed.buildId === "string" && parsed.buildId.trim()
-      ? parsed.buildId.trim()
-      : null;
-  } catch {
-    return null;
-  }
+  return parseNextDataScript(html).buildId;
 }
 
-async function fetchBuildId(): Promise<string> {
-  const home = await fetchHiringCafe(HIRING_CAFE_BASE, { Accept: "text/html,application/xhtml+xml" });
-  if (!home.ok) {
-    if (home.status === 403 || home.text.includes("Just a moment")) {
-      const proxyHint = getHiringCafeProxyUrl()
-        ? ""
-        : " Set HIRING_CAFE_PROXY_URL (or HIRING_CAFE_PROXY) to route through an ISP proxy.";
-      throw new Error(
-        `HiringCafe blocked the scrape request (HTTP 403).${proxyHint} Try again later or scrape from a different network.`,
-      );
-    }
+function extractPagePropsFromNextData(html: string): Record<string, unknown> | null {
+  return parseNextDataScript(html).pageProps;
+}
 
-    const usingProxy = Boolean(getHiringCafeProxyUrl());
-    const statusLabel = home.status > 0 ? `HTTP ${home.status}` : "no HTTP response";
-    const detail = home.error ? ` ${home.error}` : "";
-    const proxyHint = usingProxy
-      ? " Check HIRING_CAFE_PROXY_URL / HIRING_CAFE_PROXY (host, port, user, pass) and that Proxy-Seller allows Vercel's IP."
-      : "";
-    throw new Error(`Could not reach HiringCafe (${statusLabel}).${detail}${proxyHint}`);
+function hasSsrHits(pageProps: Record<string, unknown> | null): boolean {
+  return Array.isArray(pageProps?.ssrHits);
+}
+
+async function createBrowserPage(browser: Browser): Promise<Page> {
+  const page = await browser.newPage({
+    userAgent: USER_AGENT,
+    extraHTTPHeaders: {
+      "Accept-Language": HIRING_CAFE_FETCH_HEADERS["Accept-Language"],
+    },
+  });
+  page.setDefaultTimeout(PAGE_LOAD_TIMEOUT_MS);
+  return page;
+}
+
+async function warmHiringCafeSession(page: Page): Promise<string> {
+  await page.goto(HIRING_CAFE_BASE, {
+    waitUntil: "domcontentloaded",
+    timeout: PAGE_LOAD_TIMEOUT_MS,
+  });
+
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+
+  const hasTurnstile = await page.locator('iframe[src*="cloudflare"]').count();
+  if (hasTurnstile > 0) {
+    await page
+      .waitForFunction(() => !document.querySelector('iframe[src*="cloudflare"]'), {
+        timeout: 10_000,
+      })
+      .catch(() => {});
   }
 
-  const buildId = extractBuildIdFromHtml(home.text);
+  await page.waitForSelector("script#__NEXT_DATA__", { timeout: 10_000 }).catch(() => {});
+
+  const html = await page.content();
+  const buildId = extractBuildIdFromHtml(html);
   if (!buildId) {
     throw new Error("Could not read HiringCafe build ID. The site layout may have changed.");
   }
-
   return buildId;
 }
 
 function extractPagePropsFromJson(text: string): Record<string, unknown> | null {
   try {
-    const parsed = JSON.parse(text) as { pageProps?: Record<string, unknown> };
-    return parsed.pageProps ?? null;
+    const parsed = JSON.parse(text) as {
+      pageProps?: Record<string, unknown>;
+      props?: { pageProps?: Record<string, unknown> };
+    };
+    return parsed.pageProps ?? parsed.props?.pageProps ?? null;
   } catch {
     return null;
   }
 }
 
-async function fetchSearchPageProps(
-  buildId: string,
+async function fetchSearchPagePropsViaHtml(
+  page: Page,
   dateWindow: JobScraperDateWindow,
-  page: number,
-): Promise<{ pageProps: Record<string, unknown> | null; staleBuildId: boolean }> {
-  const url = buildHiringCafeDataUrl(buildId, dateWindow, page);
-  const response = await fetchHiringCafe(url, {
-    Accept: "*/*",
-    "x-nextjs-data": "1",
+  pageIndex: number,
+): Promise<{ pageProps: Record<string, unknown> | null; blocked: boolean }> {
+  const url = buildHiringCafeUrl(dateWindow, pageIndex);
+  const response = await page.goto(url, {
+    waitUntil: "domcontentloaded",
+    timeout: PAGE_LOAD_TIMEOUT_MS,
   });
 
-  if (response.status === 404) {
-    return { pageProps: null, staleBuildId: true };
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+  await page.waitForSelector("script#__NEXT_DATA__", { timeout: 15_000 }).catch(() => {});
+
+  const html = await page.content();
+  const pageProps = extractPagePropsFromNextData(html);
+  if (hasSsrHits(pageProps)) {
+    return { pageProps, blocked: false };
   }
 
-  if (!response.ok) {
-    return { pageProps: null, staleBuildId: false };
+  const status = response?.status() ?? 0;
+  const blocked =
+    looksLikeCloudflareChallenge(html) ||
+    status === 403 ||
+    status === 429 ||
+    status === 503;
+  return { pageProps: null, blocked };
+}
+
+async function fetchSearchPageProps(
+  page: Page,
+  buildId: string,
+  dateWindow: JobScraperDateWindow,
+  pageIndex: number,
+): Promise<{
+  pageProps: Record<string, unknown> | null;
+  staleBuildId: boolean;
+  blocked: boolean;
+}> {
+  const dataUrl = buildHiringCafeDataUrl(buildId, dateWindow, pageIndex);
+
+  // Fast path: Next.js data JSON in the same browser context (keeps CF cookies).
+  try {
+    const response = await page.request.get(dataUrl, {
+      headers: {
+        Accept: "*/*",
+        "x-nextjs-data": "1",
+        Referer: HIRING_CAFE_BASE,
+      },
+      timeout: PAGE_LOAD_TIMEOUT_MS,
+    });
+
+    const status = response.status();
+    if (status === 404) {
+      return { pageProps: null, staleBuildId: true, blocked: false };
+    }
+
+    if (status >= 200 && status < 300) {
+      const text = await response.text();
+      const pageProps = extractPagePropsFromJson(text);
+      if (hasSsrHits(pageProps)) {
+        return { pageProps, staleBuildId: false, blocked: false };
+      }
+      // 200 with HTML/challenge/empty payload — fall through to HTML navigation.
+    }
+  } catch (error) {
+    console.error("HiringCafe data URL fetch failed:", formatFetchError(error));
   }
 
-  return {
-    pageProps: extractPagePropsFromJson(response.text),
-    staleBuildId: false,
-  };
+  // Reliable path (same as the extension): load the search HTML and read __NEXT_DATA__.
+  try {
+    const htmlResult = await fetchSearchPagePropsViaHtml(page, dateWindow, pageIndex);
+    return {
+      pageProps: htmlResult.pageProps,
+      staleBuildId: false,
+      blocked: htmlResult.blocked,
+    };
+  } catch (error) {
+    console.error("HiringCafe HTML page fetch failed:", formatFetchError(error));
+    return { pageProps: null, staleBuildId: false, blocked: true };
+  }
 }
 
 function extractJobFields(hit: Record<string, unknown>): ScrapedJob {
@@ -284,56 +334,136 @@ function extractJobFields(hit: Record<string, unknown>): ScrapedJob {
 
 export async function scrapeHiringCafeJobs(
   dateWindow: JobScraperDateWindow,
-  options?: { maxPages?: number; delayMs?: number },
+  options?: HiringCafeScrapeOptions,
 ): Promise<ScrapeJobsResult> {
   const maxPages = Math.max(1, Math.min(options?.maxPages ?? 8, 20));
-  const delayMs = Math.max(500, Math.min(options?.delayMs ?? 1000, 3000));
+  // Shorter pause between pages — one shared browser session already has CF cookies.
+  const delayMs = Math.max(200, Math.min(options?.delayMs ?? 400, 3000));
+  const onProgress = options?.onProgress;
   const jobs: ScrapedJob[] = [];
   let reportedTotal: number | null = null;
   let lastHitId = "";
   let pagesFetched = 0;
-  let buildId = await fetchBuildId();
+  let blocked = false;
 
-  for (let page = 0; page < maxPages; page += 1) {
-    let { pageProps, staleBuildId } = await fetchSearchPageProps(buildId, dateWindow, page);
+  onProgress?.({
+    step: "launching",
+    message: "Starting browser…",
+    maxPages,
+  });
+  const browser = await launchScrapeBrowser();
+  try {
+    const page = await createBrowserPage(browser);
 
-    if (staleBuildId) {
-      buildId = await fetchBuildId();
-      ({ pageProps, staleBuildId } = await fetchSearchPageProps(buildId, dateWindow, page));
+    let buildId: string;
+    try {
+      onProgress?.({
+        step: "warming",
+        message: "Opening HiringCafe (Cloudflare check)…",
+        maxPages,
+      });
+      buildId = await warmHiringCafeSession(page);
+      onProgress?.({
+        step: "session_ready",
+        message: "Session ready — fetching job pages…",
+        maxPages,
+      });
+    } catch (error) {
+      const message = formatFetchError(error);
+      const proxyHint = getScrapeProxyConfig()
+        ? " Check that your residential proxy is working correctly (Webshare host/port/user/pass)."
+        : " Set HIRING_CAFE_PROXY_URL (or HIRING_CAFE_PROXY) to route through an ISP proxy.";
+      throw new Error(`Could not reach HiringCafe: ${message}.${proxyHint}`);
     }
 
-    if (!pageProps) break;
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+      onProgress?.({
+        step: "fetching_page",
+        message: `Fetching page ${pageIndex + 1} of up to ${maxPages}…`,
+        page: pageIndex + 1,
+        maxPages,
+        jobsSoFar: jobs.length,
+        pagesFetched,
+      });
 
-    const hits = Array.isArray(pageProps.ssrHits)
-      ? (pageProps.ssrHits as Record<string, unknown>[])
-      : [];
-    const isLastPage = Boolean(pageProps.ssrIsLastPage);
-    reportedTotal =
-      typeof pageProps.ssrTotalCount === "number" ? pageProps.ssrTotalCount : reportedTotal;
+      let result = await fetchSearchPageProps(page, buildId, dateWindow, pageIndex);
 
-    if (hits.length === 0) break;
+      if (result.staleBuildId) {
+        onProgress?.({
+          step: "warming",
+          message: "Build ID stale — refreshing HiringCafe session…",
+          maxPages,
+          jobsSoFar: jobs.length,
+        });
+        buildId = await warmHiringCafeSession(page);
+        result = await fetchSearchPageProps(page, buildId, dateWindow, pageIndex);
+      }
 
-    const firstHitId = serializeField(hits[0]?.id) ?? "";
-    if (page > 0 && firstHitId && firstHitId === lastHitId) break;
-    lastHitId = serializeField(hits[hits.length - 1]?.id) ?? lastHitId;
+      blocked = blocked || result.blocked;
+      const pageProps = result.pageProps;
+      if (!pageProps) break;
 
-    for (const hit of hits) {
-      jobs.push(extractJobFields(hit));
+      const hits = Array.isArray(pageProps.ssrHits)
+        ? (pageProps.ssrHits as Record<string, unknown>[])
+        : [];
+      const isLastPage = Boolean(pageProps.ssrIsLastPage);
+      reportedTotal =
+        typeof pageProps.ssrTotalCount === "number" ? pageProps.ssrTotalCount : reportedTotal;
+
+      if (hits.length === 0) break;
+
+      const firstHitId = serializeField(hits[0]?.id) ?? "";
+      if (pageIndex > 0 && firstHitId && firstHitId === lastHitId) break;
+      lastHitId = serializeField(hits[hits.length - 1]?.id) ?? lastHitId;
+
+      for (const hit of hits) {
+        jobs.push(extractJobFields(hit));
+      }
+      pagesFetched += 1;
+
+      onProgress?.({
+        step: "page_done",
+        message: `Page ${pageIndex + 1} done — ${jobs.length} jobs so far`,
+        page: pageIndex + 1,
+        maxPages,
+        jobsSoFar: jobs.length,
+        pagesFetched,
+      });
+
+      if (isLastPage) {
+        onProgress?.({
+          step: "closing",
+          message: "Closing browser…",
+          jobsSoFar: jobs.length,
+          pagesFetched,
+          maxPages,
+        });
+        return { jobs, pagesFetched, reportedTotal };
+      }
+
+      if (pageIndex < maxPages - 1) {
+        await sleep(delayMs);
+      }
     }
-    pagesFetched += 1;
-
-    if (isLastPage) {
-      return { jobs, pagesFetched, reportedTotal };
-    }
-
-    if (page < maxPages - 1) {
-      await sleep(delayMs);
-    }
+  } finally {
+    onProgress?.({
+      step: "closing",
+      message: "Closing browser…",
+      jobsSoFar: jobs.length,
+      pagesFetched,
+      maxPages,
+    });
+    await browser.close().catch(() => {});
   }
 
   if (pagesFetched === 0) {
+    const proxyHint = getScrapeProxyConfig()
+      ? " Check that your residential proxy is working correctly."
+      : " Set HIRING_CAFE_PROXY_URL (or HIRING_CAFE_PROXY) to route through an ISP proxy.";
     throw new Error(
-      "HiringCafe returned no job pages. The site may be blocking automated requests.",
+      blocked
+        ? `HiringCafe blocked the job-page request (Cloudflare/challenge).${proxyHint}`
+        : `HiringCafe returned no job pages. The search may be empty, or the site layout changed.${proxyHint}`,
     );
   }
 
@@ -343,3 +473,7 @@ export async function scrapeHiringCafeJobs(
     reportedTotal,
   };
 }
+
+export type { ScrapeProxyConfig } from "@/lib/job-scraper-browser";
+export { getHiringCafeProxyConfig, getScrapeProxyConfig } from "@/lib/job-scraper-browser";
+
