@@ -70,43 +70,158 @@
     }
   }
 
+  const COUNTRY_TO_LOCATION = {
+    US: 'United States',
+    USA: 'United States',
+    CA: 'Canada',
+    GB: 'United Kingdom',
+    UK: 'United Kingdom',
+  };
+
+  /** Params that should be overridden when paging swan-api / opening a fresh tab. */
+  const PAGING_PARAM_KEYS = new Set(['position', 'count', 'page', 'refresh', 'visit']);
+
   function cloneDefaultSearch() {
     return { ...DEFAULT_SEARCH };
   }
 
+  function mapCountryToLocation(country) {
+    const code = String(country || '').trim().toUpperCase();
+    if (!code) return '';
+    return COUNTRY_TO_LOCATION[code] || String(country || '').trim();
+  }
+
+  function countryCodeFromLocation(location) {
+    const loc = String(location || '').trim().toLowerCase();
+    if (!loc) return 'US';
+    if (/^[a-z]{2}$/i.test(loc)) return loc.toUpperCase();
+    if (loc.includes('united states') || loc === 'usa') return 'US';
+    if (loc.includes('canada')) return 'CA';
+    if (loc.includes('united kingdom') || loc.includes('england') || loc === 'uk') return 'GB';
+    return 'US';
+  }
+
+  function taxonomyTitleFromParams(paramsOrUrl) {
+    let raw = '';
+    if (paramsOrUrl instanceof URL) {
+      raw = paramsOrUrl.searchParams.get('jobTaxonomyList') || '';
+    } else if (paramsOrUrl && typeof paramsOrUrl === 'object') {
+      raw = String(paramsOrUrl.jobTaxonomyList || '');
+    }
+    if (!raw) return '';
+    try {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list) && list[0]?.title) return String(list[0].title).trim();
+    } catch (_) {
+      /* ignore */
+    }
+    return '';
+  }
+
+  function cloneParams(params) {
+    if (!params || typeof params !== 'object' || Array.isArray(params)) return null;
+    const out = {};
+    for (const [key, value] of Object.entries(params)) {
+      if (value == null) continue;
+      const str = String(value);
+      if (!str) continue;
+      out[key] = str;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
   function normalizeSearch(search) {
-    const titleKeyword = String(search?.titleKeyword ?? search?.keyword ?? '')
-      .trim();
-    const location = String(search?.location ?? '').trim();
+    const titleKeyword = String(
+      search?.titleKeyword ?? search?.keyword ?? search?.value ?? ''
+    ).trim();
+    const location = String(
+      search?.location ?? mapCountryToLocation(search?.country) ?? ''
+    ).trim();
+    const params = cloneParams(search?.params);
     return {
       titleKeyword: titleKeyword || DEFAULT_SEARCH.titleKeyword,
       location: location || DEFAULT_SEARCH.location,
+      ...(params ? { params } : {}),
     };
+  }
+
+  function buildQueryFromParams(params, { position, count } = {}) {
+    const qs = new URLSearchParams();
+    if (params && typeof params === 'object') {
+      for (const [key, value] of Object.entries(params)) {
+        if (value == null || value === '') continue;
+        if (PAGING_PARAM_KEYS.has(key)) continue;
+        qs.set(key, String(value));
+      }
+    }
+    if (position != null) qs.set('position', String(Math.max(0, Number(position) || 0)));
+    if (count != null) qs.set('count', String(Math.max(1, Number(count) || PAGE_SIZE)));
+    return qs;
   }
 
   function buildJobrightSearchUrl(search, page = 0) {
     const normalized = normalizeSearch(search);
     const url = new URL(`${JOBRIGHT_SITE}/jobs/search`);
+
+    if (normalized.params) {
+      for (const [key, value] of Object.entries(normalized.params)) {
+        if (value == null || value === '') continue;
+        if (key === 'page' || key === 'visit') continue;
+        url.searchParams.set(key, String(value));
+      }
+      // Fresh scrape always starts at the first page of results.
+      url.searchParams.set('position', page > 0 ? String(page * PAGE_SIZE) : '0');
+      return url.toString();
+    }
+
+    // Current Jobright search URL shape (value/country) + legacy aliases.
+    url.searchParams.set('value', normalized.titleKeyword);
+    url.searchParams.set('country', countryCodeFromLocation(normalized.location));
     url.searchParams.set('titleKeyword', normalized.titleKeyword);
     if (normalized.location) url.searchParams.set('location', normalized.location);
     url.searchParams.set('visit', 'search');
-    // SSR only reliably returns the first page; keep page=0 for the initial tab.
-    // Real pagination uses swan-api (position/count), not this query param.
-    if (page > 0) url.searchParams.set('page', String(page));
+    url.searchParams.set('position', page > 0 ? String(page * PAGE_SIZE) : '0');
     return url.toString();
   }
 
   function buildSwanApiCandidateUrls(search, position, count) {
     const normalized = normalizeSearch(search);
-    const kw = encodeURIComponent(normalized.titleKeyword);
-    const loc = encodeURIComponent(normalized.location || '');
     const size = Math.max(1, Math.min(Number(count) || PAGE_SIZE, 50));
     const pos = Math.max(0, Number(position) || 0);
-    return [
-      `${SWAN_API}/swan/search/list/jobs?titleKeyword=${kw}&location=${loc}&position=${pos}&count=${size}`,
-      `${SWAN_API}/swan/job/search/list?titleKeyword=${kw}&location=${loc}&position=${pos}&count=${size}`,
-      `${SWAN_API}/swan/recommend/list/jobs?position=${pos}&count=${size}${pos === 0 ? '&refresh=true' : ''}`,
-    ];
+    const kw = encodeURIComponent(normalized.titleKeyword);
+    const loc = encodeURIComponent(normalized.location || '');
+    const country = encodeURIComponent(countryCodeFromLocation(normalized.location));
+    const urls = [];
+
+    if (normalized.params) {
+      const qs = buildQueryFromParams(normalized.params, { position: pos, count: size });
+      if (!qs.has('value') && !qs.has('titleKeyword')) qs.set('value', normalized.titleKeyword);
+      if (!qs.has('country') && !qs.has('location')) qs.set('country', countryCodeFromLocation(normalized.location));
+      const q = qs.toString();
+      urls.push(`${SWAN_API}/swan/search/list/jobs?${q}`);
+      urls.push(`${SWAN_API}/swan/job/search/list?${q}`);
+    }
+
+    // New-style minimal query.
+    urls.push(
+      `${SWAN_API}/swan/search/list/jobs?value=${kw}&country=${country}&position=${pos}&count=${size}`
+    );
+    urls.push(
+      `${SWAN_API}/swan/job/search/list?value=${kw}&country=${country}&position=${pos}&count=${size}`
+    );
+
+    // Legacy titleKeyword/location.
+    urls.push(
+      `${SWAN_API}/swan/search/list/jobs?titleKeyword=${kw}&location=${loc}&position=${pos}&count=${size}`
+    );
+    urls.push(
+      `${SWAN_API}/swan/job/search/list?titleKeyword=${kw}&location=${loc}&position=${pos}&count=${size}`
+    );
+
+    urls.push(
+      `${SWAN_API}/swan/recommend/list/jobs?position=${pos}&count=${size}${pos === 0 ? '&refresh=true' : ''}`
+    );
+    return urls;
   }
 
   function collectJobRowsFromPayload(payload, out) {
@@ -196,18 +311,43 @@
    */
   async function fetchSearchApiPageInTab(search, position, count) {
     const SWAN_API = 'https://swan-api.jobright.ai';
-    const titleKeyword = String(search?.titleKeyword || '').trim() || 'Software Engineer';
+    const PAGE_SIZE = 20;
+    const PAGING_KEYS = new Set(['position', 'count', 'page', 'refresh', 'visit']);
+    const titleKeyword = String(
+      search?.titleKeyword || search?.value || ''
+    ).trim() || 'Software Engineer';
     const location = String(search?.location || '').trim() || 'United States';
+    const country =
+      String(search?.params?.country || '').trim() ||
+      (/canada/i.test(location) ? 'CA' : /united kingdom|\buk\b/i.test(location) ? 'GB' : 'US');
     const kw = encodeURIComponent(titleKeyword);
     const loc = encodeURIComponent(location);
-    const size = Math.max(1, Math.min(Number(count) || 20, 50));
+    const ctry = encodeURIComponent(country);
+    const size = Math.max(1, Math.min(Number(count) || PAGE_SIZE, 50));
     const pos = Math.max(0, Number(position) || 0);
 
-    const candidates = [
+    const candidates = [];
+    if (search?.params && typeof search.params === 'object') {
+      const qs = new URLSearchParams();
+      for (const [key, value] of Object.entries(search.params)) {
+        if (value == null || value === '' || PAGING_KEYS.has(key)) continue;
+        qs.set(key, String(value));
+      }
+      if (!qs.has('value') && !qs.has('titleKeyword')) qs.set('value', titleKeyword);
+      if (!qs.has('country') && !qs.has('location')) qs.set('country', country);
+      qs.set('position', String(pos));
+      qs.set('count', String(size));
+      const q = qs.toString();
+      candidates.push(`${SWAN_API}/swan/search/list/jobs?${q}`);
+      candidates.push(`${SWAN_API}/swan/job/search/list?${q}`);
+    }
+    candidates.push(
+      `${SWAN_API}/swan/search/list/jobs?value=${kw}&country=${ctry}&position=${pos}&count=${size}`,
+      `${SWAN_API}/swan/job/search/list?value=${kw}&country=${ctry}&position=${pos}&count=${size}`,
       `${SWAN_API}/swan/search/list/jobs?titleKeyword=${kw}&location=${loc}&position=${pos}&count=${size}`,
       `${SWAN_API}/swan/job/search/list?titleKeyword=${kw}&location=${loc}&position=${pos}&count=${size}`,
-      `${SWAN_API}/swan/recommend/list/jobs?position=${pos}&count=${size}${pos === 0 ? '&refresh=true' : ''}`,
-    ];
+      `${SWAN_API}/swan/recommend/list/jobs?position=${pos}&count=${size}${pos === 0 ? '&refresh=true' : ''}`
+    );
 
     function collect(payload, out) {
       if (!payload) return;
@@ -429,29 +569,58 @@
     const normalized = normalizeSearch(search);
     const parts = [normalized.titleKeyword];
     if (normalized.location) parts.push(normalized.location);
+    if (normalized.params) {
+      const ignored = new Set([
+        'value',
+        'titleKeyword',
+        'keyword',
+        'q',
+        'location',
+        'country',
+        'position',
+        'count',
+        'page',
+        'refresh',
+        'visit',
+        'searchType',
+        'jobTaxonomyList',
+        'sortCondition',
+      ]);
+      const filterCount = Object.keys(normalized.params).filter((k) => !ignored.has(k)).length;
+      if (filterCount > 0) parts.push(`${filterCount} filters`);
+    }
     return parts.join(' · ');
   }
 
   /**
-   * Parse a Jobright search URL into { titleKeyword, location }.
+   * Parse a Jobright search URL into { titleKeyword, location, params? }.
+   * Supports legacy titleKeyword/location and current value/country (+ filters).
    * @returns {{ ok: true, search: object, sourceUrl: string } | { ok: false, error: string }}
    */
   function parseSearchFromInput(rawInput) {
     const raw = String(rawInput || '').trim();
     if (!raw) {
-      return { ok: false, error: 'Paste a Jobright search URL (jobs/search?titleKeyword=…).' };
+      return {
+        ok: false,
+        error: 'Paste a Jobright search URL (jobs/search?value=… or titleKeyword=…).',
+      };
     }
 
     try {
       let url;
       if (/^https?:\/\//i.test(raw)) {
         url = new URL(raw);
-      } else if (raw.includes('titleKeyword=') || raw.includes('/jobs/search')) {
+      } else if (
+        raw.includes('titleKeyword=') ||
+        raw.includes('value=') ||
+        raw.includes('/jobs/search')
+      ) {
         url = new URL(raw.startsWith('/') ? raw : `/${raw}`, JOBRIGHT_SITE);
       } else {
         return {
           ok: false,
-          error: 'Paste a full Jobright search URL, e.g. https://jobright.ai/jobs/search?titleKeyword=…',
+          error:
+            'Paste a full Jobright search URL, e.g. https://jobright.ai/jobs/search?value=Software+Engineer&country=US',
         };
       }
 
@@ -475,23 +644,46 @@
         }
       }
 
+      if (/\/jobs\/recommend\/?$/i.test(url.pathname) && ![...url.searchParams.keys()].length) {
+        return {
+          ok: false,
+          error:
+            'Recommended feed URLs cannot be imported. Open Jobs → Search, apply filters, then copy that URL.',
+        };
+      }
+
+      const params = {};
+      url.searchParams.forEach((value, key) => {
+        params[key] = value;
+      });
+
       const titleKeyword =
         url.searchParams.get('titleKeyword') ||
+        url.searchParams.get('value') ||
         url.searchParams.get('keyword') ||
         url.searchParams.get('q') ||
+        taxonomyTitleFromParams(url) ||
         '';
-      const location = url.searchParams.get('location') || '';
+      const location =
+        url.searchParams.get('location') ||
+        mapCountryToLocation(url.searchParams.get('country')) ||
+        '';
 
       if (!titleKeyword.trim()) {
         return {
           ok: false,
-          error: 'No titleKeyword found in that URL. Search on Jobright, then copy the address bar URL.',
+          error:
+            'No search keyword found in that URL (need value= or titleKeyword=). Search on Jobright, then copy the address bar URL.',
         };
       }
 
       return {
         ok: true,
-        search: normalizeSearch({ titleKeyword, location }),
+        search: normalizeSearch({
+          titleKeyword,
+          location,
+          params: Object.keys(params).length ? params : null,
+        }),
         sourceUrl: url.toString(),
       };
     } catch (_) {

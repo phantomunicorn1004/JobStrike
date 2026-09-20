@@ -181,10 +181,14 @@
 
     const jrStored = result[STORAGE.jobrightSearch];
     if (jrStored && typeof jrStored === 'object') {
-      state.jobrightSearch = {
+      const jr = jrApi();
+      state.jobrightSearch = jr?.normalizeSearch?.(jrStored) || {
         ...DEFAULT_JOBRIGHT_SEARCH,
         titleKeyword: String(jrStored.titleKeyword || DEFAULT_JOBRIGHT_SEARCH.titleKeyword),
         location: String(jrStored.location || DEFAULT_JOBRIGHT_SEARCH.location),
+        ...(jrStored.params && typeof jrStored.params === 'object'
+          ? { params: jrStored.params }
+          : {}),
       };
       state.jobrightSearchSourceUrl = String(jrStored.sourceUrl || '');
     } else {
@@ -224,6 +228,7 @@
       [STORAGE.jobrightSearch]: {
         titleKeyword: state.jobrightSearch.titleKeyword,
         location: state.jobrightSearch.location,
+        ...(state.jobrightSearch.params ? { params: state.jobrightSearch.params } : {}),
         sourceUrl: state.jobrightSearchSourceUrl || '',
         updatedAt: new Date().toISOString(),
       },
@@ -644,6 +649,7 @@
     const panel = document.getElementById('jsJrSearchImportPanel');
     const isCustom =
       Boolean(state.jobrightSearchSourceUrl) ||
+      Boolean(state.jobrightSearch.params) ||
       state.jobrightSearch.titleKeyword !== DEFAULT_JOBRIGHT_SEARCH.titleKeyword ||
       state.jobrightSearch.location !== DEFAULT_JOBRIGHT_SEARCH.location;
 
@@ -693,6 +699,7 @@
     state.jobrightSearch = jr?.normalizeSearch?.(search) || {
       titleKeyword: String(search?.titleKeyword || DEFAULT_JOBRIGHT_SEARCH.titleKeyword),
       location: String(search?.location || DEFAULT_JOBRIGHT_SEARCH.location),
+      ...(search?.params ? { params: search.params } : {}),
     };
     state.jobrightSearchSourceUrl = sourceUrl || '';
     await persistJobrightSearch();
