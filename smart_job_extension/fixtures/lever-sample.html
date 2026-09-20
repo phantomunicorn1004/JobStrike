@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Lever application fixture — Smart Job Autofill</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 720px; }
+    .application-question { margin-bottom: 16px; list-style: none; }
+    .application-label { font-weight: 600; margin-bottom: 4px; }
+    .required { color: #c00; }
+    input[type="text"], input[type="email"], input[type="tel"], textarea { width: 100%; padding: 8px; box-sizing: border-box; }
+    .dropdown-container { border: 1px solid #ccc; display: none; }
+    .dropdown-container.open { display: block; }
+    .dropdown-row { padding: 6px 10px; cursor: pointer; }
+    .dropdown-row:hover { background: #eef2ff; }
+    .filename:empty + .default-label { display: inline; }
+    .filename:not(:empty) + .default-label { display: none; }
+  </style>
+</head>
+<body>
+  <div class="content-wrapper application-page">
+    <div class="section posting-header page-centered">
+      <h2>Senior Data Engineer</h2>
+      <div class="posting-categories">
+        <div class="posting-category department">D.A. Davidson &amp; Co. – Information Technology /</div>
+      </div>
+    </div>
+
+    <form id="application-form" enctype="multipart/form-data" method="POST">
+      <div class="section application-form page-centered">
+        <h4>Submit your application</h4>
+        <ul>
+          <li class="application-question resume">
+            <label>
+              <div class="application-label"><span class="text">Resume/CV <span class="required">✱</span></span></div>
+              <div class="application-field">
+                <a href="#" class="postings-btn template-btn-utility visible-resume-upload">
+                  <span class="filename"></span>
+                  <span class="default-label">ATTACH RESUME/CV</span>
+                  <input class="application-file-input invisible-resume-upload" data-qa="input-resume" id="resume-upload-input" name="resume" tabindex="-1" type="file" accept=".pdf,.doc,.docx">
+                </a>
+              </div>
+            </label>
+          </li>
+          <li class="application-question">
+            <label>
+              <div class="application-label"><span class="text">Full name<span class="required">✱</span></span></div>
+              <div class="application-field">
+                <input type="text" data-qa="name-input" name="name" required>
+              </div>
+            </label>
+          </li>
+          <li class="application-question">
+            <label>
+              <div class="application-label"><span class="text">Email<span class="required">✱</span></span></div>
+              <div class="application-field">
+                <input name="email" data-qa="email-input" type="email" required>
+              </div>
+            </label>
+          </li>
+          <li class="application-question">
+            <label>
+              <div class="application-label"><span class="text">Phone <span class="required">✱</span></span></div>
+              <div class="application-field">
+                <input type="text" data-qa="phone-input" name="phone" required>
+              </div>
+            </label>
+          </li>
+          <li class="application-question" data-qa="structured-contact-location-question">
+            <label>
+              <div class="application-label"><span class="text">Current location </span></div>
+              <div class="application-field">
+                <input class="location-input" data-qa="location-input" id="location-input" type="text" name="location">
+                <input id="selected-location" type="hidden" name="selectedLocation" value="">
+                <div class="dropdown-container">
+                  <div class="dropdown-results"></div>
+                </div>
+              </div>
+            </label>
+          </li>
+          <li class="application-question">
+            <label>
+              <div class="application-label"><span class="text">Current company </span></div>
+              <div class="application-field">
+                <input type="text" data-qa="org-input" name="org">
+              </div>
+            </label>
+          </li>
+        </ul>
+      </div>
+
+      <div class="section application-form page-centered">
+        <h4>Links</h4>
+        <ul>
+          <li class="application-question">
+            <label>
+              <div class="application-label"><span class="text">LinkedIn URL</span></div>
+              <div class="application-field">
+                <input type="text" name="urls[LinkedIn]">
+              </div>
+            </label>
+          </li>
+        </ul>
+      </div>
+
+      <div class="section application-form page-centered" data-qa="additional-cards">
+        <h4 data-qa="card-name">Cover Letter Upload</h4>
+        <ul>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width file-upload">
+                <div class="text">If you have a cover letter you would like to share with the hiring team, please do so here.</div>
+              </div>
+              <div class="application-field full-width">
+                <a href="#" class="upload-file-overlay">
+                  <span class="filename" data-qa="filename"></span>
+                  <span class="default-label">Upload file</span>
+                  <input type="file" class="application-file-input" name="cards[cover][field0]" data-qa="application-file-upload">
+                </a>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="section application-form page-centered" data-qa="additional-cards">
+        <h4 data-qa="card-name">Employment</h4>
+        <ul>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width multiple-choice">
+                <div class="text">Please provide your employment history below. If you have not had 5 employers, please fill what you can and write "N/A" for the remainder.<span class="required">✱</span></div>
+              </div>
+              <div class="application-field full-width required-field">
+                <ul data-qa="multiple-choice">
+                  <li><label><input type="radio" name="cards[emp][field0]" value="I have read this" required><span class="application-answer-alternative">I have read this</span></label></li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width text"><div class="text">1. Employer Name<span class="required">✱</span></div></div>
+              <div class="application-field full-width required-field">
+                <input class="card-field-input" type="text" name="cards[emp][field1]" placeholder="Type your response">
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width text"><div class="text">Job Title<span class="required">✱</span></div></div>
+              <div class="application-field full-width required-field">
+                <input class="card-field-input" type="text" name="cards[emp][field2]" placeholder="Type your response">
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width multiple-choice"><div class="text">Is this your current employer?<span class="required">✱</span></div></div>
+              <div class="application-field full-width required-field">
+                <ul data-qa="multiple-choice">
+                  <li><label><input type="radio" name="cards[emp][field3]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+                  <li><label><input type="radio" name="cards[emp][field3]" value="No" required><span class="application-answer-alternative">No</span></label></li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width textarea"><div class="text">Summarize the nature of the work performed &amp; job responsibilities<span class="required">✱</span></div></div>
+              <div class="application-field full-width required-field">
+                <textarea class="card-field-input" name="cards[emp][field4]" rows="3"></textarea>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="section application-form page-centered" data-qa="additional-cards">
+        <h4 data-qa="card-name">General Application Questions</h4>
+        <ul>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width multiple-choice">
+                <div class="text">Have you ever been employed by D.A. Davidson Companies?<span class="required">✱</span></div>
+              </div>
+              <div class="application-field full-width required-field">
+                <ul data-qa="multiple-choice">
+                  <li><label><input type="radio" name="cards[auth][field0]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+                  <li><label><input type="radio" name="cards[auth][field0]" value="No" required><span class="application-answer-alternative">No</span></label></li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width text">
+                <div class="text">If yes, what was your last year of employment with the company? Type N/A if not applicable<span class="required">✱</span></div>
+              </div>
+              <div class="application-field full-width required-field">
+                <input class="card-field-input" type="text" name="cards[auth][field1]" placeholder="Type your response" required>
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width multiple-choice">
+                <div class="text">Are you legally authorized to work in the United States without sponsorship?<span class="required">✱</span></div>
+              </div>
+              <div class="application-field full-width required-field">
+                <ul data-qa="multiple-choice">
+                  <li><label><input type="radio" name="cards[auth][field2]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+                  <li><label><input type="radio" name="cards[auth][field2]" value="No" required><span class="application-answer-alternative">No</span></label></li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width multiple-choice">
+                <div class="text">Will you now or in the future require D.A. Davidson Companies to commence ("sponsor") an immigration case to lawfully employ you in the United States (for example, H-1B or other employment-based immigration case)?<span class="required">✱</span></div>
+              </div>
+              <div class="application-field full-width required-field">
+                <ul data-qa="multiple-choice">
+                  <li><label><input type="radio" name="cards[auth][field3]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+                  <li><label><input type="radio" name="cards[auth][field3]" value="No" required><span class="application-answer-alternative">No</span></label></li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width multiple-select">
+                <div class="text">IMPORTANT – PLEASE READ: If you are employed by D.A. Davidson Companies, securities industry regulations require that your fingerprints be submitted to the FBI.<span class="required">✱</span></div>
+              </div>
+              <div class="application-field full-width required-field">
+                <ul data-qa="checkboxes">
+                  <li><label><input type="checkbox" name="cards[auth][field4]" value="I have read this"><span class="application-answer-alternative">I have read this</span></label></li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width text"><div class="text">MARYLAND POLYGRAPH STATEMENT</div></div>
+              <div class="application-label full-width text">
+                <div class="text">Under Maryland law, an employer may not require or demand, as a condition of employment, prospective employment, or continued employment, that an individual submit to or take a polygraph examination or similar test. An employer who violates this law is guilty of a misdemeanor and subject to a fine not exceeding $100.<span class="required">✱</span></div>
+              </div>
+              <div class="application-field full-width required-field">
+                <ul data-qa="checkboxes">
+                  <li><label><input type="checkbox" name="cards[auth][field6]" value="I have read this"><span class="application-answer-alternative">I have read this</span></label></li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width text"><div class="text">MASSACHUSETTS LIE DETECTOR STATEMENT</div></div>
+              <div class="application-label full-width text">
+                <div class="text">It is unlawful in Massachusetts to require or administer a lie detector test as a condition of employment or continued employment. An employer who violates this law shall be subject to criminal penalties and civil liability.<span class="required">✱</span></div>
+              </div>
+              <div class="application-field full-width required-field">
+                <ul data-qa="checkboxes">
+                  <li><label><input type="checkbox" name="cards[auth][field7]" value="I have read this"><span class="application-answer-alternative">I have read this</span></label></li>
+                </ul>
+              </div>
+            </div>
+          </li>
+          <li class="application-question custom-question">
+            <div>
+              <div class="application-label full-width multiple-choice">
+                <div class="text">Have you been convicted of, or pled guilty or nolo contendere (“no contest”) in a domestic, foreign, or military court to any felony in the past 10 years?<span class="required">✱</span></div>
+              </div>
+              <div class="application-field full-width required-field">
+                <ul data-qa="multiple-choice">
+                  <li><label><input type="radio" name="cards[auth][field5]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+                  <li><label><input type="radio" name="cards[auth][field5]" value="No" required><span class="application-answer-alternative">No</span></label></li>
+                </ul>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <button id="btn-submit" type="button" data-qa="btn-submit">Submit application</button>
+    </form>
+  </div>
+
+  <script>
+    const locInput = document.getElementById('location-input');
+    const locHidden = document.getElementById('selected-location');
+    const panel = document.querySelector('.dropdown-container');
+    const results = document.querySelector('.dropdown-results');
+    const cities = ['San Francisco, CA, USA', 'San Jose, CA, USA', 'Seattle, WA, USA'];
+
+    locInput.addEventListener('input', () => {
+      const q = locInput.value.trim().toLowerCase();
+      results.innerHTML = '';
+      if (!q) { panel.classList.remove('open'); return; }
+      cities.filter((c) => c.toLowerCase().includes(q)).forEach((city) => {
+        const row = document.createElement('div');
+        row.className = 'dropdown-row';
+        row.textContent = city;
+        row.addEventListener('click', () => {
+          locInput.value = city;
+          locHidden.value = city;
+          panel.classList.remove('open');
+        });
+        results.appendChild(row);
+      });
+      panel.classList.add('open');
+    });
+  </script>
+</body>
+</html>
