@@ -1,0 +1,104 @@
+{
+  "manifest_version": 3,
+  "name": "Remote Helper Ext",
+  "version": "4.12.7",
+  "description": "Chrome extension for Remote Helper — autofill job applications, custom Q&A, Resume DB registration, and HiringCafe job scraping.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "unlimitedStorage",
+    "scripting",
+    "downloads",
+    "sidePanel",
+    "tabs",
+    "identity"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*",
+    "https://*.vercel.app/*",
+    "https://www.googleapis.com/*",
+    "https://accounts.google.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Remote Helper Ext",
+    "default_popup": "launcher.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "commands": {
+    "refresh-current-tab": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+J",
+        "mac": "Command+Shift+J"
+      },
+      "description": "Scrape current job and add it to saved jobs"
+    },
+    "start-element-text-picker": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+E",
+        "mac": "Command+Shift+E"
+      },
+      "description": "Extract text from a page element"
+    },
+    "open-assistant-left": {
+      "description": "Open Job Assistant docked on the left"
+    },
+    "open-assistant-movable": {
+      "description": "Open Job Assistant as a movable dialog"
+    },
+    "open-assistant-right": {
+      "description": "Open Job Assistant docked on the right"
+    },
+    "open-assistant-panel": {
+      "description": "Open Job Assistant in Chrome right-side pinned panel"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["field-registry.js", "content.js", "assistant-overlay.js", "website-bridge.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "sidepanel.html",
+        "sidepanel.css",
+        "layout.css",
+        "theme.css",
+        "theme.js",
+        "toast.js",
+        "tab-session.js",
+        "clipboard.js",
+        "ai-fill.js",
+        "job-url.js",
+        "company-name.js",
+        "job-scraper-hiringcafe.js",
+        "job-scraper-panel.js",
+        "register-resume-db.js",
+        "sidepanel.js",
+        "icons/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

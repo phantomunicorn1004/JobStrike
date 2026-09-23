@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rippling application fixture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 640px; }
+    [data-testid="field"] { margin-bottom: 16px; }
+    [id$="-label"] { display: block; font-weight: 600; margin-bottom: 4px; }
+    input { width: 100%; padding: 8px; box-sizing: border-box; }
+    [role="listbox"] { border: 1px solid #ccc; margin-top: 4px; padding: 4px 0; display: none; }
+    [role="listbox"].open { display: block; }
+    [role="option"] { padding: 6px 10px; cursor: pointer; }
+    [role="option"]:hover { background: #eef2ff; }
+    .css-hyyaj0 { border: 1px solid #cbd5e1; padding: 8px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <form>
+    <h4 class="css-19w1hyc">Application: Senior Infrastructure Engineer</h4>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-122-label">Résumé</span>
+      <label data-testid="resume">
+        <input accept=".pdf" data-testid="input-resume" type="file" />
+      </label>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-126-label">First name</span>
+      <div data-testid="first_name">
+        <input data-input="first_name" data-testid="input-first_name" id="field-126" placeholder="First name" aria-labelledby="field-126-label" name="DPDpHRBubB" />
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-130-label">Last name</span>
+      <div data-testid="last_name">
+        <input data-input="last_name" data-testid="input-last_name" id="field-130" placeholder="Last name" aria-labelledby="field-130-label" name="5eQoDDRo-9Q" />
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-134-label">Email</span>
+      <div data-testid="email">
+        <input data-input="email" data-testid="input-email" id="field-134" type="email" placeholder="Email" aria-labelledby="field-134-label" name="Wh4f6aIOaa0" />
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-145-label">Current company</span>
+      <div data-testid="current_company">
+        <input data-input="current_company" data-testid="input-current_company" id="field-145" placeholder="Current company" aria-labelledby="field-145-label" name="W-Piz2v3WUU" />
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-149-label">Phone number</span>
+      <div data-testid="phone_number">
+        <input data-input="phone_number" data-testid="input-phone_number" id="field-149" type="tel" placeholder="Phone number" aria-labelledby="field-149-label" name="ZhKYOq3ahS9" />
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-160-label">Location</span>
+      <div data-testid="location">
+        <input data-testid="input-undefined" id="field-160" aria-autocomplete="list" aria-haspopup="listbox" aria-labelledby="field-160-label" name="41OynTlSUri" />
+        <div id="location-listbox" role="listbox" class="open">
+          <div role="option">San Francisco, CA</div>
+          <div role="option">San Jose, CA</div>
+        </div>
+      </div>
+      <input data-input="externalPlaceId" data-testid="input-externalPlaceId" type="hidden" name="SgWxBBt0mNQ" />
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-165-label">Pronouns</span>
+      <div data-testid="pronouns_strategy">
+        <div data-testid="select-controller">
+          <input data-input="select-search-input" data-testid="input-select-search-input" id="field-165" role="combobox" aria-labelledby="field-165-label" placeholder="Select..." name="pronounsField" />
+          <div role="listbox">
+            <div role="option">He/Him</div>
+            <div role="option">She/Her</div>
+            <div role="option">They/Them</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-169-label">LinkedIn Link</span>
+      <div data-testid="linkedin_link">
+        <input data-input="linkedin_link" data-testid="input-linkedin_link" id="field-169" placeholder="LinkedIn Link" aria-labelledby="field-169-label" name="qlaPLCJMvQN" />
+      </div>
+    </div>
+
+    <p>U.S. Equal Opportunity Employment Information (Completion is voluntary)</p>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-177-label">Gender</span>
+      <div data-testid="eeoc.gender">
+        <div data-testid="select-controller">
+          <div id="field-177" role="combobox" aria-labelledby="field-177-label" aria-label="Select..." tabindex="0" class="css-hyyaj0"><p>Select...</p></div>
+          <div id="gender-listbox" role="listbox">
+            <div role="option">Male</div>
+            <div role="option">Female</div>
+            <div role="option">Decline to self-identify</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-183-label">Please identify your race</span>
+      <div data-testid="eeoc.race">
+        <div data-testid="select-controller">
+          <div id="field-183" role="combobox" aria-labelledby="field-183-label" aria-label="Select..." tabindex="0" class="css-hyyaj0"><p>Select...</p></div>
+          <div id="race-listbox" role="listbox">
+            <div role="option">Asian (Not Hispanic or Latino)</div>
+            <div role="option">White (Not Hispanic or Latino)</div>
+            <div role="option">Black or African American</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-190-label">Are you Hispanic/Latino?</span>
+      <div data-testid="eeoc.hispanicOrLatino">
+        <div data-testid="select-controller">
+          <div id="field-190" role="combobox" aria-labelledby="field-190-label" tabindex="0" class="css-hyyaj0"><p>Select...</p></div>
+          <div role="listbox">
+            <div role="option">Yes</div>
+            <div role="option">No</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-196-label">Veteran Status</span>
+      <div data-testid="eeoc.veteranStatus">
+        <div data-testid="select-controller">
+          <div id="field-196" role="combobox" aria-labelledby="field-196-label" tabindex="0" class="css-hyyaj0"><p>Select...</p></div>
+          <div role="listbox">
+            <div role="option">I am not a protected veteran</div>
+            <div role="option">I am a protected veteran</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="css-fuqajr" data-testid="field">
+      <span id="field-202-label">Disability Status</span>
+      <div data-testid="eeoc.disabilityStatus">
+        <div data-testid="select-controller">
+          <div id="field-202" role="combobox" aria-labelledby="field-202-label" tabindex="0" class="css-hyyaj0"><p>Select...</p></div>
+          <div role="listbox">
+            <div role="option">No, I do not have a disability</div>
+            <div role="option">Yes, I have a disability</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button data-testid="Apply" type="submit">Apply</button>
+  </form>
+  <script>
+    document.querySelectorAll('[role="combobox"][tabindex="0"]').forEach((combo) => {
+      combo.addEventListener('click', () => {
+        const lb = combo.parentElement.querySelector('[role="listbox"]');
+        if (lb) lb.classList.toggle('open');
+      });
+    });
+    document.querySelectorAll('[role="option"]').forEach((opt) => {
+      opt.addEventListener('click', () => {
+        const lb = opt.closest('[role="listbox"]');
+        const combo = lb && lb.parentElement.querySelector('[role="combobox"]');
+        if (combo && combo.querySelector('p')) combo.querySelector('p').textContent = opt.textContent;
+        if (lb) lb.classList.remove('open');
+      });
+    });
+  </script>
+</body>
+</html>

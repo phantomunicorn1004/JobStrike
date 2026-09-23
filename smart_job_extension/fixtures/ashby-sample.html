@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Software Engineer — Example Corp (Ashby fixture)</title>
+  <style>
+    .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+  </style>
+</head>
+<body>
+  <header class="company-name">Example Corp</header>
+  <main role="main">
+    <h1 class="ashby-job-posting-heading">Software Engineer</h1>
+    <div tabindex="0" role="tabpanel" id="form">
+      <div class="ashby-application-form-autofill-uploader">
+        <input type="file" id="autofill-resume-only" accept=".pdf,.doc,.docx" class="visually-hidden" tabindex="-1">
+        <p>Autofill from resume (extension should skip this uploader)</p>
+      </div>
+      <div class="ashby-application-form-container">
+        <div class="ashby-application-form-field-entry" data-field-path="_systemfield_name">
+          <label class="ashby-application-form-question-title" for="_systemfield_name">Full Name</label>
+          <input id="_systemfield_name" name="_systemfield_name" type="text" required>
+        </div>
+        <div class="ashby-application-form-field-entry" data-field-path="_systemfield_email">
+          <label class="ashby-application-form-question-title" for="_systemfield_email">Email</label>
+          <input id="_systemfield_email" name="_systemfield_email" type="email" required>
+        </div>
+        <div class="ashby-application-form-field-entry" data-field-path="_systemfield_phone">
+          <label class="ashby-application-form-question-title" for="phone-custom">Phone Number</label>
+          <input id="phone-custom" name="phone-custom" type="tel" required>
+        </div>
+        <div class="ashby-application-form-field-entry" data-field-path="_systemfield_resume">
+          <label class="ashby-application-form-question-title" for="_systemfield_resume">Resume</label>
+          <input id="_systemfield_resume" name="_systemfield_resume" type="file" accept=".pdf,.doc,.docx" required>
+        </div>
+        <div class="ashby-application-form-field-entry" data-field-path="_systemfield_location">
+          <label class="ashby-application-form-question-title" for="loc">Location</label>
+          <input id="loc" role="combobox" aria-autocomplete="list" placeholder="Start typing..." value="">
+        </div>
+        <div class="ashby-application-form-field-entry" data-field-path="linkedin-custom">
+          <label class="ashby-application-form-question-title" for="linkedin-custom">LinkedIn Profile</label>
+          <input id="linkedin-custom" name="linkedin-custom" type="text">
+        </div>
+        <div class="ashby-application-form-field-entry" data-field-path="sponsorship-q">
+          <label class="ashby-application-form-question-title">Will you require company sponsorship now or in the future?</label>
+          <div class="_yesno">
+            <button type="button">Yes</button>
+            <button type="button">No</button>
+            <input type="checkbox" class="visually-hidden" tabindex="-1" name="sponsorship-q">
+          </div>
+        </div>
+        <div data-field-path="work-auth-q" class="ashby-application-form-field-entry">
+          <label class="ashby-application-form-question-title">Are you authorized to work in the country you are applying to?</label>
+          <div class="_yesno">
+            <button type="button">Yes</button>
+            <button type="button">No</button>
+            <input type="checkbox" class="visually-hidden" tabindex="-1" name="work-auth-q">
+          </div>
+        </div>
+      </div>
+      <div class="ashby-survey-form-container">
+        <div data-field-path="_systemfield_eeoc_gender">
+          <fieldset>
+            <label class="ashby-application-form-question-title">Gender</label>
+            <div>
+              <input type="radio" id="eeoc-g-0" name="eeoc-gender-group">
+              <label for="eeoc-g-0">Male</label>
+            </div>
+            <div>
+              <input type="radio" id="eeoc-g-1" name="eeoc-gender-group">
+              <label for="eeoc-g-1">Female</label>
+            </div>
+            <div>
+              <input type="radio" id="eeoc-g-2" name="eeoc-gender-group">
+              <label for="eeoc-g-2">Decline to self-identify</label>
+            </div>
+          </fieldset>
+        </div>
+      </div>
+      <button type="submit" class="ashby-application-form-submit-button">Submit Application</button>
+    </div>
+  </main>
+</body>
+</html>
