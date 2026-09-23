@@ -160,7 +160,39 @@ export function parseJobrightPublishDate(
   return parseRelativePublishDesc(jr.publishTimeDesc || jr.posted, nowMs);
 }
 
-export function extractJobrightJobFields(raw: unknown): ScrapedJob & { id?: string | null } {
+/** Local display: 2026-09-18 21:34 */
+export function formatJobrightPostedAtLocal(value: unknown): string {
+  if (value == null || value === "") return "";
+  const raw = String(value).trim();
+  let d = new Date(raw);
+  if (Number.isNaN(d.getTime())) {
+    const match = raw.match(
+      /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d+)?Z?$/,
+    );
+    if (match) {
+      d = new Date(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        Number(match[4]),
+        Number(match[5]),
+      );
+    }
+  }
+  if (Number.isNaN(d.getTime())) return raw;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day} ${hh}:${mm}`;
+}
+
+export function extractJobrightJobFields(raw: unknown): ScrapedJob & {
+  id?: string | null;
+  posted_at?: string | null;
+  source?: string;
+} {
   const row = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const jr = (
     row.jobResult && typeof row.jobResult === "object"
@@ -176,36 +208,161 @@ export function extractJobrightJobFields(raw: unknown): ScrapedJob & { id?: stri
   const jobId = serializeField(jr.jobId || jr.id || row.jobId);
   const applyUrl =
     serializeField(jr.applyLink || jr.applyUrl || jr.applicationUrl) ||
-    // Prefer ATS when present; Jobright detail is last resort for open/review only.
     (jobId ? `${JOBRIGHT_SITE}/jobs/info/${jobId}` : null);
-
-  const requirements =
-    joinList(jr.requirements) ||
-    serializeField(jr.jobSummary) ||
-    serializeField(jr.jobDescription);
-  const tools = joinList(jr.skillSummaries || jr.skills || jr.technicalSkills);
-  const activities = joinList(jr.coreResponsibilities || jr.responsibilities);
+  const postedAt = parseJobrightPublishDate(jr);
 
   return {
     id: jobId,
     apply_url: applyUrl,
+    posted_at: formatJobrightPostedAtLocal(postedAt),
     title: serializeField(jr.jobTitle || jr.title),
-    core_job_title: serializeField(jr.jobTitle || jr.title),
-    requirements_summary: requirements,
-    technical_tools: tools,
-    job_category: serializeField(jr.jobSeniority || jr.jobCategory || jr.department),
-    estimated_publish_date: parseJobrightPublishDate(jr),
-    role_activities: activities,
     company_name:
       serializeField(cr.companyName) ||
       serializeField(jr.companyName) ||
       serializeField(row.companyName),
-    company_tagline:
-      serializeField(cr.companyTagline) ||
-      serializeField(cr.tagline) ||
-      serializeField(jr.workModel),
     application_site: detectPlatform(applyUrl),
+    // Compat for shared ScrapedJob / date filtering.
+    core_job_title: null,
+    requirements_summary: null,
+    technical_tools: null,
+    job_category: null,
+    estimated_publish_date: postedAt,
+    role_activities: null,
+    company_tagline: null,
+    source: "jobright",
   };
+}
+
+function postedAtSortKey(job: {
+  estimated_publish_date?: string | null;
+  posted_at?: string | null;
+}): number {
+  const raw = job.estimated_publish_date || job.posted_at || "";
+  const ms = Date.parse(String(raw));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function companyKey(job: { company_name?: string | null }): string {
+  return String(job.company_name || "")
+    .trim()
+    .toLowerCase();
+}
+
+/** ATS Z→A, company A→Z (same company adjacent), newest posted first. */
+export function sortJobrightJobsForCsv<T extends ScrapedJob & { posted_at?: string | null }>(
+  jobs: T[],
+): T[] {
+  return [...jobs].sort((a, b) => {
+    const atsA = String(a.application_site || "").toLowerCase();
+    const atsB = String(b.application_site || "").toLowerCase();
+    if (atsA !== atsB) return atsB.localeCompare(atsA);
+    const coA = companyKey(a);
+    const coB = companyKey(b);
+    if (coA !== coB) return coA.localeCompare(coB);
+    return postedAtSortKey(b) - postedAtSortKey(a);
+  });
+}
+
+export function jobrightJobsToCsv(
+  jobs: Array<ScrapedJob & { posted_at?: string | null }>,
+): string {
+  const headers = [
+    "Application Link",
+    "Date Posted",
+    "Job Title",
+    "Company",
+    "Source Platform",
+  ] as const;
+
+  const escape = (value: string | null | undefined) => {
+    const text = value ?? "";
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  const sorted = sortJobrightJobsForCsv(jobs);
+  const rows = sorted.map((job) =>
+    [
+      job.apply_url ?? "",
+      formatJobrightPostedAtLocal(job.posted_at || job.estimated_publish_date || ""),
+      job.title ?? "",
+      job.company_name ?? "",
+      job.application_site ?? "",
+    ]
+      .map(escape)
+      .join(","),
+  );
+
+  return [headers.join(","), ...rows].join("\n");
+}
+
+function escapeXml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** SpreadsheetML (.xls) with white 14pt header text on dark blue. */
+export function jobrightJobsToExcelXml(
+  jobs: Array<ScrapedJob & { posted_at?: string | null }>,
+): string {
+  const headers = [
+    "Application Link",
+    "Date Posted",
+    "Job Title",
+    "Company",
+    "Source Platform",
+  ] as const;
+  const sorted = sortJobrightJobsForCsv(jobs);
+  const headerCells = headers
+    .map(
+      (h) =>
+        `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeXml(h)}</Data></Cell>`,
+    )
+    .join("");
+  const dataRows = sorted
+    .map((job) => {
+      const values = [
+        job.apply_url ?? "",
+        formatJobrightPostedAtLocal(job.posted_at || job.estimated_publish_date || ""),
+        job.title ?? "",
+        job.company_name ?? "",
+        job.application_site ?? "",
+      ];
+      const cells = values
+        .map((v) => `<Cell><Data ss:Type="String">${escapeXml(v)}</Data></Cell>`)
+        .join("");
+      return `<Row>${cells}</Row>`;
+    })
+    .join("");
+
+  return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="Header">
+   <Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="14" ss:FontName="Calibri"/>
+   <Interior ss:Color="#1B4F72" ss:Pattern="Solid"/>
+   <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="Jobs">
+  <Table>
+   <Column ss:Width="280"/>
+   <Column ss:Width="110"/>
+   <Column ss:Width="220"/>
+   <Column ss:Width="120"/>
+   <Column ss:Width="120"/>
+   <Row ss:StyleID="Header">${headerCells}</Row>
+   ${dataRows}
+  </Table>
+ </Worksheet>
+</Workbook>`;
 }
 
 function collectJobRowsFromPayload(payload: unknown, out: unknown[]): void {

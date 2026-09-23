@@ -319,166 +319,205 @@
       <section class="tab-panel" id="tab-job-scraper">
         <div class="tab-panel-scroll js-scraper">
           <header class="js-head">
-            <div class="js-head-text">
-              <h2 class="js-title" id="jsScraperTitle">Job Scraper</h2>
-              <p class="muted js-subtitle" id="jsMeta">Source → search → scrape.</p>
-            </div>
+            <h2 class="js-title">Job Scraper</h2>
+            <p class="js-subtitle">Scrape from multiple sources at once</p>
           </header>
 
-          <section class="js-section js-section-source" aria-label="Scrape source">
-            <div class="js-source-toggle" role="group" aria-label="Job source">
-              <button type="button" class="js-source-btn is-active" data-js-source="hiringcafe" id="jsSourceHiringCafe">
-                <span class="js-source-btn-title">HiringCafe</span>
-                <span class="js-source-btn-desc">Import search URL</span>
-              </button>
-              <button type="button" class="js-source-btn" data-js-source="jobright" id="jsSourceJobright">
-                <span class="js-source-btn-title">Jobright</span>
-                <span class="js-source-btn-desc">Import search URL</span>
-              </button>
-            </div>
-          </section>
-
-          <section class="js-section js-section-search card js-card" aria-labelledby="jsSearchHeading" id="jsSearchCard">
-            <div class="js-section-label" id="jsSearchHeading">
-              Search
-              <span class="js-badge-custom" id="jsSearchCustomBadge" hidden>Custom</span>
-            </div>
-            <div class="js-search-preview" aria-live="polite">
-              <span class="js-search-preview-label" id="jsSearchPreviewLabel">Active search</span>
-              <p class="js-search-preview-value" id="jsSearchSummary">Built-in default</p>
-              <p class="muted small" id="jsSearchSource" hidden></p>
-            </div>
-            <div class="js-inline-tools">
-              <button type="button" class="btn small primary" id="jsOpenEditSearchBtn" data-js-open-modal="import">
-                Edit search
+          <!-- Feed Sources (scrape order: Jobright → HiringCafe) -->
+          <div class="js-sources">
+            <div class="js-source-card">
+              <div class="js-source-header">
+                <div class="js-source-icon">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                  </svg>
+                </div>
+                <div class="js-source-info">
+                  <h3 class="js-source-name">Jobright</h3>
+                  <p class="js-source-status" id="jsJrFeedStatus">Recommend · Most Recent</p>
+                </div>
+              </div>
+              <button type="button" class="btn-icon" id="jsOpenRecommendBtn" title="Open Recommend page">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
               </button>
             </div>
-          </section>
 
-          <section class="js-section js-section-quick card js-card" aria-label="Scrape options">
-            <div class="js-quick-row">
-              <label class="js-field js-field-date">
-                <span>Posted within</span>
-                <select id="jsDateWindow" aria-label="Date window">
-                  <option value="1d">Last 1 day</option>
-                  <option value="3d" selected>Last 3 days</option>
-                  <option value="7d">Last 7 days</option>
-                </select>
-              </label>
-              <button type="button" class="btn js-options-btn" id="jsOpenFiltersBtn" data-js-open-modal="filters">
-                Filters &amp; lists
+            <div class="js-source-card">
+              <div class="js-source-header">
+                <div class="js-source-icon">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+                  </svg>
+                </div>
+                <div class="js-source-info">
+                  <h3 class="js-source-name">HiringCafe</h3>
+                  <p class="js-source-status" id="jsHcFeedStatus">Past 24 hours · Remote</p>
+                </div>
+              </div>
+              <button type="button" class="btn-icon" id="jsEditHcSearchBtn" data-js-open-modal="import" title="Edit search">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                </svg>
               </button>
             </div>
-            <p class="muted small js-profile-hint" id="jsProfileHint">Optional: open Filters to sync profile &amp; hide lists.</p>
-          </section>
+          </div>
 
-          <section class="js-section js-section-actions js-actions-bar" aria-label="Actions">
-            <div class="js-action-row">
-              <button type="button" class="btn primary js-scrape-primary" id="jsScrapeBtn">Scrape jobs</button>
-              <button type="button" class="btn" id="jsResumeBtn" hidden>Resume</button>
-              <button type="button" class="btn" id="jsStopBtn" hidden>Stop</button>
-            </div>
-          </section>
+          <!-- Filters Button -->
+          <button type="button" class="js-filters-card" id="jsOpenFiltersBtn" data-js-open-modal="filters">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+            </svg>
+            <span>Filters & Lists</span>
+            <svg class="js-filters-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
 
-          <section class="js-section js-section-progress card js-card" id="jsProgressSection" hidden>
-            <div class="js-progress" id="jsProgress" data-kind="info" role="status" aria-live="polite">
-              <div class="js-progress-top">
-                <span class="js-progress-label" id="jsProgressLabel"></span>
-                <span class="js-progress-pct" id="jsProgressPct" hidden></span>
-              </div>
-              <div class="js-progress-track" aria-hidden="true">
-                <div class="js-progress-bar" id="jsProgressBar"></div>
-              </div>
-              <p class="js-progress-detail" id="jsProgressDetail" hidden></p>
-            </div>
-          </section>
+          <!-- Main Action -->
+          <button type="button" class="js-scrape-btn" id="jsScrapeBtn">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Scrape Jobs</span>
+          </button>
+          <div class="js-action-secondary">
+            <button type="button" class="btn-secondary" id="jsResumeBtn" hidden>Resume</button>
+            <button type="button" class="btn-secondary" id="jsStopBtn" hidden>Stop</button>
+          </div>
 
-          <section class="js-section js-section-results card js-card js-results-card" aria-labelledby="jsResultsHeading">
-            <div class="js-section-label" id="jsResultsHeading">Results</div>
-            <div class="js-results-toolbar">
-              <div class="js-results-text">
-                <span class="js-results-count" id="jsActionScope">No results yet</span>
-                <span class="muted small js-results-sub" id="jsResultsSub" hidden></span>
+          <!-- Progress (visible while scraping) -->
+          <div class="js-progress-card" id="jsProgressSection" hidden>
+            <div class="js-progress-phases" id="jsPhaseStrip">
+              <div class="js-progress-phase" data-phase="jobright">
+                <div class="js-phase-dot"></div>
+                <span class="js-phase-name">Jobright</span>
               </div>
-              <div class="js-results-actions">
-                <button type="button" class="btn small" id="jsCsvBtn" disabled>CSV</button>
-                <button type="button" class="btn small" id="jsLinksBtn" disabled>Links</button>
-                <button type="button" class="btn small" id="jsCopyLinksBtn" disabled>Copy</button>
-                <button type="button" class="btn small" id="jsClearResultsBtn" disabled>Clear</button>
+              <div class="js-progress-connector"></div>
+              <div class="js-progress-phase" data-phase="hiringcafe">
+                <div class="js-phase-dot"></div>
+                <span class="js-phase-name">HiringCafe</span>
+              </div>
+              <div class="js-progress-connector"></div>
+              <div class="js-progress-phase" data-phase="done">
+                <div class="js-phase-dot"></div>
+                <span class="js-phase-name">Done</span>
               </div>
             </div>
-            <p class="muted js-results-empty" id="jsResultsEmpty">Tap <strong>Scrape jobs</strong> to load listings.</p>
+            <div class="js-progress-header">
+              <span class="js-progress-label" id="jsProgressLabel">Scraping...</span>
+              <span class="js-progress-pct" id="jsProgressPct" hidden></span>
+            </div>
+            <div class="js-progress-bar-wrap">
+              <div class="js-progress-bar" id="jsProgressBar"></div>
+            </div>
+            <p class="js-progress-detail" id="jsProgressDetail" hidden></p>
+            <p class="js-progress-trust" id="jsProgressTrust" hidden>Using your open browser tabs</p>
+          </div>
+
+          <!-- Results: actions appear after scrape finishes -->
+          <div class="js-results-card" id="jsResultsCard" hidden>
+            <div class="js-results-header">
+              <div class="js-results-info">
+                <h3 class="js-results-title">Results</h3>
+                <p class="js-results-count" id="jsActionScope">No jobs yet</p>
+              </div>
+            </div>
+            <div class="js-results-actions" id="jsResultsActions" hidden>
+              <button type="button" class="js-result-action-btn" id="jsCsvBtn" disabled title="Export Excel / CSV">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <span>Export</span>
+              </button>
+              <button type="button" class="js-result-action-btn" id="jsCopyLinksBtn" disabled title="Copy links">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                <span>Copy</span>
+              </button>
+              <button type="button" class="js-result-action-btn" id="jsClearResultsBtn" disabled title="Clear results">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+                <span>Clear</span>
+              </button>
+            </div>
+            <div class="js-results-empty" id="jsResultsEmpty">
+              <p id="jsResultsEmptyText">Start a scrape to load jobs</p>
+              <p class="js-results-empty-hint" id="jsResultsEmptyHint" hidden></p>
+            </div>
             <div class="js-results-list" id="jsResultsList" hidden></div>
-          </section>
+          </div>
         </div>
 
         <div id="jsFiltersModal" class="js-modal" hidden>
-          <div class="js-modal-sheet" role="dialog" aria-modal="true" aria-labelledby="jsFiltersModalTitle">
-            <div class="js-modal-head">
-              <strong id="jsFiltersModalTitle">Filters &amp; lists</strong>
-              <button type="button" class="btn small" data-js-close-modal="filters">Done</button>
+          <div class="js-modal-sheet" role="dialog" aria-modal="true">
+            <div class="js-modal-header">
+              <h2>Filters & Lists</h2>
+              <button type="button" class="js-modal-close" data-js-close-modal="filters">×</button>
             </div>
-            <div class="js-modal-body">
-              <label class="js-field js-field-profile">
-                <span>Profile</span>
-                <select id="jsProfileFilter" aria-label="Profile">
-                  <option value="">Select profile…</option>
-                </select>
-              </label>
-              <div class="js-modal-toolbar">
-                <button type="button" class="btn small" id="jsRefreshProfileBtn" title="Refresh profile lists from website">Refresh lists</button>
-                <span class="muted small js-sync-status" id="jsListsSyncStatus">Not synced</span>
+            <div class="js-modal-content">
+              <div class="js-modal-section">
+                <label class="js-input-label">
+                  Profile
+                  <select id="jsProfileFilter" class="js-input">
+                    <option value="">Select profile…</option>
+                  </select>
+                </label>
+                <button type="button" class="btn-secondary-full" id="jsRefreshProfileBtn">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>
+                  </svg>
+                  Refresh Lists
+                </button>
               </div>
-              <p class="muted small" id="jsFiltersModalHint">Sign in under Settings first, then refresh to load profiles and block lists.</p>
 
-              <div class="js-hide-group">
-                <div class="js-hide-label">Hide from results</div>
+              <div class="js-modal-section">
+                <h3 class="js-section-title">Hide from Results</h3>
+                
+                <div class="js-filter-group">
+                  <h4 class="js-filter-group-title">Blocked Lists</h4>
+                  <label class="js-filter-row">
+                    <input type="checkbox" id="jsFilterBlockedCompanies" checked>
+                    <span class="js-filter-name" data-edit-list="company">Companies</span>
+                    <span class="js-filter-count" id="jsBlockedCompanyCount" data-edit-list="company">0</span>
+                  </label>
+                  <label class="js-filter-row">
+                    <input type="checkbox" id="jsFilterBlockedAts" checked>
+                    <span class="js-filter-name" data-edit-list="ats">ATS</span>
+                    <span class="js-filter-count" id="jsBlockedAtsCount" data-edit-list="ats">0</span>
+                  </label>
+                  <label class="js-filter-row">
+                    <input type="checkbox" id="jsFilterBlockedJobs" checked>
+                    <span class="js-filter-name" data-edit-list="job">Jobs</span>
+                    <span class="js-filter-count" id="jsBlockedJobCount" data-edit-list="job">0</span>
+                  </label>
+                </div>
 
-                <div class="js-hide-stack">
-                  <div class="js-hide-col">
-                    <div class="js-hide-col-title">Website lists</div>
-                    <p class="muted small js-hide-col-hint">Double-click a name to edit</p>
-                    <label class="js-hide-row">
-                      <input type="checkbox" id="jsFilterBlockedCompanies" checked>
-                      <span class="js-hide-name" data-edit-list="company" title="Double-click to edit">Companies</span>
-                      <span class="js-hide-count" id="jsBlockedCompanyCount" data-edit-list="company">0</span>
-                    </label>
-                    <label class="js-hide-row">
-                      <input type="checkbox" id="jsFilterBlockedAts" checked>
-                      <span class="js-hide-name" data-edit-list="ats" title="Double-click to edit">ATS</span>
-                      <span class="js-hide-count" id="jsBlockedAtsCount" data-edit-list="ats">0</span>
-                    </label>
-                    <label class="js-hide-row">
-                      <input type="checkbox" id="jsFilterBlockedJobs" checked>
-                      <span class="js-hide-name" data-edit-list="job" title="Double-click to edit">Jobs</span>
-                      <span class="js-hide-count" id="jsBlockedJobCount" data-edit-list="job">0</span>
-                    </label>
-                  </div>
-
-                  <div class="js-hide-col">
-                    <div class="js-hide-col-title">Resume DB</div>
-                    <p class="muted small js-hide-col-hint">Requires a profile · read-only lists</p>
-                    <label class="js-hide-row" id="jsFilterRegJobsLabel" title="Requires a profile">
-                      <input type="checkbox" id="jsFilterRegisteredJobs" checked disabled>
-                      <span class="js-hide-name">Registered jobs</span>
-                      <span class="js-hide-count" id="jsRegisteredJobCount">0</span>
-                    </label>
-                    <label class="js-hide-row" id="jsFilterRegCompaniesLabel" title="Requires a profile">
-                      <input type="checkbox" id="jsFilterRegisteredCompanies" checked disabled>
-                      <span class="js-hide-name">Registered companies</span>
-                      <span class="js-hide-count" id="jsRegisteredCompanyCount">0</span>
-                    </label>
-                  </div>
+                <div class="js-filter-group">
+                  <h4 class="js-filter-group-title">Applied Jobs</h4>
+                  <label class="js-filter-row">
+                    <input type="checkbox" id="jsFilterRegisteredJobs" checked disabled>
+                    <span class="js-filter-name">Registered jobs</span>
+                    <span class="js-filter-count" id="jsRegisteredJobCount">0</span>
+                  </label>
+                  <label class="js-filter-row">
+                    <input type="checkbox" id="jsFilterRegisteredCompanies" checked disabled>
+                    <span class="js-filter-name">Registered companies</span>
+                    <span class="js-filter-count" id="jsRegisteredCompanyCount">0</span>
+                  </label>
                 </div>
 
                 <div class="js-list-editor" id="jsListEditor" hidden>
-                  <div class="js-list-editor-head">
-                    <strong id="jsListEditorTitle">Blocked companies</strong>
-                    <button type="button" class="btn small" id="jsListEditorClose">Done</button>
+                  <div class="js-list-editor-header">
+                    <h4 id="jsListEditorTitle">Edit List</h4>
+                    <button type="button" class="js-modal-close-sm" id="jsListEditorClose">×</button>
                   </div>
-                  <div class="js-add-row">
-                    <input type="text" id="jsListEditorInput" placeholder="Add item…">
-                    <button type="button" class="btn small" id="jsListEditorAddBtn">Add</button>
+                  <div class="js-list-editor-add">
+                    <input type="text" id="jsListEditorInput" class="js-input" placeholder="Add item…">
+                    <button type="button" class="btn-secondary" id="jsListEditorAddBtn">Add</button>
                   </div>
                   <ul class="js-block-list" id="jsListEditorItems"></ul>
                 </div>
@@ -488,38 +527,22 @@
         </div>
 
         <div id="jsImportModal" class="js-modal" hidden>
-          <div class="js-modal-sheet" role="dialog" aria-modal="true" aria-labelledby="jsImportModalTitle">
-            <div class="js-modal-head">
-              <strong id="jsImportModalTitle">Edit search</strong>
-              <button type="button" class="btn small" data-js-close-modal="import">Done</button>
+          <div class="js-modal-sheet" role="dialog" aria-modal="true">
+            <div class="js-modal-header">
+              <h2>Edit HiringCafe Search</h2>
+              <button type="button" class="js-modal-close" data-js-close-modal="import">×</button>
             </div>
-            <div class="js-modal-body">
-              <div id="jsSearchImportPanel" data-import-panel="hiringcafe">
-                <p class="muted small js-search-help">
-                  Set remote/hybrid/location on hiringcafe.com, copy the URL, then import. Posted-within on the main screen still applies.
-                </p>
-                <label class="js-field js-search-url-field">
-                  <span>HiringCafe URL</span>
-                  <textarea id="jsSearchUrlInput" rows="3" spellcheck="false" placeholder="https://hiringcafe.com/?searchState=…"></textarea>
-                </label>
-                <div class="js-search-actions">
-                  <button type="button" class="btn small primary" id="jsImportSearchUrlBtn">Import URL</button>
-                  <button type="button" class="btn small" id="jsImportSearchTabBtn" title="Read searchState from the active HiringCafe tab">From open tab</button>
-                  <button type="button" class="btn small" id="jsResetSearchBtn">Use default</button>
-                </div>
-              </div>
-              <div id="jsJrSearchImportPanel" data-import-panel="jobright" hidden>
-                <p class="muted small js-search-help">
-                  Set filters on jobright.ai search (not Recommend), copy the URL, then import. Posted-within on the main screen still applies.
-                </p>
-                <label class="js-field js-search-url-field">
-                  <span>Jobright URL</span>
-                  <textarea id="jsJrSearchUrlInput" rows="3" spellcheck="false" placeholder="https://jobright.ai/jobs/search?value=Software+Engineer&country=US…"></textarea>
-                </label>
-                <div class="js-search-actions">
-                  <button type="button" class="btn small primary" id="jsJrImportSearchUrlBtn">Import URL</button>
-                  <button type="button" class="btn small" id="jsJrImportSearchTabBtn" title="Read search from the active Jobright tab">From open tab</button>
-                  <button type="button" class="btn small" id="jsJrResetSearchBtn">Use default</button>
+            <div class="js-modal-content">
+              <p class="js-modal-hint">Set filters on hiringcafe.com, copy the URL, then paste here</p>
+              <label class="js-input-label">
+                Search URL
+                <textarea id="jsSearchUrlInput" class="js-input" rows="4" spellcheck="false" placeholder="https://hiringcafe.com/?searchState=…"></textarea>
+              </label>
+              <div class="js-modal-actions">
+                <button type="button" class="btn-primary-full" id="jsImportSearchUrlBtn">Import URL</button>
+                <div class="js-modal-actions-row">
+                  <button type="button" class="btn-secondary-full" id="jsImportSearchTabBtn">From Open Tab</button>
+                  <button type="button" class="btn-secondary-full" id="jsResetSearchBtn">Reset to Default</button>
                 </div>
               </div>
             </div>

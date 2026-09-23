@@ -10,12 +10,9 @@
     lastResults: 'job_scraper_last_results',
     scrapeTabId: 'job_scraper_tab_id',
     customSearch: 'job_scraper_custom_search',
-    jobrightSearch: 'job_scraper_jobright_search',
   };
 
   const DEFAULT_PREFS = {
-    source: 'hiringcafe',
-    dateWindow: '3d',
     excludeBlockedCompanies: true,
     excludeBlockedAts: true,
     excludeBlockedJobs: true,
@@ -24,11 +21,6 @@
     candidateFilter: '',
     maxPages: 8,
     delayMs: 700,
-  };
-
-  const DEFAULT_JOBRIGHT_SEARCH = {
-    titleKeyword: 'Software Engineer',
-    location: 'United States',
   };
 
   const state = {
@@ -45,14 +37,13 @@
     openListEditor: null,
     customSearchState: null,
     customSearchSourceUrl: '',
-    jobrightSearch: { ...DEFAULT_JOBRIGHT_SEARCH },
-    jobrightSearchSourceUrl: '',
     rawJobs: [],
     filteredJobs: [],
     selectedKeys: new Set(),
     scraping: false,
     pausedForChallenge: false,
     scrapeCursor: null,
+    combinedRun: null,
     status: '',
     lastScrapedAt: null,
     stats: null,
@@ -85,11 +76,15 @@
   }
 
   function activeSource() {
-    return state.prefs.source === 'jobright' ? 'jobright' : 'hiringcafe';
+    return 'both';
   }
 
-  function sourceLabel(source = activeSource()) {
-    return source === 'jobright' ? 'Jobright' : 'HiringCafe';
+  function sourceLabel() {
+    return 'HiringCafe + Jobright';
+  }
+
+  function isCombinedMode() {
+    return true;
   }
 
   function showToast(message, type) {
@@ -152,11 +147,9 @@
       STORAGE.blockedJobs,
       STORAGE.lastResults,
       STORAGE.customSearch,
-      STORAGE.jobrightSearch,
     ]);
 
     state.prefs = { ...DEFAULT_PREFS, ...(result[STORAGE.prefs] || {}) };
-    if (state.prefs.source !== 'jobright') state.prefs.source = 'hiringcafe';
 
     applyWebsiteBlockedLists({
       blockedCompanies: Array.isArray(result[STORAGE.blockedCompanies])
@@ -177,23 +170,6 @@
     } else {
       state.customSearchState = null;
       state.customSearchSourceUrl = '';
-    }
-
-    const jrStored = result[STORAGE.jobrightSearch];
-    if (jrStored && typeof jrStored === 'object') {
-      const jr = jrApi();
-      state.jobrightSearch = jr?.normalizeSearch?.(jrStored) || {
-        ...DEFAULT_JOBRIGHT_SEARCH,
-        titleKeyword: String(jrStored.titleKeyword || DEFAULT_JOBRIGHT_SEARCH.titleKeyword),
-        location: String(jrStored.location || DEFAULT_JOBRIGHT_SEARCH.location),
-        ...(jrStored.params && typeof jrStored.params === 'object'
-          ? { params: jrStored.params }
-          : {}),
-      };
-      state.jobrightSearchSourceUrl = String(jrStored.sourceUrl || '');
-    } else {
-      state.jobrightSearch = { ...DEFAULT_JOBRIGHT_SEARCH };
-      state.jobrightSearchSourceUrl = '';
     }
 
     const last = result[STORAGE.lastResults];
@@ -221,18 +197,6 @@
     } else {
       await chrome.storage.local.remove(STORAGE.customSearch);
     }
-  }
-
-  async function persistJobrightSearch() {
-    await storageSet({
-      [STORAGE.jobrightSearch]: {
-        titleKeyword: state.jobrightSearch.titleKeyword,
-        location: state.jobrightSearch.location,
-        ...(state.jobrightSearch.params ? { params: state.jobrightSearch.params } : {}),
-        sourceUrl: state.jobrightSearchSourceUrl || '',
-        updatedAt: new Date().toISOString(),
-      },
-    });
   }
 
   async function persistBlockLists() {
@@ -350,11 +314,7 @@
 
     const hasProfile = Boolean(state.prefs.candidateFilter);
     const deduped = scraper.dedupeJobs(state.rawJobs);
-    const { filtered: dated, removedByDate } = scraper.filterJobsByPublishDate(
-      deduped,
-      state.prefs.dateWindow
-    );
-    const { filtered, stats } = scraper.applyLocalFilters(dated, {
+    const { filtered, stats } = scraper.applyLocalFilters(deduped, {
       excludeBlockedCompanies: state.prefs.excludeBlockedCompanies,
       excludeBlockedAts: state.prefs.excludeBlockedAts,
       excludeBlockedJobs: state.prefs.excludeBlockedJobs,
@@ -372,7 +332,6 @@
       ...(state.stats || {}),
       scraped: state.rawJobs.length,
       deduped: deduped.length,
-      removedByDate,
       removedBlockedJobs: stats.removedBlockedJobs,
       removedBlockedCompanies: stats.removedBlockedCompanies,
       removedAts: stats.removedAts,
@@ -396,24 +355,30 @@
       total = null,
       indeterminate = false,
       hidden = false,
+      phase = null,
+      showTrust = null,
     } = options;
 
     state.status = text || '';
     const section = document.getElementById('jsProgressSection');
-    const root = document.getElementById('jsProgress');
+    const root = document.getElementById('jsProgress') || section;
     const label = document.getElementById('jsProgressLabel');
     const pctEl = document.getElementById('jsProgressPct');
     const bar = document.getElementById('jsProgressBar');
     const detailEl = document.getElementById('jsProgressDetail');
-    if (!root || !label || !bar) return;
+    const trustEl = document.getElementById('jsProgressTrust');
+    const phaseStrip = document.getElementById('jsPhaseStrip');
+    if (!section || !label || !bar) return;
 
     const clean = (value) => String(value || '').replace(/\u2014|\u2013/g, '-');
 
     if (hidden || !text) {
-      if (section) section.hidden = true;
-      root.hidden = true;
-      root.dataset.kind = 'info';
-      root.classList.remove('is-indeterminate');
+      section.hidden = true;
+      if (root && root !== section) root.hidden = true;
+      if (root) {
+        root.dataset.kind = 'info';
+        root.classList.remove('is-indeterminate');
+      }
       bar.style.width = '0%';
       if (pctEl) {
         pctEl.hidden = true;
@@ -423,13 +388,54 @@
         detailEl.hidden = true;
         detailEl.textContent = '';
       }
+      if (trustEl) trustEl.hidden = true;
+      if (phaseStrip) phaseStrip.hidden = true;
+      syncResultsPanelUi();
       return;
     }
 
-    if (section) section.hidden = false;
-    root.hidden = false;
-    root.dataset.kind = kind || 'info';
+    section.hidden = false;
+    if (root && root !== section) root.hidden = false;
+    if (root) root.dataset.kind = kind || 'info';
     label.textContent = clean(text);
+
+    const trustVisible =
+      showTrust != null ? showTrust : kind === 'info' || kind === 'warn';
+    if (trustEl) {
+      trustEl.hidden = !trustVisible;
+      if (kind === 'warn' && state.pausedForChallenge) {
+        trustEl.textContent =
+          'Browser check in the open tab — finish it, then hit Resume. Nothing is uploaded.';
+      } else {
+        trustEl.textContent =
+          'Using your open browser tabs. JobStrike does not store passwords.';
+      }
+    }
+
+    if (phaseStrip) {
+      const combined = isCombinedMode() || phase;
+      phaseStrip.hidden = !combined;
+      if (combined) {
+        const activePhase =
+          phase ||
+          state.combinedRun?.phase ||
+          (kind === 'success' ? 'done' : 'jobright');
+        const order = ['jobright', 'hiringcafe', 'done'];
+        const activeIdx = order.indexOf(activePhase);
+        phaseStrip.querySelectorAll('.js-progress-phase').forEach((el) => {
+          const name = el.getAttribute('data-phase');
+          const idx = order.indexOf(name);
+          el.classList.remove('is-active', 'is-done', 'is-paused');
+          if (kind === 'success' || activePhase === 'done') {
+            el.classList.add('is-done');
+          } else if (name === activePhase) {
+            el.classList.add(kind === 'warn' ? 'is-paused' : 'is-active');
+          } else if (idx >= 0 && activeIdx >= 0 && idx < activeIdx) {
+            el.classList.add('is-done');
+          }
+        });
+      }
+    }
 
     if (detailEl) {
       if (detail) {
@@ -444,22 +450,238 @@
     const hasNumbers =
       Number.isFinite(current) && Number.isFinite(total) && total > 0;
     if (indeterminate || !hasNumbers) {
-      root.classList.add('is-indeterminate');
+      if (root) root.classList.add('is-indeterminate');
       bar.style.width = '35%';
       if (pctEl) {
         pctEl.hidden = true;
         pctEl.textContent = '';
       }
+    } else {
+      if (root) root.classList.remove('is-indeterminate');
+      const pct = Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+      bar.style.width = `${pct}%`;
+      if (pctEl) {
+        pctEl.hidden = false;
+        pctEl.textContent = `${pct}%`;
+      }
+    }
+
+    // After Done: hand off to Results actions. While running: hide Results.
+    if (kind === 'success' && (phase === 'done' || /done/i.test(String(text)))) {
+      finishScrapeUiReveal();
+    } else if (kind === 'error') {
+      syncResultsPanelUi();
+    } else {
+      syncResultsPanelUi({
+        mode: state.pausedForChallenge ? 'paused' : state.scraping ? 'scraping' : undefined,
+      });
+    }
+  }
+
+  /**
+   * While scraping: show progress only.
+   * After finish: hide progress, show Results + Export/Copy/Clear.
+   */
+  function syncResultsPanelUi(options = {}) {
+    const card = document.getElementById('jsResultsCard');
+    const actions = document.getElementById('jsResultsActions');
+    if (!card) return;
+
+    const hasJobs = state.filteredJobs.length > 0 || state.rawJobs.length > 0;
+    let mode = options.mode;
+    if (!mode) {
+      if (state.scraping && !state.pausedForChallenge) mode = 'scraping';
+      else if (state.pausedForChallenge) mode = 'paused';
+      else if (hasJobs) mode = 'ready';
+      else mode = 'idle';
+    }
+
+    card.classList.remove('is-scraping', 'is-ready', 'is-paused', 'is-idle');
+    card.classList.add(
+      mode === 'scraping'
+        ? 'is-scraping'
+        : mode === 'paused'
+          ? 'is-paused'
+          : mode === 'ready'
+            ? 'is-ready'
+            : 'is-idle'
+    );
+
+    if (mode === 'scraping' || mode === 'paused') {
+      card.hidden = true;
+      if (actions) actions.hidden = true;
       return;
     }
 
-    root.classList.remove('is-indeterminate');
-    const pct = Math.max(0, Math.min(100, Math.round((current / total) * 100)));
-    bar.style.width = `${pct}%`;
-    if (pctEl) {
-      pctEl.hidden = false;
-      pctEl.textContent = `${pct}%`;
+    card.hidden = false;
+    if (actions) {
+      const showActions = mode === 'ready' && state.filteredJobs.length > 0;
+      actions.hidden = !showActions;
     }
+  }
+
+  function finishScrapeUiReveal() {
+    const progress = document.getElementById('jsProgressSection');
+    window.setTimeout(() => {
+      if (state.scraping && !state.pausedForChallenge) return;
+      if (progress) progress.hidden = true;
+      syncResultsPanelUi({
+        mode: state.filteredJobs.length || state.rawJobs.length ? 'ready' : 'idle',
+      });
+      renderResults();
+      const card = document.getElementById('jsResultsCard');
+      if (card && !card.hidden) {
+        try {
+          card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }, 450);
+  }
+
+  function formatBidPostedAt(value) {
+    if (value == null || value === '') return '';
+    const raw = String(value).trim();
+    let d = new Date(raw);
+    if (Number.isNaN(d.getTime())) {
+      const match = raw.match(
+        /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d+)?Z?$/
+      );
+      if (match) {
+        d = new Date(
+          Number(match[1]),
+          Number(match[2]) - 1,
+          Number(match[3]),
+          Number(match[4]),
+          Number(match[5])
+        );
+      }
+    }
+    if (Number.isNaN(d.getTime())) return raw;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${day} ${hh}:${mm}`;
+  }
+
+  function escapeXml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function normalizeBidJob(job, origin) {
+    return {
+      apply_url: job?.apply_url || null,
+      posted_at: formatBidPostedAt(
+        job?.posted_at || job?.estimated_publish_date || ''
+      ),
+      title: job?.title || null,
+      company_name: job?.company_name || null,
+      application_site: job?.application_site || 'Unknown',
+      origin: origin || job?.origin || '',
+      estimated_publish_date: job?.estimated_publish_date || null,
+      source: job?.source || origin || '',
+    };
+  }
+
+  function sortBidJobs(jobs) {
+    return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {
+      const atsA = String(a?.application_site || '').toLowerCase();
+      const atsB = String(b?.application_site || '').toLowerCase();
+      if (atsA !== atsB) return atsB.localeCompare(atsA);
+      const coA = String(a?.company_name || '').toLowerCase();
+      const coB = String(b?.company_name || '').toLowerCase();
+      if (coA !== coB) return coA.localeCompare(coB);
+      const tA = Date.parse(a?.estimated_publish_date || a?.posted_at || '') || 0;
+      const tB = Date.parse(b?.estimated_publish_date || b?.posted_at || '') || 0;
+      return tB - tA;
+    });
+  }
+
+  function dedupeBidJobs(jobs) {
+    const seen = new Set();
+    const out = [];
+    for (const job of jobs) {
+      const url = String(job?.apply_url || '')
+        .trim()
+        .toLowerCase();
+      const key =
+        url ||
+        `${String(job?.company_name || '').toLowerCase()}::${String(job?.title || '').toLowerCase()}`;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(job);
+    }
+    return out;
+  }
+
+  function jobsToBidExcelXml(jobs, { includeOrigin = false } = {}) {
+    const headers = [
+      'Application Link',
+      'Date Posted',
+      'Job Title',
+      'Company',
+      'Source Platform',
+      ...(includeOrigin ? ['Origin'] : []),
+    ];
+    const sorted = sortBidJobs(jobs);
+    const headerCells = headers
+      .map(
+        (h) =>
+          `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeXml(h)}</Data></Cell>`
+      )
+      .join('');
+    const dataRows = sorted
+      .map((job) => {
+        const values = [
+          job?.apply_url ?? '',
+          formatBidPostedAt(job?.posted_at || job?.estimated_publish_date || ''),
+          job?.title ?? '',
+          job?.company_name ?? '',
+          job?.application_site ?? '',
+          ...(includeOrigin ? [job?.origin || ''] : []),
+        ];
+        return `<Row>${values
+          .map((v) => `<Cell><Data ss:Type="String">${escapeXml(v)}</Data></Cell>`)
+          .join('')}</Row>`;
+      })
+      .join('');
+
+    const colXml = headers
+      .map((_, i) => {
+        const widths = [280, 110, 220, 120, 120, 100];
+        return `<Column ss:Width="${widths[i] || 100}"/>`;
+      })
+      .join('');
+
+    return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="Header">
+   <Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="14" ss:FontName="Calibri"/>
+   <Interior ss:Color="#1B4F72" ss:Pattern="Solid"/>
+   <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="Jobs">
+  <Table>
+   ${colXml}
+   <Row ss:StyleID="Header">${headerCells}</Row>
+   ${dataRows}
+  </Table>
+ </Worksheet>
+</Workbook>`;
   }
 
   function setStatus(text, kind) {
@@ -475,8 +697,6 @@
   }
 
   function syncControlsFromState() {
-    const dateSel = document.getElementById('jsDateWindow');
-    if (dateSel) dateSel.value = state.prefs.dateWindow;
 
     const profileSel = document.getElementById('jsProfileFilter');
     if (profileSel) {
@@ -525,8 +745,7 @@
     if (jobCount) jobCount.textContent = String(state.registeredJobs.length);
     if (coCount) coCount.textContent = String(state.registeredCompanies.length);
 
-    renderSourceUi();
-    renderActiveSearchUi();
+    renderFeedStatus();
     renderSyncStatus();
 
     const hint = document.getElementById('jsProfileHint');
@@ -569,192 +788,42 @@
 
     renderBlockLists();
     renderResults();
+    syncResultsPanelUi();
     renderMeta();
   }
 
-  function renderSourceUi() {
-    const source = activeSource();
-    document.querySelectorAll('[data-js-source]').forEach((btn) => {
-      btn.classList.toggle('is-active', btn.getAttribute('data-js-source') === source);
-    });
-    syncImportModalPanels();
-    const title = document.getElementById('jsScraperTitle');
-    if (title) title.textContent = 'Job Scraper';
-    const empty = document.getElementById('jsResultsEmpty');
-    if (empty && !state.rawJobs.length && !state.filteredJobs.length) {
-      empty.innerHTML = `Tap <strong>Scrape jobs</strong> to load ${sourceLabel(source)} listings.`;
-    }
-    renderActiveSearchUi();
-  }
-
-  function renderActiveSearchUi() {
-    if (activeSource() === 'jobright') {
-      renderJobrightSearchUi();
-    } else {
-      renderSearchImportUi();
-    }
-  }
-
-  function renderSearchImportUi() {
-    if (activeSource() !== 'hiringcafe') return;
-
+  function renderFeedStatus() {
     const scraper = api();
-    const summaryEl = document.getElementById('jsSearchSummary');
-    const previewLabel = document.getElementById('jsSearchPreviewLabel');
-    const sourceEl = document.getElementById('jsSearchSource');
-    const panel = document.getElementById('jsSearchImportPanel');
-    const resetBtn = document.getElementById('jsResetSearchBtn');
-    const badge = document.getElementById('jsSearchCustomBadge');
-    const searchCard = document.getElementById('jsSearchCard');
+    const hcEl = document.getElementById('jsHcFeedStatus');
+    const jrEl = document.getElementById('jsJrFeedStatus');
 
-    const summary = state.customSearchState
+    const hcSummary = state.customSearchState
       ? scraper?.summarizeSearchState?.(state.customSearchState) || 'Custom search imported'
       : 'Built-in default';
 
-    if (previewLabel) previewLabel.textContent = 'HiringCafe search';
-    if (summaryEl) {
-      summaryEl.textContent = summary;
-      summaryEl.title = summary;
+    if (hcEl) {
+      hcEl.textContent = hcSummary;
+      hcEl.title = hcSummary;
     }
-    if (panel) panel.classList.toggle('is-custom', Boolean(state.customSearchState));
-    if (searchCard) searchCard.classList.toggle('is-custom', Boolean(state.customSearchState));
-    if (badge) badge.hidden = !state.customSearchState;
-    if (resetBtn) resetBtn.disabled = !state.customSearchState;
-
-    if (sourceEl) {
-      if (state.customSearchSourceUrl) {
-        sourceEl.hidden = false;
-        sourceEl.textContent = `From: ${state.customSearchSourceUrl}`;
-        sourceEl.title = state.customSearchSourceUrl;
-      } else if (state.customSearchState) {
-        sourceEl.hidden = false;
-        sourceEl.textContent = 'From: pasted searchState';
-      } else {
-        sourceEl.hidden = true;
-        sourceEl.textContent = '';
-      }
+    if (jrEl) {
+      jrEl.textContent = 'Recommend · your Saved Filters';
+      jrEl.title = 'Set filters on jobright.ai → Recommend, then scrape';
     }
   }
 
-  function renderJobrightSearchUi() {
-    if (activeSource() !== 'jobright') return;
-
+  async function openJobrightRecommend() {
     const jr = jrApi();
-    const summaryEl = document.getElementById('jsSearchSummary');
-    const previewLabel = document.getElementById('jsSearchPreviewLabel');
-    const sourceEl = document.getElementById('jsSearchSource');
-    const badge = document.getElementById('jsSearchCustomBadge');
-    const searchCard = document.getElementById('jsSearchCard');
-    const resetBtn = document.getElementById('jsJrResetSearchBtn');
-    const panel = document.getElementById('jsJrSearchImportPanel');
-    const isCustom =
-      Boolean(state.jobrightSearchSourceUrl) ||
-      Boolean(state.jobrightSearch.params) ||
-      state.jobrightSearch.titleKeyword !== DEFAULT_JOBRIGHT_SEARCH.titleKeyword ||
-      state.jobrightSearch.location !== DEFAULT_JOBRIGHT_SEARCH.location;
-
-    const summary = isCustom
-      ? jr?.summarizeSearch?.(state.jobrightSearch) ||
-        `${state.jobrightSearch.titleKeyword} · ${state.jobrightSearch.location}`
-      : 'Built-in default';
-
-    if (previewLabel) previewLabel.textContent = 'Jobright search';
-    if (summaryEl) {
-      summaryEl.textContent = summary;
-      summaryEl.title = summary;
+    const url = jr?.JOBRIGHT_RECOMMEND || 'https://jobright.ai/jobs/recommend';
+    try {
+      await chrome.tabs.create({ url, active: true });
+    } catch (err) {
+      showToast(err?.message || String(err), 'error');
     }
-    if (panel) panel.classList.toggle('is-custom', isCustom);
-    if (badge) badge.hidden = !isCustom;
-    if (searchCard) searchCard.classList.toggle('is-custom', isCustom);
-    if (resetBtn) resetBtn.disabled = !isCustom;
-
-    if (sourceEl) {
-      if (state.jobrightSearchSourceUrl) {
-        sourceEl.hidden = false;
-        sourceEl.textContent = `From: ${state.jobrightSearchSourceUrl}`;
-        sourceEl.title = state.jobrightSearchSourceUrl;
-      } else {
-        sourceEl.hidden = true;
-        sourceEl.textContent = '';
-      }
-    }
-  }
-
-  async function setScrapeSource(nextSource) {
-    const source = nextSource === 'jobright' ? 'jobright' : 'hiringcafe';
-    if (state.prefs.source === source) return;
-    if (state.scraping) {
-      showToast('Stop the current scrape before switching source.', 'warn');
-      return;
-    }
-    state.prefs.source = source;
-    state.pausedForChallenge = false;
-    state.scrapeCursor = null;
-    await persistPrefs();
-    syncControlsFromState();
-  }
-
-  async function applyJobrightSearch(search, sourceUrl) {
-    const jr = jrApi();
-    state.jobrightSearch = jr?.normalizeSearch?.(search) || {
-      titleKeyword: String(search?.titleKeyword || DEFAULT_JOBRIGHT_SEARCH.titleKeyword),
-      location: String(search?.location || DEFAULT_JOBRIGHT_SEARCH.location),
-      ...(search?.params ? { params: search.params } : {}),
-    };
-    state.jobrightSearchSourceUrl = sourceUrl || '';
-    await persistJobrightSearch();
-    syncControlsFromState();
-  }
-
-  async function resetJobrightSearch() {
-    state.jobrightSearch = { ...DEFAULT_JOBRIGHT_SEARCH };
-    state.jobrightSearchSourceUrl = '';
-    const input = document.getElementById('jsJrSearchUrlInput');
-    if (input) input.value = '';
-    await persistJobrightSearch();
-    syncControlsFromState();
-    showToast('Restored default Jobright search.', 'success');
-  }
-
-  async function importJobrightSearchFromText(raw, { silent = false } = {}) {
-    const jr = jrApi();
-    if (!jr?.parseSearchFromInput) {
-      showToast('Jobright search import is unavailable. Reload the extension.', 'error');
-      return false;
-    }
-    const parsed = jr.parseSearchFromInput(raw);
-    if (!parsed.ok) {
-      showToast(parsed.error, 'error');
-      return false;
-    }
-    await applyJobrightSearch(parsed.search, parsed.sourceUrl);
-    if (!silent) {
-      showToast(`Jobright search imported. ${jr.summarizeSearch(parsed.search)}`, 'success');
-    }
-    return true;
-  }
-
-  async function importJobrightSearchFromActiveTab() {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tab = tabs?.[0];
-    const url = tab?.url || '';
-    if (!/jobright\.ai/i.test(url)) {
-      showToast('Open a jobright.ai search tab first, then try From tab.', 'warn');
-      return;
-    }
-    const input = document.getElementById('jsJrSearchUrlInput');
-    if (input) input.value = url;
-    await importJobrightSearchFromText(url);
   }
 
   async function applyImportedSearch(searchState, sourceUrl) {
-    const scraper = api();
     state.customSearchState = searchState;
     state.customSearchSourceUrl = sourceUrl || '';
-
-    if (searchState?.dateFetchedPastNDays != null && scraper?.dateWindowFromDays) {
-      state.prefs.dateWindow = scraper.dateWindowFromDays(searchState.dateFetchedPastNDays);
-    }
 
     await persistPrefs();
     await persistCustomSearch();
@@ -968,24 +1037,42 @@
 
   function renderResults() {
     const empty = document.getElementById('jsResultsEmpty');
+    const emptyText = document.getElementById('jsResultsEmptyText');
+    const emptyHint = document.getElementById('jsResultsEmptyHint');
     const list = document.getElementById('jsResultsList');
+    const jobs = state.filteredJobs;
+    const n = jobs.length;
+
     if (list) {
       list.innerHTML = '';
       list.hidden = true;
     }
 
-    if (empty) {
-      if (state.filteredJobs.length === 0) {
+    if (n === 0) {
+      if (empty) {
         empty.hidden = false;
-        empty.textContent = state.rawJobs.length
-          ? '0 jobs after filters. Adjust date or unblock lists.'
-          : 'Click Scrape to load HiringCafe jobs.';
-      } else {
-        empty.hidden = true;
+        empty.classList.remove('is-ready');
+        if (emptyText) {
+          emptyText.textContent = state.rawJobs.length
+            ? '0 jobs after filters. Open Filters & lists to adjust.'
+            : 'Start a scrape to load jobs';
+        }
+        if (emptyHint) {
+          emptyHint.hidden = true;
+          emptyHint.textContent = '';
+        }
       }
+      updateActionButtons();
+      syncResultsPanelUi();
+      return;
+    }
+
+    if (empty) {
+      empty.hidden = true;
     }
 
     updateActionButtons();
+    syncResultsPanelUi();
   }
 
   function updateActionButtons() {
@@ -1013,7 +1100,6 @@
     if (sub) {
       const bits = [];
       if (state.stats?.scraped != null) bits.push(`${state.stats.scraped} scraped`);
-      if (state.stats?.removedByDate) bits.push(`${state.stats.removedByDate} by date`);
       if (state.stats?.removedBlockedJobs) {
         bits.push(`${state.stats.removedBlockedJobs} blocked jobs`);
       }
@@ -1105,8 +1191,10 @@
     return created.id;
   }
 
-  /** Reuse an open Jobright tab without reloading (keeps session for swan-api). */
+  /** Reuse an open Jobright Recommend tab without reloading (keeps session for swan-api). */
   async function ensureJobrightApiTab(fallbackUrl) {
+    const recommendUrl =
+      jrApi()?.JOBRIGHT_RECOMMEND || fallbackUrl || 'https://jobright.ai/jobs/recommend';
     let tabId = await getStoredScrapeTabId();
     if (tabId) {
       try {
@@ -1115,6 +1203,7 @@
         if (
           tab?.id &&
           /jobright\.ai/i.test(href) &&
+          /\/jobs\/recommend/i.test(href) &&
           !/\/_jr\/security\/challenge/i.test(href)
         ) {
           return tab.id;
@@ -1123,16 +1212,82 @@
         await setStoredScrapeTabId(null);
       }
     }
-    return ensureScrapeTab(fallbackUrl);
+    // Prefer any open recommend tab in this window.
+    try {
+      const tabs = await chrome.tabs.query({ url: ['*://jobright.ai/jobs/recommend*'] });
+      const live = tabs.find(
+        (t) => t?.id && !/\/_jr\/security\/challenge/i.test(String(t.url || ''))
+      );
+      if (live?.id) {
+        await setStoredScrapeTabId(live.id);
+        return live.id;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return ensureScrapeTab(recommendUrl);
+  }
+
+  /**
+   * Open/reuse Recommend, install swan capture, then force a refetch so the first
+   * job payloads are not missed (page load usually finishes before capture exists).
+   */
+  async function prepareJobrightRecommendTab(recommendUrl) {
+    const jr = jrApi();
+    let reused = false;
+    let tabId = null;
+
+    try {
+      const tabs = await chrome.tabs.query({ url: ['*://jobright.ai/jobs/recommend*'] });
+      const live = tabs.find(
+        (t) => t?.id && !/\/_jr\/security\/challenge/i.test(String(t.url || ''))
+      );
+      if (live?.id) {
+        tabId = live.id;
+        reused = true;
+        await setStoredScrapeTabId(tabId);
+      }
+    } catch (_) {
+      /* ignore */
+    }
+
+    if (!tabId) {
+      tabId = await ensureScrapeTab(recommendUrl);
+    }
+
+    if (typeof jr?.installSwanCaptureInTab === 'function') {
+      await runJobrightTabFn(tabId, jr.installSwanCaptureInTab, []);
+    }
+
+    // Fresh tab already fetched before capture — force another Recommend pull.
+    // Reused tab also needs a pull so capture sees jobs (prior SPA loads are gone).
+    if (typeof jr?.forceRecommendRefetchInTab === 'function') {
+      await runJobrightTabFn(tabId, jr.forceRecommendRefetchInTab, []);
+      await sleep(600);
+    }
+
+    return { tabId, reused };
+  }
+
+  function scrapePhaseSource() {
+    if (state.combinedRun?.active && state.combinedRun.phase) {
+      return state.combinedRun.phase === 'jobright' ? 'jobright' : 'hiringcafe';
+    }
+    const source = activeSource();
+    return source === 'jobright' ? 'jobright' : 'hiringcafe';
   }
 
   async function extractFromTab(tabId) {
+    const phase = scrapePhaseSource();
     const extractFn =
-      activeSource() === 'jobright'
+      phase === 'jobright'
         ? jrApi()?.extractPagePropsInTab
         : api()?.extractPagePropsInTab;
     if (typeof extractFn !== 'function') {
-      return { ok: false, error: `${sourceLabel()} scraper module failed to load.` };
+      return {
+        ok: false,
+        error: `${sourceLabel(phase)} scraper module failed to load.`,
+      };
     }
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId },
@@ -1142,7 +1297,8 @@
   }
 
   async function waitUntilPageReady(tabId, { allowPause = true } = {}) {
-    const label = sourceLabel();
+    const phase = scrapePhaseSource();
+    const label = sourceLabel(phase);
     const maxAttempts = 10;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (!state.scraping) throw new Error('Scrape stopped.');
@@ -1157,6 +1313,7 @@
           detail: `Complete it in the open ${label} tab, then click Resume.`,
           kind: 'warn',
           indeterminate: true,
+          phase: state.combinedRun?.active ? phase : null,
         });
         showToast(`Complete the ${label} check, then click Resume.`, 'warn');
         return { paused: true };
@@ -1170,6 +1327,7 @@
           detail: `Sign in on the ${label} tab if needed, open search results, then click Resume.`,
           kind: 'warn',
           indeterminate: true,
+          phase: state.combinedRun?.active ? phase : null,
         });
         showToast(`Sign in on ${label} if needed, then click Resume.`, 'warn');
         return { paused: true };
@@ -1191,17 +1349,27 @@
       return;
     }
 
-    if (state.scraping && !state.pausedForChallenge && !resume) return;
+    if (state.scraping && !state.pausedForChallenge && !resume) {
+      const handoff =
+        state.combinedRun?.active && state.combinedRun.phase === 'hiringcafe';
+      if (!handoff) return;
+    }
 
     await loadProfileFilterContext({ silent: true });
 
     state.scraping = true;
     state.pausedForChallenge = false;
+    if (state.combinedRun?.active) {
+      state.combinedRun.phase = 'hiringcafe';
+    }
     syncControlsFromState();
 
-    const dateWindow = state.prefs.dateWindow;
+    const combined = Boolean(state.combinedRun?.active);
     const maxPages = Math.max(1, Math.min(Number(state.prefs.maxPages) || 8, 20));
     const delayMs = Math.max(400, Math.min(Number(state.prefs.delayMs) || 700, 3000));
+    const jrPages = Number(state.combinedRun?.jrPages) || 0;
+    const overallTotal = combined ? maxPages * 2 : maxPages;
+    const overallOffset = combined ? maxPages : 0;
 
     let page = resume && state.scrapeCursor ? state.scrapeCursor.page : 0;
     let jobs = resume && state.scrapeCursor ? [...state.scrapeCursor.jobs] : [];
@@ -1216,14 +1384,19 @@
         if (!state.scraping) break;
 
         setProgress({
-          text: `Page ${page + 1} of ${maxPages}`,
-          detail: `Collected ${jobs.length}${reportedTotal != null ? ` / ${reportedTotal}` : ''} so far`,
+          text: combined
+            ? `Both · Step 2 of 2 · HiringCafe · Page ${page + 1} of ${maxPages}`
+            : `HiringCafe · Page ${page + 1} of ${maxPages}`,
+          detail:
+            `Collected ${jobs.length}${reportedTotal != null ? ` / ${reportedTotal}` : ''} so far` +
+            (combined ? ` · Jobright ${state.combinedRun?.jrCount || 0} already` : ''),
           kind: 'info',
-          current: page,
-          total: maxPages,
+          current: overallOffset + page,
+          total: overallTotal,
+          phase: combined ? 'hiringcafe' : null,
         });
         const url = scraper.buildHiringCafeUrl(
-          dateWindow,
+          '1d',
           page,
           state.customSearchState
         );
@@ -1237,6 +1410,8 @@
             reportedTotal,
             lastHitId,
             pagesFetched,
+            combined: combined || undefined,
+            phase: combined ? 'hiringcafe' : undefined,
           };
           state.pausedForChallenge = true;
           state.scraping = true;
@@ -1264,26 +1439,50 @@
         pagesFetched += 1;
 
         setProgress({
-          text: `Page ${page + 1} of ${maxPages}`,
+          text: combined
+            ? `Both · Step 2 of 2 · HiringCafe · Page ${page + 1} of ${maxPages}`
+            : `HiringCafe · Page ${page + 1} of ${maxPages}`,
           detail:
             `${hits.length} hits this page · collected ${jobs.length}` +
-            (reportedTotal != null ? ` / ${reportedTotal}` : ''),
+            (reportedTotal != null ? ` / ${reportedTotal}` : '') +
+            (combined
+              ? ` · combined ${(state.combinedRun?.jrCount || 0) + jobs.length}`
+              : ''),
           kind: 'info',
-          current: page + 1,
-          total: maxPages,
+          current: overallOffset + page + 1,
+          total: overallTotal,
+          phase: combined ? 'hiringcafe' : null,
         });
 
         if (extracted.pageProps.ssrIsLastPage) break;
         if (page < maxPages - 1) await sleep(delayMs);
       }
 
-      state.rawJobs = jobs;
+      const hcJobs = jobs.map((job) => normalizeBidJob(job, 'HiringCafe'));
+      let merged = hcJobs;
+      let jrCount = 0;
+      if (combined) {
+        jrCount = state.combinedRun?.jrJobs?.length || 0;
+        merged = dedupeBidJobs([...(state.combinedRun?.jrJobs || []), ...hcJobs]);
+        state.combinedRun = null;
+      }
+
+      if (merged.length === 0) {
+        throw new Error(
+          'No jobs found from HiringCafe' +
+            (combined ? ' (and Jobright returned none).' : '.')
+        );
+      }
+
+      state.rawJobs = merged;
       state.lastScrapedAt = new Date().toISOString();
       state.stats = {
-        pagesFetched,
+        pagesFetched: combined ? jrPages + pagesFetched : pagesFetched,
         reportedTotal,
-        scraped: jobs.length,
-        source: 'hiringcafe',
+        scraped: merged.length,
+        source: combined ? 'both' : 'hiringcafe',
+        jrCount: combined ? jrCount : undefined,
+        hcCount: hcJobs.length,
       };
       state.scrapeCursor = null;
       state.selectedKeys = new Set();
@@ -1293,25 +1492,41 @@
       setProgress({
         text: `Done · ${state.filteredJobs.length} jobs ready`,
         detail:
-          `${jobs.length} scraped` +
-          (pagesFetched ? ` · ${pagesFetched} pages` : '') +
-          (reportedTotal != null ? ` · HiringCafe total ${reportedTotal}` : '') +
+          (combined
+            ? `JR ${jrCount} + HC ${hcJobs.length} → ${merged.length} unique`
+            : `${jobs.length} scraped`) +
+          (pagesFetched
+            ? ` · ${combined ? jrPages + pagesFetched : pagesFetched} pages`
+            : '') +
+          (reportedTotal != null && !combined
+            ? ` · HiringCafe total ${reportedTotal}`
+            : '') +
           (removalDetail ? ` · ${removalDetail}` : ''),
         kind: 'success',
         current: 1,
         total: 1,
+        phase: combined ? 'done' : null,
+        showTrust: false,
       });
       showToast(
-        `Scraped ${jobs.length} · ${state.filteredJobs.length} after filters.` +
+        `Scraped ${merged.length} · ${state.filteredJobs.length} after filters.` +
           (removalDetail ? ` ${removalDetail}` : ''),
         'success'
       );
     } catch (err) {
       const message = err?.message || String(err);
-      setProgress({ text: 'Scrape failed', detail: message, kind: 'error', indeterminate: true });
+      setProgress({
+        text: 'Scrape failed',
+        detail: message,
+        kind: 'error',
+        indeterminate: true,
+        showTrust: false,
+        phase: combined ? 'hiringcafe' : null,
+      });
       showToast(message, 'error');
       state.pausedForChallenge = false;
       state.scrapeCursor = null;
+      if (combined) state.combinedRun = null;
     } finally {
       if (!state.pausedForChallenge) {
         state.scraping = false;
@@ -1337,14 +1552,25 @@
     }
   }
 
-  async function fetchJobrightApiPage(tabId, search, position, count) {
+  async function fetchJobrightApiPage(tabId, position, count, sortCondition) {
     const jr = jrApi();
     const errors = [];
+    const sort = sortCondition || undefined;
 
-    // 1) Extension-context fetch (bypasses page CORS; uses host cookies).
-    if (typeof jr?.fetchSearchApiPageExtension === 'function') {
+    // Prefer in-tab fetch so UI "Most Recent" session applies.
+    if (typeof jr?.fetchRecommendApiPageInTab === 'function') {
+      const tabResult = await runJobrightTabFn(tabId, jr.fetchRecommendApiPageInTab, [
+        position,
+        count,
+        sort || '',
+      ]);
+      if (tabResult?.ok && tabResult.rows?.length) return tabResult;
+      if (tabResult?.error) errors.push(`tab: ${tabResult.error}`);
+    }
+
+    if (typeof jr?.fetchRecommendApiPageExtension === 'function') {
       try {
-        const ext = await jr.fetchSearchApiPageExtension(search, position, count);
+        const ext = await jr.fetchRecommendApiPageExtension(position, count, sort);
         if (ext?.ok && ext.rows?.length) return ext;
         if (ext?.error) errors.push(`ext: ${ext.error}`);
       } catch (err) {
@@ -1352,18 +1578,6 @@
       }
     }
 
-    // 2) In-tab fetch (page cookies / CORS as the site itself).
-    if (typeof jr?.fetchSearchApiPageInTab === 'function') {
-      const tabResult = await runJobrightTabFn(tabId, jr.fetchSearchApiPageInTab, [
-        search,
-        position,
-        count,
-      ]);
-      if (tabResult?.ok && tabResult.rows?.length) return tabResult;
-      if (tabResult?.error) errors.push(`tab: ${tabResult.error}`);
-    }
-
-    // 3) Scroll the live search page and harvest swan-api traffic the SPA triggers.
     if (typeof jr?.installSwanCaptureInTab === 'function') {
       await runJobrightTabFn(tabId, jr.installSwanCaptureInTab, []);
     }
@@ -1379,8 +1593,54 @@
       total: null,
       error:
         errors.filter(Boolean).slice(0, 3).join(' | ') ||
-        'Could not load more Jobright jobs (API + scroll). Sign in on jobright.ai and keep the search tab open.',
+        'Could not load Recommend jobs. Sign in on jobright.ai and keep Recommend open.',
     };
+  }
+
+  /** Challenge / login probe for Recommend (SSR job list is optional). */
+  async function waitUntilJobrightRecommendReady(tabId) {
+    const maxAttempts = 10;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      if (!state.scraping) throw new Error('Scrape stopped.');
+      const extracted = await extractFromTab(tabId);
+
+      if (extracted?.challenge) {
+        state.pausedForChallenge = true;
+        syncControlsFromState();
+        setProgress({
+          text: 'Browser check required',
+          detail: 'Complete it in the open Jobright tab, then click Resume.',
+          kind: 'warn',
+          indeterminate: true,
+          phase: state.combinedRun?.active ? 'jobright' : null,
+        });
+        showToast('Complete the Jobright check, then click Resume.', 'warn');
+        return { paused: true };
+      }
+
+      if (extracted?.needsLogin) {
+        state.pausedForChallenge = true;
+        syncControlsFromState();
+        setProgress({
+          text: 'Sign-in required',
+          detail: 'Sign in on Jobright Recommend, confirm your filters, then click Resume.',
+          kind: 'warn',
+          indeterminate: true,
+          phase: state.combinedRun?.active ? 'jobright' : null,
+        });
+        showToast('Sign in on Jobright Recommend, then click Resume.', 'warn');
+        return { paused: true };
+      }
+
+      // Recommend may have empty SSR — API paging still works once the page is up.
+      if (extracted?.ok || extracted?.missingJobList || /jobright\.ai/i.test(extracted?.url || '')) {
+        return { ok: true, extracted };
+      }
+
+      await sleep(800 + attempt * 200);
+    }
+
+    return { ok: true, extracted: null };
   }
 
   async function runJobrightScrape({ resume = false } = {}) {
@@ -1395,24 +1655,32 @@
       return;
     }
 
-    if (state.scraping && !state.pausedForChallenge && !resume) return;
-
-    if (!String(state.jobrightSearch?.titleKeyword || '').trim()) {
-      showToast('Import a Jobright search URL first.', 'warn');
-      return;
+    if (state.scraping && !state.pausedForChallenge && !resume) {
+      const handoff =
+        state.combinedRun?.active && state.combinedRun.phase === 'jobright';
+      if (!handoff) return;
     }
 
     await loadProfileFilterContext({ silent: true });
 
     state.scraping = true;
     state.pausedForChallenge = false;
+    if (state.combinedRun?.active) {
+      state.combinedRun.phase = 'jobright';
+    }
     syncControlsFromState();
 
+    const combined = Boolean(state.combinedRun?.active);
     const pageSize = jr.PAGE_SIZE || 20;
-    const maxPages = Math.max(1, Math.min(Number(state.prefs.maxPages) || 8, 15));
+    // Jobright is infinite-scroll on one page. Treat prefs.maxPages as scroll batches.
+    const maxScrollBatches = Math.max(6, Math.min(Number(state.prefs.maxPages) || 8, 15) * 4);
+    const scrollsPerBatch = 5;
     const delayMs = Math.max(400, Math.min(Number(state.prefs.delayMs) || 700, 3000));
+    const overallTotal = combined ? maxScrollBatches + 8 : maxScrollBatches;
+    const overallOffset = 0;
+    const recommendUrl = jr.JOBRIGHT_RECOMMEND || 'https://jobright.ai/jobs/recommend';
 
-    let page = resume && state.scrapeCursor ? state.scrapeCursor.page : 0;
+    let batch = resume && state.scrapeCursor ? state.scrapeCursor.page : 0;
     let jobs = resume && state.scrapeCursor ? [...state.scrapeCursor.jobs] : [];
     let reportedTotal =
       resume && state.scrapeCursor ? state.scrapeCursor.reportedTotal : null;
@@ -1439,30 +1707,39 @@
     };
 
     let lastApiError = '';
+    let recommendSort = '';
+    let stagnantBatches = 0;
+    const jrProgressLabel = (batchNum) =>
+      combined
+        ? `Both · Step 1 of 2 · Jobright · Scroll ${batchNum} of ${maxScrollBatches}`
+        : `Jobright · Scroll ${batchNum} of ${maxScrollBatches}`;
 
     try {
       let tabId = null;
 
-      // Page 0: open search tab and read SSR __NEXT_DATA__.
-      if (page === 0) {
+      if (batch === 0) {
         setProgress({
-          text: `Page 1 of ${maxPages}`,
-          detail: 'Opening Jobright search…',
+          text: jrProgressLabel(1),
+          detail: 'Opening Jobright Recommend…',
           kind: 'info',
-          current: 0,
-          total: maxPages,
+          current: overallOffset,
+          total: overallTotal,
+          phase: 'jobright',
+          showTrust: true,
         });
 
-        const url = jr.buildJobrightSearchUrl(state.jobrightSearch, 0);
-        tabId = await ensureScrapeTab(url);
-        const extracted = await waitUntilPageReady(tabId);
+        const prepared = await prepareJobrightRecommendTab(recommendUrl);
+        tabId = prepared.tabId;
+        const ready = await waitUntilJobrightRecommendReady(tabId);
 
-        if (extracted?.paused) {
+        if (ready?.paused) {
           state.scrapeCursor = {
             page: 0,
             jobs,
             reportedTotal,
             pagesFetched,
+            combined: combined || undefined,
+            phase: combined ? 'jobright' : undefined,
           };
           state.pausedForChallenge = true;
           state.scraping = true;
@@ -1470,73 +1747,144 @@
           return;
         }
 
-        if (!extracted?.ok) {
-          throw new Error(extracted?.error || 'Jobright page did not return job data.');
-        }
-
-        const hits = extracted.pageProps.jobList || [];
-        reportedTotal = extracted.pageProps.totalJobs ?? reportedTotal;
-        pushHits(hits);
-        pagesFetched = hits.length > 0 ? 1 : 0;
-        page = 1;
-
-        // Install network capture early so later scrolls see SPA API calls.
+        // Capture may have been wiped if challenge redirected — reinstall + refetch.
         if (typeof jr.installSwanCaptureInTab === 'function') {
           await runJobrightTabFn(tabId, jr.installSwanCaptureInTab, []);
         }
+        if (typeof jr.forceRecommendRefetchInTab === 'function') {
+          await runJobrightTabFn(tabId, jr.forceRecommendRefetchInTab, []);
+        }
 
-        // Client-rendered results: scroll once if SSR was empty.
-        if (jobs.length === 0 && typeof jr.harvestMoreJobsInTab === 'function') {
-          setProgress({
-            text: `Page 1 of ${maxPages}`,
-            detail: 'SSR empty — scrolling for Jobright API jobs…',
-            kind: 'info',
-            current: 0,
-            total: maxPages,
-          });
-          const firstHarvest = await runJobrightTabFn(tabId, jr.harvestMoreJobsInTab, [4]);
-          if (firstHarvest?.rows?.length) {
-            pushHits(firstHarvest.rows);
-            if (firstHarvest.total != null) reportedTotal = firstHarvest.total;
+        setProgress({
+          text: jrProgressLabel(1),
+          detail: 'Selecting Most Recent in sort dropdown…',
+          kind: 'info',
+          current: overallOffset,
+          total: overallTotal,
+          phase: 'jobright',
+          showTrust: true,
+        });
+
+        let sortOk = false;
+        if (typeof jr.ensureMostRecentSort === 'function') {
+          const sortResult = await runJobrightTabFn(tabId, jr.ensureMostRecentSort, []);
+          sortOk = Boolean(sortResult?.ok && (sortResult.clicked || sortResult.already));
+          if (sortOk) {
+            await sleep(sortResult.clicked ? 3200 : 1000);
+            if (typeof jr.readCapturedRecommendSort === 'function') {
+              const captured = await runJobrightTabFn(tabId, jr.readCapturedRecommendSort, []);
+              if (captured?.sortCondition) recommendSort = captured.sortCondition;
+            }
+            setProgress({
+              text: jrProgressLabel(1),
+              detail: sortResult.already
+                ? 'Most Recent already selected · loading feed…'
+                : 'Dropdown set to Most Recent · loading feed…',
+              kind: 'info',
+              current: overallOffset,
+              total: overallTotal,
+              phase: 'jobright',
+              showTrust: true,
+            });
+          } else {
+            setProgress({
+              text: jrProgressLabel(1),
+              detail: `Sort dropdown: ${sortResult?.reason || sortResult?.error || 'not changed'} · scrolling feed…`,
+              kind: 'warn',
+              current: overallOffset,
+              total: overallTotal,
+              phase: 'jobright',
+              showTrust: true,
+            });
+          }
+        }
+
+        // Initial jobs from page network after sort / forced refetch
+        if (typeof jr.drainSwanCaptureInTab === 'function') {
+          const drained = await runJobrightTabFn(tabId, jr.drainSwanCaptureInTab, []);
+          if (drained?.rows?.length) {
+            pushHits(drained.rows);
+            if (drained.total != null) reportedTotal = drained.total;
+            if (drained.sortCondition) recommendSort = drained.sortCondition;
+            pagesFetched = jobs.length > 0 ? 1 : 0;
+          }
+        }
+
+        // Seed from API only if capture empty
+        if (jobs.length === 0) {
+          const first = await fetchJobrightApiPage(tabId, 0, pageSize, recommendSort || undefined);
+          if (first.sortCondition) recommendSort = first.sortCondition;
+          if (first.total != null) reportedTotal = first.total;
+          if (first.ok && first.rows?.length) {
+            pushHits(first.rows);
+            pagesFetched = 1;
+          } else if (first.error) {
+            lastApiError = first.error;
+          }
+        }
+
+        if (jobs.length === 0) {
+          const extracted = ready?.extracted;
+          const ssrHits = extracted?.pageProps?.jobList || [];
+          if (ssrHits.length) {
+            pushHits(ssrHits);
+            reportedTotal = extracted.pageProps.totalJobs ?? reportedTotal;
+            pagesFetched = jobs.length > 0 ? 1 : 0;
+          }
+        }
+
+        // DOM cards on the open Recommend page
+        if (jobs.length === 0 && typeof jr.extractDomRecommendJobsInTab === 'function') {
+          const dom = await runJobrightTabFn(tabId, jr.extractDomRecommendJobsInTab, []);
+          if (dom?.rows?.length) {
+            pushHits(dom.rows);
             pagesFetched = jobs.length > 0 ? 1 : 0;
           }
         }
 
         setProgress({
-          text: `Page 1 of ${maxPages}`,
+          text: jrProgressLabel(1),
           detail:
             `${jobs.length} collected` +
-            (reportedTotal != null ? ` / ${reportedTotal}` : ''),
-          kind: 'info',
-          current: 1,
-          total: maxPages,
+            (sortOk ? ' (Most Recent)' : '') +
+            (prepared.reused ? ' · reused tab' : '') +
+            ' · scrolling for more…',
+          kind: jobs.length ? 'info' : 'warn',
+          current: overallOffset + 1,
+          total: overallTotal,
+          phase: 'jobright',
+          showTrust: true,
         });
+
+        batch = 1;
       }
 
-      // Pages 1+: extension API → tab API → scroll capture.
-      for (; page < maxPages; page += 1) {
+      // Primary: infinite-scroll the Recommend feed and capture swan-api payloads
+      for (; batch < maxScrollBatches; batch += 1) {
         if (!state.scraping) break;
         if (reportedTotal != null && jobs.length >= reportedTotal) break;
 
         setProgress({
-          text: `Page ${page + 1} of ${maxPages}`,
-          detail: `Loading more Jobright jobs (offset ${page * pageSize})…`,
+          text: jrProgressLabel(batch + 1),
+          detail: `Scrolling Recommend feed… (${jobs.length} so far)`,
           kind: 'info',
-          current: page,
-          total: maxPages,
+          current: overallOffset + batch,
+          total: overallTotal,
+          phase: 'jobright',
+          showTrust: true,
         });
 
-        tabId = await ensureJobrightApiTab(
-          jr.buildJobrightSearchUrl(state.jobrightSearch, 0)
-        );
+        tabId = await ensureJobrightApiTab(recommendUrl);
 
         const probe = await extractFromTab(tabId);
         if (probe?.challenge || probe?.needsLogin) {
           state.scrapeCursor = {
-            page,
+            page: batch,
             jobs,
             reportedTotal,
             pagesFetched,
+            combined: combined || undefined,
+            phase: combined ? 'jobright' : undefined,
           };
           state.pausedForChallenge = true;
           state.scraping = true;
@@ -1546,94 +1894,165 @@
             detail: 'Complete it in the open Jobright tab, then click Resume.',
             kind: 'warn',
             indeterminate: true,
+            phase: 'jobright',
           });
           showToast('Complete the Jobright check, then click Resume.', 'warn');
           return;
         }
 
-        const before = jobs.length;
-        const apiResult = await fetchJobrightApiPage(
-          tabId,
-          state.jobrightSearch,
-          page * pageSize,
-          pageSize
-        );
-
-        if (apiResult.total != null) reportedTotal = apiResult.total;
-
-        if (!apiResult.ok || !apiResult.rows?.length) {
-          lastApiError = apiResult.error || lastApiError;
-          break;
+        if (typeof jr.installSwanCaptureInTab === 'function') {
+          await runJobrightTabFn(tabId, jr.installSwanCaptureInTab, []);
         }
 
-        const added = pushHits(apiResult.rows);
-        if (added === 0) break;
+        const before = jobs.length;
+        const harvest = await runJobrightTabFn(tabId, jr.harvestMoreJobsInTab, [
+          scrollsPerBatch,
+        ]);
 
-        pagesFetched += 1;
+        if (harvest?.total != null) reportedTotal = harvest.total;
+        if (harvest?.sortCondition) recommendSort = harvest.sortCondition;
 
-        setProgress({
-          text: `Page ${page + 1} of ${maxPages}`,
-          detail:
-            `+${added} via ${apiResult.via || 'api'} · collected ${jobs.length}` +
-            (reportedTotal != null ? ` / ${reportedTotal}` : ''),
-          kind: 'info',
-          current: page + 1,
-          total: maxPages,
-        });
+        let added = 0;
+        if (harvest?.rows?.length) {
+          added = pushHits(harvest.rows);
+        }
 
-        if (jobs.length === before) break;
-        if (page < maxPages - 1) await sleep(delayMs);
+        // API offset backup only when scroll added nothing
+        if (added === 0) {
+          const apiResult = await fetchJobrightApiPage(
+            tabId,
+            jobs.length,
+            pageSize,
+            recommendSort || undefined
+          );
+          if (apiResult.total != null) reportedTotal = apiResult.total;
+          if (apiResult.ok && apiResult.rows?.length) {
+            added = pushHits(apiResult.rows);
+          } else if (apiResult.error) {
+            lastApiError = apiResult.error;
+          }
+        }
+
+        if (added === 0 && jobs.length === 0 && typeof jr.extractDomRecommendJobsInTab === 'function') {
+          const dom = await runJobrightTabFn(tabId, jr.extractDomRecommendJobsInTab, []);
+          if (dom?.rows?.length) {
+            added = pushHits(dom.rows);
+          }
+        }
+
+        if (added > 0) {
+          pagesFetched += 1;
+          stagnantBatches = 0;
+          setProgress({
+            text: jrProgressLabel(batch + 1),
+            detail: `+${added} via scroll · collected ${jobs.length}`,
+            kind: 'info',
+            current: overallOffset + batch + 1,
+            total: overallTotal,
+            phase: 'jobright',
+            showTrust: true,
+          });
+        } else {
+          stagnantBatches += 1;
+          if (stagnantBatches >= 2) break;
+        }
+
+        if (jobs.length === before && stagnantBatches >= 2) break;
+        if (batch < maxScrollBatches - 1) await sleep(delayMs);
       }
 
-      if (jobs.length === 0) {
+      if (jobs.length === 0 && !combined) {
         throw new Error(
           lastApiError ||
-            'No Jobright jobs found. Sign in on jobright.ai, open search results, then scrape again.'
+            'No Recommend jobs found. Sign in on jobright.ai, open Recommend with your Saved Filters, then scrape again.'
         );
       }
 
-      const deduped = filters.dedupeJobs(jobs);
-      state.rawJobs = deduped;
+      if (combined) {
+        const jrEmpty = jobs.length === 0;
+        state.combinedRun = {
+          active: true,
+          phase: 'hiringcafe',
+          jrJobs: jobs.map((job) => normalizeBidJob(job, 'Jobright')),
+          jrPages: pagesFetched,
+          jrCount: jobs.length,
+        };
+        state.scrapeCursor = null;
+        state.pausedForChallenge = false;
+        setProgress({
+          text: jrEmpty
+            ? 'Both · Jobright returned 0 · starting HiringCafe'
+            : 'Both · Step 1 of 2 complete',
+          detail: jrEmpty
+            ? (lastApiError
+                ? `Jobright failed (${lastApiError}). Continuing with HiringCafe…`
+                : 'Jobright collected 0 jobs. Continuing with HiringCafe…')
+            : `Jobright ${jobs.length} jobs. Starting HiringCafe…`,
+          kind: jrEmpty ? 'warn' : 'info',
+          indeterminate: true,
+          phase: 'hiringcafe',
+        });
+        showToast(
+          jrEmpty
+            ? 'Jobright returned 0 jobs — continuing HiringCafe.'
+            : `Jobright done (${jobs.length}). Starting HiringCafe…`,
+          jrEmpty ? 'warn' : 'info'
+        );
+        // Keep scraping=true; HiringCafe phase continues.
+        await runHiringCafeScrape({ resume: false });
+        return;
+      }
+
+      const jrJobs = jobs.map((job) => normalizeBidJob(job, 'Jobright'));
+
+      state.rawJobs = jrJobs;
       state.lastScrapedAt = new Date().toISOString();
       state.stats = {
         pagesFetched,
         reportedTotal,
-        scraped: deduped.length,
+        scraped: jrJobs.length,
         source: 'jobright',
+        jrCount: jrJobs.length,
       };
       state.scrapeCursor = null;
       state.selectedKeys = new Set();
       recomputeFiltered();
       await persistResults();
       const removalDetail = formatFilterRemovalDetail(state.stats);
-      const pageNote =
-        reportedTotal != null && deduped.length < reportedTotal
-          ? ` · ${deduped.length} of ${reportedTotal} (raise Max pages for more)`
-          : '';
       setProgress({
         text: `Done · ${state.filteredJobs.length} jobs ready`,
         detail:
-          `${deduped.length} scraped` +
-          (pagesFetched ? ` · ${pagesFetched} pages` : '') +
-          pageNote +
+          `${jrJobs.length} scraped` +
+          (pagesFetched ? ` · ${pagesFetched} scroll batches` : '') +
           (removalDetail ? ` · ${removalDetail}` : ''),
         kind: 'success',
         current: 1,
         total: 1,
+        phase: 'done',
+        showTrust: false,
       });
       showToast(
-        `Scraped ${deduped.length} · ${state.filteredJobs.length} after filters.` +
+        `Scraped ${jrJobs.length} · ${state.filteredJobs.length} after filters.` +
           (removalDetail ? ` ${removalDetail}` : ''),
         'success'
       );
     } catch (err) {
       const message = err?.message || String(err);
-      setProgress({ text: 'Scrape failed', detail: message, kind: 'error', indeterminate: true });
+      setProgress({
+        text: 'Scrape failed',
+        detail: message,
+        kind: 'error',
+        indeterminate: true,
+        showTrust: false,
+        phase: combined ? 'jobright' : null,
+      });
       showToast(message, 'error');
       state.pausedForChallenge = false;
       state.scrapeCursor = null;
+      if (combined) state.combinedRun = null;
     } finally {
-      if (!state.pausedForChallenge) {
+      // Combined handoff to HiringCafe keeps scraping true.
+      if (!state.pausedForChallenge && !(combined && state.combinedRun?.phase === 'hiringcafe')) {
         state.scraping = false;
       }
       syncControlsFromState();
@@ -1641,6 +2060,42 @@
   }
 
   async function runScrape({ resume = false } = {}) {
+    if (activeSource() === 'both' || state.combinedRun?.active) {
+      if (!resume || !state.combinedRun?.active) {
+        state.combinedRun = {
+          active: true,
+          phase: 'jobright',
+          jrJobs: [],
+          jrPages: 0,
+          jrCount: 0,
+        };
+        setProgress({
+          text: 'Starting scrape…',
+          detail: 'Step 1 of 2 · Jobright (Most Recent) → HiringCafe',
+          kind: 'info',
+          indeterminate: true,
+          phase: 'jobright',
+          showTrust: true,
+        });
+      }
+      if (resume && state.scrapeCursor?.phase === 'hiringcafe') {
+        state.combinedRun.phase = 'hiringcafe';
+        await runHiringCafeScrape({ resume: true });
+        return;
+      }
+      if (resume && state.combinedRun.phase === 'hiringcafe' && !state.scrapeCursor) {
+        await runHiringCafeScrape({ resume: false });
+        return;
+      }
+      if (resume && state.scrapeCursor?.phase === 'jobright') {
+        await runJobrightScrape({ resume: true });
+        return;
+      }
+      await runJobrightScrape({ resume });
+      return;
+    }
+
+    state.combinedRun = null;
     if (activeSource() === 'jobright') {
       await runJobrightScrape({ resume });
       return;
@@ -1886,22 +2341,10 @@
     return null;
   }
 
-  function syncImportModalPanels() {
-    const source = activeSource();
-    document.querySelectorAll('[data-import-panel]').forEach((panel) => {
-      panel.hidden = panel.getAttribute('data-import-panel') !== source;
-    });
-    const title = document.getElementById('jsImportModalTitle');
-    if (title) {
-      title.textContent =
-        source === 'jobright' ? 'Edit Jobright search' : 'Edit HiringCafe search';
-    }
-  }
 
   function openJsModal(name) {
     const modal = modalEl(name);
     if (!modal) return;
-    if (name === 'import') syncImportModalPanels();
     modal.hidden = false;
   }
 
@@ -1916,12 +2359,6 @@
   }
 
   function wireUi() {
-    document.querySelectorAll('[data-js-source]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        void setScrapeSource(btn.getAttribute('data-js-source'));
-      });
-    });
-
     document.querySelectorAll('[data-js-open-modal]').forEach((btn) => {
       btn.addEventListener('click', () => {
         openJsModal(btn.getAttribute('data-js-open-modal'));
@@ -1944,22 +2381,6 @@
       if (event.key === 'Escape') closeAllJsModals();
     });
 
-    document.getElementById('jsDateWindow')?.addEventListener('change', async (event) => {
-      state.prefs.dateWindow = event.target.value === '1d' || event.target.value === '7d'
-        ? event.target.value
-        : '3d';
-      await persistPrefs();
-      if (state.customSearchState) {
-        renderSearchImportUi();
-      }
-      if (state.rawJobs.length) {
-        recomputeFiltered();
-        await persistResults();
-        renderResults();
-        renderMeta();
-      }
-    });
-
     document.getElementById('jsImportSearchUrlBtn')?.addEventListener('click', async () => {
       const raw = document.getElementById('jsSearchUrlInput')?.value || '';
       await importSearchFromText(raw);
@@ -1980,24 +2401,12 @@
       }
     });
 
-    document.getElementById('jsJrImportSearchUrlBtn')?.addEventListener('click', async () => {
-      const raw = document.getElementById('jsJrSearchUrlInput')?.value || '';
-      await importJobrightSearchFromText(raw);
+    document.getElementById('jsEditHcSearchBtn')?.addEventListener('click', () => {
+      openJsModal('import');
     });
 
-    document.getElementById('jsJrImportSearchTabBtn')?.addEventListener('click', () => {
-      void importJobrightSearchFromActiveTab();
-    });
-
-    document.getElementById('jsJrResetSearchBtn')?.addEventListener('click', () => {
-      void resetJobrightSearch();
-    });
-
-    document.getElementById('jsJrSearchUrlInput')?.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        void importJobrightSearchFromText(event.target.value || '');
-      }
+    document.getElementById('jsOpenRecommendBtn')?.addEventListener('click', () => {
+      void openJobrightRecommend();
     });
 
     [
@@ -2042,7 +2451,14 @@
     document.getElementById('jsStopBtn')?.addEventListener('click', () => {
       state.scraping = false;
       state.pausedForChallenge = false;
-      setProgress({ text: 'Scrape stopped', detail: 'Partial results were kept if any pages finished.', kind: 'warn', indeterminate: true });
+      state.combinedRun = null;
+      setProgress({
+        text: 'Scrape stopped',
+        detail: 'Partial results were kept if any pages finished.',
+        kind: 'warn',
+        indeterminate: true,
+        showTrust: false,
+      });
       syncControlsFromState();
     });
 
@@ -2053,6 +2469,7 @@
       state.stats = null;
       state.lastScrapedAt = null;
       state.scrapeCursor = null;
+      state.combinedRun = null;
       await storageSet({ [STORAGE.lastResults]: null });
       setProgress({ hidden: true });
       syncControlsFromState();
@@ -2061,14 +2478,23 @@
     document.getElementById('jsCsvBtn')?.addEventListener('click', () => {
       const jobs = actionJobs();
       if (!jobs.length) return;
-      const csv = api().jobsToCsv(jobs);
-      const prefix = activeSource() === 'jobright' ? 'jobright' : 'hiringcafe';
+      const includeOrigin =
+        activeSource() === 'both' ||
+        jobs.some((j) => j.origin) ||
+        state.stats?.source === 'both';
+      const xml = jobsToBidExcelXml(jobs, { includeOrigin });
+      const prefix =
+        state.stats?.source === 'both' || activeSource() === 'both'
+          ? 'jobstrike-both'
+          : activeSource() === 'jobright'
+            ? 'jobright'
+            : 'hiringcafe';
       downloadTextFile(
-        csv,
-        `${prefix}-jobs.csv`,
-        'text/csv;charset=utf-8'
+        xml,
+        `${prefix}-jobs.xls`,
+        'application/vnd.ms-excel;charset=utf-8'
       );
-      showToast(`CSV downloaded (${jobs.length}).`, 'success');
+      showToast(`Spreadsheet downloaded (${jobs.length}).`, 'success');
     });
 
     document.getElementById('jsLinksBtn')?.addEventListener('click', () => {
@@ -2079,7 +2505,12 @@
         showToast('No links to download.', 'error');
         return;
       }
-      const prefix = activeSource() === 'jobright' ? 'jobright' : 'hiringcafe';
+      const prefix =
+        state.stats?.source === 'both' || activeSource() === 'both'
+          ? 'jobstrike-both'
+          : activeSource() === 'jobright'
+            ? 'jobright'
+            : 'hiringcafe';
       downloadTextFile(
         links.join('\n'),
         `${prefix}-links.txt`,

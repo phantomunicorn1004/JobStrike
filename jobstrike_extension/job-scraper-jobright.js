@@ -1,11 +1,12 @@
 /**
- * Jobright.ai search scrape helpers for the extension (browser-side).
- * Opens a real Jobright search tab, reads __NEXT_DATA__.jobList, maps to ScrapedJob.
+ * Jobright.ai Recommend scrape helpers for the extension (browser-side).
+ * Uses the logged-in Recommend feed (account Saved Filters) via swan-api.
  */
 (function (global) {
   const JOBRIGHT_SITE = 'https://jobright.ai';
+  const JOBRIGHT_RECOMMEND = `${JOBRIGHT_SITE}/jobs/recommend`;
   const SWAN_API = 'https://swan-api.jobright.ai';
-  /** Jobright search list page size (SSR + swan-api). */
+  /** Jobright recommend / search list page size (SSR + swan-api). */
   const PAGE_SIZE = 20;
   const DEFAULT_SEARCH = {
     titleKeyword: 'Software Engineer',
@@ -224,6 +225,31 @@
     return urls;
   }
 
+  /** Recommend feed only — server applies the account Saved Filters. */
+  function buildRecommendApiUrls(position, count, sortCondition) {
+    const size = Math.max(1, Math.min(Number(count) || PAGE_SIZE, 50));
+    const pos = Math.max(0, Number(position) || 0);
+    const refresh = pos === 0 ? '&refresh=true' : '';
+    const sortRaw = String(sortCondition || '').trim();
+    // Always try bare Recommend URL first. Optional real captured sort after.
+    // Do not invent MOST_RECENT — that caused JR 0 when the API rejected it.
+    const sortParts = [''];
+    if (sortRaw) sortParts.push(`&sortCondition=${encodeURIComponent(sortRaw)}`);
+    const seen = new Set();
+    const urls = [];
+    for (const sort of sortParts) {
+      for (const path of [
+        `${SWAN_API}/swan/recommend/list/jobs?position=${pos}&count=${size}${refresh}${sort}`,
+        `${SWAN_API}/swan/job/recommend/list?position=${pos}&count=${size}${refresh}${sort}`,
+      ]) {
+        if (seen.has(path)) continue;
+        seen.add(path);
+        urls.push(path);
+      }
+    }
+    return urls;
+  }
+
   function collectJobRowsFromPayload(payload, out) {
     if (!payload) return;
     if (Array.isArray(payload)) {
@@ -302,6 +328,63 @@
       rows: [],
       total: null,
       error: errors.length ? errors.slice(0, 4).join('; ') : 'No swan-api endpoint returned jobs',
+    };
+  }
+
+  /** Page the Recommend feed (Saved Filters) from the extension context. */
+  async function fetchRecommendApiPageExtension(position, count, sortCondition) {
+    const candidates = buildRecommendApiUrls(position, count, sortCondition);
+    const errors = [];
+
+    for (const url of candidates) {
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) {
+          errors.push(`${response.status} ${url.split('?')[0]}`);
+          continue;
+        }
+        const json = await response.json().catch(() => null);
+        if (!json) continue;
+        const rows = [];
+        collectJobRowsFromPayload(json, rows);
+        if (rows.length === 0) {
+          errors.push(`empty ${url.split('?')[0]}`);
+          continue;
+        }
+        let detectedSort = sortCondition || '';
+        try {
+          detectedSort =
+            new URL(url).searchParams.get('sortCondition') || detectedSort;
+        } catch (_) {
+          /* ignore */
+        }
+        return {
+          ok: true,
+          rows,
+          total: extractTotalFromPayload(json),
+          endpoint: url.split('?')[0],
+          via: 'extension',
+          sortCondition: detectedSort || null,
+        };
+      } catch (err) {
+        errors.push(
+          `${err?.message || String(err)} (${url.split('?')[0].replace(/^https:\/\//, '')})`
+        );
+      }
+    }
+
+    return {
+      ok: false,
+      rows: [],
+      total: null,
+      error:
+        errors.length
+          ? errors.slice(0, 4).join('; ')
+          : 'No recommend swan-api endpoint returned jobs',
     };
   }
 
@@ -422,9 +505,307 @@
     };
   }
 
+  /**
+   * Injected (MAIN): auto-select "Most Recent" in the Recommend sort dropdown
+   * (Recommended | Top Matched | Most Recent) shown in the Jobright UI.
+   */
+  async function ensureMostRecentSort() {
+    const clean = (text) => (text || '').replace(/\s+/g, ' ').trim();
+    const lower = (text) => clean(text).toLowerCase();
+    const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+    const SORT_LABELS = /^(recommended|top matched|most recent)$/i;
+
+    function isVisible(el) {
+      if (!el || !(el instanceof Element)) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return false;
+      const style = window.getComputedStyle(el);
+      return style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
+    }
+
+    function leafText(el) {
+      return clean(el?.innerText || el?.textContent || '');
+    }
+
+    function clickEl(el) {
+      if (!el) return false;
+      try {
+        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      } catch (_) {}
+      try {
+        const opts = { bubbles: true, cancelable: true, view: window };
+        el.dispatchEvent(new PointerEvent('pointerdown', opts));
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        el.dispatchEvent(new PointerEvent('pointerup', opts));
+        el.dispatchEvent(new MouseEvent('mouseup', opts));
+        el.dispatchEvent(new MouseEvent('click', opts));
+        return true;
+      } catch (_) {
+        try {
+          el.click();
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+    }
+
+    /** Closed trigger shows current sort, e.g. "Recommended" with chevron. */
+    function findSortTrigger() {
+      const nodes = Array.from(
+        document.querySelectorAll('button, [role="button"], [role="combobox"], div, span')
+      );
+      const matches = [];
+      for (const el of nodes) {
+        if (!isVisible(el)) continue;
+        const text = leafText(el);
+        if (!SORT_LABELS.test(text)) continue;
+        if (text.length > 20) continue;
+        matches.push(el);
+      }
+      matches.sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        return ra.width * ra.height - rb.width * rb.height || ra.top - rb.top;
+      });
+      return matches[0] || null;
+    }
+
+    /** Deepest visible node whose text is exactly Most Recent (menu row). */
+    function findMostRecentMenuItem() {
+      const nodes = Array.from(
+        document.querySelectorAll(
+          'div, span, li, button, [role="option"], [role="menuitem"], [class*="option"], [class*="item"], [class*="menu"], [class*="dropdown"]'
+        )
+      );
+      let best = null;
+      let bestScore = Infinity;
+      for (const el of nodes) {
+        if (!isVisible(el)) continue;
+        const text = leafText(el);
+        if (!/^most\s*recent$/i.test(text)) continue;
+        const rect = el.getBoundingClientRect();
+        const score = el.childElementCount * 1000 + rect.width * rect.height;
+        if (score < bestScore) {
+          best = el;
+          bestScore = score;
+        }
+      }
+      return best;
+    }
+
+    async function waitForTrigger(timeoutMs) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        const el = findSortTrigger();
+        if (el) return el;
+        await sleepMs(150);
+      }
+      return null;
+    }
+
+    async function waitForOpenMenuItem(trigger, timeoutMs) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        const el = findMostRecentMenuItem();
+        if (el && trigger) {
+          const tr = trigger.getBoundingClientRect();
+          const er = el.getBoundingClientRect();
+          if (er.top >= tr.top - 8 && el !== trigger) return el;
+        } else if (el && el !== trigger) {
+          return el;
+        }
+        await sleepMs(100);
+      }
+      return findMostRecentMenuItem();
+    }
+
+    try {
+      let trigger = await waitForTrigger(10000);
+      if (!trigger) {
+        return { ok: false, reason: 'sort dropdown (Recommended) not found' };
+      }
+
+      if (/most\s*recent/i.test(lower(leafText(trigger)))) {
+        return { ok: true, already: true, label: leafText(trigger) };
+      }
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        trigger = findSortTrigger() || trigger;
+        if (/most\s*recent/i.test(lower(leafText(trigger)))) {
+          return { ok: true, already: true, label: leafText(trigger), attempt };
+        }
+
+        clickEl(trigger);
+        await sleepMs(400);
+
+        const option = await waitForOpenMenuItem(trigger, 3500);
+        if (!option) {
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          await sleepMs(300);
+          continue;
+        }
+
+        let clickTarget = option;
+        const parent = option.parentElement;
+        if (parent && /^most\s*recent$/i.test(leafText(parent))) {
+          clickTarget = parent;
+        }
+        clickEl(clickTarget);
+        await sleepMs(1000);
+
+        const afterTrigger = await waitForTrigger(3000);
+        const afterLabel = leafText(afterTrigger);
+        if (/most\s*recent/i.test(lower(afterLabel))) {
+          return { ok: true, clicked: true, label: afterLabel, attempt };
+        }
+      }
+
+      return {
+        ok: false,
+        reason: 'opened dropdown but Most Recent did not stick',
+        label: leafText(findSortTrigger()),
+      };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  }
+
+  /** Injected (MAIN): read sortCondition from swan-api URLs captured after UI sort. */
+  function readCapturedRecommendSort() {
+    try {
+      const items = Array.isArray(window.__jobstrikeSwanCapture)
+        ? window.__jobstrikeSwanCapture
+        : [];
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        const url = String(items[i]?.url || '');
+        if (!/recommend/i.test(url)) continue;
+        try {
+          const sort = new URL(url, location.origin).searchParams.get('sortCondition');
+          if (sort) return { ok: true, sortCondition: sort, url };
+        } catch (_) {
+          const m = url.match(/[?&]sortCondition=([^&]+)/i);
+          if (m) return { ok: true, sortCondition: decodeURIComponent(m[1]), url };
+        }
+      }
+      return { ok: false, sortCondition: null };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  }
+
+  /** Injected (MAIN): page Recommend feed with page cookies. */
+  async function fetchRecommendApiPageInTab(position, count, sortCondition) {
+    const SWAN_API = 'https://swan-api.jobright.ai';
+    const PAGE_SIZE = 20;
+    const size = Math.max(1, Math.min(Number(count) || PAGE_SIZE, 50));
+    const pos = Math.max(0, Number(position) || 0);
+    const refresh = pos === 0 ? '&refresh=true' : '';
+    const sortRaw = String(sortCondition || '').trim();
+    // Bare Recommend URL first (UI Most Recent is session-side). Optional captured sort after.
+    const sortVariants = [''];
+    if (sortRaw) sortVariants.push(`&sortCondition=${encodeURIComponent(sortRaw)}`);
+    const candidates = [];
+    const seen = new Set();
+    for (const sort of sortVariants) {
+      for (const url of [
+        `${SWAN_API}/swan/recommend/list/jobs?position=${pos}&count=${size}${refresh}${sort}`,
+        `${SWAN_API}/swan/job/recommend/list?position=${pos}&count=${size}${refresh}${sort}`,
+      ]) {
+        if (seen.has(url)) continue;
+        seen.add(url);
+        candidates.push(url);
+      }
+    }
+
+    function collect(payload, out) {
+      if (!payload) return;
+      if (Array.isArray(payload)) {
+        for (const item of payload) {
+          if (item && typeof item === 'object') {
+            if (item.jobResult || item.jobTitle || item.jobId || item.applyLink) {
+              out.push(item);
+            } else {
+              collect(item, out);
+            }
+          }
+        }
+        return;
+      }
+      if (typeof payload !== 'object') return;
+      for (const key of ['jobList', 'jobs', 'list', 'result', 'data', 'records']) {
+        if (payload[key] != null) collect(payload[key], out);
+      }
+    }
+
+    function readTotal(payload) {
+      if (!payload || typeof payload !== 'object') return null;
+      if (typeof payload.total === 'number') return payload.total;
+      if (typeof payload.totalJobs === 'number') return payload.totalJobs;
+      if (payload.result && typeof payload.result === 'object') {
+        if (typeof payload.result.total === 'number') return payload.result.total;
+        if (typeof payload.result.totalJobs === 'number') return payload.result.totalJobs;
+      }
+      return null;
+    }
+
+    const errors = [];
+    for (const url of candidates) {
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) {
+          errors.push(`${response.status} ${url.split('?')[0]}`);
+          continue;
+        }
+        const json = await response.json().catch(() => null);
+        if (!json) continue;
+        const rows = [];
+        collect(json, rows);
+        if (rows.length === 0) {
+          errors.push(`empty ${url.split('?')[0]}`);
+          continue;
+        }
+        let detectedSort = sortRaw;
+        try {
+          detectedSort = new URL(url).searchParams.get('sortCondition') || detectedSort;
+        } catch (_) {
+          /* ignore */
+        }
+        return {
+          ok: true,
+          rows,
+          total: readTotal(json),
+          endpoint: url.split('?')[0],
+          via: 'tab',
+          sortCondition: detectedSort || null,
+        };
+      } catch (err) {
+        errors.push(
+          `${err?.message || String(err)} (${url.split('?')[0].replace(/^https:\/\//, '')})`
+        );
+      }
+    }
+
+    return {
+      ok: false,
+      rows: [],
+      total: null,
+      error:
+        errors.length
+          ? errors.slice(0, 3).join('; ')
+          : 'No recommend swan-api endpoint returned jobs',
+    };
+  }
+
   /** Injected (MAIN): patch fetch/XHR to capture swan-api JSON the SPA loads. */
   function installSwanCaptureInTab() {
     if (window.__jobstrikeSwanInstalled) {
+      window.__jobstrikeSwanCapture = window.__jobstrikeSwanCapture || [];
+      window.__jobstrikeSwanSeen = window.__jobstrikeSwanSeen || new Set();
       return { ok: true, already: true };
     }
     window.__jobstrikeSwanCapture = [];
@@ -488,7 +869,223 @@
   }
 
   /**
-   * Injected (MAIN): scroll / load-more to trigger SPA pagination; return new rows.
+   * Injected (MAIN): after capture is installed, force Recommend to refetch so
+   * swan-api responses hit the patched fetch (first paint was usually already done).
+   */
+  async function forceRecommendRefetchInTab() {
+    try {
+      if (window.__jobstrikeSwanCapture) window.__jobstrikeSwanCapture.length = 0;
+
+      const SWAN_API = 'https://swan-api.jobright.ai';
+      const candidates = [
+        `${SWAN_API}/swan/recommend/list/jobs?position=0&count=20&refresh=true`,
+        `${SWAN_API}/swan/job/recommend/list?position=0&count=20&refresh=true`,
+        `${SWAN_API}/swan/recommend/list/jobs?position=0&count=50&refresh=true`,
+      ];
+
+      let apiRows = 0;
+      for (const url of candidates) {
+        try {
+          const response = await fetch(url, {
+            method: 'GET',
+            credentials: 'include',
+            headers: { Accept: 'application/json' },
+          });
+          if (!response.ok) continue;
+          const json = await response.json().catch(() => null);
+          if (!json) continue;
+          // Patched fetch also stores this; count jobs for ok signal.
+          const probe = [];
+          const walk = (payload) => {
+            if (!payload) return;
+            if (Array.isArray(payload)) {
+              for (const item of payload) {
+                if (
+                  item &&
+                  typeof item === 'object' &&
+                  (item.jobResult || item.jobTitle || item.jobId || item.applyLink)
+                ) {
+                  probe.push(item);
+                } else if (item && typeof item === 'object') {
+                  walk(item);
+                }
+              }
+              return;
+            }
+            if (typeof payload === 'object') {
+              for (const key of ['jobList', 'jobs', 'list', 'result', 'data', 'records']) {
+                if (payload[key] != null) walk(payload[key]);
+              }
+            }
+          };
+          walk(json);
+          if (probe.length) {
+            apiRows = probe.length;
+            break;
+          }
+        } catch (_) {
+          /* try next */
+        }
+      }
+
+      // Soft UI nudge: scroll to top then a bit down so infinite feed may refetch.
+      try {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+        await new Promise((r) => setTimeout(r, 200));
+        window.scrollBy(0, Math.max(window.innerHeight, 600));
+      } catch (_) {
+        /* ignore */
+      }
+
+      await new Promise((r) => setTimeout(r, 900));
+
+      return {
+        ok: apiRows > 0 || (window.__jobstrikeSwanCapture || []).length > 0,
+        apiRows,
+        captured: (window.__jobstrikeSwanCapture || []).length,
+      };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Injected (MAIN): scrape visible Recommend cards from the DOM when network
+   * capture / API guesses return nothing.
+   */
+  function extractDomRecommendJobsInTab() {
+    try {
+      const rows = [];
+      const seen = new Set();
+      const anchors = Array.from(
+        document.querySelectorAll('a[href*="/jobs/info/"], a[href*="/jobs/detail/"]')
+      );
+
+      for (const a of anchors) {
+        const href = String(a.href || '');
+        const m = href.match(/\/jobs\/(?:info|detail)\/([^/?#]+)/i);
+        if (!m) continue;
+        const jobId = decodeURIComponent(m[1]);
+        if (!jobId || seen.has(jobId)) continue;
+        seen.add(jobId);
+
+        let card = a.closest('article, li, [class*="Job"], [class*="job"], [class*="card"], [class*="Card"]');
+        if (!card) card = a.parentElement;
+        const block = card || a;
+        const lines = String(block.innerText || a.textContent || '')
+          .split(/\n+/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .filter((s) => !/^(easy apply|applied|save|saved|new|hot)$/i.test(s));
+
+        let title = '';
+        let company = '';
+        for (const line of lines) {
+          if (!title && line.length > 2 && line.length < 180) {
+            title = line;
+            continue;
+          }
+          if (title && !company && line.length > 1 && line.length < 100 && line !== title) {
+            company = line;
+            break;
+          }
+        }
+        if (!title) title = String(a.textContent || '').trim() || `Job ${jobId}`;
+
+        rows.push({
+          jobId,
+          jobTitle: title,
+          companyName: company,
+          applyLink: href.startsWith('http') ? href : `https://jobright.ai/jobs/info/${jobId}`,
+        });
+      }
+
+      return { ok: rows.length > 0, rows, via: 'dom', count: rows.length };
+    } catch (err) {
+      return { ok: false, rows: [], error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Injected (MAIN): return jobs already captured from swan-api (e.g. after Most Recent click).
+   */
+  function drainSwanCaptureInTab() {
+    try {
+      const items = Array.isArray(window.__jobstrikeSwanCapture)
+        ? window.__jobstrikeSwanCapture.slice()
+        : [];
+      const rows = [];
+      let total = null;
+      let sortCondition = null;
+
+      function collect(payload, out) {
+        if (!payload) return;
+        if (Array.isArray(payload)) {
+          for (const item of payload) {
+            if (item && typeof item === 'object') {
+              if (item.jobResult || item.jobTitle || item.jobId || item.applyLink) {
+                out.push(item);
+              } else {
+                collect(item, out);
+              }
+            }
+          }
+          return;
+        }
+        if (typeof payload !== 'object') return;
+        for (const key of ['jobList', 'jobs', 'list', 'result', 'data', 'records']) {
+          if (payload[key] != null) collect(payload[key], out);
+        }
+      }
+
+      function readTotal(payload) {
+        if (!payload || typeof payload !== 'object') return null;
+        if (typeof payload.total === 'number') return payload.total;
+        if (typeof payload.totalJobs === 'number') return payload.totalJobs;
+        if (payload.result && typeof payload.result === 'object') {
+          if (typeof payload.result.total === 'number') return payload.result.total;
+          if (typeof payload.result.totalJobs === 'number') return payload.result.totalJobs;
+        }
+        return null;
+      }
+
+      for (const item of items) {
+        const url = String(item?.url || '');
+        // Accept any swan-api payload; Jobright path names change across releases.
+        if (!/swan-api\.jobright\.ai/i.test(url)) continue;
+        try {
+          const sort = new URL(url, location.origin).searchParams.get('sortCondition');
+          if (sort) sortCondition = sort;
+        } catch (_) {
+          const m = url.match(/[?&]sortCondition=([^&]+)/i);
+          if (m) sortCondition = decodeURIComponent(m[1]);
+        }
+        collect(item.json, rows);
+        const t = readTotal(item.json);
+        if (t != null) total = t;
+      }
+
+      // Clear so later harvests only get new pages
+      if (window.__jobstrikeSwanCapture) window.__jobstrikeSwanCapture.length = 0;
+
+      return {
+        ok: rows.length > 0,
+        rows,
+        total,
+        sortCondition,
+        via: 'swan-capture',
+        drained: items.length,
+      };
+    } catch (err) {
+      return { ok: false, rows: [], error: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Injected (MAIN): scroll the Recommend infinite feed and return newly captured jobs.
+   * Jobright is one page + scroll — not classic pagination.
    */
   async function harvestMoreJobsInTab(scrollRounds) {
     function collect(payload, out) {
@@ -522,18 +1119,53 @@
       return null;
     }
 
+    function findScrollRoot() {
+      const candidates = Array.from(
+        document.querySelectorAll('main, [class*="list"], [class*="feed"], [class*="scroll"], [class*="job"]')
+      );
+      let best = null;
+      let bestScore = 0;
+      for (const el of candidates) {
+        const style = window.getComputedStyle(el);
+        const canScroll =
+          /(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 80;
+        if (!canScroll) continue;
+        const score = el.scrollHeight - el.clientHeight;
+        if (score > bestScore) {
+          best = el;
+          bestScore = score;
+        }
+      }
+      return best;
+    }
+
+    function scrollOnce(root) {
+      const step = Math.max(window.innerHeight, 900);
+      if (root) {
+        root.scrollTop = Math.min(root.scrollTop + step * 1.6, root.scrollHeight);
+      } else {
+        window.scrollBy(0, step * 1.6);
+        document.documentElement.scrollTop = document.documentElement.scrollHeight;
+        document.body.scrollTop = document.body.scrollHeight;
+      }
+    }
+
     window.__jobstrikeSwanCapture = window.__jobstrikeSwanCapture || [];
     const beforeLen = window.__jobstrikeSwanCapture.length;
-    const rounds = Math.max(1, Math.min(Number(scrollRounds) || 3, 8));
+    const rounds = Math.max(2, Math.min(Number(scrollRounds) || 5, 12));
+    const root = findScrollRoot();
 
     for (let i = 0; i < rounds; i += 1) {
-      window.scrollBy(0, Math.max(window.innerHeight, 800) * 1.5);
-      await new Promise((r) => setTimeout(r, 850));
+      scrollOnce(root);
+      await new Promise((r) => setTimeout(r, 700));
+      // Second nudge in case lazy-load needs another tick
+      scrollOnce(root);
+      await new Promise((r) => setTimeout(r, 550));
     }
 
     const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
     const loadMore = buttons.find((el) =>
-      /load\s*more|show\s*more|see\s*more|next\s*page/i.test((el.textContent || '').trim())
+      /load\s*more|show\s*more|see\s*more|next/i.test((el.textContent || '').trim())
     );
     if (loadMore) {
       try {
@@ -541,27 +1173,73 @@
       } catch (_) {
         /* ignore */
       }
-      await new Promise((r) => setTimeout(r, 1200));
+      await new Promise((r) => setTimeout(r, 1000));
     }
 
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 500));
 
     const captured = window.__jobstrikeSwanCapture.slice(beforeLen);
     const rows = [];
     let total = null;
+    let sortCondition = null;
     for (const item of captured) {
+      const url = String(item?.url || '');
+      try {
+        const sort = new URL(url, location.origin).searchParams.get('sortCondition');
+        if (sort) sortCondition = sort;
+      } catch (_) {
+        /* ignore */
+      }
       collect(item.json, rows);
       const t = readTotal(item.json);
       if (t != null) total = t;
+    }
+
+    // DOM backup when scroll did not yield swan-api payloads
+    if (rows.length === 0) {
+      try {
+        const anchors = Array.from(
+          document.querySelectorAll('a[href*="/jobs/info/"], a[href*="/jobs/detail/"]')
+        );
+        const seen = new Set();
+        for (const a of anchors) {
+          const href = String(a.href || '');
+          const m = href.match(/\/jobs\/(?:info|detail)\/([^/?#]+)/i);
+          if (!m) continue;
+          const jobId = decodeURIComponent(m[1]);
+          if (!jobId || seen.has(jobId)) continue;
+          seen.add(jobId);
+          let card = a.closest(
+            'article, li, [class*="Job"], [class*="job"], [class*="card"], [class*="Card"]'
+          );
+          if (!card) card = a.parentElement;
+          const lines = String((card || a).innerText || a.textContent || '')
+            .split(/\n+/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .filter((s) => !/^(easy apply|applied|save|saved|new|hot)$/i.test(s));
+          const title = lines[0] || String(a.textContent || '').trim() || `Job ${jobId}`;
+          const company = lines[1] && lines[1] !== title ? lines[1] : '';
+          rows.push({
+            jobId,
+            jobTitle: title,
+            companyName: company,
+            applyLink: href.startsWith('http') ? href : `https://jobright.ai/jobs/info/${jobId}`,
+          });
+        }
+      } catch (_) {
+        /* ignore */
+      }
     }
 
     return {
       ok: rows.length > 0,
       rows,
       total,
+      sortCondition,
       captured: captured.length,
-      via: 'scroll-capture',
-      error: rows.length ? null : 'No new Jobright API payloads after scroll',
+      via: rows.length && captured.length === 0 ? 'dom-after-scroll' : 'scroll-capture',
+      error: rows.length ? null : 'No new Jobright payloads after scroll',
     };
   }
 
@@ -755,6 +1433,34 @@
     return new Date(nowMs).toISOString();
   }
 
+  /** Local display: 2026-09-18 21:34 */
+  function formatPostedAtLocal(value) {
+    if (value == null || value === '') return '';
+    const raw = String(value).trim();
+    let d = new Date(raw);
+    if (Number.isNaN(d.getTime())) {
+      const match = raw.match(
+        /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d+)?Z?$/
+      );
+      if (match) {
+        d = new Date(
+          Number(match[1]),
+          Number(match[2]) - 1,
+          Number(match[3]),
+          Number(match[4]),
+          Number(match[5])
+        );
+      }
+    }
+    if (Number.isNaN(d.getTime())) return raw;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${day} ${hh}:${mm}`;
+  }
+
   function extractJobFields(raw) {
     const jr =
       raw?.jobResult && typeof raw.jobResult === 'object' ? raw.jobResult : raw || {};
@@ -764,35 +1470,155 @@
     const applyUrl =
       serializeField(jr.applyLink || jr.applyUrl || jr.applicationUrl) ||
       (jobId ? `${JOBRIGHT_SITE}/jobs/info/${jobId}` : null);
-
-    const requirements =
-      joinList(jr.requirements) ||
-      serializeField(jr.jobSummary) ||
-      serializeField(jr.jobDescription);
-    const tools = joinList(jr.skillSummaries || jr.skills || jr.technicalSkills);
-    const activities = joinList(jr.coreResponsibilities || jr.responsibilities);
+    const publishedIso = parsePublishDate(jr);
 
     return {
       id: jobId,
       apply_url: applyUrl,
+      posted_at: formatPostedAtLocal(publishedIso),
       title: serializeField(jr.jobTitle || jr.title),
-      core_job_title: serializeField(jr.jobTitle || jr.title),
-      requirements_summary: requirements,
-      technical_tools: tools,
-      job_category: serializeField(jr.jobSeniority || jr.jobCategory || jr.department),
-      estimated_publish_date: parsePublishDate(jr),
-      role_activities: activities,
       company_name:
         serializeField(cr.companyName) ||
         serializeField(jr.companyName) ||
         serializeField(raw?.companyName),
-      company_tagline:
-        serializeField(cr.companyTagline) ||
-        serializeField(cr.tagline) ||
-        serializeField(jr.workModel),
       application_site: detectPlatform(applyUrl),
+      // ISO for shared date-window filtering in the panel.
+      estimated_publish_date: publishedIso,
       source: 'jobright',
     };
+  }
+
+  function postedAtSortKey(job) {
+    const raw = job?.estimated_publish_date || job?.posted_at || '';
+    const ms = Date.parse(String(raw));
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function companyKey(job) {
+    return String(job?.company_name || '')
+      .trim()
+      .toLowerCase();
+  }
+
+  /**
+   * Bid order: application_site Z→A, then company_name A→Z (same company adjacent),
+   * then newest posted_at first. Does not drop same-company duplicates.
+   */
+  function sortJobsForCsv(jobs) {
+    return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {
+      const atsA = String(a?.application_site || '').toLowerCase();
+      const atsB = String(b?.application_site || '').toLowerCase();
+      if (atsA !== atsB) return atsB.localeCompare(atsA); // Z → A
+      const coA = companyKey(a);
+      const coB = companyKey(b);
+      if (coA !== coB) return coA.localeCompare(coB); // A → Z
+      return postedAtSortKey(b) - postedAtSortKey(a); // newest first
+    });
+  }
+
+  /** Jobright CSV matching the bid spreadsheet layout. */
+  function jobsToCsv(jobs) {
+    // Display headers (order matches the manual bid table).
+    const headers = [
+      'Application Link',
+      'Date Posted',
+      'Job Title',
+      'Company',
+      'Source Platform',
+    ];
+    const escape = (value) => {
+      const text = value == null ? '' : String(value);
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+
+    const sorted = sortJobsForCsv(jobs);
+    const rows = sorted.map((job) =>
+      [
+        job?.apply_url ?? '',
+        formatPostedAtLocal(job?.posted_at || job?.estimated_publish_date || ''),
+        job?.title ?? '',
+        job?.company_name ?? '',
+        job?.application_site ?? '',
+      ]
+        .map(escape)
+        .join(',')
+    );
+
+    return [headers.join(','), ...rows].join('\n');
+  }
+
+  function escapeXml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /**
+   * SpreadsheetML (.xls) with styled header row.
+   * CSV cannot set font color/size; open this in Excel / Google Sheets.
+   */
+  function jobsToExcelXml(jobs) {
+    const headers = [
+      'Application Link',
+      'Date Posted',
+      'Job Title',
+      'Company',
+      'Source Platform',
+    ];
+    const sorted = sortJobsForCsv(jobs);
+    const headerCells = headers
+      .map(
+        (h) =>
+          `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeXml(h)}</Data></Cell>`
+      )
+      .join('');
+    const dataRows = sorted
+      .map((job) => {
+        const values = [
+          job?.apply_url ?? '',
+          formatPostedAtLocal(job?.posted_at || job?.estimated_publish_date || ''),
+          job?.title ?? '',
+          job?.company_name ?? '',
+          job?.application_site ?? '',
+        ];
+        const cells = values
+          .map(
+            (v) =>
+              `<Cell><Data ss:Type="String">${escapeXml(v)}</Data></Cell>`
+          )
+          .join('');
+        return `<Row>${cells}</Row>`;
+      })
+      .join('');
+
+    return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="Header">
+   <Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="14" ss:FontName="Calibri"/>
+   <Interior ss:Color="#1B4F72" ss:Pattern="Solid"/>
+   <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="Jobs">
+  <Table>
+   <Column ss:Width="280"/>
+   <Column ss:Width="110"/>
+   <Column ss:Width="220"/>
+   <Column ss:Width="120"/>
+   <Column ss:Width="120"/>
+   <Row ss:StyleID="Header">${headerCells}</Row>
+   ${dataRows}
+  </Table>
+ </Worksheet>
+</Workbook>`;
   }
 
   /** Injected into the Jobright tab — keep self-contained. */
@@ -911,6 +1737,7 @@
 
   global.SmartJobJobrightScraper = {
     JOBRIGHT_SITE,
+    JOBRIGHT_RECOMMEND,
     SWAN_API,
     PAGE_SIZE,
     DEFAULT_SEARCH,
@@ -918,17 +1745,28 @@
     normalizeSearch,
     buildJobrightSearchUrl,
     buildSwanApiCandidateUrls,
+    buildRecommendApiUrls,
     collectJobRowsFromPayload,
     extractTotalFromPayload,
     fetchSearchApiPageExtension,
     fetchSearchApiPageInTab,
+    fetchRecommendApiPageExtension,
+    fetchRecommendApiPageInTab,
+    ensureMostRecentSort,
+    readCapturedRecommendSort,
     installSwanCaptureInTab,
+    forceRecommendRefetchInTab,
+    extractDomRecommendJobsInTab,
+    drainSwanCaptureInTab,
     harvestMoreJobsInTab,
     summarizeSearch,
     parseSearchFromInput,
     parsePublishDate,
+    formatPostedAtLocal,
     parseRelativePublishDesc,
     extractJobFields,
+    jobsToCsv,
+    jobsToExcelXml,
     detectPlatform,
     extractPagePropsInTab,
   };
