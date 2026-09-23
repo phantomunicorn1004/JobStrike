@@ -928,18 +928,14 @@
         }
       }
 
-      // Soft UI nudge: scroll to top then a bit down so infinite feed may refetch.
+      // Soft UI nudge: one small scroll only (avoid rate-limit).
       try {
-        window.scrollTo(0, 0);
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-        await new Promise((r) => setTimeout(r, 200));
-        window.scrollBy(0, Math.max(window.innerHeight, 600));
+        window.scrollBy(0, Math.max(Math.floor(window.innerHeight * 0.4), 280));
       } catch (_) {
         /* ignore */
       }
 
-      await new Promise((r) => setTimeout(r, 900));
+      await new Promise((r) => setTimeout(r, 1500));
 
       return {
         ok: apiRows > 0 || (window.__jobstrikeSwanCapture || []).length > 0,
@@ -1084,8 +1080,8 @@
   }
 
   /**
-   * Injected (MAIN): scroll the Recommend infinite feed and return newly captured jobs.
-   * Jobright is one page + scroll — not classic pagination.
+   * Injected (MAIN): scroll the Recommend infinite feed gently.
+   * Aggressive scrolling triggers Jobright "too fast" / account limits.
    */
   async function harvestMoreJobsInTab(scrollRounds) {
     function collect(payload, out) {
@@ -1140,43 +1136,54 @@
     }
 
     function scrollOnce(root) {
-      const step = Math.max(window.innerHeight, 900);
+      // Small human-like step — large jumps trip Jobright rate limits.
+      const step = Math.max(Math.floor(window.innerHeight * 0.55), 360);
       if (root) {
-        root.scrollTop = Math.min(root.scrollTop + step * 1.6, root.scrollHeight);
+        root.scrollTop = Math.min(root.scrollTop + step, root.scrollHeight);
       } else {
-        window.scrollBy(0, step * 1.6);
-        document.documentElement.scrollTop = document.documentElement.scrollHeight;
-        document.body.scrollTop = document.body.scrollHeight;
+        window.scrollBy(0, step);
       }
+    }
+
+    function detectRateLimit() {
+      const text = String(document.body?.innerText || '').slice(0, 10000);
+      return /too\s*fast|scroll(ing)?\s*too\s*fast|slow\s*down|rate\s*limit|too\s*many\s*requests|try\s*again\s*later|temporarily\s*(blocked|restricted|suspended)/i.test(
+        text
+      );
+    }
+
+    if (detectRateLimit()) {
+      return {
+        ok: false,
+        rows: [],
+        rateLimited: true,
+        error: 'Jobright rate limit: scrolling too fast',
+        via: 'rate-limit',
+      };
     }
 
     window.__jobstrikeSwanCapture = window.__jobstrikeSwanCapture || [];
     const beforeLen = window.__jobstrikeSwanCapture.length;
-    const rounds = Math.max(2, Math.min(Number(scrollRounds) || 5, 12));
+    // Cap rounds low — prefer API paging in the panel over heavy scroll.
+    const rounds = Math.max(1, Math.min(Number(scrollRounds) || 2, 3));
     const root = findScrollRoot();
 
     for (let i = 0; i < rounds; i += 1) {
       scrollOnce(root);
-      await new Promise((r) => setTimeout(r, 700));
-      // Second nudge in case lazy-load needs another tick
-      scrollOnce(root);
-      await new Promise((r) => setTimeout(r, 550));
-    }
-
-    const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
-    const loadMore = buttons.find((el) =>
-      /load\s*more|show\s*more|see\s*more|next/i.test((el.textContent || '').trim())
-    );
-    if (loadMore) {
-      try {
-        loadMore.click();
-      } catch (_) {
-        /* ignore */
+      const pause = 2000 + Math.floor(Math.random() * 900);
+      await new Promise((r) => setTimeout(r, pause));
+      if (detectRateLimit()) {
+        return {
+          ok: false,
+          rows: [],
+          rateLimited: true,
+          error: 'Jobright rate limit: scrolling too fast',
+          via: 'rate-limit',
+        };
       }
-      await new Promise((r) => setTimeout(r, 1000));
     }
 
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 800));
 
     const captured = window.__jobstrikeSwanCapture.slice(beforeLen);
     const rows = [];
@@ -1238,9 +1245,31 @@
       total,
       sortCondition,
       captured: captured.length,
+      rateLimited: false,
       via: rows.length && captured.length === 0 ? 'dom-after-scroll' : 'scroll-capture',
       error: rows.length ? null : 'No new Jobright payloads after scroll',
     };
+  }
+
+  /** Injected (MAIN): detect Jobright "scrolling too fast" / rate-limit UI. */
+  function detectJobrightRateLimitInTab() {
+    try {
+      const text = String(document.body?.innerText || '').slice(0, 12000);
+      const title = String(document.title || '');
+      const rateLimited =
+        /too\s*fast|scroll(ing)?\s*too\s*fast|slow\s*down|rate\s*limit|too\s*many\s*requests|try\s*again\s*later|temporarily\s*(blocked|restricted|suspended)|account\s*(suspended|restricted)/i.test(
+          `${title}\n${text}`
+        );
+      return {
+        ok: !rateLimited,
+        rateLimited,
+        message: rateLimited
+          ? 'Jobright asked you to slow down (rate limit). Wait, then Resume — or finish with HiringCafe only.'
+          : null,
+      };
+    } catch (err) {
+      return { ok: true, rateLimited: false, error: err?.message || String(err) };
+    }
   }
 
   function summarizeSearch(search) {
@@ -1501,18 +1530,16 @@
   }
 
   /**
-   * Bid order: application_site Z→A, then company_name A→Z (same company adjacent),
-   * then newest posted_at first. Does not drop same-company duplicates.
+   * Newest posted_at first. Does not drop same-company roles — applicant chooses.
    */
   function sortJobsForCsv(jobs) {
     return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {
-      const atsA = String(a?.application_site || '').toLowerCase();
-      const atsB = String(b?.application_site || '').toLowerCase();
-      if (atsA !== atsB) return atsB.localeCompare(atsA); // Z → A
+      const tDiff = postedAtSortKey(b) - postedAtSortKey(a);
+      if (tDiff !== 0) return tDiff;
       const coA = companyKey(a);
       const coB = companyKey(b);
-      if (coA !== coB) return coA.localeCompare(coB); // A → Z
-      return postedAtSortKey(b) - postedAtSortKey(a); // newest first
+      if (coA !== coB) return coA.localeCompare(coB);
+      return String(a?.title || '').localeCompare(String(b?.title || ''));
     });
   }
 
@@ -1636,13 +1663,18 @@
         htmlHead
       );
 
+    const rateLimited =
+      /too\s*fast|scroll(ing)?\s*too\s*fast|slow\s*down|rate\s*limit|too\s*many\s*requests|temporarily\s*(blocked|restricted|suspended)/i.test(
+        bodyText
+      );
+
     const needsLogin =
       /\/sign-?in|\/login|\/auth/i.test(url) ||
       (/sign in|log in|create account/i.test(title) && !/jobs\/search/i.test(url));
 
     const el = document.querySelector('script#__NEXT_DATA__');
     if (!el?.textContent) {
-      return { ok: false, challenge, needsLogin, title, url };
+      return { ok: false, challenge, needsLogin, rateLimited, title, url };
     }
 
     try {
@@ -1698,7 +1730,7 @@
 
       // Still on challenge shell even if NEXT_DATA exists.
       if (challenge && jobList.length === 0) {
-        return { ok: false, challenge: true, needsLogin, title, url };
+        return { ok: false, challenge: true, needsLogin, rateLimited, title, url };
       }
 
       if (!Array.isArray(jobList)) {
@@ -1706,6 +1738,7 @@
           ok: false,
           challenge: false,
           needsLogin,
+          rateLimited,
           title,
           url,
           missingJobList: true,
@@ -1715,6 +1748,7 @@
       return {
         ok: true,
         url,
+        rateLimited,
         pageProps: {
           jobList,
           totalJobs,
@@ -1728,6 +1762,7 @@
         ok: false,
         challenge,
         needsLogin,
+        rateLimited,
         title,
         url,
         error: err?.message || String(err),
@@ -1759,6 +1794,7 @@
     extractDomRecommendJobsInTab,
     drainSwanCaptureInTab,
     harvestMoreJobsInTab,
+    detectJobrightRateLimitInTab,
     summarizeSearch,
     parseSearchFromInput,
     parsePublishDate,

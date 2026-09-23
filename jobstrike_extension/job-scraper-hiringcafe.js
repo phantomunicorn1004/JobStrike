@@ -62,14 +62,25 @@
   ];
 
   function dateWindowFromDays(days) {
-    const n = Number(days);
+    const n = Math.max(1, Math.round(Number(days) || 3));
     if (n === 1) return '1d';
+    if (n === 2) return '2d';
     if (n === 7) return '7d';
-    return '3d';
+    if (n === 3) return '3d';
+    return `${n}d`;
   }
 
   function dateWindowDays(dateWindow) {
-    return dateWindow === '1d' ? 1 : dateWindow === '7d' ? 7 : 3;
+    if (typeof dateWindow === 'number' && Number.isFinite(dateWindow)) {
+      return Math.max(1, Math.round(dateWindow));
+    }
+    const raw = String(dateWindow || '').trim().toLowerCase();
+    const match = raw.match(/^(\d+)\s*d?$/);
+    if (match) return Math.max(1, Number(match[1]));
+    if (raw === '1d') return 1;
+    if (raw === '2d') return 2;
+    if (raw === '7d') return 7;
+    return 3;
   }
 
   function cloneDefaultSearchState(dateWindow) {
@@ -382,7 +393,8 @@
     const filtered = [];
 
     for (const job of jobs) {
-      const raw = job.estimated_publish_date?.trim?.() || job.estimated_publish_date;
+      const raw =
+        String(job.estimated_publish_date || job.posted_at || '').trim() || '';
       if (!raw) {
         removedByDate += 1;
         continue;
@@ -395,7 +407,7 @@
       filtered.push(job);
     }
 
-    return { filtered, removedByDate };
+    return { filtered, removedByDate, dateWindowDays: days };
   }
 
   function dedupeJobs(jobs) {

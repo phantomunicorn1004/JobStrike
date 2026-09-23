@@ -305,6 +305,54 @@
     return bits.length ? `Hidden: ${bits.join(' · ')}` : 'No matches hidden by lists';
   }
 
+  function resolveScrapeDateWindow() {
+    const scraper = api();
+    const importedDays = Number(state.customSearchState?.dateFetchedPastNDays);
+    if (Number.isFinite(importedDays) && importedDays >= 1) {
+      return scraper?.dateWindowFromDays?.(importedDays) || `${Math.round(importedDays)}d`;
+    }
+    const pref = String(state.prefs.dateWindow || '').trim();
+    if (/^\d+d$/i.test(pref) || pref === '1d' || pref === '2d' || pref === '3d' || pref === '7d') {
+      return pref;
+    }
+    return '3d';
+  }
+
+  /** @deprecated use resolveScrapeDateWindow — kept for call sites */
+  function resolveHiringCafeDateWindow() {
+    return resolveScrapeDateWindow();
+  }
+
+  /**
+   * Split jobs by Past N days window. Undated jobs are excluded from "in window"
+   * (same as filterJobsByPublishDate). Does not drop same-company roles.
+   */
+  function partitionJobsByDateWindow(jobs, dateWindow, nowMs = Date.now()) {
+    const scraper = api();
+    const days =
+      typeof scraper?.dateWindowDays === 'function'
+        ? scraper.dateWindowDays(dateWindow)
+        : 3;
+    const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000;
+    const inWindow = [];
+    const outWindow = [];
+    const undated = [];
+    for (const job of jobs || []) {
+      const raw = String(job?.estimated_publish_date || job?.posted_at || '').trim();
+      if (!raw) {
+        undated.push(job);
+        continue;
+      }
+      const publishedMs = Date.parse(raw);
+      if (Number.isNaN(publishedMs) || publishedMs < cutoffMs) {
+        outWindow.push(job);
+      } else {
+        inWindow.push(job);
+      }
+    }
+    return { inWindow, outWindow, undated, days, cutoffMs };
+  }
+
   function recomputeFiltered() {
     const scraper = api();
     if (!scraper) {
@@ -314,7 +362,7 @@
 
     const hasProfile = Boolean(state.prefs.candidateFilter);
     const deduped = scraper.dedupeJobs(state.rawJobs);
-    const { filtered, stats } = scraper.applyLocalFilters(deduped, {
+    const { filtered: afterBlocks, stats } = scraper.applyLocalFilters(deduped, {
       excludeBlockedCompanies: state.prefs.excludeBlockedCompanies,
       excludeBlockedAts: state.prefs.excludeBlockedAts,
       excludeBlockedJobs: state.prefs.excludeBlockedJobs,
@@ -327,11 +375,26 @@
       registeredCompanies: state.registeredCompanies,
     });
 
+    // Past N days for BOTH HiringCafe and Jobright. Keep multiple roles per company.
+    const dateWindow = resolveScrapeDateWindow();
+    let filtered = afterBlocks;
+    let removedByDate = 0;
+    if (typeof scraper.filterJobsByPublishDate === 'function') {
+      const dated = scraper.filterJobsByPublishDate(afterBlocks, dateWindow);
+      filtered = dated.filtered || [];
+      removedByDate = dated.removedByDate || 0;
+    }
+
+    // Newest posted first so applicants see latest options first.
+    filtered = sortBidJobs(filtered);
+
     state.filteredJobs = filtered;
     state.stats = {
       ...(state.stats || {}),
       scraped: state.rawJobs.length,
       deduped: deduped.length,
+      removedByDate,
+      dateWindow,
       removedBlockedJobs: stats.removedBlockedJobs,
       removedBlockedCompanies: stats.removedBlockedCompanies,
       removedAts: stats.removedAts,
@@ -590,17 +653,16 @@
     };
   }
 
+  /** Newest posted_at first. Keeps multiple roles per company for manual choice. */
   function sortBidJobs(jobs) {
     return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {
-      const atsA = String(a?.application_site || '').toLowerCase();
-      const atsB = String(b?.application_site || '').toLowerCase();
-      if (atsA !== atsB) return atsB.localeCompare(atsA);
+      const tA = Date.parse(a?.estimated_publish_date || a?.posted_at || '') || 0;
+      const tB = Date.parse(b?.estimated_publish_date || b?.posted_at || '') || 0;
+      if (tA !== tB) return tB - tA;
       const coA = String(a?.company_name || '').toLowerCase();
       const coB = String(b?.company_name || '').toLowerCase();
       if (coA !== coB) return coA.localeCompare(coB);
-      const tA = Date.parse(a?.estimated_publish_date || a?.posted_at || '') || 0;
-      const tB = Date.parse(b?.estimated_publish_date || b?.posted_at || '') || 0;
-      return tB - tA;
+      return String(a?.title || '').localeCompare(String(b?.title || ''));
     });
   }
 
@@ -1263,7 +1325,7 @@
     // Reused tab also needs a pull so capture sees jobs (prior SPA loads are gone).
     if (typeof jr?.forceRecommendRefetchInTab === 'function') {
       await runJobrightTabFn(tabId, jr.forceRecommendRefetchInTab, []);
-      await sleep(600);
+      await sleep(1400);
     }
 
     return { tabId, reused };
@@ -1370,6 +1432,7 @@
     const jrPages = Number(state.combinedRun?.jrPages) || 0;
     const overallTotal = combined ? maxPages * 2 : maxPages;
     const overallOffset = combined ? maxPages : 0;
+    const dateWindow = resolveScrapeDateWindow();
 
     let page = resume && state.scrapeCursor ? state.scrapeCursor.page : 0;
     let jobs = resume && state.scrapeCursor ? [...state.scrapeCursor.jobs] : [];
@@ -1378,6 +1441,7 @@
     let lastHitId = resume && state.scrapeCursor ? state.scrapeCursor.lastHitId : '';
     let pagesFetched =
       resume && state.scrapeCursor ? state.scrapeCursor.pagesFetched : 0;
+    let staleDatePages = 0;
 
     try {
       for (; page < maxPages; page += 1) {
@@ -1389,6 +1453,7 @@
             : `HiringCafe · Page ${page + 1} of ${maxPages}`,
           detail:
             `Collected ${jobs.length}${reportedTotal != null ? ` / ${reportedTotal}` : ''} so far` +
+            ` · window ${dateWindow}` +
             (combined ? ` · Jobright ${state.combinedRun?.jrCount || 0} already` : ''),
           kind: 'info',
           current: overallOffset + page,
@@ -1396,7 +1461,7 @@
           phase: combined ? 'hiringcafe' : null,
         });
         const url = scraper.buildHiringCafeUrl(
-          '1d',
+          dateWindow,
           page,
           state.customSearchState
         );
@@ -1433,26 +1498,46 @@
         lastHitId =
           scraper.extractJobFields(hits[hits.length - 1]).id || lastHitId;
 
-        for (const hit of hits) {
-          jobs.push(scraper.extractJobFields(hit));
+        const mapped = hits.map((hit) => scraper.extractJobFields(hit));
+        const part = partitionJobsByDateWindow(mapped, dateWindow);
+        for (const job of part.inWindow) {
+          jobs.push(job);
         }
         pagesFetched += 1;
 
-        setProgress({
-          text: combined
-            ? `Both · Step 2 of 2 · HiringCafe · Page ${page + 1} of ${maxPages}`
-            : `HiringCafe · Page ${page + 1} of ${maxPages}`,
-          detail:
-            `${hits.length} hits this page · collected ${jobs.length}` +
-            (reportedTotal != null ? ` / ${reportedTotal}` : '') +
-            (combined
-              ? ` · combined ${(state.combinedRun?.jrCount || 0) + jobs.length}`
-              : ''),
-          kind: 'info',
-          current: overallOffset + page + 1,
-          total: overallTotal,
-          phase: combined ? 'hiringcafe' : null,
-        });
+        // Sorted by date: a full page of only older dated jobs → past the window.
+        if (part.inWindow.length === 0 && part.outWindow.length > 0) {
+          staleDatePages += 1;
+          setProgress({
+            text: combined
+              ? `Both · Step 2 of 2 · HiringCafe · Page ${page + 1} of ${maxPages}`
+              : `HiringCafe · Page ${page + 1} of ${maxPages}`,
+            detail: `Page outside ${dateWindow} (${part.outWindow.length} older) · stopping deeper pages`,
+            kind: 'info',
+            current: overallOffset + page + 1,
+            total: overallTotal,
+            phase: combined ? 'hiringcafe' : null,
+          });
+          if (staleDatePages >= 1) break;
+        } else {
+          staleDatePages = 0;
+          setProgress({
+            text: combined
+              ? `Both · Step 2 of 2 · HiringCafe · Page ${page + 1} of ${maxPages}`
+              : `HiringCafe · Page ${page + 1} of ${maxPages}`,
+            detail:
+              `+${part.inWindow.length} in ${dateWindow} · collected ${jobs.length}` +
+              (part.outWindow.length ? ` · skipped ${part.outWindow.length} older` : '') +
+              (reportedTotal != null ? ` / ${reportedTotal}` : '') +
+              (combined
+                ? ` · combined ${(state.combinedRun?.jrCount || 0) + jobs.length}`
+                : ''),
+            kind: 'info',
+            current: overallOffset + page + 1,
+            total: overallTotal,
+            phase: combined ? 'hiringcafe' : null,
+          });
+        }
 
         if (extracted.pageProps.ssrIsLastPage) break;
         if (page < maxPages - 1) await sleep(delayMs);
@@ -1618,6 +1703,21 @@
         return { paused: true };
       }
 
+      if (extracted?.rateLimited) {
+        state.pausedForChallenge = true;
+        syncControlsFromState();
+        setProgress({
+          text: 'Jobright rate limit',
+          detail:
+            'Jobright asked you to slow down. Wait a few minutes in the tab, then Resume — or stop and use HiringCafe only.',
+          kind: 'warn',
+          indeterminate: true,
+          phase: state.combinedRun?.active ? 'jobright' : null,
+        });
+        showToast('Jobright rate limit — slow down before Resume.', 'warn');
+        return { paused: true };
+      }
+
       if (extracted?.needsLogin) {
         state.pausedForChallenge = true;
         syncControlsFromState();
@@ -1672,13 +1772,14 @@
 
     const combined = Boolean(state.combinedRun?.active);
     const pageSize = jr.PAGE_SIZE || 20;
-    // Jobright is infinite-scroll on one page. Treat prefs.maxPages as scroll batches.
-    const maxScrollBatches = Math.max(6, Math.min(Number(state.prefs.maxPages) || 8, 15) * 4);
-    const scrollsPerBatch = 5;
-    const delayMs = Math.max(400, Math.min(Number(state.prefs.delayMs) || 700, 3000));
+    // Safer caps: fewer batches, longer pauses — Jobright bans aggressive scroll.
+    const maxScrollBatches = Math.max(3, Math.min(Number(state.prefs.maxPages) || 8, 10) * 2);
+    const scrollsPerBatch = 2;
+    const delayMs = Math.max(2200, Math.min(Number(state.prefs.delayMs) || 2500, 6000));
     const overallTotal = combined ? maxScrollBatches + 8 : maxScrollBatches;
     const overallOffset = 0;
     const recommendUrl = jr.JOBRIGHT_RECOMMEND || 'https://jobright.ai/jobs/recommend';
+    const dateWindow = resolveScrapeDateWindow();
 
     let batch = resume && state.scrapeCursor ? state.scrapeCursor.page : 0;
     let jobs = resume && state.scrapeCursor ? [...state.scrapeCursor.jobs] : [];
@@ -1690,10 +1791,9 @@
       jobs.map((j) => String(j.id || j.apply_url || '').trim()).filter(Boolean)
     );
 
-    const pushHits = (hits) => {
+    const pushMapped = (mappedList) => {
       let added = 0;
-      for (const hit of hits) {
-        const mapped = jr.extractJobFields(hit);
+      for (const mapped of mappedList) {
         const key =
           String(mapped.id || '').trim() ||
           String(mapped.apply_url || '').trim() ||
@@ -1706,13 +1806,59 @@
       return added;
     };
 
+    /** Keep only Past N days jobs; do not auto-drop same-company roles. */
+    const pushRawHitsInWindow = (hits) => {
+      const mapped = (hits || []).map((hit) => jr.extractJobFields(hit));
+      const part = partitionJobsByDateWindow(mapped, dateWindow);
+      const added = pushMapped(part.inWindow);
+      return {
+        added,
+        inWindow: part.inWindow.length,
+        outWindow: part.outWindow.length,
+        undated: part.undated.length,
+      };
+    };
+
     let lastApiError = '';
     let recommendSort = '';
     let stagnantBatches = 0;
+    let staleDateBatches = 0;
     const jrProgressLabel = (batchNum) =>
       combined
         ? `Both · Step 1 of 2 · Jobright · Scroll ${batchNum} of ${maxScrollBatches}`
         : `Jobright · Scroll ${batchNum} of ${maxScrollBatches}`;
+
+    const pauseForJobrightRateLimit = async (tabIdForCursor, batchForCursor) => {
+      state.scrapeCursor = {
+        page: batchForCursor,
+        jobs,
+        reportedTotal,
+        pagesFetched,
+        combined: combined || undefined,
+        phase: combined ? 'jobright' : undefined,
+      };
+      state.pausedForChallenge = true;
+      state.scraping = true;
+      syncControlsFromState();
+      setProgress({
+        text: 'Jobright rate limit',
+        detail:
+          'Dismiss the “too fast” message in the Jobright tab, wait 2–5 minutes, then click Resume. Prefer fewer scrapes per day.',
+        kind: 'warn',
+        indeterminate: true,
+        phase: 'jobright',
+      });
+      showToast('Jobright rate limit — pause and Resume later.', 'warn');
+      if (tabIdForCursor && typeof jr.detectJobrightRateLimitInTab === 'function') {
+        /* cursor already set */
+      }
+    };
+
+    const checkJobrightRateLimit = async (tabIdCheck) => {
+      if (typeof jr.detectJobrightRateLimitInTab !== 'function') return false;
+      const probe = await runJobrightTabFn(tabIdCheck, jr.detectJobrightRateLimitInTab, []);
+      return Boolean(probe?.rateLimited);
+    };
 
     try {
       let tabId = null;
@@ -1803,7 +1949,7 @@
         if (typeof jr.drainSwanCaptureInTab === 'function') {
           const drained = await runJobrightTabFn(tabId, jr.drainSwanCaptureInTab, []);
           if (drained?.rows?.length) {
-            pushHits(drained.rows);
+            pushRawHitsInWindow(drained.rows);
             if (drained.total != null) reportedTotal = drained.total;
             if (drained.sortCondition) recommendSort = drained.sortCondition;
             pagesFetched = jobs.length > 0 ? 1 : 0;
@@ -1816,8 +1962,8 @@
           if (first.sortCondition) recommendSort = first.sortCondition;
           if (first.total != null) reportedTotal = first.total;
           if (first.ok && first.rows?.length) {
-            pushHits(first.rows);
-            pagesFetched = 1;
+            pushRawHitsInWindow(first.rows);
+            pagesFetched = jobs.length > 0 ? 1 : 0;
           } else if (first.error) {
             lastApiError = first.error;
           }
@@ -1827,7 +1973,7 @@
           const extracted = ready?.extracted;
           const ssrHits = extracted?.pageProps?.jobList || [];
           if (ssrHits.length) {
-            pushHits(ssrHits);
+            pushRawHitsInWindow(ssrHits);
             reportedTotal = extracted.pageProps.totalJobs ?? reportedTotal;
             pagesFetched = jobs.length > 0 ? 1 : 0;
           }
@@ -1837,7 +1983,7 @@
         if (jobs.length === 0 && typeof jr.extractDomRecommendJobsInTab === 'function') {
           const dom = await runJobrightTabFn(tabId, jr.extractDomRecommendJobsInTab, []);
           if (dom?.rows?.length) {
-            pushHits(dom.rows);
+            pushRawHitsInWindow(dom.rows);
             pagesFetched = jobs.length > 0 ? 1 : 0;
           }
         }
@@ -1845,7 +1991,7 @@
         setProgress({
           text: jrProgressLabel(1),
           detail:
-            `${jobs.length} collected` +
+            `${jobs.length} in ${dateWindow}` +
             (sortOk ? ' (Most Recent)' : '') +
             (prepared.reused ? ' · reused tab' : '') +
             ' · scrolling for more…',
@@ -1859,14 +2005,14 @@
         batch = 1;
       }
 
-      // Primary: infinite-scroll the Recommend feed and capture swan-api payloads
+      // Primary: prefer API paging; gentle scroll only as backup (avoids bans).
       for (; batch < maxScrollBatches; batch += 1) {
         if (!state.scraping) break;
         if (reportedTotal != null && jobs.length >= reportedTotal) break;
 
         setProgress({
           text: jrProgressLabel(batch + 1),
-          detail: `Scrolling Recommend feed… (${jobs.length} so far)`,
+          detail: `Loading Recommend safely… (${jobs.length} in ${dateWindow})`,
           kind: 'info',
           current: overallOffset + batch,
           total: overallTotal,
@@ -1876,8 +2022,13 @@
 
         tabId = await ensureJobrightApiTab(recommendUrl);
 
+        if (await checkJobrightRateLimit(tabId)) {
+          await pauseForJobrightRateLimit(tabId, batch);
+          return;
+        }
+
         const probe = await extractFromTab(tabId);
-        if (probe?.challenge || probe?.needsLogin) {
+        if (probe?.challenge || probe?.needsLogin || probe?.rateLimited) {
           state.scrapeCursor = {
             page: batch,
             jobs,
@@ -1889,14 +2040,26 @@
           state.pausedForChallenge = true;
           state.scraping = true;
           syncControlsFromState();
+          const rate = Boolean(probe?.rateLimited);
           setProgress({
-            text: probe?.needsLogin ? 'Sign-in required' : 'Browser check required',
-            detail: 'Complete it in the open Jobright tab, then click Resume.',
+            text: probe?.needsLogin
+              ? 'Sign-in required'
+              : rate
+                ? 'Jobright rate limit'
+                : 'Browser check required',
+            detail: rate
+              ? 'Wait in the Jobright tab, then Resume. Do not keep scraping today.'
+              : 'Complete it in the open Jobright tab, then click Resume.',
             kind: 'warn',
             indeterminate: true,
             phase: 'jobright',
           });
-          showToast('Complete the Jobright check, then click Resume.', 'warn');
+          showToast(
+            rate
+              ? 'Jobright rate limit — pause before Resume.'
+              : 'Complete the Jobright check, then click Resume.',
+            'warn'
+          );
           return;
         }
 
@@ -1905,60 +2068,94 @@
         }
 
         const before = jobs.length;
-        const harvest = await runJobrightTabFn(tabId, jr.harvestMoreJobsInTab, [
-          scrollsPerBatch,
-        ]);
+        let pushResult = { added: 0, inWindow: 0, outWindow: 0, undated: 0 };
 
-        if (harvest?.total != null) reportedTotal = harvest.total;
-        if (harvest?.sortCondition) recommendSort = harvest.sortCondition;
-
-        let added = 0;
-        if (harvest?.rows?.length) {
-          added = pushHits(harvest.rows);
+        // API first — quieter than rapid scroll.
+        const apiResult = await fetchJobrightApiPage(
+          tabId,
+          jobs.length,
+          pageSize,
+          recommendSort || undefined
+        );
+        if (apiResult.total != null) reportedTotal = apiResult.total;
+        if (apiResult.sortCondition) recommendSort = apiResult.sortCondition;
+        if (apiResult.ok && apiResult.rows?.length) {
+          pushResult = pushRawHitsInWindow(apiResult.rows);
+        } else if (apiResult.error) {
+          lastApiError = apiResult.error;
         }
 
-        // API offset backup only when scroll added nothing
-        if (added === 0) {
-          const apiResult = await fetchJobrightApiPage(
-            tabId,
-            jobs.length,
-            pageSize,
-            recommendSort || undefined
-          );
-          if (apiResult.total != null) reportedTotal = apiResult.total;
-          if (apiResult.ok && apiResult.rows?.length) {
-            added = pushHits(apiResult.rows);
-          } else if (apiResult.error) {
-            lastApiError = apiResult.error;
+        // Gentle scroll only if API added nothing in-window.
+        if (pushResult.added === 0) {
+          const harvest = await runJobrightTabFn(tabId, jr.harvestMoreJobsInTab, [
+            scrollsPerBatch,
+          ]);
+          if (harvest?.rateLimited) {
+            await pauseForJobrightRateLimit(tabId, batch);
+            return;
+          }
+          if (harvest?.total != null) reportedTotal = harvest.total;
+          if (harvest?.sortCondition) recommendSort = harvest.sortCondition;
+          if (harvest?.rows?.length) {
+            pushResult = pushRawHitsInWindow(harvest.rows);
           }
         }
 
-        if (added === 0 && jobs.length === 0 && typeof jr.extractDomRecommendJobsInTab === 'function') {
+        if (
+          pushResult.added === 0 &&
+          jobs.length === 0 &&
+          typeof jr.extractDomRecommendJobsInTab === 'function'
+        ) {
           const dom = await runJobrightTabFn(tabId, jr.extractDomRecommendJobsInTab, []);
           if (dom?.rows?.length) {
-            added = pushHits(dom.rows);
+            pushResult = pushRawHitsInWindow(dom.rows);
           }
         }
 
+        if (await checkJobrightRateLimit(tabId)) {
+          await pauseForJobrightRateLimit(tabId, batch);
+          return;
+        }
+
+        const added = pushResult.added;
         if (added > 0) {
           pagesFetched += 1;
           stagnantBatches = 0;
+          staleDateBatches = 0;
           setProgress({
             text: jrProgressLabel(batch + 1),
-            detail: `+${added} via scroll · collected ${jobs.length}`,
+            detail:
+              `+${added} in ${dateWindow} · collected ${jobs.length}` +
+              (pushResult.outWindow ? ` · skipped ${pushResult.outWindow} older` : ''),
             kind: 'info',
             current: overallOffset + batch + 1,
             total: overallTotal,
             phase: 'jobright',
             showTrust: true,
           });
+        } else if (pushResult.outWindow > 0) {
+          staleDateBatches += 1;
+          stagnantBatches += 1;
+          setProgress({
+            text: jrProgressLabel(batch + 1),
+            detail: `Batch outside ${dateWindow} (${pushResult.outWindow} older) · ${staleDateBatches}/2`,
+            kind: 'info',
+            current: overallOffset + batch + 1,
+            total: overallTotal,
+            phase: 'jobright',
+            showTrust: true,
+          });
+          if (staleDateBatches >= 2) break;
         } else {
           stagnantBatches += 1;
           if (stagnantBatches >= 2) break;
         }
 
         if (jobs.length === before && stagnantBatches >= 2) break;
-        if (batch < maxScrollBatches - 1) await sleep(delayMs);
+        if (batch < maxScrollBatches - 1) {
+          // Extra jitter between batches so traffic looks less bot-like.
+          await sleep(delayMs + Math.floor(Math.random() * 800));
+        }
       }
 
       if (jobs.length === 0 && !combined) {
