@@ -175,36 +175,59 @@ Return valid JSON only. No markdown fences, no commentary.`;
     return normalizeKit(data.kit || kit);
   }
 
-  async function getPromptKit(profileId) {
+  async function getPromptKitLocal(profileId) {
     const id = Number(profileId);
     if (!Number.isFinite(id) || id < 1) {
-      return { kit: emptyKit(), exists: false };
+      return { kit: emptyKit(), exists: false, source: 'empty' };
+    }
+    const local = await readLocalKit(id);
+    return { ...local, source: local.exists ? 'local' : 'empty' };
+  }
+
+  /**
+   * @param {string|number} profileId
+   * @param {{ preferLocal?: boolean }} [options]
+   */
+  async function getPromptKit(profileId, options = {}) {
+    const id = Number(profileId);
+    if (!Number.isFinite(id) || id < 1) {
+      return { kit: emptyKit(), exists: false, source: 'empty' };
     }
 
     const local = await readLocalKit(id);
+    if (options.preferLocal && local.exists) {
+      return { kit: local.kit, exists: true, source: 'local' };
+    }
 
     try {
       const remote = await fetchRemoteKit(id);
-      if (!remote.available) return local;
+      if (!remote.available) {
+        return { kit: local.kit, exists: local.exists, source: 'local' };
+      }
 
       if (!remote.exists && local.exists && localKitHasDraft(local.kit)) {
         const seeded = await putRemoteKit(id, local.kit);
         await writeLocalKit(id, seeded);
-        return { kit: seeded, exists: true };
+        return { kit: seeded, exists: true, source: 'remote' };
       }
 
       if (remote.exists) {
         await writeLocalKit(id, remote.kit);
-        return { kit: remote.kit, exists: true };
+        return { kit: remote.kit, exists: true, source: 'remote' };
       }
 
-      return { kit: emptyKit(), exists: false };
+      return { kit: emptyKit(), exists: false, source: 'empty' };
     } catch (_) {
-      return local;
+      return { kit: local.kit, exists: local.exists, source: 'local' };
     }
   }
 
-  async function savePromptKit(profileId, kit) {
+  /**
+   * @param {string|number} profileId
+   * @param {object} kit
+   * @param {{ localOnly?: boolean, swallowRemoteError?: boolean }} [options]
+   */
+  async function savePromptKit(profileId, kit, options = {}) {
     const id = Number(profileId);
     if (!Number.isFinite(id) || id < 1) {
       throw new Error('Select a profile first.');
@@ -215,13 +238,20 @@ Return valid JSON only. No markdown fences, no commentary.`;
       updatedAt: new Date().toISOString(),
     });
 
+    await writeLocalKit(id, draft);
+
+    if (options.localOnly) {
+      return draft;
+    }
+
     try {
       const saved = await putRemoteKit(id, draft);
       await writeLocalKit(id, saved);
       return saved;
     } catch (err) {
-      // Offline / unsigned-in fallback: keep local cache so Build & Copy still works.
-      await writeLocalKit(id, draft);
+      if (options.swallowRemoteError) {
+        return draft;
+      }
       throw err;
     }
   }
@@ -274,6 +304,7 @@ Return valid JSON only. No markdown fences, no commentary.`;
     emptyKit,
     normalizeKit,
     getPromptKit,
+    getPromptKitLocal,
     savePromptKit,
     buildPrompt,
     kitStatusSummary,

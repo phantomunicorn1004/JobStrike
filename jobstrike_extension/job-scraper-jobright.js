@@ -1500,6 +1500,14 @@
       serializeField(jr.applyLink || jr.applyUrl || jr.applicationUrl) ||
       (jobId ? `${JOBRIGHT_SITE}/jobs/info/${jobId}` : null);
     const publishedIso = parsePublishDate(jr);
+    const applicantsRaw =
+      jr.applicantsCount ?? jr.applicantCount ?? jr.applyCount ?? jr.numApplicants;
+    let applicants_count = null;
+    if (typeof applicantsRaw === 'number' && Number.isFinite(applicantsRaw)) {
+      applicants_count = String(Math.round(applicantsRaw));
+    } else if (applicantsRaw != null && String(applicantsRaw).trim()) {
+      applicants_count = String(applicantsRaw).trim();
+    }
 
     return {
       id: jobId,
@@ -1511,6 +1519,7 @@
         serializeField(jr.companyName) ||
         serializeField(raw?.companyName),
       application_site: detectPlatform(applyUrl),
+      applicants_count,
       // ISO for shared date-window filtering in the panel.
       estimated_publish_date: publishedIso,
       source: 'jobright',
@@ -1551,6 +1560,7 @@
       'Date Posted',
       'Job Title',
       'Company',
+      'Applicants',
       'Source Platform',
     ];
     const escape = (value) => {
@@ -1565,6 +1575,7 @@
         formatPostedAtLocal(job?.posted_at || job?.estimated_publish_date || ''),
         job?.title ?? '',
         job?.company_name ?? '',
+        job?.applicants_count ?? '',
         job?.application_site ?? '',
       ]
         .map(escape)
@@ -1592,6 +1603,7 @@
       'Date Posted',
       'Job Title',
       'Company',
+      'Applicants',
       'Source Platform',
     ];
     const sorted = sortJobsForCsv(jobs);
@@ -1608,6 +1620,7 @@
           formatPostedAtLocal(job?.posted_at || job?.estimated_publish_date || ''),
           job?.title ?? '',
           job?.company_name ?? '',
+          job?.applicants_count ?? '',
           job?.application_site ?? '',
         ];
         const cells = values
@@ -1640,6 +1653,7 @@
    <Column ss:Width="110"/>
    <Column ss:Width="220"/>
    <Column ss:Width="120"/>
+   <Column ss:Width="80"/>
    <Column ss:Width="120"/>
    <Row ss:StyleID="Header">${headerCells}</Row>
    ${dataRows}

@@ -21,6 +21,8 @@
     candidateFilter: '',
     maxPages: 8,
     delayMs: 700,
+    /** Freshness: 2h | 4h | 8h | 1d | 2d | 3d | 7d — local cutoff; HC server uses days floor. */
+    freshnessWindow: '8h',
   };
 
   const state = {
@@ -150,6 +152,12 @@
     ]);
 
     state.prefs = { ...DEFAULT_PREFS, ...(result[STORAGE.prefs] || {}) };
+    if (!state.prefs.freshnessWindow && state.prefs.dateWindow) {
+      state.prefs.freshnessWindow = String(state.prefs.dateWindow);
+    }
+    if (!state.prefs.freshnessWindow) {
+      state.prefs.freshnessWindow = DEFAULT_PREFS.freshnessWindow;
+    }
 
     applyWebsiteBlockedLists({
       blockedCompanies: Array.isArray(result[STORAGE.blockedCompanies])
@@ -307,15 +315,20 @@
 
   function resolveScrapeDateWindow() {
     const scraper = api();
+    const pref = String(
+      state.prefs.freshnessWindow || state.prefs.dateWindow || ''
+    )
+      .trim()
+      .toLowerCase();
+    if (/^\d+h$/.test(pref) || /^\d+d$/.test(pref)) {
+      return pref;
+    }
+    // Legacy: map imported HC days when freshness pref missing/invalid.
     const importedDays = Number(state.customSearchState?.dateFetchedPastNDays);
     if (Number.isFinite(importedDays) && importedDays >= 1) {
       return scraper?.dateWindowFromDays?.(importedDays) || `${Math.round(importedDays)}d`;
     }
-    const pref = String(state.prefs.dateWindow || '').trim();
-    if (/^\d+d$/i.test(pref) || pref === '1d' || pref === '2d' || pref === '3d' || pref === '7d') {
-      return pref;
-    }
-    return '3d';
+    return DEFAULT_PREFS.freshnessWindow;
   }
 
   /** @deprecated use resolveScrapeDateWindow — kept for call sites */
@@ -324,16 +337,19 @@
   }
 
   /**
-   * Split jobs by Past N days window. Undated jobs are excluded from "in window"
+   * Split jobs by freshness window. Undated jobs are excluded from "in window"
    * (same as filterJobsByPublishDate). Does not drop same-company roles.
    */
   function partitionJobsByDateWindow(jobs, dateWindow, nowMs = Date.now()) {
     const scraper = api();
-    const days =
-      typeof scraper?.dateWindowDays === 'function'
-        ? scraper.dateWindowDays(dateWindow)
-        : 3;
-    const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000;
+    const cutoffMs =
+      typeof scraper?.dateWindowCutoffMs === 'function'
+        ? scraper.dateWindowCutoffMs(dateWindow, nowMs)
+        : nowMs - 8 * 60 * 60 * 1000;
+    const parsed =
+      typeof scraper?.parseFreshnessWindow === 'function'
+        ? scraper.parseFreshnessWindow(dateWindow)
+        : { label: String(dateWindow || ''), hcDays: 1, kind: 'hours', amount: 8 };
     const inWindow = [];
     const outWindow = [];
     const undated = [];
@@ -350,7 +366,14 @@
         inWindow.push(job);
       }
     }
-    return { inWindow, outWindow, undated, days, cutoffMs };
+    return {
+      inWindow,
+      outWindow,
+      undated,
+      days: parsed.hcDays,
+      label: parsed.label || String(dateWindow || ''),
+      cutoffMs,
+    };
   }
 
   function recomputeFiltered() {
@@ -647,6 +670,10 @@
       title: job?.title || null,
       company_name: job?.company_name || null,
       application_site: job?.application_site || 'Unknown',
+      applicants_count:
+        job?.applicants_count != null && String(job.applicants_count).trim()
+          ? String(job.applicants_count).trim()
+          : null,
       origin: origin || job?.origin || '',
       estimated_publish_date: job?.estimated_publish_date || null,
       source: job?.source || origin || '',
@@ -689,6 +716,7 @@
       'Date Posted',
       'Job Title',
       'Company',
+      'Applicants',
       'Source Platform',
       ...(includeOrigin ? ['Origin'] : []),
     ];
@@ -706,6 +734,7 @@
           formatBidPostedAt(job?.posted_at || job?.estimated_publish_date || ''),
           job?.title ?? '',
           job?.company_name ?? '',
+          job?.applicants_count ?? '',
           job?.application_site ?? '',
           ...(includeOrigin ? [job?.origin || ''] : []),
         ];
@@ -717,7 +746,7 @@
 
     const colXml = headers
       .map((_, i) => {
-        const widths = [280, 110, 220, 120, 120, 100];
+        const widths = [280, 110, 220, 120, 80, 120, 100];
         return `<Column ss:Width="${widths[i] || 100}"/>`;
       })
       .join('');
@@ -796,6 +825,8 @@
       if (el) el.checked = Boolean(state.prefs[key]);
     }
 
+    syncFreshnessSelect();
+
     const hasProfile = Boolean(state.prefs.candidateFilter);
     const regJobs = document.getElementById('jsFilterRegisteredJobs');
     const regCos = document.getElementById('jsFilterRegisteredCompanies');
@@ -858,19 +889,36 @@
     const scraper = api();
     const hcEl = document.getElementById('jsHcFeedStatus');
     const jrEl = document.getElementById('jsJrFeedStatus');
+    const windowLabel =
+      scraper?.dateWindowLabel?.(resolveScrapeDateWindow()) ||
+      resolveScrapeDateWindow();
 
     const hcSummary = state.customSearchState
       ? scraper?.summarizeSearchState?.(state.customSearchState) || 'Custom search imported'
       : 'Built-in default';
 
     if (hcEl) {
-      hcEl.textContent = hcSummary;
-      hcEl.title = hcSummary;
+      const text = `${windowLabel} · ${hcSummary}`;
+      hcEl.textContent = text;
+      hcEl.title = `${text} (local freshness; HC API uses whole days)`;
     }
     if (jrEl) {
-      jrEl.textContent = 'Recommend · your Saved Filters';
-      jrEl.title = 'Set filters on jobright.ai → Recommend, then scrape';
+      jrEl.textContent = `Recommend · ${windowLabel}`;
+      jrEl.title = `Local freshness ${windowLabel}. Set filters on jobright.ai → Recommend, then scrape.`;
     }
+  }
+
+  function syncFreshnessSelect() {
+    const sel = document.getElementById('jsFreshnessWindow');
+    if (!sel) return;
+    const value = resolveScrapeDateWindow();
+    if (![...sel.options].some((o) => o.value === value)) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = value;
+      sel.appendChild(opt);
+    }
+    sel.value = value;
   }
 
   async function openJobrightRecommend() {
@@ -886,6 +934,15 @@
   async function applyImportedSearch(searchState, sourceUrl) {
     state.customSearchState = searchState;
     state.customSearchSourceUrl = sourceUrl || '';
+
+    // Seed day-based freshness from HC URL when import has dateFetchedPastNDays.
+    // Hour prefs are left alone only if user already chose hours — importing days
+    // updates to that day window so the imported filter is visible.
+    const scraper = api();
+    const importedDays = Number(searchState?.dateFetchedPastNDays);
+    if (Number.isFinite(importedDays) && importedDays >= 1 && scraper?.dateWindowFromDays) {
+      state.prefs.freshnessWindow = scraper.dateWindowFromDays(importedDays);
+    }
 
     await persistPrefs();
     await persistCustomSearch();
@@ -2627,6 +2684,19 @@
       state.prefs.candidateFilter = String(event.target.value || '').trim();
       await persistPrefs();
       await loadProfileFilterContext({ silent: true });
+    });
+
+    document.getElementById('jsFreshnessWindow')?.addEventListener('change', async (event) => {
+      const value = String(event.target.value || '').trim().toLowerCase();
+      if (!/^\d+[hd]$/.test(value)) return;
+      state.prefs.freshnessWindow = value;
+      await persistPrefs();
+      recomputeFiltered();
+      await persistResults();
+      renderFeedStatus();
+      renderResults();
+      renderMeta();
+      showToast(`Freshness set to ${value}.`, 'success');
     });
 
     document.getElementById('jsRefreshProfileBtn')?.addEventListener('click', () => {

@@ -24,7 +24,46 @@ export {
   normalizeCompanyName,
 };
 
-export type JobScraperDateWindow = "1d" | "3d" | "7d";
+export type JobScraperDateWindow =
+  | "2h"
+  | "4h"
+  | "8h"
+  | "1d"
+  | "2d"
+  | "3d"
+  | "7d"
+  | (string & {});
+
+export type FreshnessWindow = {
+  kind: "hours" | "days";
+  amount: number;
+  label: string;
+  /** Whole days for HiringCafe dateFetchedPastNDays (hour windows → 1). */
+  hcDays: number;
+};
+
+export function parseFreshnessWindow(
+  dateWindow: JobScraperDateWindow | number,
+): FreshnessWindow {
+  if (typeof dateWindow === "number" && Number.isFinite(dateWindow)) {
+    const days = Math.max(1, Math.round(dateWindow));
+    return { kind: "days", amount: days, label: `${days}d`, hcDays: days };
+  }
+  const raw = String(dateWindow || "").trim().toLowerCase();
+  const hourMatch = raw.match(/^(\d+)\s*h$/);
+  if (hourMatch) {
+    const hours = Math.max(1, Number(hourMatch[1]));
+    return { kind: "hours", amount: hours, label: `${hours}h`, hcDays: 1 };
+  }
+  const dayMatch = raw.match(/^(\d+)\s*d$/);
+  if (dayMatch) {
+    const days = Math.max(1, Number(dayMatch[1]));
+    return { kind: "days", amount: days, label: `${days}d`, hcDays: days };
+  }
+  if (raw === "1d") return { kind: "days", amount: 1, label: "1d", hcDays: 1 };
+  if (raw === "7d") return { kind: "days", amount: 7, label: "7d", hcDays: 7 };
+  return { kind: "days", amount: 3, label: "3d", hcDays: 3 };
+}
 
 export type ScrapedJob = {
   apply_url: string | null;
@@ -38,6 +77,8 @@ export type ScrapedJob = {
   company_name: string | null;
   company_tagline: string | null;
   application_site: string;
+  /** Jobright apply/member count when available (e.g. "75+"). */
+  applicants_count?: string | null;
 };
 
 export type ScrapeJobsResult = {
@@ -75,7 +116,18 @@ function normalizeText(value: string | null | undefined): string {
 }
 
 export function dateWindowDays(dateWindow: JobScraperDateWindow): number {
-  return dateWindow === "1d" ? 1 : dateWindow === "7d" ? 7 : 3;
+  return parseFreshnessWindow(dateWindow).hcDays;
+}
+
+export function dateWindowCutoffMs(
+  dateWindow: JobScraperDateWindow,
+  nowMs: number = Date.now(),
+): number {
+  const parsed = parseFreshnessWindow(dateWindow);
+  if (parsed.kind === "hours") {
+    return nowMs - parsed.amount * 60 * 60 * 1000;
+  }
+  return nowMs - parsed.amount * 24 * 60 * 60 * 1000;
 }
 
 /** Keep jobs whose estimated_publish_date is within the selected rolling window. */
@@ -85,8 +137,7 @@ export function filterJobsByPublishDate(
   nowMs: number = Date.now(),
   options?: { keepUndated?: boolean },
 ) {
-  const days = dateWindowDays(dateWindow);
-  const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000;
+  const cutoffMs = dateWindowCutoffMs(dateWindow, nowMs);
   let removedByDate = 0;
   const filtered: ScrapedJob[] = [];
   const keepUndated = Boolean(options?.keepUndated);
@@ -292,15 +343,18 @@ export function jobsToCsv(jobs: ScrapedJob[]): string {
     "company_name",
     "company_tagline",
     "application_site",
+    "applicants_count",
   ] as const;
 
-  const escape = (value: string | null) => {
+  const escape = (value: string | null | undefined) => {
     const text = value ?? "";
     return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
 
   return [
     headers.join(","),
-    ...jobs.map((job) => headers.map((header) => escape(job[header])).join(",")),
+    ...jobs.map((job) =>
+      headers.map((header) => escape(job[header] ?? null)).join(","),
+    ),
   ].join("\n");
 }

@@ -353,7 +353,7 @@
                 </div>
                 <div class="js-source-info">
                   <h3 class="js-source-name">HiringCafe</h3>
-                  <p class="js-source-status" id="jsHcFeedStatus">Past 24 hours · Remote</p>
+                  <p class="js-source-status" id="jsHcFeedStatus">8h · Remote</p>
                 </div>
               </div>
               <button type="button" class="btn-icon" id="jsEditHcSearchBtn" data-js-open-modal="import" title="Edit search">
@@ -459,6 +459,24 @@
               <button type="button" class="js-modal-close" data-js-close-modal="filters">×</button>
             </div>
             <div class="js-modal-content">
+              <div class="js-modal-section">
+                <label class="js-input-label">
+                  Freshness
+                  <select id="jsFreshnessWindow" class="js-input" aria-label="Job freshness window">
+                    <option value="2h">Last 2 hours</option>
+                    <option value="4h">Last 4 hours</option>
+                    <option value="8h">Last 8 hours</option>
+                    <option value="1d">Last 24 hours</option>
+                    <option value="2d">Last 2 days</option>
+                    <option value="3d">Last 3 days</option>
+                    <option value="7d">Last 7 days</option>
+                  </select>
+                </label>
+                <p class="muted" style="margin:6px 0 0;font-size:12px;">
+                  Keeps early listings. HiringCafe still requests whole days (hours → past 1 day), then we cut locally. Same cutoff for Jobright.
+                </p>
+              </div>
+
               <div class="js-modal-section">
                 <label class="js-input-label">
                   Profile

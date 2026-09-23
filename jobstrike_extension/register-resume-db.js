@@ -16,6 +16,13 @@
   let profilesLoadSeq = 0;
   let backendConnected = false;
   let websiteDriveStatus = null;
+  /** Short-lived caches so Register / Copy don't refetch on every click. */
+  let authCache = { ok: false, checkedAt: 0, username: '' };
+  let driveStatusCacheAt = 0;
+  let applicationsCache = { at: 0, resumes: null };
+  const AUTH_CACHE_TTL_MS = 3 * 60 * 1000;
+  const DRIVE_CACHE_TTL_MS = 3 * 60 * 1000;
+  const APPLICATIONS_CACHE_TTL_MS = 60 * 1000;
   // These hold the *currently bound tab's* values. SmartJobTabSession owns the
   // per-tab copies and swaps them in and out around tab changes.
   let autoAttachedFromJson2docx = { resume: false, cover: false };
@@ -107,7 +114,15 @@
     });
   }
 
+  function invalidateSessionCaches() {
+    authCache = { ok: false, checkedAt: 0, username: '' };
+    driveStatusCacheAt = 0;
+    websiteDriveStatus = null;
+    applicationsCache = { at: 0, resumes: null };
+  }
+
   async function clearAuthConfig() {
+    invalidateSessionCaches();
     return new Promise((resolve) => {
       chrome.storage.local.remove(
         [AUTH_USERNAME_KEY, AUTH_USER_ID_KEY, EXTENSION_API_KEY_KEY, LEGACY_API_KEY_KEY],
@@ -880,7 +895,18 @@
     input.addEventListener('blur', persist);
   }
 
-  async function fetchResumeDbApplications() {
+  async function fetchResumeDbApplications(options = {}) {
+    const { force = false } = options;
+    const now = Date.now();
+    if (
+      !force &&
+      Array.isArray(applicationsCache.resumes) &&
+      applicationsCache.at &&
+      now - applicationsCache.at < APPLICATIONS_CACHE_TTL_MS
+    ) {
+      return applicationsCache.resumes;
+    }
+
     const config = await getBackendConfig();
     const res = await fetch(`${config.baseUrl}/api/resume-db`, {
       headers: apiHeaders(config),
@@ -890,11 +916,17 @@
     if (!res.ok) {
       throw new Error(data.error || 'Failed to load Resume DB applications');
     }
-    return Array.isArray(data.resumes) ? data.resumes : [];
+    const resumes = Array.isArray(data.resumes) ? data.resumes : [];
+    applicationsCache = { at: now, resumes };
+    return resumes;
+  }
+
+  function invalidateApplicationsCache() {
+    applicationsCache = { at: 0, resumes: null };
   }
 
   async function checkFieldDuplicate(field, showStatus, { quietIfNone = false } = {}) {
-    const connected = await checkBackendConnection();
+    const connected = await checkBackendConnection({ skipDriveBadge: true });
     if (!connected) {
       throw new Error(
         'Not signed in. Open Settings → Website connection and sign in to check Resume DB.'
@@ -1338,14 +1370,35 @@
     return data;
   }
 
-  async function checkBackendConnection() {
+  async function checkBackendConnection(options = {}) {
+    const { force = false, skipDriveBadge = false } = options;
+    const now = Date.now();
+    if (
+      !force &&
+      authCache.checkedAt &&
+      now - authCache.checkedAt < AUTH_CACHE_TTL_MS &&
+      authCache.ok
+    ) {
+      setConnectionStatus('ok', null, authCache.username || undefined);
+      updateBackendDependentUi(true);
+      backendConnected = true;
+      if (!skipDriveBadge) {
+        // Use cached drive badge if fresh; don't block.
+        if (!driveStatusCacheAt || now - driveStatusCacheAt >= DRIVE_CACHE_TTL_MS) {
+          void updateRegisterDriveBadge();
+        }
+      }
+      return true;
+    }
+
     setConnectionStatus('checking', 'Checking…');
     const config = await getBackendConfig();
 
     if (!isAuthenticated(config)) {
+      authCache = { ok: false, checkedAt: now, username: '' };
       setConnectionStatus('error', 'Not signed in — open Settings');
       updateBackendDependentUi(false);
-      await updateRegisterDriveBadge();
+      if (!skipDriveBadge) await updateRegisterDriveBadge();
       return false;
     }
 
@@ -1361,23 +1414,38 @@
       }
       const data = await res.json().catch(() => ({}));
       const username = data.user?.username || config.username;
+      authCache = { ok: true, checkedAt: now, username: username || '' };
       setConnectionStatus('ok', null, username);
       updateBackendDependentUi(true);
-      await updateRegisterDriveBadge();
+      backendConnected = true;
+      if (!skipDriveBadge) await updateRegisterDriveBadge();
       return true;
     } catch (err) {
+      authCache = { ok: false, checkedAt: now, username: '' };
       const host = config.baseUrl.replace(/^https?:\/\//, '');
       setConnectionStatus('error', 'Not connected · ' + host);
       updateBackendDependentUi(false);
-      await updateRegisterDriveBadge();
+      if (!skipDriveBadge) await updateRegisterDriveBadge();
       return false;
     }
   }
 
-  async function fetchWebsiteDriveStatus() {
+  async function fetchWebsiteDriveStatus(options = {}) {
+    const { force = false } = options;
+    const now = Date.now();
+    if (
+      !force &&
+      websiteDriveStatus &&
+      driveStatusCacheAt &&
+      now - driveStatusCacheAt < DRIVE_CACHE_TTL_MS
+    ) {
+      return websiteDriveStatus;
+    }
+
     const config = await getBackendConfig();
     if (!isAuthenticated(config)) {
       websiteDriveStatus = null;
+      driveStatusCacheAt = 0;
       return null;
     }
     try {
@@ -1388,9 +1456,11 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to load Drive status');
       websiteDriveStatus = data;
+      driveStatusCacheAt = now;
       return data;
     } catch {
       websiteDriveStatus = null;
+      driveStatusCacheAt = 0;
       return null;
     }
   }
@@ -2052,11 +2122,12 @@
         try {
           await loginWithCredentials(baseUrl, username, password);
           await saveBackendUrlOnly(baseUrl);
+          invalidateSessionCaches();
           const passwordInput = document.getElementById('backendPasswordSetting');
           if (passwordInput) passwordInput.value = '';
           setSettingsHint('Signed in successfully.', 'success');
           if (showStatus) showStatus('Signed in to Resume DB.', 'success');
-          await checkBackendConnection();
+          await checkBackendConnection({ force: true });
           await loadBackendSettingsForm();
           await loadProfilesIntoSelect();
         } catch (err) {
@@ -2086,7 +2157,7 @@
         const baseUrl = document.getElementById('backendUrlSetting')?.value;
         await saveBackendUrlOnly(baseUrl);
         setSettingsHint('Testing connection…', '');
-        const ok = await checkBackendConnection();
+        const ok = await checkBackendConnection({ force: true });
         if (ok) {
           setSettingsHint('Connection successful.', 'success');
           if (showStatus) showStatus('Backend connection OK.', 'success');
@@ -2865,7 +2936,27 @@
     const profileId = getSelectedRegisterProfileId();
     if (!profileId) throw new Error('Select a profile first.');
 
-    const { kit } = await api.getPromptKit(profileId);
+    // Hot path: local cache / editor — do not block copy on remote kit sync.
+    let kit;
+    const editorTemplate = document.getElementById('regPromptKitTemplate')?.value || '';
+    const editorResumeJson = document.getElementById('regPromptKitResumeJson')?.value || '';
+    const localPack =
+      typeof api.getPromptKitLocal === 'function'
+        ? await api.getPromptKitLocal(profileId)
+        : await api.getPromptKit(profileId, { preferLocal: true });
+    kit = { ...(localPack.kit || {}) };
+    if (String(editorTemplate).trim()) kit.template = editorTemplate;
+    if (String(editorResumeJson).trim()) kit.resumeTemplateJson = editorResumeJson;
+
+    // If local empty, one remote fetch to bootstrap (first use only).
+    if (
+      !String(kit.resumeTemplateJson || '').trim() &&
+      !String(kit.template || '').trim()
+    ) {
+      const remotePack = await api.getPromptKit(profileId);
+      kit = remotePack.kit || kit;
+    }
+
     const noteText = document.getElementById('regNote')?.value || '';
     const jobDescription = api.resolveJobDescription({ noteText, kit });
 
@@ -2887,8 +2978,6 @@
       throw new Error(top);
     }
 
-    // Risky is advisory only — still allow Copy Prompt (quiet cue already shown).
-
     const { prompt, missingPlaceholders } = api.buildPrompt(
       kit.template,
       kit.resumeTemplateJson,
@@ -2900,12 +2989,6 @@
     }
 
     await copyTextToClipboard(prompt);
-
-    try {
-      await api.savePromptKit(profileId, { ...kit, output: prompt });
-    } catch (_) {
-      /* non-fatal: copy already succeeded */
-    }
 
     promptCopiedAt = Date.now();
     syncTabSession();
@@ -2923,7 +3006,25 @@
       setRegisterStatus(message, 'success');
       if (showStatus) showStatus(message, 'success');
     }
-    void refreshPromptKitUi();
+
+    // Persist + UI refresh in background — must not delay the copy spinner.
+    void (async () => {
+      try {
+        await api.savePromptKit(
+          profileId,
+          { ...kit, output: prompt, jobDescription },
+          { swallowRemoteError: true }
+        );
+      } catch (_) {
+        /* non-fatal */
+      }
+      try {
+        void refreshPromptKitUi();
+      } catch (_) {
+        /* ignore */
+      }
+    })();
+
     return { prompt, missingPlaceholders, fit };
   }
 
@@ -3162,7 +3263,7 @@
       registerBtn.addEventListener('click', async () => {
         setRegisterBusy(true);
         try {
-          const connected = await checkBackendConnection();
+          const connected = await checkBackendConnection({ skipDriveBadge: true });
           if (!connected) {
             throw new Error(
               'Not signed in. Open Settings → Website connection, enter your username and password, and click Sign in.'
@@ -3207,6 +3308,7 @@
             'info'
           );
           const result = await registerJobToBackend();
+          invalidateApplicationsCache();
           registeredRecord = { id: String(result.id || ''), at: Date.now() };
           const sourceNote = result._draftFromJson ? ' (from resume JSON draft)' : '';
           const fileNote =

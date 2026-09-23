@@ -210,6 +210,14 @@ export function extractJobrightJobFields(raw: unknown): ScrapedJob & {
     serializeField(jr.applyLink || jr.applyUrl || jr.applicationUrl) ||
     (jobId ? `${JOBRIGHT_SITE}/jobs/info/${jobId}` : null);
   const postedAt = parseJobrightPublishDate(jr);
+  const applicantsRaw =
+    jr.applicantsCount ?? jr.applicantCount ?? jr.applyCount ?? jr.numApplicants;
+  let applicants_count: string | null = null;
+  if (typeof applicantsRaw === "number" && Number.isFinite(applicantsRaw)) {
+    applicants_count = String(Math.round(applicantsRaw));
+  } else if (applicantsRaw != null && String(applicantsRaw).trim()) {
+    applicants_count = String(applicantsRaw).trim();
+  }
 
   return {
     id: jobId,
@@ -221,6 +229,7 @@ export function extractJobrightJobFields(raw: unknown): ScrapedJob & {
       serializeField(jr.companyName) ||
       serializeField(row.companyName),
     application_site: detectPlatform(applyUrl),
+    applicants_count,
     // Compat for shared ScrapedJob / date filtering.
     core_job_title: null,
     requirements_summary: null,
@@ -271,6 +280,7 @@ export function jobrightJobsToCsv(
     "Date Posted",
     "Job Title",
     "Company",
+    "Applicants",
     "Source Platform",
   ] as const;
 
@@ -286,6 +296,7 @@ export function jobrightJobsToCsv(
       formatJobrightPostedAtLocal(job.posted_at || job.estimated_publish_date || ""),
       job.title ?? "",
       job.company_name ?? "",
+      job.applicants_count ?? "",
       job.application_site ?? "",
     ]
       .map(escape)
@@ -312,6 +323,7 @@ export function jobrightJobsToExcelXml(
     "Date Posted",
     "Job Title",
     "Company",
+    "Applicants",
     "Source Platform",
   ] as const;
   const sorted = sortJobrightJobsForCsv(jobs);
@@ -328,6 +340,7 @@ export function jobrightJobsToExcelXml(
         formatJobrightPostedAtLocal(job.posted_at || job.estimated_publish_date || ""),
         job.title ?? "",
         job.company_name ?? "",
+        job.applicants_count ?? "",
         job.application_site ?? "",
       ];
       const cells = values
@@ -357,6 +370,7 @@ export function jobrightJobsToExcelXml(
    <Column ss:Width="110"/>
    <Column ss:Width="220"/>
    <Column ss:Width="120"/>
+   <Column ss:Width="80"/>
    <Column ss:Width="120"/>
    <Row ss:StyleID="Header">${headerCells}</Row>
    ${dataRows}

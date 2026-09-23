@@ -78,7 +78,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-type DateWindow = "1d" | "3d" | "7d";
+type DateWindow = "2h" | "4h" | "8h" | "1d" | "2d" | "3d" | "7d";
 
 type BlockedCompany = {
   id: string;
@@ -146,7 +146,11 @@ type ScrapeResponse = {
 };
 
 const DATE_WINDOW_OPTIONS: Array<{ value: DateWindow; label: string }> = [
+  { value: "2h", label: "2h" },
+  { value: "4h", label: "4h" },
+  { value: "8h", label: "8h" },
   { value: "1d", label: "24h" },
+  { value: "2d", label: "2 days" },
   { value: "3d", label: "3 days" },
   { value: "7d", label: "7 days" },
 ];
@@ -341,7 +345,7 @@ export function JobScraperPageClient() {
     : DEFAULT_PAGE_SIZE;
   const search = searchParams.get("q") ?? "";
 
-  const [dateWindow, setDateWindow] = useState<DateWindow>("3d");
+  const [dateWindow, setDateWindow] = useState<DateWindow>("8h");
   const [scrapeSource, setScrapeSource] = useState<"hiringcafe" | "jobright">(
     "hiringcafe",
   );
@@ -404,7 +408,7 @@ export function JobScraperPageClient() {
   useEffect(() => {
     const saved = loadJobScraperSession();
     if (saved) {
-      setDateWindow(saved.dateWindow || "3d");
+      setDateWindow(saved.dateWindow || "8h");
       setCandidateFilter(saved.candidateFilter || "");
       setExcludeBlocked(saved.excludeBlocked !== false);
       setExcludeBlockedAts(saved.excludeBlockedAts !== false);

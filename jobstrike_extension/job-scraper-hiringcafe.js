@@ -26,7 +26,7 @@
       },
     ],
     commitmentTypes: ['Full Time', 'Part Time', 'Contract', 'Temporary', 'Seasonal'],
-    dateFetchedPastNDays: 3,
+    dateFetchedPastNDays: 1,
     departments: [
       'Engineering',
       'Software Development',
@@ -61,6 +61,35 @@
     ['JazzHR', (h) => h.includes('jazz.co') || h.includes('applytojob.com')],
   ];
 
+  /**
+   * Freshness window: `2h` / `4h` / `8h` / `1d` / `3d` / …
+   * HC API only accepts whole days (`dateFetchedPastNDays`); hour windows
+   * use hcDays=1 server-side, then a local ms cutoff.
+   */
+  function parseFreshnessWindow(dateWindow) {
+    if (typeof dateWindow === 'number' && Number.isFinite(dateWindow)) {
+      const days = Math.max(1, Math.round(dateWindow));
+      return { kind: 'days', amount: days, label: `${days}d`, hcDays: days };
+    }
+    const raw = String(dateWindow || '').trim().toLowerCase();
+    const hourMatch = raw.match(/^(\d+)\s*h$/);
+    if (hourMatch) {
+      const hours = Math.max(1, Number(hourMatch[1]));
+      return { kind: 'hours', amount: hours, label: `${hours}h`, hcDays: 1 };
+    }
+    const dayMatch = raw.match(/^(\d+)\s*d$/);
+    if (dayMatch) {
+      const days = Math.max(1, Number(dayMatch[1]));
+      return { kind: 'days', amount: days, label: `${days}d`, hcDays: days };
+    }
+    const bare = raw.match(/^(\d+)$/);
+    if (bare) {
+      const days = Math.max(1, Number(bare[1]));
+      return { kind: 'days', amount: days, label: `${days}d`, hcDays: days };
+    }
+    return { kind: 'days', amount: 3, label: '3d', hcDays: 3 };
+  }
+
   function dateWindowFromDays(days) {
     const n = Math.max(1, Math.round(Number(days) || 3));
     if (n === 1) return '1d';
@@ -70,23 +99,27 @@
     return `${n}d`;
   }
 
+  /** Days to send to HiringCafe (hour windows → 1). */
   function dateWindowDays(dateWindow) {
-    if (typeof dateWindow === 'number' && Number.isFinite(dateWindow)) {
-      return Math.max(1, Math.round(dateWindow));
+    return parseFreshnessWindow(dateWindow).hcDays;
+  }
+
+  function dateWindowLabel(dateWindow) {
+    return parseFreshnessWindow(dateWindow).label;
+  }
+
+  function dateWindowCutoffMs(dateWindow, nowMs = Date.now()) {
+    const parsed = parseFreshnessWindow(dateWindow);
+    if (parsed.kind === 'hours') {
+      return nowMs - parsed.amount * 60 * 60 * 1000;
     }
-    const raw = String(dateWindow || '').trim().toLowerCase();
-    const match = raw.match(/^(\d+)\s*d?$/);
-    if (match) return Math.max(1, Number(match[1]));
-    if (raw === '1d') return 1;
-    if (raw === '2d') return 2;
-    if (raw === '7d') return 7;
-    return 3;
+    return nowMs - parsed.amount * 24 * 60 * 60 * 1000;
   }
 
   function cloneDefaultSearchState(dateWindow) {
     return {
       ...DEFAULT_SEARCH_STATE,
-      dateFetchedPastNDays: dateWindowDays(dateWindow || '3d'),
+      dateFetchedPastNDays: dateWindowDays(dateWindow || '8h'),
     };
   }
 
@@ -387,8 +420,8 @@
   }
 
   function filterJobsByPublishDate(jobs, dateWindow, nowMs = Date.now()) {
-    const days = dateWindowDays(dateWindow);
-    const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000;
+    const parsed = parseFreshnessWindow(dateWindow);
+    const cutoffMs = dateWindowCutoffMs(dateWindow, nowMs);
     let removedByDate = 0;
     const filtered = [];
 
@@ -407,7 +440,13 @@
       filtered.push(job);
     }
 
-    return { filtered, removedByDate, dateWindowDays: days };
+    return {
+      filtered,
+      removedByDate,
+      dateWindowDays: parsed.hcDays,
+      dateWindowLabel: parsed.label,
+      cutoffMs,
+    };
   }
 
   function dedupeJobs(jobs) {
@@ -519,6 +558,7 @@
       'company_name',
       'company_tagline',
       'application_site',
+      'applicants_count',
     ];
 
     const escape = (value) => {
@@ -578,8 +618,11 @@
   global.SmartJobHiringCafeScraper = {
     HIRING_CAFE_BASE,
     DEFAULT_SEARCH_STATE,
+    parseFreshnessWindow,
     dateWindowDays,
     dateWindowFromDays,
+    dateWindowLabel,
+    dateWindowCutoffMs,
     cloneDefaultSearchState,
     buildSearchState,
     buildHiringCafeUrl,
