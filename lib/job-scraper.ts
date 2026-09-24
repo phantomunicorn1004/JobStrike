@@ -31,8 +31,36 @@ export type JobScraperDateWindow =
   | "1d"
   | "2d"
   | "3d"
-  | "7d"
-  | (string & {});
+  | "7d";
+
+export const JOB_SCRAPER_DATE_WINDOWS: readonly JobScraperDateWindow[] = [
+  "2h",
+  "4h",
+  "8h",
+  "1d",
+  "2d",
+  "3d",
+  "7d",
+] as const;
+
+export function isJobScraperDateWindow(value: unknown): value is JobScraperDateWindow {
+  return (
+    typeof value === "string" &&
+    (JOB_SCRAPER_DATE_WINDOWS as readonly string[]).includes(value)
+  );
+}
+
+/** Coerce stored/API values to a known window; invalid → fallback. */
+export function normalizeJobScraperDateWindow(
+  value: unknown,
+  fallback: JobScraperDateWindow = "8h",
+): JobScraperDateWindow {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (isJobScraperDateWindow(raw)) return raw;
+  return fallback;
+}
 
 export type FreshnessWindow = {
   kind: "hours" | "days";
@@ -43,7 +71,7 @@ export type FreshnessWindow = {
 };
 
 export function parseFreshnessWindow(
-  dateWindow: JobScraperDateWindow | number,
+  dateWindow: JobScraperDateWindow | number | string,
 ): FreshnessWindow {
   if (typeof dateWindow === "number" && Number.isFinite(dateWindow)) {
     const days = Math.max(1, Math.round(dateWindow));

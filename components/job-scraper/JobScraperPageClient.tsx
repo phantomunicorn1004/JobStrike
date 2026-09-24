@@ -65,8 +65,10 @@ import {
   jobsToCsv,
   normalizeAtsName,
   normalizeCompanyName,
+  normalizeJobScraperDateWindow,
   type BlockedJobRef,
   type JobDuplicateStatus,
+  type JobScraperDateWindow,
   type RegisteredJobRef,
   type ScrapedJob,
 } from "@/lib/job-scraper";
@@ -78,7 +80,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-type DateWindow = "2h" | "4h" | "8h" | "1d" | "2d" | "3d" | "7d";
+type DateWindow = JobScraperDateWindow;
 
 type BlockedCompany = {
   id: string;
@@ -408,7 +410,7 @@ export function JobScraperPageClient() {
   useEffect(() => {
     const saved = loadJobScraperSession();
     if (saved) {
-      setDateWindow(saved.dateWindow || "8h");
+      setDateWindow(normalizeJobScraperDateWindow(saved.dateWindow, "8h"));
       setCandidateFilter(saved.candidateFilter || "");
       setExcludeBlocked(saved.excludeBlocked !== false);
       setExcludeBlockedAts(saved.excludeBlockedAts !== false);
@@ -685,7 +687,7 @@ export function JobScraperPageClient() {
         pagesFetched: data.stats.pagesFetched,
         reportedTotal: data.stats.reportedTotal,
         dateCutoff: data.stats.dateCutoff,
-        dateWindow: data.stats.dateWindow,
+        dateWindow: normalizeJobScraperDateWindow(data.stats.dateWindow, dateWindow),
       });
     }
     if (data.filterContext) {

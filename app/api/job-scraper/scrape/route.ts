@@ -6,7 +6,7 @@ import {
   dedupeJobs,
   filterJobsByPublishDate,
   jobsToCsv,
-  type JobScraperDateWindow,
+  normalizeJobScraperDateWindow,
 } from "@/lib/job-scraper";
 import {
   scrapeHiringCafeJobs,
@@ -56,8 +56,7 @@ export async function POST(request: NextRequest) {
     const user = await requireRequestUser(request);
     const body = (await request.json()) as ScrapeBody;
     const source = body.source === "jobright" ? "jobright" : "hiringcafe";
-    const dateWindow =
-      body.dateWindow === "1d" || body.dateWindow === "7d" ? body.dateWindow : "3d";
+    const dateWindow = normalizeJobScraperDateWindow(body.dateWindow, "3d");
     const excludeBlocked = body.excludeBlocked !== false;
     const excludeBlockedAts = body.excludeBlockedAts !== false;
     const excludeRegisteredJobs = body.excludeRegisteredJobs === true;
@@ -93,7 +92,7 @@ export async function POST(request: NextRequest) {
               search: { titleKeyword, location },
               onProgress,
             })
-          : scrapeHiringCafeJobs(dateWindow as JobScraperDateWindow, { onProgress }),
+          : scrapeHiringCafeJobs(dateWindow, { onProgress }),
         listBlockedCompanies(user.id),
         listBlockedAts(user.id),
         listBlockedJobs(user.id),
@@ -118,7 +117,7 @@ export async function POST(request: NextRequest) {
         filtered: baseJobs,
         removedByDate,
         cutoffIso,
-      } = filterJobsByPublishDate(dedupedJobs, dateWindow as JobScraperDateWindow, Date.now(), {
+      } = filterJobsByPublishDate(dedupedJobs, dateWindow, Date.now(), {
         keepUndated: source === "jobright",
       });
 
