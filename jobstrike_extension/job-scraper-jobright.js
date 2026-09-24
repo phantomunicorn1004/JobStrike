@@ -1539,10 +1539,14 @@
   }
 
   /**
-   * Newest posted_at first. Does not drop same-company roles — applicant chooses.
+   * Source Platform A→Z, then newest posted, then company A→Z.
+   * Does not drop same-company roles — applicant chooses.
    */
   function sortJobsForCsv(jobs) {
     return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {
+      const atsA = String(a?.application_site || '').toLowerCase();
+      const atsB = String(b?.application_site || '').toLowerCase();
+      if (atsA !== atsB) return atsA.localeCompare(atsB);
       const tDiff = postedAtSortKey(b) - postedAtSortKey(a);
       if (tDiff !== 0) return tDiff;
       const coA = companyKey(a);

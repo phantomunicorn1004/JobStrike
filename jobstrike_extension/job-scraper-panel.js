@@ -21,8 +21,9 @@
     candidateFilter: '',
     maxPages: 8,
     delayMs: 700,
-    /** Freshness: 2h | 4h | 8h | 1d | 2d | 3d | 7d — local cutoff; HC server uses days floor. */
-    freshnessWindow: '8h',
+    /** Per-source freshness (legacy `freshnessWindow` migrates into both). */
+    freshnessWindowJr: '1d',
+    freshnessWindowHc: '8h',
   };
 
   const state = {
@@ -151,12 +152,25 @@
       STORAGE.customSearch,
     ]);
 
-    state.prefs = { ...DEFAULT_PREFS, ...(result[STORAGE.prefs] || {}) };
-    if (!state.prefs.freshnessWindow && state.prefs.dateWindow) {
-      state.prefs.freshnessWindow = String(state.prefs.dateWindow);
+    const storedPrefs = result[STORAGE.prefs] || {};
+    state.prefs = { ...DEFAULT_PREFS, ...storedPrefs };
+    // Migrate single freshnessWindow → per-source only when that source was never set.
+    const legacyFresh = normalizeFreshnessPref(
+      storedPrefs.freshnessWindow || storedPrefs.dateWindow
+    );
+    if (legacyFresh) {
+      if (!normalizeFreshnessPref(storedPrefs.freshnessWindowJr)) {
+        state.prefs.freshnessWindowJr = legacyFresh;
+      }
+      if (!normalizeFreshnessPref(storedPrefs.freshnessWindowHc)) {
+        state.prefs.freshnessWindowHc = legacyFresh;
+      }
     }
-    if (!state.prefs.freshnessWindow) {
-      state.prefs.freshnessWindow = DEFAULT_PREFS.freshnessWindow;
+    if (!normalizeFreshnessPref(state.prefs.freshnessWindowJr)) {
+      state.prefs.freshnessWindowJr = DEFAULT_PREFS.freshnessWindowJr;
+    }
+    if (!normalizeFreshnessPref(state.prefs.freshnessWindowHc)) {
+      state.prefs.freshnessWindowHc = DEFAULT_PREFS.freshnessWindowHc;
     }
 
     applyWebsiteBlockedLists({
@@ -313,27 +327,51 @@
     return bits.length ? `Hidden: ${bits.join(' · ')}` : 'No matches hidden by lists';
   }
 
-  function resolveScrapeDateWindow() {
-    const scraper = api();
-    const pref = String(
-      state.prefs.freshnessWindow || state.prefs.dateWindow || ''
-    )
+  function normalizeFreshnessPref(value) {
+    const pref = String(value || '')
       .trim()
       .toLowerCase();
-    if (/^\d+h$/.test(pref) || /^\d+d$/.test(pref)) {
-      return pref;
-    }
-    // Legacy: map imported HC days when freshness pref missing/invalid.
+    return /^\d+[hd]$/.test(pref) ? pref : '';
+  }
+
+  function resolveJrDateWindow() {
+    return (
+      normalizeFreshnessPref(state.prefs.freshnessWindowJr) ||
+      normalizeFreshnessPref(state.prefs.freshnessWindow) ||
+      DEFAULT_PREFS.freshnessWindowJr
+    );
+  }
+
+  function resolveHcDateWindow() {
+    const pref =
+      normalizeFreshnessPref(state.prefs.freshnessWindowHc) ||
+      normalizeFreshnessPref(state.prefs.freshnessWindow);
+    if (pref) return pref;
+    const scraper = api();
     const importedDays = Number(state.customSearchState?.dateFetchedPastNDays);
     if (Number.isFinite(importedDays) && importedDays >= 1) {
       return scraper?.dateWindowFromDays?.(importedDays) || `${Math.round(importedDays)}d`;
     }
-    return DEFAULT_PREFS.freshnessWindow;
+    return DEFAULT_PREFS.freshnessWindowHc;
   }
 
-  /** @deprecated use resolveScrapeDateWindow — kept for call sites */
+  /** @deprecated use resolveHcDateWindow */
+  function resolveScrapeDateWindow() {
+    return resolveHcDateWindow();
+  }
+
+  /** @deprecated use resolveHcDateWindow */
   function resolveHiringCafeDateWindow() {
-    return resolveScrapeDateWindow();
+    return resolveHcDateWindow();
+  }
+
+  function jobOriginKey(job) {
+    const raw = String(job?.origin || job?.source || '')
+      .trim()
+      .toLowerCase();
+    if (raw.includes('jobright') || raw === 'jr') return 'jobright';
+    if (raw.includes('hiring') || raw === 'hc') return 'hiringcafe';
+    return '';
   }
 
   /**
@@ -376,6 +414,27 @@
     };
   }
 
+  /** Apply each job's source-specific freshness window. */
+  function filterJobsByPerSourceFreshness(jobs, nowMs = Date.now()) {
+    const jrWin = resolveJrDateWindow();
+    const hcWin = resolveHcDateWindow();
+    const filtered = [];
+    let removedByDate = 0;
+    for (const job of jobs || []) {
+      const origin = jobOriginKey(job);
+      const win = origin === 'jobright' ? jrWin : hcWin;
+      const part = partitionJobsByDateWindow([job], win, nowMs);
+      if (part.inWindow.length) filtered.push(job);
+      else removedByDate += 1;
+    }
+    return {
+      filtered,
+      removedByDate,
+      dateWindowJr: jrWin,
+      dateWindowHc: hcWin,
+    };
+  }
+
   function recomputeFiltered() {
     const scraper = api();
     if (!scraper) {
@@ -398,26 +457,19 @@
       registeredCompanies: state.registeredCompanies,
     });
 
-    // Past N days for BOTH HiringCafe and Jobright. Keep multiple roles per company.
-    const dateWindow = resolveScrapeDateWindow();
-    let filtered = afterBlocks;
-    let removedByDate = 0;
-    if (typeof scraper.filterJobsByPublishDate === 'function') {
-      const dated = scraper.filterJobsByPublishDate(afterBlocks, dateWindow);
-      filtered = dated.filtered || [];
-      removedByDate = dated.removedByDate || 0;
-    }
-
-    // Newest posted first so applicants see latest options first.
-    filtered = sortBidJobs(filtered);
+    // Per-source freshness (Jobright vs HiringCafe). Keep multiple roles per company.
+    const dated = filterJobsByPerSourceFreshness(afterBlocks);
+    let filtered = sortBidJobs(dated.filtered || []);
 
     state.filteredJobs = filtered;
     state.stats = {
       ...(state.stats || {}),
       scraped: state.rawJobs.length,
       deduped: deduped.length,
-      removedByDate,
-      dateWindow,
+      removedByDate: dated.removedByDate || 0,
+      dateWindow: `${dated.dateWindowJr || ''}/${dated.dateWindowHc || ''}`,
+      dateWindowJr: dated.dateWindowJr,
+      dateWindowHc: dated.dateWindowHc,
       removedBlockedJobs: stats.removedBlockedJobs,
       removedBlockedCompanies: stats.removedBlockedCompanies,
       removedAts: stats.removedAts,
@@ -680,9 +732,12 @@
     };
   }
 
-  /** Newest posted_at first. Keeps multiple roles per company for manual choice. */
+  /** Source Platform A→Z, then newest posted, then company A→Z — easier ATS batch bidding. */
   function sortBidJobs(jobs) {
     return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {
+      const atsA = String(a?.application_site || '').toLowerCase();
+      const atsB = String(b?.application_site || '').toLowerCase();
+      if (atsA !== atsB) return atsA.localeCompare(atsB);
       const tA = Date.parse(a?.estimated_publish_date || a?.posted_at || '') || 0;
       const tB = Date.parse(b?.estimated_publish_date || b?.posted_at || '') || 0;
       if (tA !== tB) return tB - tA;
@@ -889,29 +944,28 @@
     const scraper = api();
     const hcEl = document.getElementById('jsHcFeedStatus');
     const jrEl = document.getElementById('jsJrFeedStatus');
-    const windowLabel =
-      scraper?.dateWindowLabel?.(resolveScrapeDateWindow()) ||
-      resolveScrapeDateWindow();
+    const jrLabel =
+      scraper?.dateWindowLabel?.(resolveJrDateWindow()) || resolveJrDateWindow();
+    const hcLabel =
+      scraper?.dateWindowLabel?.(resolveHcDateWindow()) || resolveHcDateWindow();
 
     const hcSummary = state.customSearchState
       ? scraper?.summarizeSearchState?.(state.customSearchState) || 'Custom search imported'
       : 'Built-in default';
 
     if (hcEl) {
-      const text = `${windowLabel} · ${hcSummary}`;
+      const text = `${hcLabel} · ${hcSummary}`;
       hcEl.textContent = text;
-      hcEl.title = `${text} (local freshness; HC API uses whole days)`;
+      hcEl.title = `${text} (HiringCafe freshness; API uses whole days for hour windows)`;
     }
     if (jrEl) {
-      jrEl.textContent = `Recommend · ${windowLabel}`;
-      jrEl.title = `Local freshness ${windowLabel}. Set filters on jobright.ai → Recommend, then scrape.`;
+      jrEl.textContent = `Recommend · ${jrLabel}`;
+      jrEl.title = `Jobright freshness ${jrLabel}. Set filters on jobright.ai → Recommend, then scrape.`;
     }
   }
 
-  function syncFreshnessSelect() {
-    const sel = document.getElementById('jsFreshnessWindow');
+  function ensureFreshnessSelectValue(sel, value) {
     if (!sel) return;
-    const value = resolveScrapeDateWindow();
     if (![...sel.options].some((o) => o.value === value)) {
       const opt = document.createElement('option');
       opt.value = value;
@@ -919,6 +973,17 @@
       sel.appendChild(opt);
     }
     sel.value = value;
+  }
+
+  function syncFreshnessSelect() {
+    ensureFreshnessSelectValue(
+      document.getElementById('jsFreshnessWindowJr'),
+      resolveJrDateWindow()
+    );
+    ensureFreshnessSelectValue(
+      document.getElementById('jsFreshnessWindowHc'),
+      resolveHcDateWindow()
+    );
   }
 
   async function openJobrightRecommend() {
@@ -941,7 +1006,7 @@
     const scraper = api();
     const importedDays = Number(searchState?.dateFetchedPastNDays);
     if (Number.isFinite(importedDays) && importedDays >= 1 && scraper?.dateWindowFromDays) {
-      state.prefs.freshnessWindow = scraper.dateWindowFromDays(importedDays);
+      state.prefs.freshnessWindowHc = scraper.dateWindowFromDays(importedDays);
     }
 
     await persistPrefs();
@@ -1489,7 +1554,7 @@
     const jrPages = Number(state.combinedRun?.jrPages) || 0;
     const overallTotal = combined ? maxPages * 2 : maxPages;
     const overallOffset = combined ? maxPages : 0;
-    const dateWindow = resolveScrapeDateWindow();
+    const dateWindow = resolveHcDateWindow();
 
     let page = resume && state.scrapeCursor ? state.scrapeCursor.page : 0;
     let jobs = resume && state.scrapeCursor ? [...state.scrapeCursor.jobs] : [];
@@ -1836,7 +1901,7 @@
     const overallTotal = combined ? maxScrollBatches + 8 : maxScrollBatches;
     const overallOffset = 0;
     const recommendUrl = jr.JOBRIGHT_RECOMMEND || 'https://jobright.ai/jobs/recommend';
-    const dateWindow = resolveScrapeDateWindow();
+    const dateWindow = resolveJrDateWindow();
 
     let batch = resume && state.scrapeCursor ? state.scrapeCursor.page : 0;
     let jobs = resume && state.scrapeCursor ? [...state.scrapeCursor.jobs] : [];
@@ -2686,17 +2751,30 @@
       await loadProfileFilterContext({ silent: true });
     });
 
-    document.getElementById('jsFreshnessWindow')?.addEventListener('change', async (event) => {
+    document.getElementById('jsFreshnessWindowJr')?.addEventListener('change', async (event) => {
       const value = String(event.target.value || '').trim().toLowerCase();
       if (!/^\d+[hd]$/.test(value)) return;
-      state.prefs.freshnessWindow = value;
+      state.prefs.freshnessWindowJr = value;
       await persistPrefs();
       recomputeFiltered();
       await persistResults();
       renderFeedStatus();
       renderResults();
       renderMeta();
-      showToast(`Freshness set to ${value}.`, 'success');
+      showToast(`Jobright freshness set to ${value}.`, 'success');
+    });
+
+    document.getElementById('jsFreshnessWindowHc')?.addEventListener('change', async (event) => {
+      const value = String(event.target.value || '').trim().toLowerCase();
+      if (!/^\d+[hd]$/.test(value)) return;
+      state.prefs.freshnessWindowHc = value;
+      await persistPrefs();
+      recomputeFiltered();
+      await persistResults();
+      renderFeedStatus();
+      renderResults();
+      renderMeta();
+      showToast(`HiringCafe freshness set to ${value}.`, 'success');
     });
 
     document.getElementById('jsRefreshProfileBtn')?.addEventListener('click', () => {

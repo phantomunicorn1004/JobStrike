@@ -334,7 +334,7 @@
                 </div>
                 <div class="js-source-info">
                   <h3 class="js-source-name">Jobright</h3>
-                  <p class="js-source-status" id="jsJrFeedStatus">Recommend · Most Recent</p>
+                  <p class="js-source-status" id="jsJrFeedStatus">Recommend · 1d</p>
                 </div>
               </div>
               <button type="button" class="btn-icon" id="jsOpenRecommendBtn" title="Open Recommend page">
@@ -461,8 +461,20 @@
             <div class="js-modal-content">
               <div class="js-modal-section">
                 <label class="js-input-label">
-                  Freshness
-                  <select id="jsFreshnessWindow" class="js-input" aria-label="Job freshness window">
+                  Jobright freshness
+                  <select id="jsFreshnessWindowJr" class="js-input" aria-label="Jobright freshness window">
+                    <option value="2h">Last 2 hours</option>
+                    <option value="4h">Last 4 hours</option>
+                    <option value="8h">Last 8 hours</option>
+                    <option value="1d">Last 24 hours</option>
+                    <option value="2d">Last 2 days</option>
+                    <option value="3d">Last 3 days</option>
+                    <option value="7d">Last 7 days</option>
+                  </select>
+                </label>
+                <label class="js-input-label" style="margin-top:10px">
+                  HiringCafe freshness
+                  <select id="jsFreshnessWindowHc" class="js-input" aria-label="HiringCafe freshness window">
                     <option value="2h">Last 2 hours</option>
                     <option value="4h">Last 4 hours</option>
                     <option value="8h">Last 8 hours</option>
@@ -473,7 +485,7 @@
                   </select>
                 </label>
                 <p class="muted" style="margin:6px 0 0;font-size:12px;">
-                  Keeps early listings. HiringCafe still requests whole days (hours → past 1 day), then we cut locally. Same cutoff for Jobright.
+                  Separate cutoffs per source. HiringCafe API still uses whole days (hours → past 1 day), then we cut locally.
                 </p>
               </div>
 

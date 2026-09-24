@@ -257,14 +257,14 @@ function companyKey(job: { company_name?: string | null }): string {
     .toLowerCase();
 }
 
-/** ATS Z→A, company A→Z (same company adjacent), newest posted first. */
+/** Source Platform A→Z, company A→Z, newest posted first. */
 export function sortJobrightJobsForCsv<T extends ScrapedJob & { posted_at?: string | null }>(
   jobs: T[],
 ): T[] {
   return [...jobs].sort((a, b) => {
     const atsA = String(a.application_site || "").toLowerCase();
     const atsB = String(b.application_site || "").toLowerCase();
-    if (atsA !== atsB) return atsB.localeCompare(atsA);
+    if (atsA !== atsB) return atsA.localeCompare(atsB);
     const coA = companyKey(a);
     const coB = companyKey(b);
     if (coA !== coB) return coA.localeCompare(coB);
