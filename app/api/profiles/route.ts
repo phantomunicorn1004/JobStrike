@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+import { sanitizeProfileAutofill } from "@/lib/resume-db/profile-autofill";
 import {
   requireRequestUser,
   resolveRequestUser,
@@ -43,6 +44,8 @@ function parseProfileBody(body: Record<string, unknown>) {
     postal_code: String(body.postal_code ?? body.postalCode ?? "").trim(),
     university: String(body.university ?? "").trim(),
     linkedin: String(body.linkedin ?? "").trim(),
+    // Only when sent: an older client that omits it must not wipe saved answers.
+    ...(body.autofill !== undefined ? { autofill: sanitizeProfileAutofill(body.autofill) } : {}),
   };
 }
 
@@ -79,7 +82,17 @@ export async function POST(request: NextRequest) {
     }
 
     const created = await createProfile(user.id, profile);
-    return corsJson({ profile: created }, { status: 201 });
+    // The row comes back without the column when the database predates it.
+    const autofillSkipped = "autofill" in profile && created.autofill === undefined;
+    return corsJson(
+      {
+        profile: created,
+        ...(autofillSkipped
+          ? { warning: "Autofill details were not saved. Run scripts/add-profile-autofill.sql on the database." }
+          : {}),
+      },
+      { status: 201 },
+    );
   } catch (error) {
     console.error("Profiles create error:", error);
     const message = error instanceof Error ? error.message : "Failed to create profile.";

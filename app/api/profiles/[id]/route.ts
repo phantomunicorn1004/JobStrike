@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+import { sanitizeProfileAutofill } from "@/lib/resume-db/profile-autofill";
 import { requireRequestUser } from "@/lib/auth/resolve-request-user";
 import { deleteProfile, updateProfile } from "@/lib/resume-db/repository";
 
@@ -35,6 +36,8 @@ function parseProfileBody(body: Record<string, unknown>) {
     postal_code: String(body.postal_code ?? body.postalCode ?? "").trim(),
     university: String(body.university ?? "").trim(),
     linkedin: String(body.linkedin ?? "").trim(),
+    // Only when sent: an older client that omits it must not wipe saved answers.
+    ...(body.autofill !== undefined ? { autofill: sanitizeProfileAutofill(body.autofill) } : {}),
   };
 }
 
@@ -52,8 +55,15 @@ export async function PATCH(
 
     const body = await request.json();
     const profile = parseProfileBody(body);
-    await updateProfile(user.id, profileId, profile);
-    return corsJson({ ok: true });
+    const { autofillSaved } = await updateProfile(user.id, profileId, profile);
+    const autofillSkipped = "autofill" in profile && !autofillSaved;
+    return corsJson({
+      ok: true,
+      // The core profile saved, but the answers column is missing from the database.
+      ...(autofillSkipped
+        ? { warning: "Autofill details were not saved. Run scripts/add-profile-autofill.sql on the database." }
+        : {}),
+    });
   } catch (error) {
     console.error("Profiles update error:", error);
     const message = error instanceof Error ? error.message : "Failed to update profile.";

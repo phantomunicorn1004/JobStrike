@@ -476,120 +476,45 @@ main {
   font-weight: 700;
 }
 
-/* Step number badges on the action buttons. */
-.rb-step-badge {
-  flex-shrink: 0;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--muted) 22%, transparent);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 18px;
-  text-align: center;
+/* Bid step buttons — exactly one is filled (the step to do now); the rest stay quiet. */
+.rb-actions .btn[data-step-btn] {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text-secondary) !important;
+  box-shadow: none;
 }
 
-.btn.is-done-step .rb-step-badge {
-  background: color-mix(in srgb, var(--cta, #3b6fd4) 75%, #64748b);
-  color: #fff;
+.rb-actions .btn[data-step-btn]:hover:not(:disabled) {
+  background: var(--bg-subtle) !important;
+  border-color: color-mix(in srgb, var(--cta, #3b6fd4) 45%, var(--border-strong)) !important;
+  color: var(--text) !important;
 }
 
-.btn.primary.is-done-step .rb-step-badge,
-.btn.primary.is-current-step .rb-step-badge,
-.btn.rb-action-soft.is-done-step .rb-step-badge,
-.btn.rb-action-soft.is-current-step .rb-step-badge {
-  background: rgba(255, 255, 255, 0.92);
-  color: #2f5bb8;
-}
-
-.btn.is-done-step:not(.primary):not(.success):not(.rb-action-soft) {
-  color: var(--brand, #3b6fd4);
-  border-color: color-mix(in srgb, var(--brand, #3b6fd4) 45%, var(--border));
-  opacity: 0.72;
-}
-
-/* Current bid step — only this control should feel “hot” */
-.btn.is-current-step .rb-step-badge {
-  background: rgba(255, 255, 255, 0.95);
-  color: #2f5bb8;
-}
-
-.btn.is-current-step:not(:disabled) {
-  opacity: 1;
-  filter: none;
+.rb-actions .btn[data-step-btn].is-current-step:not(:disabled) {
   background: var(--cta, #3b6fd4) !important;
-  border-color: transparent !important;
+  border-color: var(--cta, #3b6fd4) !important;
   color: #fff !important;
-  box-shadow:
-    0 0 0 2px var(--cta, #3b6fd4),
-    0 0 0 5px color-mix(in srgb, var(--cta, #3b6fd4) 20%, transparent);
-  z-index: 1;
+  box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--cta, #3b6fd4) 75%, transparent);
 }
 
-.btn.is-current-step:not(:disabled):hover {
+.rb-actions .btn[data-step-btn].is-current-step:not(:disabled):hover {
   background: var(--cta-hover, #2f5bb8) !important;
+  border-color: var(--cta-hover, #2f5bb8) !important;
+  color: #fff !important;
 }
 
-.btn.is-blocked-step .rb-step-badge {
-  background: var(--warn, #f59e0b);
-  color: #1a1a1a;
+/* Done: still clickable to repeat, marked with a tick instead of a fill. */
+.rb-actions .btn[data-step-btn].is-done-step:not(.is-current-step) .rb-btn-label::after {
+  content: "✓";
+  margin-left: 6px;
+  font-weight: 800;
+  color: var(--success, #16a34a);
 }
 
-.btn.is-blocked-step:not(:disabled) {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn, #f59e0b) 55%, transparent);
-}
-
-/*
- * Pipeline glance mode: non-current steps stay usable but quiet.
- * Permanent .primary / .rb-action-soft fills must not compete with “now”.
- */
-.rb-actions[data-pipeline="1"] .btn[data-step-btn].is-upcoming-step:not(:disabled),
-.rb-actions[data-pipeline="1"] .btn[data-step-btn].is-done-step:not(.is-current-step):not(:disabled) {
-  opacity: 0.55;
-  box-shadow: none;
-  filter: saturate(0.75);
-  background: var(--bg-elevated) !important;
-  border: 1px solid var(--border-strong) !important;
-  color: var(--text-secondary) !important;
-}
-
-.rb-actions[data-pipeline="1"] .btn[data-step-btn].is-done-step:not(.is-current-step):not(:disabled) {
-  opacity: 0.68;
-  border-color: color-mix(in srgb, var(--cta, #3b6fd4) 35%, var(--border)) !important;
-  color: var(--brand, #3b6fd4) !important;
-}
-
-.rb-actions[data-pipeline="1"] .btn[data-step-btn].is-upcoming-step .rb-step-badge,
-.rb-actions[data-pipeline="1"] .btn[data-step-btn].is-done-step:not(.is-current-step) .rb-step-badge {
-  background: color-mix(in srgb, var(--muted) 22%, transparent);
-  color: var(--muted);
-}
-
-.rb-actions[data-pipeline="1"] .btn[data-step-btn].is-done-step:not(.is-current-step) .rb-step-badge {
-  background: color-mix(in srgb, var(--cta, #3b6fd4) 70%, #64748b);
-  color: #fff;
-}
-
-.rb-actions[data-pipeline="1"] .btn[data-step-btn].is-current-step {
-  opacity: 1;
-  filter: none;
-}
-
-/* When Job (step 1) is current, no action button is hot — Note is */
-.rb-actions[data-pipeline="1"][data-current-step="job"] .btn[data-step-btn]:not(:disabled) {
-  opacity: 0.5;
-  box-shadow: none;
-  filter: saturate(0.75);
-  background: var(--bg-elevated) !important;
-  border: 1px solid var(--border-strong) !important;
-  color: var(--text-secondary) !important;
-}
-
-.rb-actions[data-pipeline="1"][data-current-step="job"] .btn[data-step-btn] .rb-step-badge {
-  background: color-mix(in srgb, var(--muted) 22%, transparent);
-  color: var(--muted);
+.rb-actions .btn[data-step-btn].is-blocked-step:not(:disabled) {
+  background: color-mix(in srgb, var(--warn, #f59e0b) 10%, var(--bg-elevated)) !important;
+  border-color: color-mix(in srgb, var(--warn, #f59e0b) 60%, var(--border-strong)) !important;
+  color: var(--text) !important;
 }
 
 .register-action-group .register-status {
@@ -719,7 +644,7 @@ main {
   padding: 0;
   border: 1px solid var(--border, #3a4558);
   border-radius: 7px;
-  background: var(--surface-2, #1e2636);
+  background: var(--bg-elevated, #fff);
   color: var(--muted, #9aa6b8);
   cursor: pointer;
 }
@@ -1472,6 +1397,50 @@ body.sidepanel.assistant-dialog {
   font-size: 12px;
 }
 
+.rb-config summary:has(.rb-details-summary) {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rb-details-label {
+  flex-shrink: 0;
+}
+
+/* A flex summary loses the native disclosure marker; draw one. */
+.rb-details-label::before {
+  content: '▸';
+  display: inline-block;
+  width: 12px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.rb-config[open] > summary .rb-details-label::before {
+  transform: rotate(90deg);
+}
+
+.rb-details-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rb-details-summary[data-state="warn"] {
+  font-weight: 600;
+  color: #b45309;
+}
+
+[data-theme="dark"] .rb-details-summary[data-state="warn"] {
+  color: #fbbf24;
+}
+
 .rb-config-body {
   display: flex;
   flex-direction: column;
@@ -1703,6 +1672,108 @@ body.sidepanel.assistant-dialog {
   color: var(--warn, #f59e0b);
 }
 
+/* Job availability — one-line ack under Note (no scrape debug noise) */
+.reg-jd-status {
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(135deg, var(--brand-soft) 0%, transparent 55%),
+    var(--bg-elevated);
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.reg-jd-status[hidden] {
+  display: none !important;
+}
+
+.reg-jd-status-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.reg-jd-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 18%, transparent);
+}
+
+.reg-jd-status-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reg-jd-status-detail {
+  margin: 3px 0 0 14px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.reg-jd-status[data-state="warn"] .reg-jd-status-detail,
+.reg-jd-status[data-state="empty"] .reg-jd-status-detail {
+  color: var(--text-secondary);
+}
+
+.reg-jd-status[data-state="ready"] {
+  border-color: color-mix(in srgb, #16a34a 35%, var(--border));
+}
+
+.reg-jd-status[data-state="ready"] .reg-jd-status-dot {
+  background: #16a34a;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #16a34a 18%, transparent);
+}
+
+.reg-jd-status[data-state="warn"] {
+  border-color: color-mix(in srgb, #f59e0b 40%, var(--border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #f59e0b 10%, transparent) 0%, transparent 55%),
+    var(--bg-elevated);
+}
+
+.reg-jd-status[data-state="warn"] .reg-jd-status-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #f59e0b 18%, transparent);
+}
+
+.reg-jd-status[data-state="empty"] {
+  border-color: color-mix(in srgb, #dc2626 30%, var(--border));
+}
+
+.reg-jd-status[data-state="empty"] .reg-jd-status-dot {
+  background: #dc2626;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #dc2626 16%, transparent);
+}
+
+.reg-jd-status[data-state="empty"] .reg-jd-status-title {
+  color: var(--danger, #dc2626);
+}
+
+/* legacy class kept for any stale references */
+.reg-posting-meta {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.reg-posting-meta.is-warn {
+  color: var(--warn-fg, #b45309);
+}
+
 #regNoteBlock.is-done-step:not(.is-current-step) {
   opacity: 0.92;
 }
@@ -1776,60 +1847,267 @@ body.sidepanel.assistant-dialog {
   font-size: 13px;
 }
 
-/* Quiet preflight cue — go / skip for ChatGPT, not an alert card */
+/* Preflight card — one verdict line, where it came from, then the reasons. */
 .rb-fit-cue {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+  /* Every tinted part reads this, so a level is one variable, not six rules. */
+  --fit-tone: var(--muted);
   margin: 0;
-  padding: 0 2px;
-  font-size: 11px;
-  line-height: 1.3;
-  color: var(--muted);
-  font-weight: 500;
+  border: 1px solid color-mix(in srgb, var(--fit-tone) 28%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--fit-tone) 5%, var(--bg-elevated));
+  overflow: hidden;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-.rb-fit-cue-dot {
+.rb-fit-cue[data-level="ready"] { --fit-tone: var(--success); }
+.rb-fit-cue[data-level="risky"] { --fit-tone: #ca8a04; }
+.rb-fit-cue[data-level="blocked"] { --fit-tone: var(--danger); }
+.rb-fit-cue[data-state="checking"] { --fit-tone: var(--brand); }
+[data-theme="dark"] .rb-fit-cue[data-level="risky"] { --fit-tone: #fbbf24; }
+[data-theme="dark"] .rb-fit-cue[data-state="checking"] { --fit-tone: var(--brand); }
+
+/* A pass is the quiet state: only the icon carries colour. */
+.rb-fit-cue[data-state="ready"],
+.rb-fit-cue[data-state="checking"] {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+
+.rb-fit-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 6px;
+}
+
+/* The verdict is the hit target for expanding the reasons. */
+.rb-fit-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 4px 8px 10px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rb-fit-head:disabled {
+  cursor: default;
+}
+
+.rb-fit-head:focus-visible,
+.rb-fit-recheck:focus-visible,
+.rb-fit-override:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+.rb-fit-icon {
+  display: flex;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--fit-tone);
+}
+
+/* One icon per state; shape differs as well as colour. */
+.rb-fit-icon > [data-icon] {
+  display: none;
+}
+.rb-fit-cue[data-state="ready"] .rb-fit-icon > [data-icon="ready"],
+.rb-fit-cue[data-state="risky"] .rb-fit-icon > [data-icon="risky"],
+.rb-fit-cue[data-state="blocked"] .rb-fit-icon > [data-icon="blocked"],
+.rb-fit-cue[data-state="checking"] .rb-fit-icon > [data-icon="checking"] {
+  display: block;
+}
+
+.rb-fit-spinner {
+  width: 14px;
+  height: 14px;
+  margin: 1px;
+  border: 2px solid color-mix(in srgb, var(--fit-tone) 25%, transparent);
+  border-top-color: var(--fit-tone);
+  border-radius: 50%;
+  animation: rb-fit-spin 0.8s linear infinite;
+}
+
+@keyframes rb-fit-spin {
+  to { transform: rotate(360deg); }
+}
+
+.rb-fit-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rb-fit-cue-text {
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rb-fit-sub {
+  font-size: 10.5px;
+  line-height: 1.3;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.rb-fit-caret {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.rb-fit-cue.is-open .rb-fit-caret {
+  transform: rotate(180deg);
+}
+
+.rb-fit-head:disabled .rb-fit-caret {
+  display: none;
+}
+
+.rb-fit-recheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.rb-fit-recheck:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+
+.rb-fit-recheck:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.rb-fit-recheck.is-loading svg {
+  animation: rb-fit-spin 0.8s linear infinite;
+}
+
+.rb-fit-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  /* Text lines up under the verdict, not under its icon. */
+  padding: 8px 10px 9px 12px;
+  list-style: none;
+  border-top: 1px solid color-mix(in srgb, var(--fit-tone) 18%, var(--border));
+}
+
+/* display:flex would otherwise beat the hidden attribute. */
+.rb-fit-reasons[hidden],
+.rb-fit-foot[hidden] {
+  display: none;
+}
+
+.rb-fit-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.rb-fit-reason-text {
+  min-width: 0;
+  flex: 1;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.rb-fit-reason-dot {
   width: 6px;
   height: 6px;
+  margin: 5px 3px 0;
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--muted);
 }
 
-.rb-fit-cue-text {
-  min-width: 0;
+.rb-fit-reason[data-severity="block"] {
+  color: var(--text);
 }
-
-.rb-fit-cue[data-level="ready"] {
-  color: color-mix(in srgb, #15803d 70%, var(--muted));
+.rb-fit-reason[data-severity="block"] .rb-fit-reason-dot {
+  background: var(--danger);
 }
-.rb-fit-cue[data-level="ready"] .rb-fit-cue-dot {
-  background: #16a34a;
-}
-
-.rb-fit-cue[data-level="risky"] {
-  color: color-mix(in srgb, #a16207 65%, var(--muted));
-}
-.rb-fit-cue[data-level="risky"] .rb-fit-cue-dot {
+.rb-fit-reason[data-severity="warn"] .rb-fit-reason-dot {
   background: #ca8a04;
 }
-
-.rb-fit-cue[data-level="blocked"] {
-  color: color-mix(in srgb, #b91c1c 55%, var(--muted));
-}
-.rb-fit-cue[data-level="blocked"] .rb-fit-cue-dot {
-  background: #dc2626;
+.rb-fit-reason[data-severity="info"] {
+  color: var(--muted);
 }
 
-[data-theme="dark"] .rb-fit-cue[data-level="ready"] {
-  color: color-mix(in srgb, #4ade80 55%, var(--muted));
+.rb-fit-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px 8px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--fit-tone) 18%, var(--border));
 }
-[data-theme="dark"] .rb-fit-cue[data-level="risky"] {
-  color: color-mix(in srgb, #fbbf24 50%, var(--muted));
+
+.rb-fit-foot-note {
+  min-width: 0;
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--muted);
 }
-[data-theme="dark"] .rb-fit-cue[data-level="blocked"] {
-  color: color-mix(in srgb, #f87171 50%, var(--muted));
+
+.rb-fit-override {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.rb-fit-override:hover:not(:disabled) {
+  border-color: var(--muted);
+  color: var(--text);
+}
+
+.rb-fit-override:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rb-fit-spinner,
+  .rb-fit-recheck.is-loading svg {
+    animation-duration: 2.4s;
+  }
 }
 
 /* Steps 3+4 — Edit JSON + Generate (side-by-side pair) */
@@ -1877,6 +2155,15 @@ body.sidepanel.assistant-dialog {
   border-color: var(--border-strong);
   background: var(--bg-elevated, #fff);
   font-size: 12px;
+}
+
+/* Shown only when AI fill is enabled in Settings. */
+.rb-action-autofill-ai.hidden {
+  display: none;
+}
+
+.rb-action-autofill-ai.needs-api-key {
+  border-style: dashed;
 }
 
 .rb-action-autofill:hover:not(:disabled) {
@@ -2049,4 +2336,722 @@ body.sidepanel.assistant-dialog {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ── Bid tab layout ───────────────────────────────────────────────────────
+   Top to bottom: profile → progress → job → tailored resume → register →
+   application form → rarely-used setup. Sections carry a small caption; the
+   only filled button is the step to do now.
+──────────────────────────────────────────────────────────────────────── */
+.register-card.register-fit.rb-card {
+  padding: 12px;
+  gap: 8px;
+}
+
+.rb-card-head {
+  justify-content: space-between;
+}
+
+.rb-head-label,
+.rb-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rb-chips-header {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+#tab-register .register-body {
+  gap: 14px;
+  margin-top: 0;
+}
+
+.rb-profile-select {
+  width: 100%;
+  font-weight: 600;
+}
+
+.rb-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+#tab-register .register-form.form-grid {
+  display: block;
+  margin: 0;
+}
+
+/* Progress: five nodes, then one line saying what to do next. */
+.rb-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-subtle);
+}
+
+.apply-step-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.apply-step-btn:focus-visible {
+  outline: 2px solid var(--cta, #3b6fd4);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+.apply-step-check {
+  display: none;
+  position: relative;
+  z-index: 1;
+  color: #fff;
+}
+
+.apply-step.is-done .apply-step-num {
+  display: none;
+}
+
+.apply-step.is-done .apply-step-check {
+  display: block;
+}
+
+/* The line into the current step is travelled too. */
+.apply-step.is-current::before,
+.apply-step.is-active::before,
+.apply-step.is-blocked::before {
+  background: var(--cta, #3b6fd4);
+}
+
+.apply-step.is-current .apply-step-node,
+.apply-step.is-active .apply-step-node {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cta, #3b6fd4) 20%, transparent);
+}
+
+.apply-step.is-done .apply-step-label {
+  color: var(--text-secondary);
+}
+
+.rb-progress .rb-cue-row {
+  margin-top: 0;
+  align-items: center;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.rb-progress .rb-next-cue {
+  padding: 2px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.rb-progress .rb-next-cue:hover {
+  box-shadow: none;
+  color: var(--cta, #3b6fd4);
+}
+
+/* The stepper already shows the position. */
+.rb-progress .rb-next-cue-step {
+  display: none;
+}
+
+.rb-progress .rb-next-cue.is-blocked {
+  border: 0;
+  background: none;
+  color: #b45309;
+}
+
+[data-theme="dark"] .rb-progress .rb-next-cue.is-blocked {
+  color: #fbbf24;
+}
+
+.rb-progress .rb-next-cue.is-complete {
+  color: var(--success, #16a34a);
+}
+
+.rb-progress .rb-progress-reset {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  border-color: transparent;
+  border-radius: 8px;
+  background: none;
+}
+
+/* Job card: what will be registered, readable while collapsed. */
+.rb-config.rb-job {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.rb-config.rb-job > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  list-style: none;
+  font-weight: 400;
+}
+
+.rb-config.rb-job > summary::-webkit-details-marker {
+  display: none;
+}
+
+.rb-config.rb-job > summary:hover {
+  background: color-mix(in srgb, var(--cta, #3b6fd4) 5%, transparent);
+}
+
+.rb-job-mark {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--cta, #3b6fd4) 12%, var(--bg-elevated));
+  color: var(--brand, #3b6fd4);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.rb-job-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rb-job-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rb-job .rb-details-summary {
+  flex: none;
+  line-height: 1.3;
+}
+
+.rb-job-edit {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.rb-job[open] .rb-job-edit {
+  transform: rotate(180deg);
+}
+
+.rb-job > .rb-config-body {
+  margin: 0;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-subtle) 55%, var(--bg-elevated));
+}
+
+/* Job description: the field itself lights up when it is the step to do. */
+#regNoteBlock .rb-field-head span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+#regNoteBlock.is-current-step,
+#regNoteBlock.is-current-step.is-blocked-step {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+#regNoteBlock.is-current-step .rb-mini {
+  border-color: var(--cta, #3b6fd4);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cta, #3b6fd4) 16%, transparent);
+}
+
+#regNoteBlock.is-current-step.is-blocked-step .rb-mini {
+  border-color: var(--warn, #f59e0b);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn, #f59e0b) 18%, transparent);
+}
+
+#regNoteBlock.is-current-step .rb-field-head span,
+#regNoteBlock.is-current-step.is-blocked-step .rb-field-head span {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+#regNoteBlock.is-done-step:not(.is-current-step) {
+  opacity: 1;
+}
+
+/* A loaded posting is a quiet line; only a problem gets a box. */
+.reg-jd-status {
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+}
+
+.reg-jd-status-title {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.reg-jd-status[data-state="warn"],
+.reg-jd-status[data-state="empty"] {
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, #f59e0b 40%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, #f59e0b 8%, var(--bg-elevated));
+}
+
+.reg-jd-status[data-state="empty"] {
+  border-color: color-mix(in srgb, #dc2626 30%, var(--border));
+  background: color-mix(in srgb, #dc2626 5%, var(--bg-elevated));
+}
+
+/* Actions */
+#tab-register .rb-actions {
+  gap: 14px;
+  margin-top: 0;
+}
+
+#tab-register .rb-actions .btn {
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#tab-register .rb-actions .btn:hover:not(:disabled) {
+  transform: none;
+}
+
+#tab-register .rb-actions .btn:disabled {
+  opacity: 0.5;
+}
+
+#tab-register .rb-action-group--register .btn {
+  min-height: 42px;
+  font-weight: 700;
+}
+
+.rb-section .register-generated-attachments {
+  margin-top: 0;
+  flex-wrap: wrap;
+}
+
+.rb-section .rb-utility-row {
+  justify-content: flex-end;
+}
+
+#tab-register .rb-actions .rb-section .rb-utility-btn {
+  width: auto;
+  min-height: 0;
+  padding: 0 2px;
+  color: var(--muted);
+  border: 0 !important;
+  background: none !important;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rb-section--autofill {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+#tab-register .rb-action-group--autofill {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* Setup and manual overrides — out of the way until needed. */
+.rb-more {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.rb-more > .rb-config {
+  border-bottom: 1px solid var(--border);
+}
+
+.rb-more > .rb-config:last-child {
+  border-bottom: 0;
+}
+
+.rb-more > .rb-config > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 2px;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.rb-more > .rb-config > summary::-webkit-details-marker {
+  display: none;
+}
+
+.rb-more > .rb-config > summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.rb-more > .rb-config[open] > summary::after {
+  transform: rotate(-135deg);
+}
+
+.rb-more > .rb-config > summary:hover {
+  color: var(--text);
+}
+
+.rb-more > .rb-config > .rb-config-body {
+  margin: 0;
+  padding: 2px 0 12px;
+}
+
+.rb-config-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Confirm dialog (replaces window.confirm, which the on-page overlay can suppress). */
+.rwh-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.rwh-confirm[hidden] {
+  display: none !important;
+}
+
+.rwh-confirm-sheet {
+  width: min(340px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elevated, var(--card));
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.rwh-confirm-title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.rwh-confirm-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.rwh-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rwh-confirm-actions .btn {
+  min-height: 32px;
+  padding: 6px 14px;
+  font-weight: 600;
+}
+
+.rwh-confirm-actions .btn.danger {
+  background: var(--danger, #dc2626);
+  border-color: var(--danger, #dc2626);
+  color: #fff;
+}
+
+/* On-page overlay: same layout, tighter. */
+.assistant-dialog .register-card.register-fit.rb-card {
+  padding: 8px;
+}
+
+.assistant-dialog #tab-register .register-body,
+.assistant-dialog #tab-register .rb-actions {
+  gap: 8px;
+}
+
+.assistant-dialog .rb-progress {
+  padding: 8px 8px 6px;
+  gap: 6px;
+}
+
+.assistant-dialog .rb-progress .rb-cue-row {
+  margin-top: 0;
+  padding-top: 6px;
+}
+
+.assistant-dialog .rb-config.rb-job > summary {
+  padding: 6px 8px;
+}
+
+.assistant-dialog .rb-job-mark {
+  width: 26px;
+  height: 26px;
+  font-size: 12px;
+}
+
+.assistant-dialog #tab-register .rb-actions .btn {
+  min-height: 30px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.assistant-dialog #tab-register .rb-actions .rb-section .rb-utility-btn {
+  min-height: 0;
+  padding: 0 2px;
+  font-size: 11px;
+}
+
+.assistant-dialog .rb-section--autofill {
+  padding-top: 8px;
+}
+
+.assistant-dialog #regNoteBlock.is-current-step {
+  padding: 0;
+  box-shadow: none;
+}
+
+/* ── Lean pass: show a thing only when it changes what the user does next ── */
+
+/* Profile and connection lights share one row; a healthy connection is just its dot. */
+.rb-card-head {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.rb-card-head .rb-profile-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.rb-chips-header .rb-chip-status {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.rb-chip-status-sep,
+.rb-chips-header .backend-connection-dot.is-ok + .rb-chip-label {
+  display: none;
+}
+
+.rb-chips-header .backend-connection-dot.is-error + .rb-chip-label {
+  color: var(--danger, #dc2626);
+}
+
+/* Progress: five flat segments. Labels live in the tooltips. */
+.rb-progress {
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.rb-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rb-progress .apply-progress-track {
+  gap: 4px;
+}
+
+.rb-progress .apply-step::before,
+.rb-progress .apply-step-label,
+.rb-progress .apply-step-num,
+.rb-progress .apply-step-check {
+  display: none !important;
+}
+
+.rb-progress .apply-step-btn {
+  padding: 7px 0;
+}
+
+.rb-progress .apply-step-node {
+  width: 100%;
+  height: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--border-strong);
+  box-shadow: none !important;
+}
+
+.rb-progress .apply-step.is-done .apply-step-node {
+  background: var(--cta, #3b6fd4);
+}
+
+.rb-progress .apply-step.is-current .apply-step-node,
+.rb-progress .apply-step.is-active .apply-step-node {
+  background: color-mix(in srgb, var(--cta, #3b6fd4) 45%, var(--border-strong));
+}
+
+.rb-progress .apply-step.is-blocked .apply-step-node,
+.rb-progress .apply-step.is-warn .apply-step-node {
+  background: var(--warn, #f59e0b);
+}
+
+.rb-progress .apply-step-btn:hover .apply-step-node {
+  filter: brightness(0.9);
+}
+
+.rb-progress .rb-progress-reset {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+}
+
+.rb-progress .rb-next-cue {
+  margin: 0;
+  padding: 0;
+  font-size: 11.5px;
+}
+
+.rb-next-cue[hidden] {
+  display: none !important;
+}
+
+.rb-progress .rb-next-cue-go {
+  display: none;
+}
+
+/* Job description: once loaded it is one line; the text comes back with Edit. */
+.reg-jd-toggle {
+  flex-shrink: 0;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--brand, #3b6fd4);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reg-jd-toggle:hover {
+  text-decoration: underline;
+}
+
+.reg-jd-status:not([data-state="ready"]) .reg-jd-toggle {
+  display: none;
+}
+
+#regNoteBlock:has(.reg-jd-status[data-state="ready"]):not(.is-expanded) > .rb-field-head,
+#regNoteBlock:has(.reg-jd-status[data-state="ready"]):not(.is-expanded) > textarea,
+#regNoteBlock:has(.reg-jd-status[data-state="ready"]):not(.is-expanded) .reg-jd-status-detail {
+  display: none;
+}
+
+#regNoteBlock .reg-jd-status[data-state="ready"] {
+  order: -1;
+}
+
+/* A pass is one quiet line; a warning or blocker keeps its card. */
+.rb-fit-cue[data-state="ready"],
+.rb-fit-cue[data-state="checking"] {
+  border: 0;
+  background: none;
+}
+
+.rb-fit-cue[data-state="ready"] .rb-fit-head,
+.rb-fit-cue[data-state="checking"] .rb-fit-head {
+  padding: 0 4px 0 2px;
+  gap: 7px;
+}
+
+.rb-fit-cue[data-state="ready"] .rb-fit-copy,
+.rb-fit-cue[data-state="checking"] .rb-fit-copy {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+#tab-register .register-body,
+#tab-register .rb-actions {
+  gap: 10px;
+}
+
+.rb-section--autofill {
+  padding-top: 10px;
+}
+
+#tab-register .rb-actions .rb-action-autofill {
+  min-height: 34px;
+  font-size: 12px;
+}
+
+.rb-more > .rb-config > summary {
+  padding: 7px 2px;
+  font-weight: 500;
+  color: var(--muted);
 }

@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES app_users(id) ON DELETE CASCADE;
+-- Application-form answers per profile (see scripts/add-profile-autofill.sql)
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS autofill JSONB NOT NULL DEFAULT '{}'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;

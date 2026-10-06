@@ -6,6 +6,7 @@ import type {
 } from "@/lib/resume-db/types";
 import { DEFAULT_TIMEZONE, endOfDayUtcIso, normalizeTimeZone, startOfDayUtcIso } from "@/lib/timezone";
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
+import type { ProfileAutofill } from "@/lib/resume-db/profile-autofill";
 
 type DbRow = {
   id: number;
@@ -47,6 +48,8 @@ type ProfileRow = {
   postal_code: string;
   university: string;
   linkedin: string;
+  /** Application-form answers; absent until scripts/add-profile-autofill.sql has run. */
+  autofill?: ProfileAutofill | null;
   user_id: string;
   created_at: string;
   updated_at: string;
@@ -102,19 +105,37 @@ export async function listProfileRecords(userId: string): Promise<ProfileRecord[
   return ((data ?? []) as ProfileRow[]).map(({ user_id: _uid, ...profile }) => profile);
 }
 
+/** PostgREST's error when profiles.autofill has not been added yet. */
+function isMissingAutofillColumn(message: string | undefined): boolean {
+  const text = String(message ?? "");
+  // "Could not find the 'autofill' column of 'profiles' in the schema cache" /
+  // "column profiles.autofill does not exist" — not any error that mentions the word.
+  return /autofill/i.test(text) && /column|schema cache/i.test(text);
+}
+
 export async function createProfile(
   userId: string,
   input: Omit<ProfileRecord, "id" | "created_at" | "updated_at">,
 ): Promise<ProfileRecord> {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("profiles")
     .insert({ ...input, user_id: userId } as never)
     .select("*")
     .single();
 
+  // The profile itself must still save on a database that predates the column.
+  if (error && "autofill" in input && isMissingAutofillColumn(error.message)) {
+    const { autofill: _autofill, ...core } = input;
+    ({ data, error } = await supabase
+      .from("profiles")
+      .insert({ ...core, user_id: userId } as never)
+      .select("*")
+      .single());
+  }
+
   if (error) throw new Error(error.message);
-  const row = data as ProfileRow;
+  const row = data as unknown as ProfileRow;
   const { user_id: _uid, ...profile } = row;
   return profile;
 }
@@ -123,15 +144,27 @@ export async function updateProfile(
   userId: string,
   profileId: number,
   input: Partial<Omit<ProfileRecord, "id" | "created_at" | "updated_at">>,
-): Promise<void> {
+): Promise<{ autofillSaved: boolean }> {
   const supabase = getSupabaseAdminClient();
-  const { error } = await supabase
-    .from("profiles")
-    .update({ ...input, updated_at: new Date().toISOString() } as never)
-    .eq("id", profileId)
-    .eq("user_id", userId);
+  const save = (values: typeof input) =>
+    supabase
+      .from("profiles")
+      .update({ ...values, updated_at: new Date().toISOString() } as never)
+      .eq("id", profileId)
+      .eq("user_id", userId);
+
+  let { error } = await save(input);
+  let autofillSaved = "autofill" in input;
+
+  // Save the rest on a database that predates the column, and say so.
+  if (error && "autofill" in input && isMissingAutofillColumn(error.message)) {
+    const { autofill: _autofill, ...core } = input;
+    ({ error } = await save(core));
+    autofillSaved = false;
+  }
 
   if (error) throw new Error(error.message);
+  return { autofillSaved };
 }
 
 export async function deleteProfile(userId: string, profileId: number): Promise<void> {

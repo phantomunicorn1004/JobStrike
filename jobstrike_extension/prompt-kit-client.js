@@ -124,8 +124,40 @@ Return valid JSON only. No markdown fences, no commentary.`;
     return { kit: normalizeKit(raw), exists: true };
   }
 
+  /** Counts local writes from this panel so the storage listener can ignore them. */
+  const ownKitWriteCounts = new Map();
+
+  function markOwnKitWrite(profileId) {
+    const key = kitStorageKey(profileId);
+    ownKitWriteCounts.set(key, (ownKitWriteCounts.get(key) || 0) + 1);
+  }
+
+  function takeOwnKitWrite(storageKey) {
+    const count = ownKitWriteCounts.get(storageKey) || 0;
+    if (count <= 0) return false;
+    if (count === 1) ownKitWriteCounts.delete(storageKey);
+    else ownKitWriteCounts.set(storageKey, count - 1);
+    return true;
+  }
+
+  function kitUpdatedMs(kit) {
+    const ms = Date.parse(kit?.updatedAt || '');
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function kitContentKey(kit) {
+    const normalized = normalizeKit(kit);
+    return [
+      normalized.template,
+      normalized.resumeTemplateJson,
+      normalized.jobDescription,
+      normalized.output,
+    ].join('\u0001');
+  }
+
   async function writeLocalKit(profileId, kit) {
     const next = normalizeKit(kit);
+    markOwnKitWrite(profileId);
     await storageSet({ [kitStorageKey(profileId)]: next });
     return next;
   }
@@ -207,11 +239,21 @@ Return valid JSON only. No markdown fences, no commentary.`;
 
       if (!remote.exists && local.exists && localKitHasDraft(local.kit)) {
         const seeded = await putRemoteKit(id, local.kit);
-        await writeLocalKit(id, seeded);
-        return { kit: seeded, exists: true, source: 'remote' };
+        const kept = normalizeKit({ ...local.kit, updatedAt: seeded.updatedAt || local.kit.updatedAt });
+        if (kitContentKey(local.kit) !== kitContentKey(kept)) {
+          await writeLocalKit(id, kept);
+        }
+        return { kit: local.kit, exists: true, source: 'local' };
       }
 
       if (remote.exists) {
+        const localMs = local.exists ? kitUpdatedMs(local.kit) : 0;
+        const remoteMs = kitUpdatedMs(remote.kit);
+        const sameContent = local.exists && kitContentKey(local.kit) === kitContentKey(remote.kit);
+        // A newer local draft wins. Never write an older website kit back over it.
+        if (sameContent || (local.exists && localKitHasDraft(local.kit) && localMs >= remoteMs)) {
+          return { kit: local.kit, exists: true, source: 'local' };
+        }
         await writeLocalKit(id, remote.kit);
         return { kit: remote.kit, exists: true, source: 'remote' };
       }
@@ -246,8 +288,17 @@ Return valid JSON only. No markdown fences, no commentary.`;
 
     try {
       const saved = await putRemoteKit(id, draft);
-      await writeLocalKit(id, saved);
-      return saved;
+      // Keep the text we just saved. The response must not replace it with an older kit.
+      const kept = normalizeKit({
+        ...draft,
+        updatedAt: saved.updatedAt || draft.updatedAt,
+      });
+      // Same text, but stamped by the server: later comparisons with the
+      // account's copy then use one clock instead of this machine's.
+      if (kept.updatedAt !== draft.updatedAt) {
+        await writeLocalKit(id, kept);
+      }
+      return kept;
     } catch (err) {
       if (options.swallowRemoteError) {
         return draft;
@@ -294,9 +345,48 @@ Return valid JSON only. No markdown fences, no commentary.`;
   }
 
   function resolveJobDescription({ noteText, kit }) {
+    return resolveJobDescriptionForCompat({ noteText, kit, posting: null });
+  }
+
+  function resolveJobDescriptionForCompat({ noteText, kit, posting }) {
+    // Non-empty Note always wins (plain paste OK — no ## headers required).
+    // Do not prepend stale scrape excerpts onto user paste.
     const note = trim(noteText);
     if (note) return note;
+    const fromPosting = trim(posting?.rawFullText);
+    if (fromPosting) return fromPosting;
+    const excerpt = trim(posting?.compatExcerptText);
+    if (excerpt) return excerpt;
     return trim(kit?.jobDescription);
+  }
+
+  function resolveJobDescriptionForResume({ noteText, kit, posting }) {
+    // Non-empty Note always wins over last scrape's resumePromptText.
+    const note = trim(noteText);
+    if (note) {
+      if (typeof SmartJobPostingIngest !== 'undefined') {
+        const split = SmartJobPostingIngest.splitJobDescription(note);
+        const resume = trim(split.resumePromptText);
+        if (resume && resume.length >= note.length * 0.35) return resume;
+      }
+      return note;
+    }
+    const fromPosting = trim(posting?.resumePromptText);
+    if (fromPosting) return fromPosting;
+    const rawPosting = trim(posting?.rawFullText);
+    if (rawPosting) {
+      if (typeof SmartJobPostingIngest !== 'undefined') {
+        const split = SmartJobPostingIngest.splitJobDescription(rawPosting);
+        return trim(split.resumePromptText) || rawPosting;
+      }
+      return rawPosting;
+    }
+    const kitJd = trim(kit?.jobDescription);
+    if (kitJd && typeof SmartJobPostingIngest !== 'undefined') {
+      const split = SmartJobPostingIngest.splitJobDescription(kitJd);
+      return trim(split.resumePromptText) || kitJd;
+    }
+    return kitJd;
   }
 
   global.SmartJobPromptKit = {
@@ -306,9 +396,12 @@ Return valid JSON only. No markdown fences, no commentary.`;
     getPromptKit,
     getPromptKitLocal,
     savePromptKit,
+    takeOwnKitWrite,
     buildPrompt,
     kitStatusSummary,
     resolveJobDescription,
+    resolveJobDescriptionForCompat,
+    resolveJobDescriptionForResume,
     kitStorageKey,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

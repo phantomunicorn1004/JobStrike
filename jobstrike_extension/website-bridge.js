@@ -110,10 +110,21 @@ Return valid JSON only. No markdown fences, no commentary.`;
       return;
     }
     try {
+      // Keep the account's own timestamp. Stamping "now" made a kit that was
+      // only being loaded on the website look newer than an edit made in the
+      // extension, and overwrote it.
+      const incomingAt = typeof data.kit?.updatedAt === 'string' ? data.kit.updatedAt : null;
       const next = normalizeKit({
         ...data.kit,
-        updatedAt: new Date().toISOString(),
+        updatedAt: incomingAt || new Date().toISOString(),
       });
+      const current = (await storageGet([kitStorageKey(profileId)]))[kitStorageKey(profileId)];
+      const currentMs = Date.parse(current?.updatedAt || '') || 0;
+      const nextMs = Date.parse(next.updatedAt || '') || 0;
+      if (current && incomingAt && currentMs > nextMs) {
+        reply({ type: 'prompt-kit-save-result', requestId, ok: true, kit: normalizeKit(current) });
+        return;
+      }
       await storageSet({ [kitStorageKey(profileId)]: next });
       mirrorToWebsiteLocalStorage(profileId, next);
       reply({

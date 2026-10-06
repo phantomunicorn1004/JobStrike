@@ -42,7 +42,6 @@
     if (!data || typeof data !== 'object') return '';
     return (
       trim(data.job_title) ||
-      nestedText(data, ['profile_title']) ||
       nestedText(data, ['jobTitle']) ||
       ''
     );
@@ -61,6 +60,73 @@
   function resumeTemplateFromJson(data) {
     if (!data || typeof data !== 'object') return '';
     return trim(data.resume_template) || trim(data.resumeTemplate) || '';
+  }
+
+  function extractTextField(val) {
+    if (typeof val === 'string') return trim(val);
+    if (val && typeof val === 'object' && 'text' in val) return trim(val.text);
+    return '';
+  }
+
+  /**
+   * Pull work-experience roles from a built resume JSON into the kit-like shape
+   * used by AI autofill (role_title, employer_name, role_bullets).
+   * @param {object} data
+   * @returns {Array<{role_title:string,employer_name:string,role_bullets:string[],start_date:string,end_date:string,is_current:boolean}>}
+   */
+  function extractWorkExperienceForAi(data) {
+    const we = data?.work_experience;
+    if (!we || typeof we !== 'object') return [];
+
+    const keys = Object.keys(we)
+      .filter((k) => /^experience_\d+$/i.test(k))
+      .sort((a, b) => {
+        const na = Number((a.match(/\d+/) || ['0'])[0]);
+        const nb = Number((b.match(/\d+/) || ['0'])[0]);
+        return na - nb;
+      });
+
+    const roles = [];
+    for (const key of keys) {
+      const exp = we[key];
+      if (!exp || typeof exp !== 'object') continue;
+
+      const title =
+        extractTextField(exp.role_title) ||
+        extractTextField(exp.title) ||
+        extractTextField(exp.job_title);
+      const company =
+        extractTextField(exp.company) ||
+        extractTextField(exp.employer_name) ||
+        extractTextField(exp.employer) ||
+        extractTextField(exp.company_name);
+
+      let bullets = [];
+      const rawBullets = exp.role_bullets || exp.bullets || exp.responsibilities || [];
+      if (Array.isArray(rawBullets)) {
+        bullets = rawBullets
+          .map((b) => (typeof b === 'string' ? trim(b) : extractTextField(b)))
+          .filter(Boolean);
+      } else if (typeof rawBullets === 'string' && trim(rawBullets)) {
+        bullets = trim(rawBullets)
+          .split(/\n+/)
+          .map((b) => trim(b).replace(/^[-•*]\s*/, ''))
+          .filter(Boolean);
+      }
+
+      if (!title && !company && !bullets.length) continue;
+
+      const displayTitle = title && company ? `${title} at ${company}` : title || company;
+      roles.push({
+        role_title: displayTitle,
+        employer_name: company,
+        role_bullets: bullets.slice(0, 6),
+        start_date: extractTextField(exp.start_date) || extractTextField(exp.startDate),
+        end_date: extractTextField(exp.end_date) || extractTextField(exp.endDate),
+        is_current: Boolean(exp.is_current || exp.isCurrent),
+      });
+    }
+    return roles;
   }
 
   /**
@@ -244,5 +310,6 @@
     parseResumeJsonText,
     mergeRegisterDraftFromResumeJson,
     validateRegisterDraft,
+    extractWorkExperienceForAi,
   };
 });

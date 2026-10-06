@@ -28,6 +28,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Edit2, Loader2, Plus, Trash2 } from "lucide-react";
+import { ProfileAutofillFields } from "@/components/profile/ProfileAutofillFields";
+import {
+  PROFILE_AUTOFILL_FIELDS,
+  countFilledAutofill,
+  defaultProfileAutofill,
+  type ProfileAutofill,
+} from "@/lib/resume-db/profile-autofill";
 
 type Profile = {
   id: number;
@@ -42,7 +49,16 @@ type Profile = {
   postal_code: string;
   university: string;
   linkedin: string;
+  autofill?: ProfileAutofill | null;
 };
+
+/**
+ * Answers to start editing from. A profile that has never had any saved gets
+ * the standard defaults, so the common case needs no typing.
+ */
+function autofillDraftFor(saved: ProfileAutofill | null | undefined): ProfileAutofill {
+  return saved && Object.keys(saved).length > 0 ? { ...saved } : defaultProfileAutofill();
+}
 
 /** Draft for editing one profile (arrays as comma-separated strings) */
 type ProfileEditDraft = {
@@ -57,9 +73,10 @@ type ProfileEditDraft = {
   postal_code: string;
   university: string;
   linkedin: string;
+  autofill: ProfileAutofill;
 };
 
-const emptyNewProfile = {
+const emptyNewProfile: ProfileEditDraft = {
   full_name: "",
   dob: "",
   work_emails: "",
@@ -71,6 +88,7 @@ const emptyNewProfile = {
   postal_code: "",
   university: "",
   linkedin: "",
+  autofill: defaultProfileAutofill(),
 };
 
 export default function ProfilePage() {
@@ -120,6 +138,7 @@ export default function ProfilePage() {
       postal_code: profile.postal_code,
       university: profile.university,
       linkedin: profile.linkedin,
+      autofill: autofillDraftFor(profile.autofill),
     });
   };
 
@@ -155,12 +174,14 @@ export default function ProfilePage() {
           postal_code: d.postal_code.trim(),
           university: d.university.trim(),
           linkedin: d.linkedin.trim(),
+          autofill: d.autofill,
         }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Update failed");
       }
+      const saved = await res.json().catch(() => ({}));
       setProfiles((prev) =>
         prev.map((p) =>
           p.id === editingProfileId
@@ -177,13 +198,15 @@ export default function ProfilePage() {
                 postal_code: d.postal_code.trim(),
                 university: d.university.trim(),
                 linkedin: d.linkedin.trim(),
+                autofill: saved.warning ? p.autofill : d.autofill,
               }
             : p
         )
       );
       setEditingProfileId(null);
       setEditDraft(null);
-      toast.success("Profile updated");
+      if (saved.warning) toast.warning(saved.warning);
+      else toast.success("Profile updated");
     } catch (err) {
       console.error(err);
       toast.error("Failed to update profile");
@@ -226,16 +249,19 @@ export default function ProfilePage() {
           postal_code: newProfile.postal_code.trim(),
           university: newProfile.university.trim(),
           linkedin: newProfile.linkedin.trim(),
+          autofill: newProfile.autofill,
         }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Failed to add profile");
       }
+      const created = await res.json().catch(() => ({}));
       setNewProfile(emptyNewProfile);
       setAddProfileOpen(false);
       await fetchProfiles();
-      toast.success("Profile added");
+      if (created.warning) toast.warning(created.warning);
+      else toast.success("Profile added");
     } catch (err) {
       console.error(err);
       toast.error("Failed to add profile");
@@ -380,6 +406,13 @@ export default function ProfilePage() {
                   placeholder="https://linkedin.com/in/..."
                 />
               </div>
+              <ProfileAutofillFields
+                idPrefix="new-profile"
+                values={newProfile.autofill}
+                onChange={(key, value) =>
+                  setNewProfile((p) => ({ ...p, autofill: { ...p.autofill, [key]: value } }))
+                }
+              />
             </div>
             <DialogFooter>
               <DialogClose asChild>
@@ -529,6 +562,13 @@ export default function ProfilePage() {
                       onChange={(e) => setEditDraft((d) => d && { ...d, linkedin: e.target.value })}
                     />
                   </div>
+                  <ProfileAutofillFields
+                    idPrefix={`profile-${profile.id}`}
+                    values={editDraft.autofill}
+                    onChange={(key, value) =>
+                      setEditDraft((d) => d && { ...d, autofill: { ...d.autofill, [key]: value } })
+                    }
+                  />
                 </>
               ) : (
                 <>
@@ -553,12 +593,36 @@ export default function ProfilePage() {
                     </a>
                     <CopyButton value={profile.linkedin} />
                   </div>
+                  <AutofillSummary autofill={profile.autofill} onEdit={() => handleStartEdit(profile)} />
                 </>
               )}
             </div>
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Read-only line showing how much of the autofill section is filled in. */
+function AutofillSummary({
+  autofill,
+  onEdit,
+}: {
+  autofill: ProfileAutofill | null | undefined;
+  onEdit: () => void;
+}) {
+  const filled = countFilledAutofill(autofill);
+  const total = PROFILE_AUTOFILL_FIELDS.length;
+  return (
+    <div className="flex items-center gap-2 min-w-0 border-t border-border pt-3">
+      <b className="shrink-0">Autofill details:</b>
+      <span className="truncate min-w-0 text-muted-foreground">
+        {filled === 0 ? "none saved yet" : `${filled} of ${total} filled`}
+      </span>
+      <Button size="sm" variant="outline" className="ml-auto h-7 shrink-0" onClick={onEdit}>
+        {filled === 0 ? "Add" : "Edit"}
+      </Button>
     </div>
   );
 }

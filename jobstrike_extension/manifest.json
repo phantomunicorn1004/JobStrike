@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobStrike",
-  "version": "4.24.0",
+  "version": "4.41.1",
   "description": "Chrome extension for JobStrike — autofill job applications, custom Q&A, Resume DB registration, and HiringCafe / Jobright job scraping.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -75,7 +75,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["field-registry.js", "content.js", "assistant-overlay.js", "website-bridge.js"],
+      "js": ["field-registry.js", "job-posting-ingest.js", "content.js", "assistant-overlay.js", "website-bridge.js"],
       "run_at": "document_idle"
     }
   ],
@@ -88,11 +88,14 @@
         "theme.css",
         "theme.js",
         "toast.js",
+        "confirm-dialog.js",
         "tab-session.js",
         "clipboard.js",
         "ai-fill.js",
         "prompt-kit-client.js",
         "bid-fit-preflight.js",
+        "job-posting-ingest.js",
+        "job-posting-frames.js",
         "job-url.js",
         "company-name.js",
         "job-scraper-hiringcafe.js",

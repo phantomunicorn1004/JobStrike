@@ -34,13 +34,25 @@
   let syncTimer = null;
   let hydrated = false;
 
+  /** Query params that say where a click came from, not which page it is. */
+  const TRACKING_PARAM_RE =
+    /^(utm_[a-z_]+|gclid|fbclid|msclkid|mc_[a-z]+|gh_src|lever-source(\[\])?|lever-origin|lever-via|trk|trackingid|refid|_hsenc|_hsmi|source|src|ref)$/i;
+
   function normalizeUrlKey(url) {
     const raw = String(url || '').trim();
     if (!raw) return '';
     try {
       const parsed = new URL(raw);
       const path = parsed.pathname.replace(/\/+$/, '');
-      return `${parsed.origin}${path}`.toLowerCase();
+      // Many career sites keep one path and name the job in the query
+      // (?gh_jid=123). Without it a second job looked like the same page, so
+      // Refresh kept the first job's resume JSON and files for the new one.
+      const params = [];
+      parsed.searchParams.forEach((value, key) => {
+        if (!TRACKING_PARAM_RE.test(key)) params.push(`${key.toLowerCase()}=${value}`);
+      });
+      const query = params.length ? `?${params.sort().join('&')}` : '';
+      return `${parsed.origin}${path}${query}`.toLowerCase();
     } catch (_) {
       return raw.toLowerCase();
     }
@@ -111,9 +123,12 @@
 
   function evictStaleSessions() {
     if (sessions.size <= MAX_SESSIONS) return;
+    // Empty sessions go first: every visited tab gets one, and a draft with
+    // resume JSON or files must not be dropped to make room for a blank.
+    const age = (s) => s.lastActiveAt || s.updatedAt || 0;
     const candidates = Array.from(sessions.values())
       .filter((s) => s.tabId !== boundTabId)
-      .sort((a, b) => (a.lastActiveAt || a.updatedAt || 0) - (b.lastActiveAt || b.updatedAt || 0));
+      .sort((a, b) => Number(hasWork(a.tabId)) - Number(hasWork(b.tabId)) || age(a) - age(b));
     while (sessions.size > MAX_SESSIONS && candidates.length) {
       sessions.delete(candidates.shift().tabId);
     }
@@ -303,6 +318,26 @@
     return getSession(tabId)?.boundUrl || '';
   }
 
+  /**
+   * Change the saved state of a tab that is not on screen — for a result (a
+   * finished upload, generated files) that belongs to the tab the user started
+   * it on, not the tab they have since switched to.
+   * @returns {boolean} false when that tab has no session to update
+   */
+  function mutateSlice(tabId, name, mutator) {
+    const session = getSession(tabId);
+    if (!session || typeof mutator !== 'function') return false;
+    try {
+      const next = mutator(session.slices[name] || null);
+      if (next !== undefined) session.slices[name] = next;
+      session.updatedAt = Date.now();
+      schedulePersist();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /** True when the tab has navigated away from the page its session is pinned to. */
   function isPinnedElsewhere(tabId, currentUrl) {
     const session = getSession(tabId);
@@ -366,6 +401,7 @@
     hasSession,
     getBoundTabId: () => boundTabId,
     getGeneration: () => generation,
+    mutateSlice,
     isCurrentGeneration: (token) => token === generation,
     captureActive,
     sync,

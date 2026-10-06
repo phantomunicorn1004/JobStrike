@@ -1,6 +1,7 @@
 /**
  * Canonical job URL for duplicate matching.
- * Compares host + path only (no query, hash, protocol, or www),
+ * Compares host + path plus job-id query parameters (no tracking query, hash,
+ * protocol, or www),
  * with ATS host/path aliases so common apply-link variants still match.
  */
 export function canonicalJobUrl(value: string | null | undefined): string {
@@ -23,10 +24,25 @@ export function canonicalJobUrl(value: string | null | undefined): string {
 
     ({ host, path } = normalizeAtsHostPath(host, path));
 
-    return `${host}${path}`;
+    return `${host}${path}${jobIdQuery(parsed.searchParams)}`;
   } catch {
     return "";
   }
+}
+
+// Query parameters that name the job itself. Boards that put the job in the
+// query (company.com/careers?gh_jid=123) would otherwise all share one key.
+const JOB_ID_PARAM_RE =
+  /^(?:gh_jid|jid|job_?id|job|req_?id|requisition_?id|posting_?id|position_?id|opening_?id|vacancy_?id|currentjobid|jk|vjk|pid|id)$/;
+
+function jobIdQuery(searchParams: URLSearchParams): string {
+  const pairs: string[] = [];
+  searchParams.forEach((value, key) => {
+    const name = key.toLowerCase();
+    const id = String(value || "").trim().toLowerCase();
+    if (id && JOB_ID_PARAM_RE.test(name)) pairs.push(`${name}=${id}`);
+  });
+  return pairs.length ? `?${pairs.sort().join("&")}` : "";
 }
 
 function normalizeAtsHostPath(

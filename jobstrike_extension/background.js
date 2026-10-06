@@ -554,7 +554,7 @@ function ensureContentScriptAndSendMessage(tabId, message) {
       chrome.scripting.executeScript(
         {
           target: { tabId },
-          files: ['field-registry.js', 'content.js', 'assistant-overlay.js']
+          files: ['field-registry.js', 'job-posting-ingest.js', 'content.js', 'assistant-overlay.js']
         },
         () => {
           if (chrome.runtime.lastError) {
@@ -638,7 +638,7 @@ chrome.commands.onCommand.addListener((command) => {
     if (command !== 'refresh-current-tab') return;
 
     try {
-      const response = await ensureContentScriptAndSendMessage(tab.id, { action: 'getJobFields' });
+      const response = await ensureContentScriptAndSendMessage(tab.id, { action: 'fetchJobPosting' });
       if (!response || !response.success) throw new Error('Could not read job data from this tab.');
 
       chrome.storage.local.get([STORAGE_KEYS.userName], async (stored) => {

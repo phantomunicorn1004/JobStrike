@@ -28,6 +28,7 @@ const defaultSettings = {
   persistScanState: true,
   aiAutofillEnabled: false,
   openaiApiKey: '',
+  openaiBaseUrl: 'https://api.openai.com/v1',
   openaiModel: 'gpt-4o-mini'
 };
 
@@ -68,9 +69,35 @@ let lastObservedTabId = null;
 let lastObservedTabUrl = '';
 let tabSwitchScrapeSeq = 0;
 let tabSwitchScrapeTimer = null;
+/** Last scored job posting from fetchJobPosting (full + resume-trimmed JD). */
+let lastPostingDocument = null;
+
+function clearPostingDerivedSlices() {
+  if (!lastPostingDocument) return;
+  lastPostingDocument = {
+    ...lastPostingDocument,
+    resumePromptText: '',
+    compatExcerptText: '',
+    meta: {
+      ...(lastPostingDocument.meta || {}),
+      userNoteOverrides: true
+    }
+  };
+}
+
+globalThis.SmartJobPostingContext = {
+  getLastPosting() {
+    return lastPostingDocument;
+  },
+  setLastPosting(doc) {
+    lastPostingDocument = doc || null;
+  },
+  clearPostingDerivedSlices
+};
 
 const defaultProfile = {
   firstName: '',
+  middleName: '',
   lastName: '',
   preferredName: '',
   suffixName: '',
@@ -112,16 +139,44 @@ const defaultProfile = {
   noticePeriod: '',
   remotePreference: '',
   relocationPreference: '',
-  gender: 'Male',
-  genderIdentity: 'Man',
-  sexualOrientation: 'Heterosexual',
-  race: 'Asian',
-  hispanicLatino: 'No',
-  transgender: 'No',
-  veteranStatus: 'No',
-  disabilityStatus: 'No',
-  pronouns: ''
+  // Voluntary answers start empty: a blank is left unanswered on the form,
+  // never filled with an assumed value.
+  gender: '',
+  genderIdentity: '',
+  sexualOrientation: '',
+  race: '',
+  hispanicLatino: '',
+  transgender: '',
+  veteranStatus: '',
+  disabilityStatus: '',
+  pronouns: '',
+  citizenship: '',
+  securityClearance: '',
+  languages: '',
+  howDidYouHear: '',
+  extraFacts: ''
 };
+
+/**
+ * Answers that hold for every profile unless its website Autofill details say
+ * otherwise. They cover the eligibility questions on nearly every application.
+ */
+const STANDARD_ELIGIBILITY = {
+  workAuthorizationUS: 'Yes',
+  sponsorshipRequirement: 'No',
+  citizenship: 'US citizen',
+  securityClearance: 'No',
+  languages: 'English',
+  country: 'United States'
+};
+
+/** Website "Autofill details" keys copied onto the autofill profile as-is. */
+const WEBSITE_AUTOFILL_KEYS = [
+  'pronouns', 'github', 'portfolio', 'currentTitle', 'currentCompany', 'yearsOfExperience',
+  'desiredSalary', 'noticePeriod', 'howDidYouHear', 'relocationPreference', 'highestEducation',
+  'degree', 'major', 'gender', 'race', 'hispanicLatino', 'veteranStatus', 'disabilityStatus',
+  'extraFacts'
+];
 
 /** Canonical profile choices; field-registry maps these to ATS-specific option text at fill time. */
 const PROFILE_YES_NO_OPTIONS = {
@@ -330,6 +385,7 @@ let profileEditMode = false;
 
 const categoryToProfileKey = {
   first_name: 'firstName',
+  middle_name: 'middleName',
   last_name: 'lastName',
   preferred_name: 'preferredName',
   suffix_name: 'suffixName',
@@ -358,6 +414,7 @@ const categoryToProfileKey = {
   salary: 'desiredSalary',
   relocation: 'relocationPreference',
   notice_period: 'noticePeriod',
+  how_heard: 'howDidYouHear',
   education: 'highestEducation',
   experience_years: 'yearsOfExperience',
   gender: 'gender',
@@ -589,18 +646,46 @@ function splitFullName(fullName) {
   return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
 }
 
+/**
+   * The website's University field often carries the years too
+   * ("University of Redlands (2013-2017)"). Forms want them separately.
+   */
+function parseUniversityField(value) {
+  const raw = String(value || '').trim();
+  const years = /\((\d{4})\s*[-–—]\s*(\d{4}|present)\)/i.exec(raw);
+  return {
+    school: raw.replace(/\s*\([^()]*\d[^()]*\)\s*$/, '').trim() || raw,
+    startYear: years ? years[1] : '',
+    endYear: years && /^\d{4}$/.test(years[2]) ? years[2] : ''
+  };
+}
+
 function websiteProfileToAutofillProfile(record) {
   const fullName = String(record?.full_name || record?.fullName || '').trim();
   const names = splitFullName(fullName);
   const city = String(record?.city || '').trim();
   const state = String(record?.state || '').trim();
   const zip = String(record?.postal_code || record?.postalCode || '').trim();
-  const location = [city, state, zip].filter(Boolean).join(', ');
-  return normalizeProfile({
+  const university = parseUniversityField(record?.university);
+  const details = record?.autofill && typeof record.autofill === 'object' ? record.autofill : {};
+  const answer = (key) => String(details[key] ?? '').trim();
+  // City, State, Country: normalizeProfile reads the third part back as the
+  // country, so the postal code must not sit there.
+  // Only with both city and state: the parts are read back by position, so a
+  // missing state would turn the country into the state.
+  const location =
+    city && state ? [city, state, answer('country') || STANDARD_ELIGIBILITY.country].join(', ') : '';
+
+  const profile = {
     fullName,
-    firstName: names.firstName,
-    lastName: names.lastName,
-    email: firstListValue(record?.work_emails || record?.workEmails),
+    // Splitting "John Michael Smith" on the first space gives the wrong last
+    // name, so separate values from the profile win when they are set.
+    firstName: answer('firstName') || names.firstName,
+    middleName: answer('middleName'),
+    lastName: answer('lastName') || names.lastName,
+    // Most forms mean "what should we call you"; the first name is the safe default.
+    preferredName: answer('preferredName') || answer('firstName') || names.firstName,
+    email: answer('applicationEmail') || firstListValue(record?.work_emails || record?.workEmails),
     phone: firstListValue(record?.phone_numbers || record?.phoneNumbers),
     dateOfBirth: String(record?.dob || '').trim(),
     address: String(record?.address || '').trim(),
@@ -608,9 +693,18 @@ function websiteProfileToAutofillProfile(record) {
     state,
     zip,
     location,
-    school: String(record?.university || '').trim(),
+    school: answer('school') || university.school,
+    educationStartYear: answer('educationStartYear') || university.startYear,
+    graduationYear: answer('graduationYear') || university.endYear,
     linkedin: String(record?.linkedin || '').trim()
+  };
+  WEBSITE_AUTOFILL_KEYS.forEach((key) => {
+    profile[key] = answer(key);
   });
+  Object.keys(STANDARD_ELIGIBILITY).forEach((key) => {
+    profile[key] = answer(key) || STANDARD_ELIGIBILITY[key];
+  });
+  return normalizeProfile(profile);
 }
 
 async function loadWebsiteProfileForAutofill() {
@@ -655,7 +749,56 @@ function kitFileToUploadPayload(file) {
   };
 }
 
+/**
+ * Resume / cover letter attached on the Bid tab for the job being bid on
+ * (usually the files Generate just produced). They are staged in storage so the
+ * content script can attach them; the page message channel is too small for a PDF.
+ */
+const JOB_UPLOAD_FILES_KEY = 'autofill_job_upload_files';
+let stagedJobUploads = { jobKey: '', resume: null, coverLetter: null };
+
+async function fileToUploadPayload(file) {
+  if (!file) return null;
+  return {
+    name: file.name,
+    type: file.type || mimeTypeFromFileName(file.name),
+    size: file.size,
+    dataUrl: await readFileAsDataUrl(file)
+  };
+}
+
+async function stageJobUploadFiles() {
+  const jobKey = getRegisterFieldValue('regJobLink');
+  const resumeFile = document.getElementById('regResumeFile')?.files?.[0] || null;
+  const coverFile = document.getElementById('regCoverFile')?.files?.[0] || null;
+  if (resumeFile || coverFile) {
+    stagedJobUploads = {
+      jobKey,
+      resume: await fileToUploadPayload(resumeFile),
+      coverLetter: await fileToUploadPayload(coverFile)
+    };
+  } else if (!jobKey || stagedJobUploads.jobKey !== jobKey) {
+    // Register clears the attached files; keep the staged copy for the same
+    // job, but never carry one job's resume over to another. With no job link
+    // there is nothing to prove it is the same job, so nothing is kept.
+    stagedJobUploads = { jobKey, resume: null, coverLetter: null };
+  }
+  await new Promise((resolve) => {
+    chrome.storage.local.set({ [JOB_UPLOAD_FILES_KEY]: stagedJobUploads }, resolve);
+  });
+}
+
+/** Staged files count only for the job link they were staged under. */
+function stagedUploadsForCurrentJob() {
+  const jobKey = getRegisterFieldValue('regJobLink');
+  return jobKey && stagedJobUploads.jobKey === jobKey ? stagedJobUploads : null;
+}
+
 function getKitUploadForCategory(category) {
+  // The file tailored for this job beats the profile's default kit.
+  const staged = stagedUploadsForCurrentJob();
+  if (category === 'resume_upload' && staged?.resume) return staged.resume;
+  if (category === 'cover_letter_upload' && staged?.coverLetter) return staged.coverLetter;
   const kit = getDefaultKit();
   if (!kit) return null;
   if (category === 'resume_upload' && kit.resume) return kitFileToUploadPayload(kit.resume);
@@ -681,16 +824,31 @@ function init() {
   if (window.SmartJobJson2Docx) {
     window.SmartJobJson2Docx.initJson2docxClient(showStatus);
   }
+  wireAiContextInvalidation();
   renderProfileForm();
   wireProfileDemographicForm();
   wireProfileEducationForm();
   renderProfileView();
   ensureOpenAiModelSelect();
   bindEvents();
+  wireRegisterJobFieldUserEditMarkers();
   wireOptimizedUi();
   registerPageTabSession();
   loadAllData();
   watchActiveTabChanges();
+}
+
+function wireRegisterJobFieldUserEditMarkers() {
+  ['regJobTitle', 'regCompany', 'regNote'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.userEditWired === '1') return;
+    el.dataset.userEditWired = '1';
+    el.addEventListener('input', () => {
+      el.dataset.fillSource = 'user';
+      if (id === 'regNote') clearPostingDerivedSlices();
+      if (id === 'regNote') renderPostingMeta();
+    });
+  });
 }
 
 function bindEvents() {
@@ -711,7 +869,7 @@ function bindEvents() {
     aiToggle.addEventListener('change', () => {
       updateAiKeyFieldHint();
       if (aiToggle.checked && !String(document.getElementById('openaiApiKeySetting')?.value || '').trim() && !getOpenAiApiKey()) {
-        showStatus('Add your OpenAI API key below, then click Save AI settings.', 'info', 5000);
+        showStatus('Add your API key below, then click Save AI settings.', 'info', 5000);
       }
     });
   }
@@ -840,28 +998,29 @@ function bindEvents() {
 }
 
 function ensureOpenAiModelSelect() {
-  const select = document.getElementById('openaiModelSetting');
-  if (!select || select.tagName !== 'SELECT') return null;
-  if (select.dataset.populated === '1') return select;
-  select.innerHTML = OPENAI_MODEL_OPTIONS.map(
-    (m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}</option>`
-  ).join('');
-  select.dataset.populated = '1';
-  return select;
+  const list = document.getElementById('openaiModelOptions');
+  if (list && list.dataset.populated !== '1') {
+    list.innerHTML = OPENAI_MODEL_OPTIONS.map(
+      (m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}</option>`
+    ).join('');
+    list.dataset.populated = '1';
+  }
+  return document.getElementById('openaiModelSetting');
 }
 
 function setOpenAiModelSelectValue(modelId) {
-  const select = ensureOpenAiModelSelect();
-  if (!select) return;
+  const input = ensureOpenAiModelSelect();
+  if (!input) return;
   const value = String(modelId || defaultSettings.openaiModel).trim() || defaultSettings.openaiModel;
-  const known = OPENAI_MODEL_OPTIONS.some((m) => m.id === value);
-  if (!known && value) {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = `${value} (saved)`;
-    select.appendChild(opt);
+  input.value = value;
+}
+
+function getOpenAiBaseUrl() {
+  const fromSettings = String(currentSettings.openaiBaseUrl || '').trim();
+  if (fromSettings) {
+    return window.SmartJobAiFill?.normalizeChatBaseUrl?.(fromSettings) || fromSettings;
   }
-  select.value = value;
+  return window.SmartJobAiFill?.DEFAULT_BASE_URL || defaultSettings.openaiBaseUrl;
 }
 
 function bindSettingsRangePreviews() {
@@ -899,17 +1058,30 @@ function fillSettingsForm(settings) {
   if (aiEnabled) aiEnabled.checked = Boolean(merged.aiAutofillEnabled);
   const apiKey = document.getElementById('openaiApiKeySetting');
   if (apiKey) apiKey.value = merged.openaiApiKey || '';
+  const baseUrl = document.getElementById('openaiBaseUrlSetting');
+  if (baseUrl) {
+    baseUrl.value =
+      merged.openaiBaseUrl ||
+      window.SmartJobAiFill?.DEFAULT_BASE_URL ||
+      defaultSettings.openaiBaseUrl;
+  }
   setOpenAiModelSelectValue(merged.openaiModel || defaultSettings.openaiModel);
   syncAiUiVisibility();
   updateAiKeyFieldHint();
 }
 
 function readAiSettingsForm() {
-  const modelSelect = ensureOpenAiModelSelect();
+  const modelInput = ensureOpenAiModelSelect();
+  const rawBase = String(document.getElementById('openaiBaseUrlSetting')?.value || '').trim();
+  const baseUrl =
+    window.SmartJobAiFill?.normalizeChatBaseUrl?.(rawBase || defaultSettings.openaiBaseUrl) ||
+    rawBase ||
+    defaultSettings.openaiBaseUrl;
   return {
     aiAutofillEnabled: Boolean(document.getElementById('aiAutofillEnabledSetting')?.checked),
     openaiApiKey: String(document.getElementById('openaiApiKeySetting')?.value || '').trim(),
-    openaiModel: String(modelSelect?.value || '').trim() || defaultSettings.openaiModel
+    openaiBaseUrl: baseUrl,
+    openaiModel: String(modelInput?.value || '').trim() || defaultSettings.openaiModel
   };
 }
 
@@ -924,6 +1096,7 @@ function readSettingsForm() {
     persistScanState: document.getElementById('persistScanStateSetting').checked,
     aiAutofillEnabled: currentSettings.aiAutofillEnabled,
     openaiApiKey: currentSettings.openaiApiKey,
+    openaiBaseUrl: currentSettings.openaiBaseUrl || defaultSettings.openaiBaseUrl,
     openaiModel: currentSettings.openaiModel
   };
 }
@@ -950,7 +1123,7 @@ function isAiFillButtonDisabled(row) {
 
 function getAiFillButtonTitle(row) {
   if (!isAiToggleEnabled()) return 'Enable AI fill in Settings';
-  if (!getOpenAiApiKey()) return 'Add your OpenAI API key in Settings first';
+  if (!getOpenAiApiKey()) return 'Add your API key in Settings first';
   if (isAiBlockedField(row)) return 'Upload file in Application kits first';
   if (!isRowFillable(row) && row?.source !== 'ai') return 'Enter a value or enable profile data first';
   return 'Generate answer with OpenAI, then fill';
@@ -980,7 +1153,7 @@ function openSettingsPanel() {
 }
 
 function showOpenAiKeyRequired(message) {
-  const text = message || 'OpenAI API key is required. Enter your key below and click Save AI settings.';
+  const text = message || 'API key is required. Enter your key below and click Save AI settings.';
   showStatus(text, 'error', 7000);
   openSettingsPanel();
   window.setTimeout(() => {
@@ -1045,7 +1218,7 @@ function saveAiSettings(event) {
   if (event) event.preventDefault();
   const ai = readAiSettingsForm();
   if (ai.aiAutofillEnabled && !ai.openaiApiKey) {
-    showOpenAiKeyRequired('Cannot enable AI fill without an API key. Paste your OpenAI key below.');
+    showOpenAiKeyRequired('Cannot enable AI fill without an API key. Paste your key below.');
     return;
   }
   clearOpenAiKeyError();
@@ -1439,7 +1612,7 @@ function sendMessageToTab(tabId, message) {
       }
 
       chrome.scripting.executeScript(
-        { target: { tabId }, files: ['field-registry.js', 'content.js', 'assistant-overlay.js'] },
+        { target: { tabId }, files: ['field-registry.js', 'job-posting-ingest.js', 'content.js', 'assistant-overlay.js'] },
         () => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
@@ -1454,6 +1627,18 @@ function sendMessageToTab(tabId, message) {
       });
     });
   });
+}
+
+/** Frame that holds the scanned form; 0 is the page itself. Set by each scan. */
+let autofillFrameId = 0;
+
+/** Fill and focus messages go to whichever frame the last scan found the form in. */
+async function sendToFormFrame(message) {
+  if (!autofillFrameId) return sendToActiveTab(message);
+  const tab = await getActiveTab();
+  if (!tab || !tab.id) throw new Error('Open a normal web page first.');
+  const response = await globalThis.SmartJobPostingFrames.sendToFrame(tab.id, autofillFrameId, message);
+  return { response, tab };
 }
 
 async function sendToActiveTab(message) {
@@ -1522,11 +1707,6 @@ function scheduleFirstBindScrape(tabId, url) {
     if (TS && !TS.isCurrentGeneration(token)) return;
     try {
       showStatus('Loading job info…', 'info', 0);
-      try {
-        await sendToActiveTab({ action: 'prepareForScan' });
-      } catch (_) {
-        /* optional */
-      }
       await scrapeJobInfoToAllForms({ showSuccess: false });
       if (seq !== tabSwitchScrapeSeq) return;
       if (TS && !TS.isCurrentGeneration(token)) return;
@@ -2313,10 +2493,20 @@ function addApplicationKitFromUI() {
   persistApplicationKits({}, () => showStatus(`Created kit "${name}".`, 'success'));
 }
 
-function deleteApplicationKit(kitId) {
+/** In-panel confirm; the native one can be suppressed inside the on-page overlay. */
+function confirmAction(message, options) {
+  if (typeof window.rwhConfirm === 'function') return window.rwhConfirm(message, options);
+  return Promise.resolve(window.confirm(message));
+}
+
+async function deleteApplicationKit(kitId) {
   const kit = getKitById(kitId);
   if (!kit) return;
-  if (!window.confirm(`Delete kit "${kit.name}" and its files? This cannot be undone.`)) return;
+  const proceed = await confirmAction(
+    `Delete kit "${kit.name}"?\n\nIts files are deleted too. This cannot be undone.`,
+    { confirmLabel: 'Delete kit', danger: true }
+  );
+  if (!proceed) return;
   applicationKits = applicationKits.filter((k) => k.id !== kitId);
   if (kit.isDefault && applicationKits.length) applicationKits[0].isDefault = true;
   if (expandedKitId === kitId) expandedKitId = null;
@@ -2458,11 +2648,11 @@ async function uploadKitFile(kitId, kind, file) {
   }
 }
 
-function removeKitFile(kitId, kind) {
+async function removeKitFile(kitId, kind) {
   const kit = getKitById(kitId);
   if (!kit) return;
   const label = kind === 'resume' ? 'resume' : 'cover letter';
-  if (!window.confirm(`Remove the ${label} from this kit?`)) return;
+  if (!(await confirmAction(`Remove the ${label} from this kit?`, { confirmLabel: 'Remove', danger: true }))) return;
   saveKitFromDom(kitId, true);
   if (kind === 'resume') kit.resume = null;
   else kit.coverLetter = null;
@@ -2668,16 +2858,117 @@ function downloadUploadedFile(entry) {
   a.remove();
 }
 
-async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
-  const { response, tab } = await sendToActiveTab({ action: 'getJobFields' });
-  if (!response?.success && !response?.job_title && !response?.company_name) {
+function registerJobFieldsEditedByUser() {
+  const ids = ['regJobTitle', 'regCompany', 'regNote'];
+  return ids.some((id) => {
+    const el = document.getElementById(id);
+    return el && el.dataset.fillSource === 'user';
+  });
+}
+
+/** Where the description in the Note came from, in words a user recognises. */
+function describePostingSource(posting, noteEl) {
+  if (noteEl?.dataset.fillSource === 'user') return 'pasted or edited by you';
+  if (noteEl?.dataset.fillSource === 'resume-json') return 'from resume JSON';
+  if (posting?.meta?.embeddedFrom) return 'from the embedded job board';
+  return 'from this page';
+}
+
+/**
+ * Status line under the Note: says what was loaded and, when the text looks
+ * wrong, what to do about it. Everything downstream (compatibility check,
+ * Copy Prompt) is only as good as this description.
+ */
+function renderPostingMeta(posting) {
+  const el = document.getElementById('regPostingMeta');
+  if (!el) return;
+  const titleEl = document.getElementById('regPostingMetaTitle');
+  const detailEl = document.getElementById('regPostingMetaDetail');
+  const noteEl = document.getElementById('regNote');
+  const p = posting || lastPostingDocument;
+  const noteChars = (noteEl?.value || '').trim().length;
+  // Once the user edits the Note, scrape warnings no longer describe its text.
+  const userEdited = noteEl?.dataset.fillSource === 'user';
+  const warnings = !userEdited && Array.isArray(p?.meta?.warnings) ? p.meta.warnings : [];
+  const setDetail = (text) => {
+    if (!detailEl) return;
+    detailEl.textContent = text || '';
+    detailEl.hidden = !text;
+  };
+
+  if (!p?.meta && !noteChars) {
+    el.hidden = true;
+    el.dataset.state = 'idle';
+    if (titleEl) titleEl.textContent = '';
+    setDetail('');
+    return;
+  }
+
+  const minChars = globalThis.SmartJobPostingIngest?.MIN_JD_CHARS || 80;
+  const size = `${noteChars.toLocaleString()} characters`;
+  let state = 'ready';
+  let title = 'Job description loaded';
+  let detail = `${size} · ${describePostingSource(p, noteEl)}`;
+
+  if (!noteChars) {
+    state = 'empty';
+    title = 'No job description found';
+    detail = 'Paste the posting into the box above, or open the job page and press Refresh.';
+  } else if (noteChars < minChars) {
+    state = 'warn';
+    title = 'Description is too short';
+    detail = `Only ${size}. Paste the full posting above.`;
+  } else if (warnings.includes('apply_only')) {
+    state = 'warn';
+    title = 'This looks like an application form';
+    detail = 'Open the posting page and press Refresh, or paste the description above.';
+  } else if (warnings.includes('missing_body')) {
+    state = 'warn';
+    title = 'Only job details were found';
+    detail = 'The description body is missing. Paste the full posting above.';
+  } else if (
+    warnings.includes('weak_jd') ||
+    warnings.includes('short_jd') ||
+    (!userEdited && p?.meta?.confidenceLabel === 'low')
+  ) {
+    state = 'warn';
+    title = 'Description may be incomplete';
+    detail = `${size} found. Compare with the page and paste the full posting if anything is missing.`;
+  }
+
+  el.dataset.state = state;
+  el.classList.toggle('is-warn', state !== 'ready');
+  if (titleEl) titleEl.textContent = title;
+  setDetail(detail);
+  el.hidden = false;
+}
+
+async function scrapeJobInfoToAllForms({ showSuccess = true, forceOverwrite = false } = {}) {
+  const scrapeSession = window.SmartJobTabSession;
+  const scrapeToken = scrapeSession?.getGeneration();
+  const { response: topResponse, tab } = await sendToActiveTab({ action: 'fetchJobPosting' });
+  // Boards embedded in an iframe are invisible to the top-frame content script.
+  const frames = globalThis.SmartJobPostingFrames;
+  const response = frames?.withFrameFallback
+    ? await frames.withFrameFallback(tab.id, topResponse).catch(() => topResponse)
+    : topResponse;
+  // Reading a page takes seconds. If the user switched tabs meanwhile, this is
+  // another tab's job: writing it here would overwrite this tab's draft.
+  if (scrapeSession && !scrapeSession.isCurrentGeneration(scrapeToken)) return null;
+  if (!response?.success && !response?.job_title && !response?.company_name && !response?.posting) {
     throw new Error(response?.error || 'Could not read job info from this page.');
   }
 
-  const jobTitle = response.job_title || '';
-  const company = response.company_name || '';
-  const jobLink = response.job_link || tab.url || '';
-  const jobDescription = response.job_description || '';
+  const posting = response.posting || null;
+  if (posting) {
+    lastPostingDocument = posting;
+    globalThis.SmartJobPostingContext?.setLastPosting?.(posting);
+  }
+
+  const jobTitle = response.job_title || posting?.jobTitle || '';
+  const company = response.company_name || posting?.companyName || '';
+  const jobLink = response.job_link || posting?.jobLink || tab.url || '';
+  const jobDescription = response.job_description || posting?.rawFullText || '';
   const preferResumeJson = Boolean(
     window.SmartJobRegisterResumeDb?.hasActiveResumeJsonOverride?.()
   );
@@ -2687,20 +2978,47 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
     if (el) el.value = value;
   };
 
+  if (!forceOverwrite && registerJobFieldsEditedByUser()) {
+    const proceed = await confirmAction(
+      'Replace your edits with this page’s data?\n\nYou edited the job title, company, or description. The job link updates either way.',
+      { confirmLabel: 'Replace', cancelLabel: 'Keep my edits' }
+    );
+    if (!proceed) {
+      const setLink = window.SmartJobRegisterResumeDb?.setRegisterFieldValue;
+      if (setLink) setLink('regJobLink', jobLink, 'page-scrape');
+      else setValue('regJobLink', jobLink);
+      setValue('jobLink', jobLink);
+      renderPostingMeta(posting);
+      if (showSuccess) showStatus('Job link updated. Title, company, and note kept.', 'info', 4000);
+      return { jobTitle, company, jobLink };
+    }
+  }
+
+  const setReg = window.SmartJobRegisterResumeDb?.setRegisterFieldValue;
+
   setValue('jobCompany', company);
   setValue('jobTitle', jobTitle);
   setValue('jobLink', jobLink);
 
-  // Job link always comes from the tab. Title/company/note prefer built resume JSON when active.
-  setValue('regJobLink', jobLink);
+  if (setReg) setReg('regJobLink', jobLink, 'page-scrape');
+  else setValue('regJobLink', jobLink);
+
   if (!preferResumeJson) {
-    setValue('regJobTitle', jobTitle);
-    setValue('regCompany', company);
-    setValue('regNote', jobDescription);
+    if (setReg) {
+      setReg('regJobTitle', jobTitle, 'page-scrape');
+      setReg('regCompany', company, 'page-scrape');
+      setReg('regNote', jobDescription, 'page-scrape');
+    } else {
+      setValue('regJobTitle', jobTitle);
+      setValue('regCompany', company);
+      setValue('regNote', jobDescription);
+    }
   }
 
   const urlEl = document.getElementById('currentUrl');
   if (urlEl) urlEl.textContent = jobLink;
+
+  renderPostingMeta(posting);
 
   window.SmartJobTabSession?.sync();
 
@@ -2709,19 +3027,22 @@ async function scrapeJobInfoToAllForms({ showSuccess = true } = {}) {
     window.SmartJobRegisterResumeDb?.notifyRegisterCompanyFilled?.(showStatus, { force: true });
   }
   window.SmartJobRegisterResumeDb?.syncJobLinkBlockButton?.();
-  // Programmatic Note fill does not fire input — refresh Bid preflight explicitly.
-  void window.SmartJobRegisterResumeDb?.refreshBidFitPreflight?.();
+  // Authoritative AI compat kick after job load (invalidates stale in-flight checks).
+  window.SmartJobRegisterResumeDb?.notifyJobLoadedForBidFit?.();
   window.SmartJobRegisterResumeDb?.refreshApplyProgress?.();
 
   if (showSuccess) {
+    const weak = posting?.meta?.warnings?.length;
     showStatus(
       preferResumeJson
         ? 'Job link refreshed. Register title/company/note kept from resume JSON.'
-        : 'Job info refreshed from current tab.',
-      'success'
+        : weak
+          ? 'Job info refreshed — review the description below.'
+          : 'Job info refreshed from current tab.',
+      weak ? 'info' : 'success'
     );
   }
-  return { jobTitle, company, jobLink };
+  return { jobTitle, company, jobLink, posting };
 }
 
 async function scrapeCurrentJob(showSuccess = true) {
@@ -2758,9 +3079,10 @@ async function globalRefreshCurrentTab() {
     TS?.captureActive();
     if (TS?.isPinnedElsewhere(tab.id, tab.url)) {
       if (TS.hasWork(tab.id)) {
-        const proceed = window.confirm(
+        const proceed = await confirmAction(
           'This tab has moved to a different page.\n\n' +
-            'Refreshing will clear the resume JSON and generated files saved for the previous job. Continue?'
+            'Refreshing clears the resume JSON and generated files saved for the previous job.',
+          { confirmLabel: 'Refresh', cancelLabel: 'Keep draft', danger: true }
         );
         if (!proceed) {
           showStatus('Refresh cancelled — previous job draft kept.', 'info', 3000);
@@ -2772,13 +3094,7 @@ async function globalRefreshCurrentTab() {
     TS?.bindUrl(tab.id, tab.url);
     renderPinnedJobBar(tab.id, tab.url);
 
-    try {
-      await sendToActiveTab({ action: 'prepareForScan' });
-    } catch (_) {
-      // optional scroll-to-top before scan
-    }
-
-    await scrapeJobInfoToAllForms({ showSuccess: false });
+    await scrapeJobInfoToAllForms({ showSuccess: false, forceOverwrite: true });
     await scanCurrentPage({ silent: true });
 
     const fieldCount = currentFields.length;
@@ -2934,7 +3250,7 @@ async function refreshAdapterDebug() {
   }
 }
 
-function restoreDismissedForHost() {
+async function restoreDismissedForHost() {
   const host = currentHost();
   if (!host) return;
   const list = dismissedFieldsByHost[host];
@@ -2942,7 +3258,11 @@ function restoreDismissedForHost() {
     showStatus('Nothing to restore on this host.', 'info', 2500);
     return;
   }
-  if (!window.confirm(`Restore ${list.length} dismissed field${list.length === 1 ? '' : 's'} for ${host}? You'll need to rescan to see them again.`)) return;
+  const proceed = await confirmAction(
+    `Restore ${list.length} dismissed field${list.length === 1 ? '' : 's'} for ${host}?\n\nYou'll need to rescan to see them again.`,
+    { confirmLabel: 'Restore' }
+  );
+  if (!proceed) return;
   delete dismissedFieldsByHost[host];
   lastDismissedCount = 0;
   persistDismissed(() => {
@@ -2954,8 +3274,22 @@ function restoreDismissedForHost() {
 async function scanCurrentPage({ silent = false } = {}) {
   try {
     if (!silent) showStatus('Scanning current page...', 'info', 0);
-    const { response, tab } = await sendToActiveTab({ action: 'scanApplicationForm' });
+    // Every scan path (Refresh as well as Autofill) must see this job's files.
+    await stageJobUploadFiles().catch(() => {});
+    let { response, tab } = await sendToActiveTab({ action: 'scanApplicationForm' });
     if (!response || !response.success) throw new Error(response?.error || 'Scan failed.');
+    // A form embedded in an iframe is invisible to the top frame's scan.
+    autofillFrameId = 0;
+    // Also when the page itself has only a stray field or two (a search box,
+    // a newsletter sign-up) and a frame holds the real form.
+    const topFieldCount = (response.fields || []).length;
+    if (topFieldCount < 3 && globalThis.SmartJobPostingFrames?.scanFormInFrames) {
+      const framed = await globalThis.SmartJobPostingFrames.scanFormInFrames(tab.id).catch(() => null);
+      if (framed?.response?.success && (framed.response.fields || []).length > topFieldCount) {
+        response = framed.response;
+        autofillFrameId = framed.frameId;
+      }
+    }
 
     currentScanUrl = response.url || tab.url || '';
     lastSkippedCount = Number.isFinite(response.skipped) ? response.skipped : 0;
@@ -3006,6 +3340,10 @@ async function scanCurrentPage({ silent = false } = {}) {
   }
 }
 
+/** How long Autofill waits for a late-loading form: 6 tries, 1.5 s apart. */
+const FORM_LOAD_RETRIES = 6;
+const FORM_LOAD_RETRY_MS = 1500;
+
 async function autofillThisPage({ useAi = false } = {}) {
   const fillBtn = document.getElementById(useAi ? 'fillSelectedAiBtn' : 'regAutofillBtn')
     || document.getElementById(useAi ? 'fillSelectedAiBtn' : 'fillSelectedBtn');
@@ -3031,6 +3369,7 @@ async function autofillThisPage({ useAi = false } = {}) {
   try {
     const loaded = await loadWebsiteProfileForAutofill();
     if (!loaded) return;
+    await stageJobUploadFiles().catch(() => {});
 
     showStatus('Scrolling to top to detect all fields...', 'info', 0);
     try {
@@ -3040,7 +3379,14 @@ async function autofillThisPage({ useAi = false } = {}) {
     }
 
     showStatus('Scanning application fields...', 'info', 0);
-    const scanResponse = await scanCurrentPage({ silent: true });
+    let scanResponse = await scanCurrentPage({ silent: true });
+    // Some boards fetch the form after the page loads (Ashby shows "Fetching
+    // application form" for several seconds). Give it time before giving up.
+    for (let attempt = 0; attempt < FORM_LOAD_RETRIES && !currentFields.length; attempt += 1) {
+      showStatus('Waiting for the application form to load…', 'info', 0);
+      await delay(FORM_LOAD_RETRY_MS);
+      scanResponse = await scanCurrentPage({ silent: true });
+    }
     const adapterInfo = scanResponse && scanResponse.adapter ? ` (${scanResponse.adapter} adapter)` : '';
     const skippedInfo = lastSkippedCount > 0
       ? ` (${lastSkippedCount} noisy field${lastSkippedCount === 1 ? '' : 's'} hidden)`
@@ -3086,7 +3432,13 @@ function regeneratePlan() {
 }
 
 function createPlanRow(field) {
-  const category = field.fieldCategory || 'unknown';
+  let category = field.fieldCategory || 'unknown';
+  // "Do you have at least 5 years of AWS experience?" wants Yes or No about one
+  // skill; total years of experience does not answer it. Leave it as an open
+  // question for the user or the AI.
+  if (category === 'experience_years' && String(field.fieldType || '') === 'yes-no') {
+    category = 'custom_question';
+  }
   const profileKey = categoryToProfileKey[category];
   const profileValue = profileKey ? (currentProfile[profileKey] || '') : '';
 
@@ -3195,7 +3547,7 @@ function createPlanRow(field) {
         field,
         suggestedValue: uploadFile.name,
         source: 'kit',
-        status: `Ready — ${label} from default kit`,
+        status: `Ready — ${label}: ${uploadFile.name}`,
         fillOutcome: null,
         fillError: '',
         confidence: field.confidence || 0.95,
@@ -3360,6 +3712,53 @@ function applyFillResultToPlanRow(row, result, { usedAi = false } = {}) {
   }
 }
 
+/** Questions that grant permission or attest to something: only the applicant may answer. */
+const CONSENT_QUESTION_RE =
+  /\b(consent\w*|i agree|agree to|acknowledg\w*|certify|certifies|certifying|attest\w*|authori[sz]e (?:us|the company|[a-z]+ to)|terms (?:and|&) conditions|privacy (?:policy|notice)|background check|e-?signature|signature|recorded|recording|notetakers?|transcrib\w*)\b/i;
+
+const SELF_ID_CATEGORIES = new Set([
+  'gender', 'gender_identity', 'sexual_orientation', 'race', 'hispanic_latino', 'transgender',
+  'veteran_status', 'disability_status', 'lgbtq_identity', 'pronouns'
+]);
+
+/** Wording that marks a self-identification question the scanner did not categorise. */
+const SELF_ID_QUESTION_RE =
+  /\b(pronouns?|gender|race|racial|ethnic\w*|hispanic|latino|latinx|veteran|disabilit\w*|sexual orientation|lgbtq?\+?|transgender)\b/i;
+
+function isSelfIdQuestion(row) {
+  const field = row?.field || {};
+  if (SELF_ID_CATEGORIES.has(field.fieldCategory)) return true;
+  const text = [field.questionText, field.labelText].filter(Boolean).join(' ');
+  return SELF_ID_QUESTION_RE.test(text);
+}
+
+/**
+ * AI is for questions nothing else can answer. A field the profile is meant to
+ * supply (name, links, salary, work authorisation, …) is a profile field even
+ * when its value is missing: the fix is to complete the profile, not to have a
+ * model invent a GitHub URL or a current employer.
+ */
+function isProfileField(row) {
+  const field = row?.field || {};
+  const category = field.fieldCategory || 'unknown';
+  // A yes/no about years in one skill is an open question, not the profile's total.
+  if (category === 'experience_years' && String(field.fieldType || '') === 'yes-no') return false;
+  return Boolean(categoryToProfileKey[category]);
+}
+
+function rowNeedsAi(row) {
+  const category = row?.field?.fieldCategory || 'unknown';
+  if (category === 'resume_upload' || category === 'cover_letter_upload') return false;
+  if (category === 'acknowledgment' || category === 'employment_kit') return false;
+  return !isProfileField(row);
+}
+
+function isConsentQuestion(row) {
+  const field = row?.field || {};
+  const text = [field.questionText, field.labelText, field.nearbyText].filter(Boolean).join(' ');
+  return CONSENT_QUESTION_RE.test(text);
+}
+
 function isAiBlockedField(row) {
   if (!row || !row.field) return true;
   const cat = row.field.fieldCategory;
@@ -3391,27 +3790,117 @@ function renderFillButtonsHtml(row) {
 }
 
 async function getJobContextForAi() {
+  return resolveJobInfoForAi();
+}
+
+function getRegisterFieldValue(id) {
+  return String(document.getElementById(id)?.value || '').trim();
+}
+
+/**
+ * Prefer Register Note JD; fall back to page scrape, then resume JSON fields.
+ */
+async function resolveJobInfoForAi() {
+  const note = getRegisterFieldValue('regNote');
+  const title = getRegisterFieldValue('regJobTitle');
+  const company = getRegisterFieldValue('regCompany');
+  const minJd = Number(window.SmartJobBidFitPreflight?.MIN_JD_CHARS) || 80;
+
+  let page = {};
   try {
     const { response } = await sendToActiveTab({ action: 'getJobFields' });
     if (response && response.success) {
-      return {
+      page = {
         job_title: response.job_title || '',
         company_name: response.company_name || '',
         job_description: response.job_description || ''
       };
     }
   } catch (_) {}
-  return {};
+
+  let fromJson = {};
+  const rawJson = getRegisterFieldValue('regResumeJson');
+  const mapper = window.SmartJobResumeJsonMapper;
+  if (rawJson && mapper?.extractRegisterFieldsFromResumeJsonText) {
+    try {
+      const extracted = mapper.extractRegisterFieldsFromResumeJsonText(rawJson);
+      if (extracted?.ok && extracted.fields) {
+        fromJson = {
+          job_title: extracted.fields.jobTitle || '',
+          company_name: extracted.fields.companyName || '',
+          job_description: extracted.fields.jobDescription || ''
+        };
+      }
+    } catch (_) {}
+  }
+
+  const rawJd =
+    (note.length >= minJd ? note : '') ||
+    String(page.job_description || '').trim() ||
+    String(fromJson.job_description || '').trim() ||
+    note;
+
+  const posting = lastPostingDocument;
+  const kitApi = window.SmartJobPromptKit;
+  let job_description = rawJd;
+  if (kitApi?.resolveJobDescriptionForResume) {
+    job_description = kitApi.resolveJobDescriptionForResume({
+      noteText: rawJd,
+      kit: null,
+      posting
+    }) || rawJd;
+  } else if (posting?.resumePromptText && note.length >= minJd) {
+    job_description = posting.resumePromptText;
+  }
+
+  return {
+    job_title: title || page.job_title || fromJson.job_title || '',
+    company_name: company || page.company_name || fromJson.company_name || '',
+    job_description
+  };
+}
+
+/**
+ * Prefer work experience from built resume JSON; fall back to default Application kit.
+ */
+function resolveAiExperienceKit() {
+  const rawJson = getRegisterFieldValue('regResumeJson');
+  const mapper = window.SmartJobResumeJsonMapper;
+  if (rawJson && mapper?.parseResumeJsonText && mapper?.extractWorkExperienceForAi) {
+    try {
+      const parsed = mapper.parseResumeJsonText(rawJson);
+      if (parsed?.ok && parsed.data) {
+        const roles = mapper.extractWorkExperienceForAi(parsed.data);
+        if (roles.length) {
+          return {
+            workExperience: roles,
+            sourceLabel: 'Work experience (built resume JSON)'
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  const kit = getDefaultKit();
+  if (kit?.workExperience?.length) {
+    return {
+      ...kit,
+      sourceLabel: 'Work experience (default kit)'
+    };
+  }
+  return { workExperience: [], sourceLabel: 'Work experience' };
 }
 
 let cachedAiContextBlock = null;
 let cachedAiContextAt = 0;
+/** Scenario fingerprints from previous AI fills — passed to suggestFieldValue so it avoids repeating examples. */
+let sessionUsedExamples = [];
 
 async function getAiContextBlock() {
   const now = Date.now();
   if (cachedAiContextBlock && now - cachedAiContextAt < 60000) return cachedAiContextBlock;
-  const jobInfo = await getJobContextForAi();
-  const kit = getDefaultKit();
+  const jobInfo = await resolveJobInfoForAi();
+  const kit = resolveAiExperienceKit();
   if (!window.SmartJobAiFill) throw new Error('AI module failed to load. Reload the extension.');
   cachedAiContextBlock = window.SmartJobAiFill.buildCandidateContext(
     currentProfile,
@@ -3426,34 +3915,180 @@ async function getAiContextBlock() {
 function invalidateAiContextCache() {
   cachedAiContextBlock = null;
   cachedAiContextAt = 0;
+  sessionUsedExamples = [];
+}
+
+function wireAiContextInvalidation() {
+  ['regNote', 'regResumeJson', 'regJobTitle', 'regCompany'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.aiCtxWired === '1') return;
+    el.dataset.aiCtxWired = '1';
+    const invalidate = () => {
+      cachedAiContextBlock = null;
+      cachedAiContextAt = 0;
+    };
+    el.addEventListener('input', invalidate);
+    el.addEventListener('change', invalidate);
+  });
+}
+
+/**
+ * Record the opening of an AI-generated answer so future calls can avoid the same story.
+ * Uses the first paragraph (up to 120 chars) as a fingerprint.
+ */
+function recordUsedExample(value) {
+  if (!value || typeof value !== 'string') return;
+  const firstPara = value.trim().split(/\n\n?/)[0].trim();
+  if (firstPara.length > 20) {
+    sessionUsedExamples.push(firstPara.slice(0, 120));
+    if (sessionUsedExamples.length > 12) sessionUsedExamples.shift(); // keep last 12
+  }
+}
+
+/** Categories that should never invent values — use profile (or skip) instead of AI prose. */
+const DETERMINISTIC_PROFILE_CATEGORIES = new Set([
+  'first_name', 'middle_name', 'last_name', 'preferred_name', 'suffix_name', 'full_name',
+  'date_of_birth', 'email', 'phone', 'address', 'address_line_2', 'address_line_3',
+  'city', 'state', 'zip', 'postal_code', 'country',
+  'linkedin', 'github', 'portfolio',
+  'current_company', 'experience_years',
+  'work_authorization', 'work_authorization_us', 'work_authorization_ca', 'work_authorization_uk',
+  'sponsorship', 'lgbtq_identity', 'salary', 'relocation', 'notice_period', 'how_heard',
+  'education', 'school', 'degree', 'graduation_year',
+  'gender', 'gender_identity', 'sexual_orientation', 'race', 'hispanic_latino',
+  'transgender', 'veteran_status', 'disability_status', 'pronouns'
+]);
+
+function matchValueToOptions(value, options) {
+  const target = String(value || '').trim();
+  if (!target || !Array.isArray(options) || !options.length) return target;
+  const lower = target.toLowerCase();
+  for (const opt of options) {
+    if (String(opt).trim().toLowerCase() === lower) return String(opt).trim();
+  }
+  for (const opt of options) {
+    const s = String(opt).trim().toLowerCase();
+    if (s.includes(lower) || lower.includes(s)) return String(opt).trim();
+  }
+  return '';
+}
+
+/**
+ * Rows that already have a trusted non-AI value — skip LLM in batch Autofill with AI.
+ */
+function isDeterministicFactRow(row) {
+  if (!row || !isRowFillable(row)) return false;
+  const src = row.source;
+  if (src === 'profile' || src === 'custom' || src === 'kit' || src === 'acknowledgment') return true;
+  const cat = row.field?.fieldCategory;
+  if (cat && DETERMINISTIC_PROFILE_CATEGORIES.has(cat) && String(row.suggestedValue || '').trim()) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve a value without calling the LLM when possible.
+ * @returns {{value:string,source:string,status:string}|null}
+ */
+function resolveDeterministicValueForRow(row) {
+  if (!row?.field) return null;
+  const field = row.field;
+  const options = Array.isArray(field.options) ? field.options : [];
+  const qText = field.questionText || field.labelText || field.nearbyText || '';
+
+  const customMatch = matchCustomQuestion(qText, currentQuestions);
+  if (customMatch?.question?.answer) {
+    const answer = String(customMatch.question.answer).trim();
+    const value = options.length ? (matchValueToOptions(answer, options) || answer) : answer;
+    if (value) {
+      return {
+        value,
+        source: 'custom',
+        status: customMatch.question.requireReview ? 'Needs review (saved answer)' : 'Ready (saved answer)'
+      };
+    }
+  }
+
+  const cat = field.fieldCategory || '';
+  const profileKey = categoryToProfileKey[cat];
+  const yesNoAboutYears = cat === 'experience_years' && String(field.fieldType || '') === 'yes-no';
+  if (profileKey && DETERMINISTIC_PROFILE_CATEGORIES.has(cat) && !yesNoAboutYears) {
+    let profileValue = String(currentProfile[profileKey] || '').trim();
+    if (cat === 'full_name' && !profileValue) {
+      profileValue = [currentProfile.firstName, currentProfile.lastName].filter(Boolean).join(' ').trim();
+    }
+    if (PROFILE_LINK_CATEGORIES.has(cat) && !isUsableProfileLinkValue(profileValue)) {
+      profileValue = '';
+    }
+    if (profileValue) {
+      const value = options.length ? matchValueToOptions(profileValue, options) : profileValue;
+      if (value) {
+        return { value, source: 'profile', status: 'Ready (profile)' };
+      }
+    }
+  }
+
+  if (isDeterministicFactRow(row) && String(row.suggestedValue || '').trim()) {
+    return {
+      value: String(row.suggestedValue).trim(),
+      source: row.source || 'profile',
+      status: row.status || 'Ready'
+    };
+  }
+
+  return null;
 }
 
 async function generateAiValueForRow(row) {
+  const deterministic = resolveDeterministicValueForRow(row);
+  if (deterministic) return deterministic;
+  if (!rowNeedsAi(row)) {
+    throw new Error('This field comes from the profile. Add the value under Autofill details on the website.');
+  }
+
   const apiKey = getOpenAiApiKey() || String(document.getElementById('openaiApiKeySetting')?.value || '').trim();
   if (!apiKey) {
-    throw new Error('OpenAI API key is not set.');
+    throw new Error('API key is not set.');
   }
   if (isAiBlockedField(row)) {
     throw new Error('Upload the file in Profile → Application kits, then use regular Fill.');
   }
   const contextBlock = await getAiContextBlock();
-  const value = await window.SmartJobAiFill.suggestFieldValue(
+  const result = await window.SmartJobAiFill.suggestFieldValue(
     apiKey,
     currentSettings.openaiModel,
     row.field,
     row,
-    contextBlock
+    contextBlock,
+    { baseUrl: getOpenAiBaseUrl(), usedExamples: sessionUsedExamples }
   );
-  if (!value) throw new Error('AI returned an empty value for this field.');
-  return value;
+
+  const needsInput = Boolean(result && typeof result === 'object' && result.needsInput);
+  const value = typeof result === 'string'
+    ? result.trim()
+    : String(result?.value || '').trim();
+
+  if (needsInput || !value) {
+    throw new Error('Needs your input — not enough facts in profile/resume to answer safely.');
+  }
+  recordUsedExample(value);
+  return { value, source: 'ai', status: 'Ready (AI)' };
 }
 
-function applyAiValueToRow(row, value, rowEl) {
+function applyAiValueToRow(row, valueOrResult, rowEl) {
+  const isObj = valueOrResult && typeof valueOrResult === 'object';
+  const value = isObj ? String(valueOrResult.value || '') : String(valueOrResult || '');
   row.suggestedValue = value;
-  row.source = 'ai';
-  row.status = 'Ready (AI)';
+  row.source = isObj && valueOrResult.source ? valueOrResult.source : 'ai';
+  row.status = isObj && valueOrResult.status
+    ? valueOrResult.status
+    : (row.source === 'custom' ? 'Ready (saved answer)' : row.source === 'profile' ? 'Ready (profile)' : 'Ready (AI)');
   row.fillOutcome = null;
   row.fillError = '';
+  if (isObj && valueOrResult.customQuestionId) {
+    row.customQuestionId = valueOrResult.customQuestionId;
+  }
   const textarea = rowEl?.querySelector('.suggested-value');
   if (textarea) textarea.value = value;
   updateFieldRowAppearance(rowEl, row);
@@ -3528,14 +4163,26 @@ function buildFillPayloadFromRow(row) {
   const uploadKitKind = kitUploadKindForRow(row);
   const hasKitFile = Boolean(row.uploadFile && row.uploadFile.dataUrl)
     || (uploadKitKind && getKitUploadForCategory(row.field.fieldCategory));
+  // Location search boxes rank by what is typed: the city alone can match a
+  // same-named city elsewhere. The fill falls back to the city if this finds nothing.
+  let value = row.suggestedValue;
+  if (
+    row.field.fieldCategory === 'city' &&
+    /search-autocomplete|combobox/.test(String(row.field.fieldType || '')) &&
+    currentProfile.state &&
+    String(value || '').trim() === String(currentProfile.city || '').trim()
+  ) {
+    value = `${currentProfile.city}, ${currentProfile.state}`;
+  }
   return {
     id: row.field.id,
     elementPath: row.field.elementPath,
     signature: row.field.signature,
-    value: row.suggestedValue,
+    value,
     fieldCategory: row.field.fieldCategory,
     fieldType: row.field.fieldType,
     uploadKitKind: hasKitFile ? uploadKitKind : null,
+    jobUploadKey: getRegisterFieldValue('regJobLink'),
     uploadFileMeta: row.uploadFile
       ? { name: row.uploadFile.name, type: row.uploadFile.type, size: row.uploadFile.size }
       : null,
@@ -3952,7 +4599,7 @@ async function focusFieldOnPage(index) {
     fieldType: row.field.fieldType
   };
   try {
-    const { response } = await sendToActiveTab({ action: 'focusField', field: payload });
+    const { response } = await sendToFormFrame({ action: 'focusField', field: payload });
     if (!response || !response.success) {
       showStatus(response?.error || 'Could not locate this field on the page.', 'error', 4000);
     }
@@ -3997,9 +4644,10 @@ async function fillSingleField(index, { triggerBtn, rowEl, useAi = false } = {})
       if (isAiBlockedField(row) && !(row.uploadFile && row.uploadFile.dataUrl)) {
         throw new Error('Upload the file in Application kits, then use regular Fill.');
       }
-      if (!isRowFillable(row) || row.source !== 'ai') {
-        const aiValue = await generateAiValueForRow(row);
-        applyAiValueToRow(row, aiValue, rowEl);
+      // Prefer profile / saved answers; only call LLM when needed.
+      if (!isRowFillable(row) || row.source !== 'ai' || isDeterministicFactRow(row)) {
+        const resolved = await generateAiValueForRow(row);
+        applyAiValueToRow(row, resolved, rowEl);
       }
     }
 
@@ -4015,10 +4663,10 @@ async function fillSingleField(index, { triggerBtn, rowEl, useAi = false } = {})
 
     if (!useAi) setBusy(true);
 
-    const { response } = await sendToActiveTab({ action: 'fillApplicationFields', fields: payload, thresholds });
+    const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: payload, thresholds });
     if (!response || !response.success) throw new Error(response?.error || 'Fill failed.');
     const result = (response.results || [])[0] || { success: false, error: 'No result returned.' };
-    applyFillResultToPlanRow(row, result, { usedAi: useAi });
+    applyFillResultToPlanRow(row, result, { usedAi: useAi && row.source === 'ai' });
     if (rowEl) updateFieldRowAppearance(rowEl, row);
     saveScanState();
     if (result.success) {
@@ -4057,7 +4705,7 @@ async function fillSelectedFields({ useAi = false } = {}) {
 
   try {
     showStatus(`Auto-filling ${payload.length} field${payload.length === 1 ? '' : 's'}...`, 'info', 0);
-    const { response } = await sendToActiveTab({ action: 'fillApplicationFields', fields: payload, thresholds });
+    const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: payload, thresholds });
     if (!response || !response.success) throw new Error(response?.error || 'Fill failed.');
     const results = response.results || [];
     fillableEntries.forEach(({ row, index }, i) => {
@@ -4095,12 +4743,26 @@ async function fillSelectedFieldsWithAi() {
   let generated = 0;
   let filled = 0;
   let failed = 0;
+  let skippedProfile = 0;
 
   try {
     showStatus(`AI: preparing answers for ${targets.length} field${targets.length === 1 ? '' : 's'}…`, 'info', 0);
 
     for (const { row, index } of targets) {
       const rowEl = document.querySelector(`.field-row[data-index="${index}"]`);
+
+      if (isConsentQuestion(row) && !isRowFillable(row)) {
+        row.status = 'Left for you — consent question';
+        updateFieldRowAppearance(rowEl, row);
+        continue;
+      }
+
+      // Self-identification is never guessed: it is answered from the profile or not at all.
+      if (isSelfIdQuestion(row) && !isRowFillable(row)) {
+        row.status = 'Left blank — set it in the profile to answer';
+        updateFieldRowAppearance(rowEl, row);
+        continue;
+      }
 
       if (isAiBlockedField(row)) {
         if (isRowFillable(row)) {
@@ -4109,7 +4771,7 @@ async function fillSelectedFieldsWithAi() {
             selectMatchThreshold: currentSettings.selectMatchThreshold ?? defaultSettings.selectMatchThreshold,
             radioMatchThreshold: currentSettings.radioMatchThreshold ?? defaultSettings.radioMatchThreshold
           };
-          const { response } = await sendToActiveTab({ action: 'fillApplicationFields', fields: payload, thresholds });
+          const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: payload, thresholds });
           const result = (response?.results || [])[0];
           applyFillResultToPlanRow(row, result || { success: false }, { usedAi: false });
           updateFieldRowAppearance(rowEl, row);
@@ -4119,11 +4781,36 @@ async function fillSelectedFieldsWithAi() {
         continue;
       }
 
+      // A profile field with no value stays empty and says where to add it.
+      if (!rowNeedsAi(row) && !isRowFillable(row)) {
+        if (isProfileField(row)) row.status = 'Missing in profile — add it under Autofill details';
+        updateFieldRowAppearance(rowEl, row);
+        skippedProfile += 1;
+        continue;
+      }
+
+      // Keep trusted profile / kit / custom answers — don't overwrite with LLM.
+      if (isDeterministicFactRow(row)) {
+        const payload = [buildFillPayloadFromRow(row)];
+        const thresholds = {
+          selectMatchThreshold: currentSettings.selectMatchThreshold ?? defaultSettings.selectMatchThreshold,
+          radioMatchThreshold: currentSettings.radioMatchThreshold ?? defaultSettings.radioMatchThreshold
+        };
+        const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: payload, thresholds });
+        const result = (response?.results || [])[0] || { success: false, error: 'No result returned.' };
+        applyFillResultToPlanRow(row, result, { usedAi: false });
+        updateFieldRowAppearance(rowEl, row);
+        if (result.success) filled += 1;
+        else failed += 1;
+        await delay(200);
+        continue;
+      }
+
       if (!isRowFillable(row) || row.source !== 'ai') {
         try {
-          const aiValue = await generateAiValueForRow(row);
-          applyAiValueToRow(row, aiValue, rowEl);
-          generated += 1;
+          const resolved = await generateAiValueForRow(row);
+          applyAiValueToRow(row, resolved, rowEl);
+          if (resolved.source === 'ai') generated += 1;
         } catch (error) {
           const errMsg = error.message || String(error);
           if (/api key is not set|invalid openai api key/i.test(errMsg)) {
@@ -4132,7 +4819,7 @@ async function fillSelectedFieldsWithAi() {
           }
           row.fillOutcome = 'failed';
           row.fillError = errMsg;
-          row.status = 'Failed';
+          row.status = /needs your input/i.test(errMsg) ? 'Needs your input' : 'Failed';
           updateFieldRowAppearance(rowEl, row);
           failed += 1;
           await delay(AI_FILL_BATCH_DELAY_MS);
@@ -4148,9 +4835,9 @@ async function fillSelectedFieldsWithAi() {
         selectMatchThreshold: currentSettings.selectMatchThreshold ?? defaultSettings.selectMatchThreshold,
         radioMatchThreshold: currentSettings.radioMatchThreshold ?? defaultSettings.radioMatchThreshold
       };
-      const { response } = await sendToActiveTab({ action: 'fillApplicationFields', fields: payload, thresholds });
+      const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: payload, thresholds });
       const result = (response?.results || [])[0] || { success: false, error: 'No result returned.' };
-      applyFillResultToPlanRow(row, result, { usedAi: true });
+      applyFillResultToPlanRow(row, result, { usedAi: row.source === 'ai' });
       updateFieldRowAppearance(rowEl, row);
       if (result.success) filled += 1;
       else failed += 1;
@@ -4163,7 +4850,10 @@ async function fillSelectedFieldsWithAi() {
     if (failed > 0) {
       showStatus(`AI: filled ${filled}, generated ${generated}, ${failed} failed. Review highlighted fields.`, 'error', 7000);
     } else {
-      showStatus(`AI filled ${filled} field${filled === 1 ? '' : 's'}${generated ? ` (${generated} new answers)` : ''}. Review before submitting.`, 'success', 7000);
+      const missingNote = skippedProfile
+        ? ` ${skippedProfile} profile field${skippedProfile === 1 ? ' is' : 's are'} empty — add ${skippedProfile === 1 ? 'it' : 'them'} to the profile.`
+        : '';
+      showStatus(`Filled ${filled} field${filled === 1 ? '' : 's'}${generated ? `, ${generated} written by AI` : ''}.${missingNote} Review before submitting.`, 'success', 8000);
     }
   } catch (error) {
     showStatus(error.message || String(error), 'error');

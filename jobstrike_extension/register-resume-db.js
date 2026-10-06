@@ -20,9 +20,15 @@
   let authCache = { ok: false, checkedAt: 0, username: '' };
   let driveStatusCacheAt = 0;
   let applicationsCache = { at: 0, resumes: null };
+  let profileLocationCache = { at: 0, profileId: '', city: '', state: '', constraints: null };
   const AUTH_CACHE_TTL_MS = 3 * 60 * 1000;
   const DRIVE_CACHE_TTL_MS = 3 * 60 * 1000;
-  const APPLICATIONS_CACHE_TTL_MS = 60 * 1000;
+  // Reading the whole list takes several requests, so keep it a while;
+  // registering a job invalidates it.
+  const APPLICATIONS_CACHE_TTL_MS = 5 * 60 * 1000;
+  const APPLICATIONS_PAGE_SIZE = 200;
+  const APPLICATIONS_MAX_PAGES = 25;
+  const PROFILE_LOCATION_CACHE_TTL_MS = 5 * 60 * 1000;
   // These hold the *currently bound tab's* values. SmartJobTabSession owns the
   // per-tab copies and swaps them in and out around tab changes.
   let autoAttachedFromJson2docx = { resume: false, cover: false };
@@ -43,6 +49,36 @@
   let registeredRecord = { id: '', at: 0 };
   /** Latest Bid fit preflight result (gates Copy Prompt). */
   let lastBidFitResult = null;
+  /** Last AI compatibility result for the current Note+profile. */
+  let lastAiCompatResult = null;
+  let lastAiCompatCacheKey = '';
+  /** True while an AI compatibility call is in-flight (auto or manual). */
+  let aiCompatPending = false;
+  /** Bumped when Note/profile changes so stale AI responses are ignored. */
+  let aiCompatRunId = 0;
+  /** Set once a run finds no API key, so later edits skip the "Checking…" wait. */
+  let aiCompatKeyMissing = false;
+  /**
+   * Verdicts by posting text + profile location. The Note is rewritten by many
+   * actions (Refresh, tab switches, Generate, Register); without this each one
+   * paid for a fresh API call on text that had already been checked.
+   */
+  const aiCompatCache = new Map();
+  const AI_COMPAT_CACHE_MAX = 40;
+  /**
+   * True once the Note has been replaced by the built resume JSON's copy of the
+   * description. The verdict was reached on the real posting, so it stays
+   * attached to this job instead of being re-run on GPT's rewording of it.
+   */
+  let aiCompatPinned = false;
+  /** Idle time after typing in the Note before an automatic check. */
+  const AI_COMPAT_TYPING_DELAY_MS = 5000;
+  /** Debounce timer for the auto compatibility check (longer than bidFitRefreshTimer). */
+  let autoAiCompatTimer = null;
+  /** True while the user has unsaved edits in the prompt kit fields. */
+  let promptKitEditorDirty = false;
+  /** null follows the preflight level; true/false is a manual override. */
+  let bidFitReasonsExpanded = null;
   let bidFitRefreshTimer = null;
   /** Live percent while json2docx runs, mirrored into the Generate Files step. */
   let generateActivity = null;
@@ -119,6 +155,95 @@
     driveStatusCacheAt = 0;
     websiteDriveStatus = null;
     applicationsCache = { at: 0, resumes: null };
+    profileLocationCache = { at: 0, profileId: '', city: '', state: '', constraints: null };
+    clearAiCompatResult();
+  }
+
+  function clearAiCompatResult() {
+    aiCompatRunId += 1;
+    lastAiCompatResult = null;
+    lastAiCompatCacheKey = '';
+    aiCompatPending = false;
+    aiCompatPinned = false;
+    if (autoAiCompatTimer) {
+      clearTimeout(autoAiCompatTimer);
+      autoAiCompatTimer = null;
+    }
+  }
+
+  /**
+   * Mark compatibility as in-progress immediately so the preflight card shows
+   * "Checking…" instead of flashing regex warns before the AI call starts.
+   * Also invalidates any in-flight AI response for a previous Note/job.
+   */
+  function markAiCompatPending() {
+    aiCompatRunId += 1;
+    lastAiCompatResult = null;
+    lastAiCompatCacheKey = '';
+    aiCompatPending = true;
+    aiCompatPinned = false;
+    if (autoAiCompatTimer) {
+      clearTimeout(autoAiCompatTimer);
+      autoAiCompatTimer = null;
+    }
+  }
+
+  /** Note/job changed: wait on the AI verdict, unless no key means none is coming. */
+  function beginAiCompatWait() {
+    if (aiCompatKeyMissing) clearAiCompatResult();
+    else markAiCompatPending();
+  }
+
+  /**
+   * Identity of a check: the whole posting text (whitespace-insensitive) plus
+   * the profile location. Hashing all of it means an edit in the middle of the
+   * text is a different posting, while a re-scrape of the same page is not.
+   */
+  function aiCompatCacheKey(jobDescription, profileCity, profileState, constraints) {
+    const jd = String(jobDescription || '').replace(/\s+/g, ' ').trim();
+    const c = constraints || {};
+    const facts = [c.sponsorshipRequirement, c.workAuthorizationUS, c.securityClearance, c.citizenship, c.languages, c.remotePreference]
+      .map((v) => String(v || '').trim().toLowerCase())
+      .join('|');
+    let hash = 5381;
+    for (let i = 0; i < jd.length; i += 1) {
+      hash = ((hash << 5) + hash + jd.charCodeAt(i)) | 0;
+    }
+    return [jd.length, hash >>> 0, profileCity || '', profileState || '', facts].join('\u0001');
+  }
+
+  function rememberAiCompatResult(cacheKey, result) {
+    if (!cacheKey || result?.status !== 'done') return;
+    aiCompatCache.delete(cacheKey);
+    aiCompatCache.set(cacheKey, result);
+    while (aiCompatCache.size > AI_COMPAT_CACHE_MAX) {
+      aiCompatCache.delete(aiCompatCache.keys().next().value);
+    }
+  }
+
+  /**
+   * The Note was replaced by the resume JSON's description. Keep the verdict
+   * (or the check still in flight) for the posting instead of re-running it.
+   * @returns {boolean} true when there is a verdict to keep
+   */
+  function pinAiCompatToJob() {
+    if (!aiCompatPending && lastAiCompatResult?.status !== 'done') return false;
+    aiCompatPinned = true;
+    return true;
+  }
+
+  /**
+   * Shape the cached AI compatibility result for the preflight engine.
+   * Returns null when nothing is known yet, a 'pending' marker while the call
+   * is in flight, and the full evidence payload once it lands.
+   */
+  function resolveAiCompatForInputs(inputs) {
+    if (aiCompatPending) return { status: 'pending' };
+    if (!lastAiCompatResult || !lastAiCompatCacheKey) return null;
+    if (aiCompatPinned) return lastAiCompatResult;
+    const key = aiCompatCacheKey(inputs.jobDescription, inputs.profileCity, inputs.profileState, inputs.constraints);
+    if (key !== lastAiCompatCacheKey) return null;
+    return lastAiCompatResult;
   }
 
   async function clearAuthConfig() {
@@ -201,6 +326,9 @@
     el.hidden = !message;
   }
 
+  /** True from the Register click until its request settles. */
+  let registerInFlight = false;
+
   function setRegisterBusy(busy) {
     const btn = document.getElementById('registerJobBtn');
     setRbButtonLoading(btn, busy);
@@ -242,7 +370,11 @@
     const hasJson = hasUsableBuiltResumeJson();
     const inputs = getRegisterFileInputs();
     const hasFiles = Boolean(inputs.resume?.files?.[0] || inputs.cover?.files?.[0]);
-    const registered = Boolean(registeredRecord.id);
+    // Pasting a different job link into the same tab is a new job.
+    const currentLinkKey = canonicalJobLinkKey(document.getElementById('regJobLink')?.value || '');
+    const registered =
+      Boolean(registeredRecord.id) &&
+      (!registeredRecord.jobLinkKey || !currentLinkKey || registeredRecord.jobLinkKey === currentLinkKey);
     const profileId = document.getElementById('regProfileId')?.value?.trim();
 
     const done = {
@@ -387,7 +519,13 @@
     }
   }
 
-  function handleApplyStepClick(stepKey) {
+  /** In-panel confirm; the native one can be suppressed inside the on-page overlay. */
+  function confirmAction(message, options) {
+    if (typeof global.rwhConfirm === 'function') return global.rwhConfirm(message, options);
+    return Promise.resolve(window.confirm(message));
+  }
+
+  async function handleApplyStepClick(stepKey) {
     const step = computeApplyProgress().steps.find((s) => s.key === stepKey);
     if (!step) return;
 
@@ -398,9 +536,10 @@
     }
 
     if (rewindDiscardsWork(stepKey)) {
-      const proceed = window.confirm(
+      const proceed = await confirmAction(
         `Redo from step ${step.number} (${step.label})?\n\n` +
-          'This clears that step and everything after it.'
+          'This clears that step and everything after it.',
+        { confirmLabel: 'Redo from here', danger: true }
       );
       if (!proceed) return;
     }
@@ -410,11 +549,12 @@
     if (stepKey === 'job') requestJobRescrape();
   }
 
-  function resetApplyProgress() {
+  async function resetApplyProgress() {
     if (rewindDiscardsWork('job')) {
-      const proceed = window.confirm(
+      const proceed = await confirmAction(
         'Reset this job’s progress?\n\n' +
-          'This clears the job description, resume JSON, generated files, and the registered mark for this tab.'
+          'This clears the job description, resume JSON, generated files, and the registered mark for this tab.',
+        { confirmLabel: 'Reset', danger: true }
       );
       if (!proceed) return;
     }
@@ -431,10 +571,60 @@
       resetBtn.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        resetApplyProgress();
+        void resetApplyProgress();
+      });
+    }
+
+    const track = document.getElementById('applySteps');
+    if (track && track.dataset.wired !== '1') {
+      track.dataset.wired = '1';
+      track.innerHTML = APPLY_STEPS.map(
+        (step, index) => `
+        <li class="apply-step" data-step="${step.key}">
+          <button type="button" class="apply-step-btn" data-step="${step.key}">
+            <span class="apply-step-node">
+              <span class="apply-step-fill"></span>
+              <span class="apply-step-num">${index + 1}</span>
+              <svg class="apply-step-check" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 12.5 10 17.5 19 7.5"/></svg>
+            </span>
+            <span class="apply-step-label">${step.label}</span>
+          </button>
+        </li>`
+      ).join('');
+      track.addEventListener('click', (event) => {
+        const key = event.target.closest?.('.apply-step-btn')?.dataset.step;
+        if (key) void handleApplyStepClick(key);
       });
     }
     return document.getElementById('rbNextCue') || resetBtn || true;
+  }
+
+  /** One node per step: done / current / blocked at a glance, click to jump or redo. */
+  function renderApplyStepper(progress) {
+    const track = document.getElementById('applySteps');
+    if (!track) return;
+    progress.steps.forEach((step) => {
+      const item = track.querySelector(`.apply-step[data-step="${step.key}"]`);
+      if (!item) return;
+      const state = progress.complete ? 'done' : step.state;
+      ['done', 'current', 'active', 'blocked', 'warn', 'pending'].forEach((name) => {
+        item.classList.toggle(`is-${name}`, name === state);
+      });
+      const btn = item.querySelector('.apply-step-btn');
+      if (btn) {
+        btn.title = applyStepTooltip(step);
+        if (state === 'current' || state === 'active' || state === 'blocked') {
+          btn.setAttribute('aria-current', 'step');
+        } else {
+          btn.removeAttribute('aria-current');
+        }
+      }
+      const fill = item.querySelector('.apply-step-fill');
+      if (fill) {
+        const percent = state === 'active' && Number.isFinite(step.percent) ? step.percent : 0;
+        fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      }
+    });
   }
 
   function renderApplyProgress(progress) {
@@ -456,6 +646,7 @@
     const resetBtn = document.getElementById('applyProgressReset');
     if (resetBtn) resetBtn.hidden = progress.doneCount === 0;
 
+    renderApplyStepper(progress);
     updateNextCue(progress);
   }
 
@@ -467,6 +658,9 @@
 
     cue.classList.remove('is-complete', 'is-blocked', 'is-working');
     cue.dataset.focusStep = '';
+    // The filled button already says what is next; speak up only for a problem,
+    // work in progress, or the finish.
+    cue.hidden = false;
 
     if (progress.complete) {
       if (stepEl) stepEl.textContent = `${progress.total} / ${progress.total}`;
@@ -500,6 +694,9 @@
     if (msgEl) msgEl.textContent = message;
     else cue.textContent = message;
     cue.title = `Go to step ${current.number}: ${current.label}`;
+    // Step 1 has its own status line under the job description.
+    const worthSaying = cue.classList.contains('is-blocked') || cue.classList.contains('is-working');
+    cue.hidden = !worthSaying || current.key === 'job';
   }
 
   /** Clicking a step jumps to the control that advances it. */
@@ -512,6 +709,7 @@
     // Highlight job note block when focusing that step.
     if (key === 'job') {
       const block = document.getElementById('regNoteBlock');
+      setNoteExpanded(true);
       if (block) {
         try {
           block.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -568,7 +766,32 @@
     });
   }
 
+  /** A loaded description collapses to one line; Edit brings the text back. */
+  function setNoteExpanded(expanded) {
+    const block = document.getElementById('regNoteBlock');
+    const toggle = document.getElementById('regNoteToggle');
+    if (!block) return;
+    block.classList.toggle('is-expanded', Boolean(expanded));
+    if (toggle) {
+      toggle.textContent = expanded ? 'Hide' : 'Edit';
+      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+  }
+
+  function wireNoteToggle() {
+    const toggle = document.getElementById('regNoteToggle');
+    if (!toggle || toggle.dataset.wired === '1') return;
+    toggle.dataset.wired = '1';
+    toggle.addEventListener('click', () => {
+      const block = document.getElementById('regNoteBlock');
+      const expand = !block?.classList.contains('is-expanded');
+      setNoteExpanded(expand);
+      if (expand) document.getElementById('regNote')?.focus({ preventScroll: true });
+    });
+  }
+
   function wireApplyNextCue() {
+    wireNoteToggle();
     const cue = document.getElementById('rbNextCue');
     if (!cue || cue.dataset.wired === '1') return;
     cue.dataset.wired = '1';
@@ -582,17 +805,21 @@
     const note = document.getElementById('regNote');
     if (note && note.dataset.applyProgressWired !== '1') {
       note.dataset.applyProgressWired = '1';
-      note.addEventListener('input', () => {
-        refreshApplyProgress();
-        scheduleBidFitRefresh();
+      note._rbPrevLen = String(note.value || '').trim().length;
+      note.addEventListener('input', (event) => {
+        onRegisterNoteChanged(event, { programmatic: false });
       });
     }
     const profile = document.getElementById('regProfileId');
     if (profile && profile.dataset.applyProgressWired !== '1') {
       profile.dataset.applyProgressWired = '1';
       profile.addEventListener('change', () => {
+        // A profile in the same city/state reuses the verdict; a different
+        // location is a different question and is checked again.
+        aiCompatPinned = false;
+        if (!noteJdReadyForAi(document.getElementById('regNote'))) clearAiCompatResult();
         refreshApplyProgress();
-        scheduleBidFitRefresh();
+        scheduleBidFitRefresh({ immediateAi: true });
       });
     }
   }
@@ -625,9 +852,13 @@
     if (buildBtn && !buildBtn.classList.contains('is-loading')) {
       const profileId = document.getElementById('regProfileId')?.value?.trim();
       const fitBlocked = lastBidFitResult?.level === 'blocked';
-      buildBtn.disabled = !profileId || fitBlocked;
+      // Wait for the verdict; the request timeout bounds how long this lasts.
+      const fitChecking = Boolean(lastBidFitResult?.aiChecking);
+      buildBtn.disabled = !profileId || fitBlocked || fitChecking;
       if (!profileId) {
         buildBtn.title = 'Select a profile first';
+      } else if (fitChecking) {
+        buildBtn.title = 'Checking compatibility…';
       } else if (fitBlocked) {
         buildBtn.title =
           lastBidFitResult.reasons?.[0]?.message ||
@@ -651,6 +882,10 @@
       } else {
         autofillBtn.title = 'Fill the current job page from the selected website profile';
       }
+    }
+    const autofillAiBtn = document.getElementById('fillSelectedAiBtn');
+    if (autofillAiBtn && !autofillAiBtn.classList.contains('is-loading')) {
+      autofillAiBtn.disabled = !(backendConnected && Boolean(profileId));
     }
 
     refreshApplyProgress();
@@ -907,16 +1142,24 @@
       return applicationsCache.resumes;
     }
 
+    // The list endpoint pages at 25 by default. Reading only the first page
+    // meant a job registered 26+ applications ago was no longer seen as a
+    // duplicate. Read every page, at the largest size the endpoint allows.
     const config = await getBackendConfig();
-    const res = await fetch(`${config.baseUrl}/api/resume-db`, {
-      headers: apiHeaders(config),
-      cache: 'no-store'
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to load Resume DB applications');
+    const resumes = [];
+    for (let page = 1; page <= APPLICATIONS_MAX_PAGES; page += 1) {
+      const res = await fetch(
+        `${config.baseUrl}/api/resume-db?page=${page}&pageSize=${APPLICATIONS_PAGE_SIZE}`,
+        { headers: apiHeaders(config), cache: 'no-store' }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to load Resume DB applications');
+      }
+      const rows = Array.isArray(data.resumes) ? data.resumes : [];
+      resumes.push(...rows);
+      if (rows.length < APPLICATIONS_PAGE_SIZE) break;
     }
-    const resumes = Array.isArray(data.resumes) ? data.resumes : [];
     applicationsCache = { at: now, resumes };
     return resumes;
   }
@@ -962,7 +1205,13 @@
     setRegisterStatus(`Checking ${config.label.toLowerCase()} in Resume DB…`, 'info');
     const windowDays = await getDuplicateCheckWindowDays();
     const windowSuffix = duplicateWindowLabel(windowDays);
+    const tabToken = tabSession()?.getGeneration();
     const applications = await fetchResumeDbApplications();
+    // The user switched tabs while the list loaded: this answer is about the
+    // other tab's job and must not set this one's duplicate flags.
+    if (tabSession() && !tabSession().isCurrentGeneration(tabToken)) {
+      return { level: 'none', match: null, windowDays, field, stale: true };
+    }
     const forCandidate = applications
       .filter((app) => String(app.profileId) === String(profileId))
       .filter((app) => isWithinDuplicateCheckWindow(app, windowDays));
@@ -1530,6 +1779,12 @@
       );
     }
 
+    if (needsUpload && !status) {
+      throw new Error(
+        'Could not check Google Drive status — check the website connection and try again.'
+      );
+    }
+
     if (needsUpload && !status?.connected && !status?.serviceAccountConfigured) {
       throw new Error(
         'Connect Google Drive on the website Settings page before uploading files from the extension.'
@@ -1566,9 +1821,23 @@
     const select = document.getElementById('regProfileId');
     if (!select || select.dataset.persistenceWired === '1') return;
     select.dataset.persistenceWired = '1';
+    // The side panel and the on-page overlay are separate documents; a profile
+    // picked in one must not leave the other bidding as someone else.
+    if (chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local' || !changes[SELECTED_PROFILE_KEY]) return;
+        const next = String(changes[SELECTED_PROFILE_KEY].newValue || '').trim();
+        if (next === String(select.value || '').trim()) return;
+        if (next && ![...select.options].some((option) => option.value === next)) return;
+        select.value = next;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+
     select.addEventListener('change', () => {
       void saveSelectedProfileId(select.value);
-      void refreshPromptKitUi();
+      promptKitEditorDirty = false;
+      void refreshPromptKitUi({ fillEditor: true, syncRemote: true });
       lastAutoCheckedJobLinkKey = '';
       lastAutoCheckedCompanyKey = '';
       scheduleJobLinkDuplicateCheck(null);
@@ -1626,7 +1895,9 @@
           .join('');
       select.disabled = !backendConnected;
       restoreProfileSelection(select, profiles, preservedId);
-      await refreshPromptKitUi();
+      await refreshPromptKitUi({ syncRemote: true });
+      scheduleJobLinkDuplicateCheck(null, { force: true });
+      scheduleCompanyDuplicateCheck(null, { force: true });
       syncResumeBuilderActionButtons();
     } catch (err) {
       if (loadSeq !== profilesLoadSeq) return;
@@ -1744,11 +2015,29 @@
     if (valid.length === 1) {
       const file = valid[0];
       const ext = fileExtension(file.name);
-      if (RESUME_ACCEPT.includes(ext)) {
-        resume = file;
-      } else {
+      // "Cover_Letter.docx" is a cover letter even though a resume may be .docx too.
+      const looksLikeCover = scoreCoverName(file.name) > scoreResumeName(file.name);
+      if (!RESUME_ACCEPT.includes(ext) || (looksLikeCover && COVER_ACCEPT.includes(ext))) {
         cover = file;
+      } else {
+        resume = file;
       }
+      const single = rejected.length ? `Skipped invalid file(s): ${rejected.join(', ')}` : undefined;
+      return { resume, cover, warning: single, keepOtherSlot: true };
+    } else if (
+      valid.length === 2 &&
+      scoreCoverName(valid[0].name) === 0 &&
+      scoreCoverName(valid[1].name) === 0 &&
+      valid[0].name.replace(/\.[^.]+$/, '').toLowerCase() === valid[1].name.replace(/\.[^.]+$/, '').toLowerCase()
+    ) {
+      // resume.docx + resume.pdf: one document in two formats, not a resume and a cover letter.
+      const docx = valid.find((f) => fileExtension(f.name) === '.docx') || valid[0];
+      return {
+        resume: docx,
+        cover: null,
+        warning: `Both files are the same document; attached ${docx.name} as the resume.`,
+        keepOtherSlot: true,
+      };
     } else {
       const [a, b] = valid;
       const aCover = scoreCoverName(a.name);
@@ -1874,12 +2163,23 @@
       return;
     }
 
-    assignFileToInput(resume, result.resume || null);
-    assignFileToInput(cover, result.cover || null);
-    autoAttachedFromJson2docx = {
-      resume: false,
-      cover: false,
-    };
+    // A single dropped file replaces only its own slot; dropping a cover
+    // letter must not remove the resume that Generate attached.
+    if (result.keepOtherSlot) {
+      if (result.resume) assignFileToInput(resume, result.resume);
+      if (result.cover) assignFileToInput(cover, result.cover);
+      autoAttachedFromJson2docx = {
+        resume: result.resume ? false : autoAttachedFromJson2docx.resume,
+        cover: result.cover ? false : autoAttachedFromJson2docx.cover,
+      };
+    } else {
+      assignFileToInput(resume, result.resume || null);
+      assignFileToInput(cover, result.cover || null);
+      autoAttachedFromJson2docx = {
+        resume: false,
+        cover: false,
+      };
+    }
     filesNeedRegeneration = false;
     updateRegisterComboDropUi();
     renderGeneratedAttachmentChips();
@@ -2019,11 +2319,20 @@
       };
     }
 
+    // What the user typed into Bid details after pasting the JSON is a
+    // correction, and it is what gets registered.
+    const userEdited = (id) => document.getElementById(id)?.dataset.fillSource === 'user';
+    if (merged.fromJson) {
+      if (userEdited('regJobTitle')) merged.fields.jobTitle = formFields.jobTitle;
+      if (userEdited('regCompany')) merged.fields.companyName = formFields.companyName;
+      if (userEdited('regNote')) merged.fields.note = formFields.note;
+    }
+
     // Keep the visible form in sync with JSON before submit (link unchanged).
     if (merged.fromJson) {
-      if (merged.fields.jobTitle) setRegisterFieldValue('regJobTitle', merged.fields.jobTitle, 'resume-json');
-      if (merged.fields.companyName) setRegisterFieldValue('regCompany', merged.fields.companyName, 'resume-json');
-      if (merged.fields.note) setRegisterFieldValue('regNote', merged.fields.note, 'resume-json');
+      if (merged.fields.jobTitle && !userEdited('regJobTitle')) setRegisterFieldValue('regJobTitle', merged.fields.jobTitle, 'resume-json');
+      if (merged.fields.companyName && !userEdited('regCompany')) setRegisterFieldValue('regCompany', merged.fields.companyName, 'resume-json');
+      if (merged.fields.note && !userEdited('regNote')) setRegisterFieldValue('regNote', merged.fields.note, 'resume-json');
       resumeJsonOverrideActive = true;
     }
 
@@ -2264,6 +2573,11 @@
       autoAttachedFromJson2docx: { ...autoAttachedFromJson2docx },
       promptCopiedAt,
       registeredRecord: { ...registeredRecord },
+      // Failed or in-flight checks are not worth keeping; they re-run on return.
+      aiCompat:
+        lastAiCompatResult?.status === 'done' && lastAiCompatCacheKey
+          ? { result: lastAiCompatResult, cacheKey: lastAiCompatCacheKey, pinned: aiCompatPinned }
+          : null,
       registerStatus: captureRegisterStatus()
     };
   }
@@ -2271,6 +2585,9 @@
   function restoreRegisterSession(data) {
     const state = data || {};
     isRestoringSession = true;
+    // The verdict in memory belongs to the tab being left. Drop it before any
+    // field is restored, or applying this tab's resume JSON would pin it here.
+    clearAiCompatResult();
     try {
       if (resumeJsonApplyTimer) {
         clearTimeout(resumeJsonApplyTimer);
@@ -2309,6 +2626,7 @@
       promptCopiedAt = Number(state.promptCopiedAt || 0);
       registeredRecord = {
         id: String(state.registeredRecord?.id || ''),
+        jobLinkKey: String(state.registeredRecord?.jobLinkKey || ''),
         at: Number(state.registeredRecord?.at || 0)
       };
       generateActivity = null;
@@ -2328,6 +2646,7 @@
       REGISTER_DRAFT_FIELDS.forEach((id) => {
         setRegisterFieldValue(id, state.draft?.[id] || '', state.fillSources?.[id]);
       });
+      restoreAiCompatFromSession(state.aiCompat);
 
       const inputs = getRegisterFileInputs();
       const resumeFile = state.files?.resume || null;
@@ -2342,9 +2661,17 @@
       restoreRegisterStatus(state.registerStatus);
       setGenerateProgress({ hidden: true, percent: 0, message: '' });
       syncResumeBuilderActionButtons();
+      // The "Edit JSON" window belongs to the tab it was opened on; left open,
+      // Apply would write that tab's text into this one.
+      const editModal = document.getElementById('rbMaxModal');
+      if (editModal) editModal.hidden = true;
     } finally {
       isRestoringSession = false;
     }
+    // Saved duplicate flags can be out of date: the profile is shared by all
+    // tabs, and the record may have been added or removed since.
+    scheduleJobLinkDuplicateCheck(null, { force: true });
+    scheduleCompanyDuplicateCheck(null, { force: true });
   }
 
   /** Drops File objects, which cannot be serialized into chrome.storage. */
@@ -2368,6 +2695,7 @@
       autoAttachedFromJson2docx: data.autoAttachedFromJson2docx || null,
       promptCopiedAt: Number(data.promptCopiedAt || 0),
       registeredRecord: data.registeredRecord || null,
+      aiCompat: data.aiCompat || null,
       registerStatus: data.registerStatus || null
     };
   }
@@ -2408,13 +2736,84 @@
   function setRegisterFieldValue(id, value, source) {
     const el = document.getElementById(id);
     if (!el) return;
-    el.value = value == null ? '' : String(value);
+    const next = value == null ? '' : String(value);
+    const unchanged = el.value.trim() === next.trim();
+    el.value = next;
     if (source) el.dataset.fillSource = source;
     else delete el.dataset.fillSource;
     if (id === 'regNote') {
-      refreshApplyProgress();
-      scheduleBidFitRefresh();
+      // Generate and Register re-apply the same text; that is not a new posting.
+      if (!unchanged) onRegisterNoteChanged(null, { programmatic: true });
+      if (typeof global.renderPostingMeta === 'function') global.renderPostingMeta();
     }
+    renderBidDetailsSummary();
+  }
+
+  /**
+   * One-line readout on the collapsed "Bid details" header, so the title and
+   * company that will be registered are checkable without opening it — and a
+   * missing one is visible before Register fails on it.
+   */
+  function renderBidDetailsSummary() {
+    const el = document.getElementById('regDetailsSummary');
+    if (!el) return;
+    const headTitle = document.getElementById('regJobHeadTitle');
+    const mark = document.getElementById('regJobMark');
+    const value = (id) => String(document.getElementById(id)?.value || '').trim();
+    const title = value('regJobTitle');
+    const company = value('regCompany');
+    const link = value('regJobLink');
+
+    // The company initial stands in for a logo once there is a company.
+    if (mark) {
+      const initial = (company.match(/[A-Za-z0-9]/) || [''])[0].toUpperCase();
+      if (!mark.dataset.icon) mark.dataset.icon = mark.innerHTML;
+      if (initial) mark.textContent = initial;
+      else mark.innerHTML = mark.dataset.icon;
+      mark.classList.toggle('has-initial', Boolean(initial));
+    }
+
+    if (!title && !company && !link) {
+      if (headTitle) headTitle.textContent = 'No job loaded';
+      el.textContent = 'Open a job posting and press Refresh';
+      el.dataset.state = 'idle';
+      el.removeAttribute('title');
+      return;
+    }
+
+    if (headTitle) headTitle.textContent = title || 'Untitled job';
+
+    const missing = [];
+    if (!title) missing.push('job title');
+    if (!company) missing.push('company');
+    if (!link) missing.push('job link');
+
+    if (missing.length) {
+      el.textContent = `Missing ${missing.join(', ')}`;
+      el.dataset.state = 'warn';
+      el.title = 'Open this card and fill these in before registering';
+      return;
+    }
+
+    let host = '';
+    try {
+      host = new URL(link).hostname.replace(/^www\./, '');
+    } catch (_) {
+      /* keep the company alone */
+    }
+    el.textContent = host ? `${company} · ${host}` : company;
+    el.dataset.state = 'ready';
+    el.title = `${title} · ${company}\n${link}`;
+  }
+
+  function wireBidDetailsSummary() {
+    ['regJobTitle', 'regCompany', 'regJobLink'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.detailsSummaryWired === '1') return;
+      el.dataset.detailsSummaryWired = '1';
+      el.addEventListener('input', renderBidDetailsSummary);
+    });
+    renderBidDetailsSummary();
   }
 
   function updateResumeJsonHint(message, type) {
@@ -2451,7 +2850,10 @@
    * Apply built resume JSON to Register draft fields (title/company/note).
    * Does not change job link.
    */
-  function applyResumeJsonToRegisterForm(rawText, { silent = false, showStatus } = {}) {
+  function applyResumeJsonToRegisterForm(rawText, { silent = false, showStatus, respectUserEdits = false } = {}) {
+    // A field the user typed in after the JSON was pasted stays as typed.
+    const keepsUserEdit = (id) =>
+      respectUserEdits && document.getElementById(id)?.dataset.fillSource === 'user';
     const mapper = global.SmartJobResumeJsonMapper;
     const clearBtn = document.getElementById('regResumeJsonClearBtn');
     const text = String(rawText || '').trim();
@@ -2494,9 +2896,9 @@
       return { ok: false, error: 'missing register fields', fields };
     }
 
-    if (fields.jobTitle) setRegisterFieldValue('regJobTitle', fields.jobTitle, 'resume-json');
-    if (fields.companyName) setRegisterFieldValue('regCompany', fields.companyName, 'resume-json');
-    if (fields.jobDescription) setRegisterFieldValue('regNote', fields.jobDescription, 'resume-json');
+    if (fields.jobTitle && !keepsUserEdit('regJobTitle')) setRegisterFieldValue('regJobTitle', fields.jobTitle, 'resume-json');
+    if (fields.companyName && !keepsUserEdit('regCompany')) setRegisterFieldValue('regCompany', fields.companyName, 'resume-json');
+    if (fields.jobDescription && !keepsUserEdit('regNote')) setRegisterFieldValue('regNote', fields.jobDescription, 'resume-json');
     if (fields.companyName && !isRestoringSession) {
       scheduleCompanyDuplicateCheckFromResumeJson(fields.companyName, showStatus);
     }
@@ -2672,6 +3074,29 @@
     return { resumeFile, coverFile };
   }
 
+  /** True while json2docx is producing files for a Generate click. */
+  let generateInFlight = false;
+
+  /** Store generated files in a tab's saved draft when that tab is not on screen. */
+  function saveGeneratedFilesToTab(tabId, preferred) {
+    // Same shape attachGeneratedFilesToRegister reads.
+    const resumeFile = preferred?.resume?.file || null;
+    const coverFile = preferred?.coverLetter?.file || null;
+    if (!tabId || (!resumeFile && !coverFile)) return false;
+    return Boolean(
+      tabSession()?.mutateSlice?.(tabId, 'register', (slice) => ({
+        ...(slice || {}),
+        files: { resume: resumeFile, cover: coverFile },
+        fileMeta: {
+          resumeName: resumeFile?.name || '',
+          coverName: coverFile?.name || '',
+          generatedAt: Date.now(),
+        },
+        autoAttachedFromJson2docx: { resume: Boolean(resumeFile), cover: Boolean(coverFile) },
+      }))
+    );
+  }
+
   async function generateFilesFromResumeJson(showStatus) {
     const api = global.SmartJobJson2Docx;
     const mapper = global.SmartJobResumeJsonMapper;
@@ -2698,8 +3123,14 @@
       throw new Error('Local json2docx server is offline. Start it or check Settings.');
     }
 
-    // Keep Register draft in sync before generate.
-    applyResumeJsonToRegisterForm(raw, { silent: true });
+    if (generateInFlight) return null;
+    generateInFlight = true;
+    const originToken = tabSession()?.getGeneration();
+    const originTabId = tabSession()?.getBoundTabId?.();
+
+    // Keep Register draft in sync before generate, without undoing a title or
+    // company the user corrected by hand after pasting the JSON.
+    applyResumeJsonToRegisterForm(raw, { silent: true, respectUserEdits: true });
 
     if (btn) {
       setRbButtonLoading(btn, true);
@@ -2724,6 +3155,15 @@
         },
       });
 
+      // Switched tabs while json2docx ran: these files are for the other job.
+      if (tabSession() && !tabSession().isCurrentGeneration(originToken)) {
+        const saved = saveGeneratedFilesToTab(originTabId, result.preferred);
+        const note = saved
+          ? 'Files finished generating for the tab you started on. Switch back to it to see them.'
+          : 'Files finished generating after you switched tabs. Generate again on that tab.';
+        if (showStatus) showStatus(note, 'info');
+        return result;
+      }
       const attached = attachGeneratedFilesToRegister(result.preferred);
       const names = [];
       if (attached.resumeFile) names.push(attached.resumeFile.name);
@@ -2754,6 +3194,7 @@
       if (showStatus) showStatus(message, 'error');
       throw err;
     } finally {
+      generateInFlight = false;
       if (btn) {
         setRbButtonLoading(btn, false);
       }
@@ -2816,49 +3257,478 @@
     if (spinner) spinner.hidden = !loading;
   }
 
+  /** Second line of the card: where the verdict came from. */
+  function bidFitSourceLabel(result) {
+    if (result.aiChecking) return '';
+    if (result.aiFailed) return 'AI check failed';
+    if (!result.aiRan) return 'Local rules only · AI check not run';
+    const compat = (result.criteria || []).filter((c) => c.id === 'compatibility');
+    const blockers = compat.filter((c) => c.status === 'fail').length;
+    const warnings = compat.filter((c) => c.status === 'warn').length;
+    if (blockers) return `AI check · ${blockers} hard blocker${blockers === 1 ? '' : 's'}`;
+    if (warnings) return `AI check · ${warnings} warning${warnings === 1 ? '' : 's'}`;
+    return 'AI check passed';
+  }
+
   function renderBidFitCard(result) {
     const cue = document.getElementById('rbFitCue');
     const text = document.getElementById('rbFitCueText');
+    const sub = document.getElementById('rbFitSub');
+    const toggle = document.getElementById('rbFitToggle');
+    const list = document.getElementById('rbFitReasons');
+    const foot = document.getElementById('rbFitFoot');
+    const recheckBtn = document.getElementById('rbFitAiCompatBtn');
     if (!cue || !text) return;
 
-    if (!result) {
+    // Preflight judges a job description, so with none present it would only
+    // repeat what the step cue already says. Stay hidden until there is a JD.
+    const noJobDescription =
+      result?.criteria?.find((c) => c.id === 'jd_quality')?.status === 'fail';
+
+    if (!result || noJobDescription) {
       cue.hidden = true;
       text.textContent = 'Preflight: —';
+      if (list) {
+        list.textContent = '';
+        list.hidden = true;
+      }
       return;
     }
 
     const preflight = global.SmartJobBidFitPreflight;
+    const level = result.level || 'ready';
+    const isChecking = Boolean(result.aiChecking);
+    const aiFailed = Boolean(result.aiFailed);
+    const hasProblem = level === 'blocked' || level === 'risky' || aiFailed;
+    const shownLevel = isChecking ? 'ready' : aiFailed && level === 'ready' ? 'risky' : level;
+
+    // Always visible once there is a JD: a pass is confirmed, not implied by
+    // absence, and Re-check stays reachable when the verdict looks wrong.
     cue.hidden = false;
-    cue.dataset.level = result.level || 'ready';
+    if (cue.dataset.level !== shownLevel) bidFitReasonsExpanded = null;
+    cue.dataset.level = shownLevel;
+    cue.dataset.state = isChecking ? 'checking' : shownLevel;
     text.textContent = preflight?.summarizeFit?.(result) || 'Preflight: —';
-    const detail = result.reasons?.[0]?.message || '';
-    cue.title = detail;
+
+    if (sub) {
+      const label = bidFitSourceLabel(result);
+      sub.textContent = label;
+      sub.hidden = !label;
+    }
+    if (foot) foot.hidden = isChecking || !result.overridable;
+    if (recheckBtn && !recheckBtn.classList.contains('is-loading')) {
+      recheckBtn.disabled = isChecking;
+    }
+
+    const reasons = Array.isArray(result.reasons) ? result.reasons.slice(0, 8) : [];
+    if (list) {
+      list.textContent = '';
+      reasons.forEach((reason) => {
+        const item = document.createElement('li');
+        item.className = 'rb-fit-reason';
+        item.dataset.severity = reason.severity || 'info';
+        const dot = document.createElement('span');
+        dot.className = 'rb-fit-reason-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        const msg = document.createElement('span');
+        msg.className = 'rb-fit-reason-text';
+        msg.textContent = reason.message || '';
+        item.append(dot, msg);
+        list.appendChild(item);
+      });
+
+      // Problems always show reasons clearly; checking has no reason list yet.
+      const shouldExpand =
+        bidFitReasonsExpanded == null ? hasProblem && !isChecking : bidFitReasonsExpanded;
+      const canExpand = reasons.length > 0;
+      list.hidden = !canExpand || !shouldExpand;
+      if (toggle) {
+        toggle.disabled = !canExpand;
+        toggle.setAttribute('aria-expanded', String(canExpand && shouldExpand));
+      }
+      cue.classList.toggle('is-open', canExpand && shouldExpand);
+    }
+  }
+
+  function wireBidFitToggle() {
+    const toggle = document.getElementById('rbFitToggle');
+    if (!toggle || toggle.dataset.wired === '1') return;
+    toggle.dataset.wired = '1';
+    toggle.addEventListener('click', () => {
+      const list = document.getElementById('rbFitReasons');
+      if (!list) return;
+      bidFitReasonsExpanded = list.hidden;
+      renderBidFitCard(lastBidFitResult);
+    });
+  }
+
+  const AI_AUTOFILL_SETTINGS_KEY = 'autofill_settings';
+
+  function readAiAutofillSettings() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([AI_AUTOFILL_SETTINGS_KEY], (result) => {
+        const s = result[AI_AUTOFILL_SETTINGS_KEY] || {};
+        resolve({
+          apiKey: String(s.openaiApiKey || '').trim(),
+          baseUrl:
+            global.SmartJobAiFill?.normalizeChatBaseUrl?.(s.openaiBaseUrl) ||
+            String(s.openaiBaseUrl || '').trim() ||
+            global.SmartJobAiFill?.DEFAULT_BASE_URL ||
+            'https://api.openai.com/v1',
+          model: String(s.openaiModel || '').trim() || global.SmartJobAiFill?.DEFAULT_MODEL || 'gpt-4o-mini',
+        });
+      });
+    });
+  }
+
+  /**
+   * Run the AI compatibility screen for the current Note + profile.
+   *
+   * The model's hard blockers are re-validated locally before they can reject a
+   * job, so a confident-but-unsupported claim degrades to a warning instead of
+   * discarding a posting.
+   *
+   * @param {Function|null} showStatus  - toast callback; null = silent auto-mode
+   * @param {{ manual?: boolean }} opts - manual=true: show button + toasts
+   */
+  async function runAiCompatCheck(showStatus, { manual = false } = {}) {
+    const ai = global.SmartJobAiFill;
+    const engine = global.SmartJobBidFitPreflight;
+    const btn = document.getElementById('rbFitAiCompatBtn');
+
+    const releasePendingWithoutResult = async () => {
+      aiCompatPending = false;
+      await refreshBidFitPreflight();
+    };
+
+    if (!ai?.evaluateJobCompatibility) {
+      if (showStatus) showStatus('AI module not loaded. Reload the extension.', 'error');
+      await releasePendingWithoutResult();
+      return null;
+    }
+
+    const inputs = await collectBidFitInputs();
+    const jd = String(inputs.jobDescription || '').trim();
+    if (!jd || jd.length < engine?.MIN_JD_CHARS) {
+      if (showStatus) showStatus('Add a full job description in Note first.', 'warn');
+      await releasePendingWithoutResult();
+      return null;
+    }
+
+    const settings = await readAiAutofillSettings();
+    aiCompatKeyMissing = !settings.apiKey;
+    if (!settings.apiKey) {
+      if (manual) {
+        if (typeof global.openSettingsPanel === 'function') {
+          global.openSettingsPanel();
+        } else {
+          document.querySelector('[data-tab="settings"]')?.click();
+        }
+        if (showStatus) showStatus('Add an API key under Settings → AI autofill.', 'error');
+      }
+      // No key: drop pending so regex soft signals can show as fallback.
+      await releasePendingWithoutResult();
+      return null;
+    }
+
+    const cacheKey = aiCompatCacheKey(jd, inputs.profileCity, inputs.profileState, inputs.constraints);
+    if (!manual && aiCompatPinned && lastAiCompatResult) {
+      return lastAiCompatResult;
+    }
+    if (!manual && cacheKey === lastAiCompatCacheKey && lastAiCompatResult) {
+      aiCompatPending = false;
+      return lastAiCompatResult;
+    }
+    // Same posting and location checked earlier in this session: reuse it.
+    if (!manual && aiCompatCache.has(cacheKey)) {
+      aiCompatRunId += 1;
+      lastAiCompatResult = aiCompatCache.get(cacheKey);
+      lastAiCompatCacheKey = cacheKey;
+      aiCompatPending = false;
+      syncTabSession();
+      await refreshBidFitPreflight();
+      return lastAiCompatResult;
+    }
+    // A manual re-check judges the text now in the Note, on its own terms.
+    if (manual) aiCompatPinned = false;
+
+    const runId = ++aiCompatRunId;
+    aiCompatPending = true;
+    await refreshBidFitPreflight();
+
+    if (manual && btn) {
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+    }
+
+    try {
+      // Point the model at every sentence the local rules find suspicious, so a
+      // requirement buried in a long posting gets an explicit ruling.
+      const signals = engine?.collectHardSignals
+        ? engine.collectHardSignals(jd, { profileState: inputs.profileState })
+        : [];
+      const result = await ai.evaluateJobCompatibility(settings.apiKey, settings.model, {
+        jobDescription: jd,
+        constraints: inputs.constraints,
+        baseUrl: settings.baseUrl,
+        signals,
+      });
+
+      // Note/job changed while this call was in flight — discard stale result.
+      if (runId !== aiCompatRunId) return null;
+
+      // Only evidence-backed blockers may reject; the rest become warnings.
+      const { accepted } = engine?.validateHardBlockers
+        ? engine.validateHardBlockers(result.blockers, jd)
+        : { accepted: [] };
+
+      // Record which quotes were found in the checked text. The Note may later
+      // hold the resume JSON's rewording, where the same quote no longer appears.
+      const acceptedEvidence = new Set(accepted.map((b) => b.evidence));
+      lastAiCompatResult = {
+        status: 'done',
+        blockers: result.blockers.map((b) => ({
+          ...b,
+          validated: acceptedEvidence.has(String(b.evidence || '').trim()),
+        })),
+        warnings: result.warnings,
+        summary: result.summary,
+        signals,
+        signalReviews: result.signalReviews,
+      };
+      lastAiCompatCacheKey = cacheKey;
+      rememberAiCompatResult(cacheKey, lastAiCompatResult);
+      aiCompatPending = false;
+      // Keep the verdict with this tab's draft so switching back does not re-run it.
+      syncTabSession();
+
+      await refreshBidFitPreflight();
+
+      if (manual && showStatus) {
+        showStatus(
+          accepted.length ? 'Compatibility check found a hard blocker.' : 'Compatibility check complete.',
+          accepted.length ? 'warn' : 'success'
+        );
+      }
+      return lastAiCompatResult;
+    } catch (err) {
+      if (runId !== aiCompatRunId) return null;
+      aiCompatPending = false;
+      const msg = err?.message || String(err);
+      // A failed call must not look like a rejection — record it as unavailable.
+      lastAiCompatResult = { status: 'error', message: msg };
+      lastAiCompatCacheKey = cacheKey;
+      if (showStatus) showStatus(msg, 'error');
+      await refreshBidFitPreflight();
+      return null;
+    } finally {
+      if (manual && btn) {
+        btn.disabled = false;
+        btn.classList.remove('is-loading');
+      }
+    }
+  }
+
+  /**
+   * Put back a verdict saved with a tab's draft. Restoring the Note has just
+   * marked the check pending; the queued auto-run then hits this cache instead
+   * of calling the API again.
+   */
+  function restoreAiCompatFromSession(saved) {
+    const result = saved?.result;
+    const cacheKey = String(saved?.cacheKey || '');
+    const note = document.getElementById('regNote');
+    if (result?.status !== 'done' || !cacheKey || !noteJdReadyForAi(note)) return;
+
+    aiCompatRunId += 1;
+    lastAiCompatResult = result;
+    lastAiCompatCacheKey = cacheKey;
+    aiCompatPending = false;
+    aiCompatPinned = Boolean(saved.pinned);
+    rememberAiCompatResult(cacheKey, result);
+
+    void refreshBidFitPreflight();
+  }
+
+  /** A check that throws outside its own handling must not leave "Checking…" up. */
+  function releaseAiCompatAfterCrash() {
+    aiCompatPending = false;
+    void refreshBidFitPreflight();
+  }
+
+  /**
+   * Schedule an automatic (silent) compatibility check after the JD settles.
+   * Paste / bulk fill uses delay 0; typing uses 2s so mid-edit doesn't spam.
+   */
+  function scheduleAutoAiCompat({ immediate = false } = {}) {
+    if (autoAiCompatTimer) clearTimeout(autoAiCompatTimer);
+    autoAiCompatTimer = setTimeout(() => {
+      autoAiCompatTimer = null;
+      runAiCompatCheck(null, { manual: false }).catch(releaseAiCompatAfterCrash);
+    }, immediate ? 0 : AI_COMPAT_TYPING_DELAY_MS);
+  }
+
+  function wireBidFitAiCompat(showStatus) {
+    const btn = document.getElementById('rbFitAiCompatBtn');
+    if (btn && btn.dataset.wired !== '1') {
+      btn.dataset.wired = '1';
+      btn.addEventListener('click', () => {
+        // Manual re-check: clear cache so it always re-runs.
+        lastAiCompatResult = null;
+        lastAiCompatCacheKey = '';
+        markAiCompatPending();
+        runAiCompatCheck(showStatus, { manual: true }).catch(releaseAiCompatAfterCrash);
+      });
+    }
+
+    // A key saved in Settings makes the AI verdict worth waiting for again.
+    if (btn && chrome.storage?.onChanged && btn.dataset.keyWatch !== '1') {
+      btn.dataset.keyWatch = '1';
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes[AI_AUTOFILL_SETTINGS_KEY]) aiCompatKeyMissing = false;
+      });
+    }
+
+    // Escape hatch for a wrong AI blocker; shown only when nothing else blocks.
+    const copyAnywayBtn = document.getElementById('rbFitCopyAnywayBtn');
+    if (copyAnywayBtn && copyAnywayBtn.dataset.wired !== '1') {
+      copyAnywayBtn.dataset.wired = '1';
+      copyAnywayBtn.addEventListener('click', () => {
+        copyAnywayBtn.disabled = true;
+        buildAndCopyPromptFromKit(showStatus, { force: true })
+          .catch((err) => {
+            const msg = err.message || String(err);
+            setRegisterStatus(msg, 'error');
+            if (showStatus) showStatus(msg, 'error');
+          })
+          .finally(() => {
+            copyAnywayBtn.disabled = false;
+          });
+      });
+    }
+  }
+
+  /**
+   * Candidate facts the compatibility screen is allowed to reject a job on.
+   *
+   * Fixed defaults for this product:
+   *   - sponsorshipRequirement → "No" (US citizen; never needs sponsorship)
+   *   - securityClearance → "No" (reject jobs that require active clearance)
+   *   - remotePreference → "Remote" when blank
+   *
+   * Salary / travel % / employment-type are intentionally not checked.
+   */
+  function buildCandidateConstraints(record) {
+    const str = (v) => String(v ?? '').trim();
+    // The profile's website "Autofill details" hold these; the defaults apply
+    // to a profile that has not filled them in.
+    const details = record?.autofill && typeof record.autofill === 'object' ? record.autofill : {};
+    const languages = str(details.languages);
+    return {
+      city: str(record?.city),
+      state: str(record?.state),
+      yearsOfExperience: str(details.yearsOfExperience),
+      sponsorshipRequirement: str(details.sponsorshipRequirement) || 'No',
+      workAuthorizationUS: str(details.workAuthorizationUS) || 'Yes',
+      relocationPreference: str(details.relocationPreference),
+      remotePreference: 'Remote',
+      securityClearance: str(details.securityClearance) || 'No',
+      citizenship: str(details.citizenship) || 'US citizen',
+      languages: !languages || /^english$/i.test(languages) ? 'English only' : languages,
+    };
+  }
+
+  /**
+   * City/state plus hard constraints for the selected profile.
+   * Preflight reruns on every Note keystroke, so this stays cached.
+   */
+  async function getProfileLocation(profileId) {
+    const empty = { city: '', state: '', constraints: buildCandidateConstraints(null) };
+    const id = String(profileId || '').trim();
+    if (!id) return empty;
+
+    const now = Date.now();
+    if (
+      profileLocationCache.profileId === id &&
+      profileLocationCache.at &&
+      now - profileLocationCache.at < PROFILE_LOCATION_CACHE_TTL_MS
+    ) {
+      return {
+        city: profileLocationCache.city,
+        state: profileLocationCache.state,
+        constraints: profileLocationCache.constraints || buildCandidateConstraints(null),
+      };
+    }
+    if (!backendConnected) return empty;
+
+    try {
+      const record = await fetchProfileRecord(id);
+      const city = String(record?.city || '').trim();
+      const state = String(record?.state || '').trim();
+      const constraints = buildCandidateConstraints(record);
+      profileLocationCache = { at: now, profileId: id, city, state, constraints };
+      return { city, state, constraints };
+    } catch (_) {
+      return empty;
+    }
   }
 
   async function collectBidFitInputs() {
     const api = global.SmartJobPromptKit;
     const noteText = document.getElementById('regNote')?.value || '';
     const profileId = getSelectedRegisterProfileId();
-    let template = document.getElementById('regPromptKitTemplate')?.value || '';
-    let resumeTemplateJson =
-      document.getElementById('regPromptKitResumeJson')?.value || '';
+    // Unedited editor text is not the kit (see buildAndCopyPromptFromKit).
+    let template = promptKitEditorDirty
+      ? document.getElementById('regPromptKitTemplate')?.value || ''
+      : '';
+    let resumeTemplateJson = promptKitEditorDirty
+      ? document.getElementById('regPromptKitResumeJson')?.value || ''
+      : '';
+
+    const {
+      city: profileCity,
+      state: profileState,
+      constraints,
+    } = await getProfileLocation(profileId);
 
     if (api && profileId) {
       try {
-        const { kit } = await api.getPromptKit(profileId);
+        const { kit } = await api.getPromptKit(profileId, { preferLocal: true });
         if (!template.trim()) template = kit.template || '';
         if (!resumeTemplateJson.trim()) resumeTemplateJson = kit.resumeTemplateJson || '';
-        const jobDescription = api.resolveJobDescription({ noteText, kit });
-        return { jobDescription, template, resumeTemplateJson };
+        const posting = global.SmartJobPostingContext?.getLastPosting?.() || null;
+        const jobDescription = api.resolveJobDescriptionForCompat({ noteText, kit, posting });
+        return {
+          jobDescription,
+          template,
+          resumeTemplateJson,
+          profileCity,
+          profileState,
+          constraints,
+          aiCompat: resolveAiCompatForInputs({ jobDescription, profileCity, profileState, constraints }),
+        };
       } catch (_) {
         /* fall through to editor fields */
       }
     }
 
+    const posting = global.SmartJobPostingContext?.getLastPosting?.() || null;
+    const jobDescription = api
+      ? api.resolveJobDescriptionForCompat({ noteText, kit: null, posting })
+      : noteText;
     return {
-      jobDescription: noteText,
+      jobDescription,
       template,
       resumeTemplateJson,
+      profileCity,
+      profileState,
+      constraints,
+      aiCompat: resolveAiCompatForInputs({
+        jobDescription,
+        profileCity,
+        profileState,
+        constraints,
+      }),
     };
   }
 
@@ -2876,15 +3746,91 @@
     return lastBidFitResult;
   }
 
-  function scheduleBidFitRefresh() {
+  function scheduleBidFitRefresh({ immediateAi = false } = {}) {
     if (bidFitRefreshTimer) clearTimeout(bidFitRefreshTimer);
     bidFitRefreshTimer = setTimeout(() => {
       bidFitRefreshTimer = null;
       void refreshBidFitPreflight();
     }, 320);
+    // Paste/bulk fill: start AI immediately. Typing: wait 2s to settle.
+    scheduleAutoAiCompat({ immediate: Boolean(immediateAi) });
   }
 
-  async function refreshPromptKitUi({ fillEditor = false } = {}) {
+  /**
+   * After Refresh / job load: ensure AI compat runs for the current Note
+   * even when text length barely changed (same-length replace).
+   */
+  function notifyJobLoadedForBidFit() {
+    const note = document.getElementById('regNote');
+    if (!noteJdReadyForAi(note)) {
+      clearAiCompatResult();
+      void refreshBidFitPreflight();
+      return;
+    }
+    if (aiCompatPinned && lastAiCompatResult && note?.dataset.fillSource === 'resume-json') {
+      void refreshBidFitPreflight();
+      return;
+    }
+    beginAiCompatWait();
+    if (note) note._rbPrevLen = String(note.value || '').trim().length;
+    void refreshBidFitPreflight();
+    scheduleBidFitRefresh({ immediateAi: true });
+  }
+
+  /**
+   * Decide whether a Note change should start AI right away (paste / bulk fill)
+   * vs wait for typing to settle.
+   */
+  function shouldStartAiImmediately(noteEl, event) {
+    if (!noteEl) return false;
+    if (event?.inputType === 'insertFromPaste') return true;
+    const len = String(noteEl.value || '').trim().length;
+    const prev = Number(noteEl._rbPrevLen) || 0;
+    const min = global.SmartJobBidFitPreflight?.MIN_JD_CHARS || 80;
+    // Large jump: paste without inputType, or bulk replace into Note.
+    return len >= min && len - prev >= min;
+  }
+
+  function noteJdReadyForAi(noteEl) {
+    const jd = String(noteEl?.value || '').trim();
+    const min = global.SmartJobBidFitPreflight?.MIN_JD_CHARS || 80;
+    return jd.length >= min;
+  }
+
+  function onRegisterNoteChanged(event, { programmatic = false } = {}) {
+    const note = document.getElementById('regNote');
+    // User paste/edit: drop stale scrape resume/compat slices so Note is sole source.
+    if (note?.dataset.fillSource === 'user') {
+      global.SmartJobPostingContext?.clearPostingDerivedSlices?.();
+    }
+    const ready = noteJdReadyForAi(note);
+    if (ready && programmatic && note?.dataset.fillSource === 'resume-json' && pinAiCompatToJob()) {
+      refreshApplyProgress();
+      if (note) note._rbPrevLen = String(note.value || '').trim().length;
+      void refreshBidFitPreflight();
+      return;
+    }
+    if (ready) {
+      beginAiCompatWait();
+    } else {
+      clearAiCompatResult();
+    }
+    refreshApplyProgress();
+    const immediateAi =
+      ready && (programmatic || shouldStartAiImmediately(note, event));
+    if (note) note._rbPrevLen = String(note.value || '').trim().length;
+    scheduleBidFitRefresh({ immediateAi });
+  }
+
+  function setPromptKitEditorValues(template, resumeTemplateJson) {
+    const templateEl = document.getElementById('regPromptKitTemplate');
+    const resumeEl = document.getElementById('regPromptKitResumeJson');
+    if (templateEl) templateEl.value = template || '';
+    if (resumeEl) resumeEl.value = resumeTemplateJson || '';
+    promptKitEditorDirty = false;
+  }
+
+  async function refreshPromptKitUi({ fillEditor = false, syncRemote = false } = {}) {
     const api = global.SmartJobPromptKit;
     const profileId = getSelectedRegisterProfileId();
     const kitDetails = document.getElementById('regPromptKitBlock');
@@ -2901,12 +3847,8 @@
     if (!profileId) {
       updatePromptKitStatus('Select a profile to load a kit.', '');
       if (buildBtn) buildBtn.disabled = true;
-      if (fillEditor || kitDetails?.open) {
-        const templateEl = document.getElementById('regPromptKitTemplate');
-        const resumeEl = document.getElementById('regPromptKitResumeJson');
-        if (templateEl) templateEl.value = api.DEFAULT_PROMPT_TEMPLATE;
-        if (resumeEl) resumeEl.value = '';
-      }
+      // Nothing is written into the editor here: with no profile there is no
+      // kit to show, and the default would look like the user's prompt was reset.
       syncRbStatusChips();
       syncResumeBuilderActionButtons();
       void refreshBidFitPreflight();
@@ -2914,13 +3856,19 @@
     }
 
     try {
-      const { kit, exists } = await api.getPromptKit(profileId);
+      const pack = syncRemote
+        ? await api.getPromptKit(profileId)
+        : typeof api.getPromptKitLocal === 'function'
+          ? await api.getPromptKitLocal(profileId)
+          : await api.getPromptKit(profileId, { preferLocal: true });
+      const kit = pack.kit || {};
+      const exists = Boolean(pack.exists);
       updatePromptKitStatus(api.kitStatusSummary(kit, exists), exists ? 'success' : '');
-      if (fillEditor || kitDetails?.open) {
-        const templateEl = document.getElementById('regPromptKitTemplate');
-        const resumeEl = document.getElementById('regPromptKitResumeJson');
-        if (templateEl) templateEl.value = kit.template || api.DEFAULT_PROMPT_TEMPLATE;
-        if (resumeEl) resumeEl.value = kit.resumeTemplateJson || '';
+      if ((fillEditor || kitDetails?.open) && !promptKitEditorDirty) {
+        setPromptKitEditorValues(
+          kit.template || api.DEFAULT_PROMPT_TEMPLATE,
+          kit.resumeTemplateJson || ''
+        );
       }
     } catch (err) {
       updatePromptKitStatus(err.message || 'Failed to load prompt kit.', 'error');
@@ -2936,34 +3884,49 @@
     const profileId = getSelectedRegisterProfileId();
     if (!profileId) throw new Error('Select a profile first.');
 
-    // Hot path: local cache / editor — do not block copy on remote kit sync.
+    // The saved kit is the source of truth. A browser that has never used this
+    // profile has no local copy yet, so fetch the account's kit before building:
+    // building from the placeholder default and saving it back used to replace
+    // the account's own prompt.
     let kit;
-    const editorTemplate = document.getElementById('regPromptKitTemplate')?.value || '';
-    const editorResumeJson = document.getElementById('regPromptKitResumeJson')?.value || '';
     const localPack =
       typeof api.getPromptKitLocal === 'function'
         ? await api.getPromptKitLocal(profileId)
         : await api.getPromptKit(profileId, { preferLocal: true });
     kit = { ...(localPack.kit || {}) };
-    if (String(editorTemplate).trim()) kit.template = editorTemplate;
-    if (String(editorResumeJson).trim()) kit.resumeTemplateJson = editorResumeJson;
-
-    // If local empty, one remote fetch to bootstrap (first use only).
-    if (
-      !String(kit.resumeTemplateJson || '').trim() &&
-      !String(kit.template || '').trim()
-    ) {
+    if (!localPack.exists) {
       const remotePack = await api.getPromptKit(profileId);
-      kit = remotePack.kit || kit;
+      kit = { ...(remotePack.kit || kit) };
+    }
+
+    // The editor overrides it only when the user has actually typed in it. Its
+    // unedited contents may be the default shown before the kit had loaded.
+    if (promptKitEditorDirty) {
+      const editorTemplate = document.getElementById('regPromptKitTemplate')?.value || '';
+      const editorResumeJson = document.getElementById('regPromptKitResumeJson')?.value || '';
+      if (String(editorTemplate).trim()) kit.template = editorTemplate;
+      if (String(editorResumeJson).trim()) kit.resumeTemplateJson = editorResumeJson;
     }
 
     const noteText = document.getElementById('regNote')?.value || '';
-    const jobDescription = api.resolveJobDescription({ noteText, kit });
+    const posting = global.SmartJobPostingContext?.getLastPosting?.() || null;
+    const jobDescription = api.resolveJobDescriptionForCompat({ noteText, kit, posting });
+    const jobDescriptionForResume = api.resolveJobDescriptionForResume({ noteText, kit, posting });
+    const {
+      city: profileCity,
+      state: profileState,
+      constraints,
+    } = await getProfileLocation(profileId);
+    const aiCompat = resolveAiCompatForInputs({ jobDescription, profileCity, profileState, constraints });
 
     const fit = global.SmartJobBidFitPreflight?.evaluateBidFit?.({
       jobDescription,
       template: kit.template,
       resumeTemplateJson: kit.resumeTemplateJson,
+      profileCity,
+      profileState,
+      constraints,
+      aiCompat,
     });
     if (fit) {
       lastBidFitResult = fit;
@@ -2981,7 +3944,7 @@
     const { prompt, missingPlaceholders } = api.buildPrompt(
       kit.template,
       kit.resumeTemplateJson,
-      jobDescription
+      jobDescriptionForResume
     );
 
     if (!String(prompt || '').trim()) {
@@ -3007,23 +3970,14 @@
       if (showStatus) showStatus(message, 'success');
     }
 
-    // Persist + UI refresh in background — must not delay the copy spinner.
-    void (async () => {
-      try {
-        await api.savePromptKit(
-          profileId,
-          { ...kit, output: prompt, jobDescription },
-          { swallowRemoteError: true }
-        );
-      } catch (_) {
-        /* non-fatal */
-      }
-      try {
-        void refreshPromptKitUi();
-      } catch (_) {
-        /* ignore */
-      }
-    })();
+    // Persist in the background. Do not reload the kit — that was resetting the original prompt.
+    void api.savePromptKit(
+      profileId,
+      { ...kit, output: prompt, jobDescription },
+      { swallowRemoteError: true }
+    ).catch(() => {
+      /* non-fatal */
+    });
 
     return { prompt, missingPlaceholders, fit };
   }
@@ -3040,10 +3994,13 @@
     const existing = await api.getPromptKit(profileId);
     const next = await api.savePromptKit(profileId, {
       ...existing.kit,
-      template,
+      // An empty box is not "use the default": keep what is saved. Reset template
+      // is the explicit way to go back to the default.
+      template: String(template).trim() ? template : existing.kit.template,
       resumeTemplateJson,
       jobDescription: noteText || existing.kit.jobDescription || '',
     });
+    promptKitEditorDirty = false;
     updatePromptKitStatus(api.kitStatusSummary(next, true), 'success');
     setRegisterStatus('Prompt kit saved for this profile (account).', 'success');
     if (showStatus) showStatus('Prompt kit saved for this profile.', 'success');
@@ -3105,7 +4062,7 @@
     if (kitDetails && kitDetails.dataset.wired !== '1') {
       kitDetails.dataset.wired = '1';
       kitDetails.addEventListener('toggle', () => {
-        if (kitDetails.open) void refreshPromptKitUi({ fillEditor: true });
+        if (kitDetails.open) void refreshPromptKitUi({ fillEditor: true, syncRemote: true });
       });
     }
 
@@ -3144,10 +4101,14 @@
       const key = api?.kitStorageKey?.(selected) || `promptKit_v1_${selected}`;
       if (!changes[key]) return;
 
+      if (api?.takeOwnKitWrite?.(key)) return;
+
       const kitDetails = document.getElementById('regPromptKitBlock');
-      const fillEditor = Boolean(kitDetails?.open);
-      void refreshPromptKitUi({ fillEditor });
-      setRegisterStatus('Prompt kit updated from website sync.', 'info');
+      const fillEditor = Boolean(kitDetails?.open) && !promptKitEditorDirty;
+      void refreshPromptKitUi({ fillEditor, syncRemote: false });
+      if (!promptKitEditorDirty) {
+        setRegisterStatus('Prompt kit updated from website sync.', 'info');
+      }
     });
   }
 
@@ -3191,6 +4152,7 @@
       resetBtn.addEventListener('click', () => {
         const ta = document.getElementById('regPromptKitTemplate');
         if (ta && api) ta.value = api.DEFAULT_PROMPT_TEMPLATE;
+        promptKitEditorDirty = true;
         setRegisterStatus('Template reset to default (Save kit to keep).', 'info');
         scheduleBidFitRefresh();
       });
@@ -3200,12 +4162,15 @@
       const el = document.getElementById(id);
       if (el && el.dataset.bidFitWired !== '1') {
         el.dataset.bidFitWired = '1';
-        el.addEventListener('input', () => scheduleBidFitRefresh());
+        el.addEventListener('input', () => {
+          promptKitEditorDirty = true;
+          scheduleBidFitRefresh();
+        });
       }
     });
 
     wireResumeBuilderChrome();
-    void refreshPromptKitUi({ fillEditor: true });
+    void refreshPromptKitUi({ fillEditor: true, syncRemote: true });
     syncRbStatusChips();
     document.addEventListener('rwh-json2docx-ui', () => {
       syncRbStatusChips();
@@ -3228,6 +4193,14 @@
     wireCompanyDuplicateAutoCheck(showStatus);
     wireJobLinkBlockAutoSync();
     wireJson2docxGenerate(showStatus);
+    wireBidFitToggle();
+    wireBidFitAiCompat(showStatus);
+    wireBidDetailsSummary();
+    // Kick off the first check shortly after init (a JD may already be present).
+    if (noteJdReadyForAi(document.getElementById('regNote'))) {
+      markAiCompatPending();
+      scheduleAutoAiCompat({ immediate: true });
+    }
     wirePromptKitControls(showStatus);
     wirePromptKitStorageSync();
     startConnectionPolling();
@@ -3261,6 +4234,11 @@
 
     if (registerBtn) {
       registerBtn.addEventListener('click', async () => {
+        // One registration at a time. The button's loading state does not
+        // disable it, so a double-click used to send two requests, both of
+        // which passed the duplicate check before either had saved.
+        if (registerInFlight) return;
+        registerInFlight = true;
         setRegisterBusy(true);
         try {
           const connected = await checkBackendConnection({ skipDriveBadge: true });
@@ -3276,6 +4254,13 @@
             );
           }
 
+          // This tab already registered this job. The server-side list is the
+          // usual guard, but it is cached and can lag a just-saved record.
+          const currentLinkKey = canonicalJobLinkKey(document.getElementById('regJobLink')?.value || '');
+          if (registeredRecord.id && registeredRecord.jobLinkKey && registeredRecord.jobLinkKey === currentLinkKey) {
+            throw new Error(`This job is already registered (#${registeredRecord.id}).`);
+          }
+
           if (jobLinkDuplicateActive) {
             throw new Error(
               'Duplicate job link — already in Resume DB for this profile. Change the job link or select a different profile.'
@@ -3289,10 +4274,20 @@
             );
           }
 
+          // After the panel is reopened the generated files are gone (the
+          // browser cannot keep them), and registering would save no resume.
+          if (filesNeedRegeneration) {
+            throw new Error(
+              'The generated files are no longer attached. Click Generate again, or clear them under “Attach your own files” to register without files.'
+            );
+          }
+
           const draft = prepareRegisterDraftForSubmit();
           if (!draft.ok) {
             throw new Error(draft.errors[0] || 'Register draft is incomplete.');
           }
+          const registerToken = tabSession()?.getGeneration();
+          const registerTabId = tabSession()?.getBoundTabId?.();
           if (draft.warnings?.length) {
             setRegisterStatus(draft.warnings.join(' '), 'warn');
           }
@@ -3307,9 +4302,22 @@
               : 'Saving to Resume DB…',
             'info'
           );
+          const submittedLinkKey = canonicalJobLinkKey(draft.fields?.jobLink || '');
           const result = await registerJobToBackend();
           invalidateApplicationsCache();
-          registeredRecord = { id: String(result.id || ''), at: Date.now() };
+          const record = { id: String(result.id || ''), at: Date.now(), jobLinkKey: submittedLinkKey };
+          // Switched tabs during the upload: the record belongs to the tab it
+          // was sent from. Mark that one, and leave this one untouched.
+          if (tabSession() && !tabSession().isCurrentGeneration(registerToken)) {
+            tabSession().mutateSlice?.(registerTabId, 'register', (slice) => ({
+              ...(slice || {}),
+              registeredRecord: record,
+              files: { resume: null, cover: null },
+            }));
+            if (showStatus) showStatus(`Job registered (#${record.id}) for the tab you started on.`, 'success');
+            return;
+          }
+          registeredRecord = record;
           const sourceNote = result._draftFromJson ? ' (from resume JSON draft)' : '';
           const fileNote =
             result.resumeUrl || result.coverLetterUrl ? ' Files saved.' : '';
@@ -3324,6 +4332,7 @@
           setRegisterStatus(msg, 'error');
           if (showStatus) showStatus(msg, 'error');
         } finally {
+          registerInFlight = false;
           setRegisterBusy(false);
         }
       });
@@ -3357,6 +4366,8 @@
     syncResumeBuilderActionButtons,
     buildAndCopyPromptFromKit,
     refreshBidFitPreflight,
+    scheduleBidFitRefresh,
+    notifyJobLoadedForBidFit,
     updateRegisterDriveBadge,
     loadBackendSettingsForm,
     hasActiveResumeJsonOverride,
@@ -3369,6 +4380,7 @@
     notifyRegisterCompanyFilled,
     blockCurrentJobFromRegister,
     syncJobLinkBlockButton,
+    setRegisterFieldValue,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND
