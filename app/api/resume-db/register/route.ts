@@ -33,6 +33,10 @@ export async function POST(request: NextRequest) {
       formData.get("companyName") ?? formData.get("company") ?? "",
     ).trim();
     const note = String(formData.get("note") ?? "").trim();
+    // Optional: the server works it out from the job link when it is not sent.
+    const atsPlatform = String(
+      formData.get("atsPlatform") ?? formData.get("ats_platform") ?? "",
+    ).trim();
     const profileIdRaw = formData.get("profileId") ?? formData.get("profile_id");
     const profileId =
       profileIdRaw != null && String(profileIdRaw).trim() !== ""
@@ -91,6 +95,7 @@ export async function POST(request: NextRequest) {
       jobLink,
       jobTitle,
       company: companyName,
+      atsPlatform: atsPlatform || undefined,
       note,
       apply: String(formData.get("apply") ?? "Registered").trim(),
       resumeUrl: resolved.resumeUrl || "",
@@ -114,6 +119,7 @@ export async function POST(request: NextRequest) {
         jobLink,
         jobTitle,
         companyName,
+        atsPlatform: application.atsPlatform,
         note: application.note ?? note,
         resumeUrl: application.resumeUrl,
         coverLetterUrl: application.coverLetterUrl,

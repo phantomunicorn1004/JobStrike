@@ -217,6 +217,10 @@
               <section class="rb-section" aria-label="Tailored resume">
 
                 <div class="rb-action-group rb-action-group--prompt">
+                  <details class="rb-ahead" id="rbAhead" hidden>
+                    <summary class="rb-ahead-summary" id="rbAheadSummary" title="Compatibility of the other job tabs open in this window, checked while you work"></summary>
+                    <ul class="rb-ahead-list" id="rbAheadList"></ul>
+                  </details>
                   <div class="rb-fit-cue" id="rbFitCue" hidden data-level="ready" data-state="ready" role="status" aria-live="polite">
                     <div class="rb-fit-bar">
                       <button type="button" class="rb-fit-head" id="rbFitToggle" aria-expanded="false" aria-controls="rbFitReasons">
@@ -380,177 +384,156 @@
 
       <section class="tab-panel" id="tab-job-scraper">
         <div class="tab-panel-scroll js-scraper">
-          <header class="js-head">
-            <h2 class="js-title">Job Scraper</h2>
-            <p class="js-subtitle">Scrape from multiple sources at once</p>
-          </header>
-
-          <!-- Feed Sources (scrape order: Jobright → HiringCafe) -->
-          <div class="js-sources">
-            <div class="js-source-card">
-              <div class="js-source-header">
-                <div class="js-source-icon">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-                  </svg>
-                </div>
+          <div class="card js-panel">
+            <!-- Sources, in scrape order. Freshness is the setting changed most, so it lives on the row. -->
+            <div class="js-sources">
+              <div class="js-source-card">
+                <span class="js-source-icon" aria-hidden="true">J</span>
                 <div class="js-source-info">
                   <h3 class="js-source-name">Jobright</h3>
-                  <p class="js-source-status" id="jsJrFeedStatus">Recommend · 1d</p>
+                  <p class="js-source-status" id="jsJrFeedStatus">Recommend feed</p>
                 </div>
-              </div>
-              <button type="button" class="btn-icon" id="jsOpenRecommendBtn" title="Open Recommend page">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-                </svg>
-              </button>
-            </div>
-
-            <div class="js-source-card">
-              <div class="js-source-header">
-                <div class="js-source-icon">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+                <label class="js-source-switch" title="Read Jobright on the next scrape. It uses your Jobright account.">
+                  <input type="checkbox" id="jsUseJobright" aria-label="Read Jobright" checked>
+                  <span aria-hidden="true"></span>
+                </label>
+                <select id="jsFreshnessWindowJr" class="js-fresh" aria-label="Jobright freshness window" title="Only jobs posted within this window">
+                  <option value="2h">2 h</option>
+                  <option value="4h">4 h</option>
+                  <option value="8h">8 h</option>
+                  <option value="1d">24 h</option>
+                  <option value="2d">2 days</option>
+                  <option value="3d">3 days</option>
+                  <option value="7d">7 days</option>
+                </select>
+                <button type="button" class="btn-icon" id="jsOpenRecommendBtn" title="Open Jobright Recommend to set its filters" aria-label="Open Jobright Recommend">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
                   </svg>
-                </div>
+                </button>
+              </div>
+
+              <div class="js-source-card">
+                <span class="js-source-icon" aria-hidden="true">H</span>
                 <div class="js-source-info">
                   <h3 class="js-source-name">HiringCafe</h3>
-                  <p class="js-source-status" id="jsHcFeedStatus">8h · Remote</p>
+                  <p class="js-source-status" id="jsHcFeedStatus">Built-in default</p>
                 </div>
+                <label class="js-source-switch" title="Read HiringCafe on the next scrape. It needs no account.">
+                  <input type="checkbox" id="jsUseHiringCafe" aria-label="Read HiringCafe" checked>
+                  <span aria-hidden="true"></span>
+                </label>
+                <select id="jsFreshnessWindowHc" class="js-fresh" aria-label="HiringCafe freshness window" title="Only jobs posted within this window. HiringCafe searches whole days; shorter windows are cut afterwards.">
+                  <option value="2h">2 h</option>
+                  <option value="4h">4 h</option>
+                  <option value="8h">8 h</option>
+                  <option value="1d">24 h</option>
+                  <option value="2d">2 days</option>
+                  <option value="3d">3 days</option>
+                  <option value="7d">7 days</option>
+                </select>
+                <button type="button" class="btn-icon" id="jsEditHcSearchBtn" data-js-open-modal="import" title="Edit the HiringCafe search" aria-label="Edit the HiringCafe search">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                  </svg>
+                </button>
               </div>
-              <button type="button" class="btn-icon" id="jsEditHcSearchBtn" data-js-open-modal="import" title="Edit search">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
-                </svg>
-              </button>
             </div>
-          </div>
 
-          <!-- Filters Button -->
-          <button type="button" class="js-filters-card" id="jsOpenFiltersBtn" data-js-open-modal="filters">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
-            </svg>
-            <span>Filters & Lists</span>
-            <svg class="js-filters-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </button>
+            <button type="button" class="js-filters-card" id="jsOpenFiltersBtn" data-js-open-modal="filters">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+              </svg>
+              <span>Filters &amp; lists</span>
+              <svg class="js-filters-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+            </button>
 
-          <!-- Main Action -->
-          <button type="button" class="js-scrape-btn" id="jsScrapeBtn">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            <span>Scrape Jobs</span>
-          </button>
-          <div class="js-action-secondary">
-            <button type="button" class="btn-secondary" id="jsResumeBtn" hidden>Resume</button>
-            <button type="button" class="btn-secondary" id="jsStopBtn" hidden>Stop</button>
-          </div>
-
-          <!-- Progress (visible while scraping) -->
-          <div class="js-progress-card" id="jsProgressSection" hidden>
-            <div class="js-progress-phases" id="jsPhaseStrip">
-              <div class="js-progress-phase" data-phase="jobright">
-                <div class="js-phase-dot"></div>
-                <span class="js-phase-name">Jobright</span>
-              </div>
-              <div class="js-progress-connector"></div>
-              <div class="js-progress-phase" data-phase="hiringcafe">
-                <div class="js-phase-dot"></div>
-                <span class="js-phase-name">HiringCafe</span>
-              </div>
-              <div class="js-progress-connector"></div>
-              <div class="js-progress-phase" data-phase="done">
-                <div class="js-phase-dot"></div>
-                <span class="js-phase-name">Done</span>
-              </div>
-            </div>
-            <div class="js-progress-header">
-              <span class="js-progress-label" id="jsProgressLabel">Scraping...</span>
-              <span class="js-progress-pct" id="jsProgressPct" hidden></span>
-            </div>
-            <div class="js-progress-bar-wrap">
-              <div class="js-progress-bar" id="jsProgressBar"></div>
-            </div>
-            <p class="js-progress-detail" id="jsProgressDetail" hidden></p>
-            <p class="js-progress-trust" id="jsProgressTrust" hidden>Using your open browser tabs</p>
-          </div>
-
-          <!-- Results: actions appear after scrape finishes -->
-          <div class="js-results-card" id="jsResultsCard" hidden>
-            <div class="js-results-header">
-              <div class="js-results-info">
-                <h3 class="js-results-title">Results</h3>
-                <p class="js-results-count" id="jsActionScope">No jobs yet</p>
-              </div>
-            </div>
-            <div class="js-results-actions" id="jsResultsActions" hidden>
-              <button type="button" class="js-result-action-btn" id="jsCsvBtn" disabled title="Export Excel / CSV">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <!-- One action row: Scrape, joined by Resume / Stop while a run is live -->
+            <div class="js-action-row">
+              <button type="button" class="js-scrape-btn" id="jsScrapeBtn">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
-                <span>Export</span>
+                <span>Scrape jobs</span>
               </button>
-              <button type="button" class="js-result-action-btn" id="jsCopyLinksBtn" disabled title="Copy links">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                </svg>
-                <span>Copy</span>
-              </button>
-              <button type="button" class="js-result-action-btn" id="jsClearResultsBtn" disabled title="Clear results">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                </svg>
-                <span>Clear</span>
-              </button>
+              <button type="button" class="btn-secondary" id="jsResumeBtn" hidden>Resume</button>
+              <button type="button" class="btn-secondary" id="jsStopBtn" hidden>Stop</button>
             </div>
-            <div class="js-results-empty" id="jsResultsEmpty">
-              <p id="jsResultsEmptyText">Start a scrape to load jobs</p>
-              <p class="js-results-empty-hint" id="jsResultsEmptyHint" hidden></p>
+
+            <!-- Progress (visible while scraping) -->
+            <div class="js-progress-card" id="jsProgressSection" hidden>
+              <div class="js-progress-phases" id="jsPhaseStrip">
+                <div class="js-progress-phase" data-phase="jobright">
+                  <div class="js-phase-dot"></div>
+                  <span class="js-phase-name">Jobright</span>
+                </div>
+                <div class="js-progress-connector"></div>
+                <div class="js-progress-phase" data-phase="hiringcafe">
+                  <div class="js-phase-dot"></div>
+                  <span class="js-phase-name">HiringCafe</span>
+                </div>
+                <div class="js-progress-connector"></div>
+                <div class="js-progress-phase" data-phase="done">
+                  <div class="js-phase-dot"></div>
+                  <span class="js-phase-name">Done</span>
+                </div>
+              </div>
+              <div class="js-progress-header">
+                <span class="js-progress-label" id="jsProgressLabel">Scraping...</span>
+                <span class="js-progress-pct" id="jsProgressPct" hidden></span>
+              </div>
+              <div class="js-progress-bar-wrap">
+                <div class="js-progress-bar" id="jsProgressBar"></div>
+              </div>
+              <p class="js-progress-detail" id="jsProgressDetail" hidden></p>
             </div>
-            <div class="js-results-list" id="jsResultsList" hidden></div>
+
+            <!-- Results: shown once a scrape has produced something -->
+            <div class="js-results-card" id="jsResultsCard" hidden>
+              <div class="js-results-header">
+                <p class="js-results-count" id="jsActionScope">No jobs yet</p>
+                <p class="js-results-sub" id="jsResultsSub" hidden></p>
+                <p class="js-results-report" id="jsResultsReport" hidden></p>
+                <button type="button" class="js-results-report-copy" id="jsCopyReportBtn" hidden title="Copy the details of this run, to check or share">Copy run report</button>
+                <p class="js-results-warn" id="jsResultsWarn" hidden></p>
+              </div>
+              <div class="js-results-empty" id="jsResultsEmpty">
+                <p id="jsResultsEmptyText">Start a scrape to load jobs</p>
+                <p class="js-results-empty-hint" id="jsResultsEmptyHint" hidden></p>
+              </div>
+              <div class="js-results-actions" id="jsResultsActions" hidden>
+                <button type="button" class="js-result-action-btn js-result-action-primary" id="jsCsvBtn" disabled title="Export Excel / CSV">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                  <span>Export</span>
+                </button>
+                <button type="button" class="js-result-action-btn" id="jsCopyLinksBtn" disabled title="Copy all job links, highest score first">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  <span>Copy links</span>
+                </button>
+                <button type="button" class="js-result-action-btn js-result-action-quiet" id="jsClearResultsBtn" disabled title="Clear the results" aria-label="Clear the results">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="js-results-list" id="jsResultsList" hidden></div>
+            </div>
           </div>
         </div>
 
         <div id="jsFiltersModal" class="js-modal" hidden>
           <div class="js-modal-sheet" role="dialog" aria-modal="true">
             <div class="js-modal-header">
-              <h2>Filters & Lists</h2>
+              <h2>Filters &amp; lists</h2>
               <button type="button" class="js-modal-close" data-js-close-modal="filters">×</button>
             </div>
             <div class="js-modal-content">
-              <div class="js-modal-section">
-                <label class="js-input-label">
-                  Jobright freshness
-                  <select id="jsFreshnessWindowJr" class="js-input" aria-label="Jobright freshness window">
-                    <option value="2h">Last 2 hours</option>
-                    <option value="4h">Last 4 hours</option>
-                    <option value="8h">Last 8 hours</option>
-                    <option value="1d">Last 24 hours</option>
-                    <option value="2d">Last 2 days</option>
-                    <option value="3d">Last 3 days</option>
-                    <option value="7d">Last 7 days</option>
-                  </select>
-                </label>
-                <label class="js-input-label" style="margin-top:10px">
-                  HiringCafe freshness
-                  <select id="jsFreshnessWindowHc" class="js-input" aria-label="HiringCafe freshness window">
-                    <option value="2h">Last 2 hours</option>
-                    <option value="4h">Last 4 hours</option>
-                    <option value="8h">Last 8 hours</option>
-                    <option value="1d">Last 24 hours</option>
-                    <option value="2d">Last 2 days</option>
-                    <option value="3d">Last 3 days</option>
-                    <option value="7d">Last 7 days</option>
-                  </select>
-                </label>
-                <p class="muted" style="margin:6px 0 0;font-size:12px;">
-                  Separate cutoffs per source. HiringCafe API still uses whole days (hours → past 1 day), then we cut locally.
-                </p>
-              </div>
-
               <div class="js-modal-section">
                 <label class="js-input-label">
                   Profile
@@ -567,6 +550,30 @@
               </div>
 
               <div class="js-modal-section">
+                <h3 class="js-section-title">Results</h3>
+                <label class="js-filter-row">
+                  <input type="checkbox" id="jsHideClearance" checked>
+                  <span class="js-filter-name" title="Hides jobs the source marks as requiring a security clearance. Jobright provides this; HiringCafe jobs are checked later on the Bid tab.">Hide clearance-required jobs</span>
+                </label>
+                <label class="js-filter-row">
+                  <input type="checkbox" id="jsUsOnly" checked>
+                  <span class="js-filter-name" title="Hides jobs the source places in another country. A job with no stated country is kept.">US jobs only</span>
+                </label>
+                <label class="js-filter-row">
+                  <input type="checkbox" id="jsHideDegree" checked>
+                  <span class="js-filter-name" title="Hides jobs the source marks as requiring a Master's degree or a doctorate. HiringCafe provides this; other jobs are checked on the Bid tab.">Hide Master's / PhD required</span>
+                </label>
+                <label class="js-filter-row">
+                  <input type="checkbox" id="jsHideLanguage" checked>
+                  <span class="js-filter-name" title="Hides jobs the source marks as requiring a language other than English. HiringCafe provides this; other jobs are checked on the Bid tab.">Hide other-language required</span>
+                </label>
+                <label class="js-filter-row">
+                  <input type="checkbox" id="jsDirectLinksOnly" checked>
+                  <span class="js-filter-name" title="Hides easy-apply listings and jobs that stay on a job board (Dice, Indeed, ZipRecruiter, Jobright apply). LinkedIn listings are kept: open them to reach the employer's careers page. Where the scraper finds the same job on the employer's own board, it uses that link instead.">Direct employer links only</span>
+                </label>
+              </div>
+
+              <div class="js-modal-section">
                 <h3 class="js-section-title">Hide from Results</h3>
                 
                 <div class="js-filter-group">
@@ -574,17 +581,17 @@
                   <label class="js-filter-row">
                     <input type="checkbox" id="jsFilterBlockedCompanies" checked>
                     <span class="js-filter-name" data-edit-list="company">Companies</span>
-                    <span class="js-filter-count" id="jsBlockedCompanyCount" data-edit-list="company">0</span>
+                    <span class="js-filter-count" id="jsBlockedCompanyCount" data-edit-list="company" role="button" tabindex="0" title="View or edit blocked companies">0</span>
                   </label>
                   <label class="js-filter-row">
                     <input type="checkbox" id="jsFilterBlockedAts" checked>
                     <span class="js-filter-name" data-edit-list="ats">ATS</span>
-                    <span class="js-filter-count" id="jsBlockedAtsCount" data-edit-list="ats">0</span>
+                    <span class="js-filter-count" id="jsBlockedAtsCount" data-edit-list="ats" role="button" tabindex="0" title="View or edit blocked ATS">0</span>
                   </label>
                   <label class="js-filter-row">
                     <input type="checkbox" id="jsFilterBlockedJobs" checked>
                     <span class="js-filter-name" data-edit-list="job">Jobs</span>
-                    <span class="js-filter-count" id="jsBlockedJobCount" data-edit-list="job">0</span>
+                    <span class="js-filter-count" id="jsBlockedJobCount" data-edit-list="job" role="button" tabindex="0" title="View or edit blocked jobs">0</span>
                   </label>
                 </div>
 
@@ -737,6 +744,27 @@
           <h2>Google Drive uploads</h2>
           <p class="muted">Connect Google Drive on the <strong>website Settings</strong> page (same account as Website connection). The extension uploads files through the server—no Gmail sign-in in the extension.</p>
           <p class="muted small">Open your site → <strong>Settings</strong> → Connect Google Drive. Set default resume/cover links there for the <strong>Default</strong> checkboxes on Bid.</p>
+        </div>
+        <div class="card" id="learnedCard">
+          <h2>Learn from my answers</h2>
+          <p class="muted">When you type or pick an answer yourself on an application form, JobStrike remembers it for the selected profile and uses it the next time the same question appears. Passwords, ID numbers, uploads and consent boxes are never remembered. Stored in this browser only.</p>
+          <label class="toggle-row full" for="learnAnswersSetting">
+            <span class="toggle-text">
+              <strong>Remember my answers</strong>
+              <small class="muted" id="learnedCount"></small>
+            </span>
+            <span class="toggle-switch">
+              <input type="checkbox" id="learnAnswersSetting" role="switch" aria-label="Remember my answers" checked>
+              <span class="toggle-slider" aria-hidden="true"></span>
+            </span>
+          </label>
+          <details class="learned-wrap" id="learnedListWrap" hidden>
+            <summary>Show saved answers</summary>
+            <ul class="learned-list" id="learnedList"></ul>
+          </details>
+          <div class="button-row">
+            <button type="button" class="btn small" id="learnedClearBtn" disabled>Clear saved answers</button>
+          </div>
         </div>
         <div class="card">
           <h2>AI autofill (hybrid mode)</h2>
@@ -897,6 +925,7 @@
   <script src="prompt-kit-client.js"></script>
   <script src="bid-fit-preflight.js"></script>
   <script src="job-url.js"></script>
+  <script src="job-link-resolver.js"></script>
   <script src="company-name.js"></script>
   <script src="job-scraper-hiringcafe.js"></script>
   <script src="job-scraper-jobright.js"></script>

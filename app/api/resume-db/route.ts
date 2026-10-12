@@ -11,6 +11,7 @@ import {
   getApplicationById,
   countApplicationsWithFilters,
   listApplicationsWithFilters,
+  listAtsPlatformCounts,
   updateApplication,
 } from "@/lib/resume-db/repository";
 import {
@@ -56,6 +57,7 @@ function mapForList(
     apply: app.apply,
     jobTitle: app.jobTitle,
     company: app.company,
+    atsPlatform: app.atsPlatform,
     note: app.note ?? "",
     resumeUrl: app.resumeUrl,
     coverLetterUrl: app.coverLetterUrl,
@@ -167,6 +169,8 @@ export async function GET(request: NextRequest) {
         ? "desc"
         : "asc";
     const includeOrphans = searchParams.get("includeOrphans") === "1";
+    const atsPlatform = (searchParams.get("atsFilter") ?? searchParams.get("ats") ?? "").trim();
+    const includeAtsPlatforms = searchParams.get("includeAtsPlatforms") === "1";
     const sortKey =
       sortKeyRaw === "company" || sortKeyRaw === "jobTitle" || sortKeyRaw === "pipeline"
         ? (sortKeyRaw as "company" | "jobTitle" | "pipeline")
@@ -253,6 +257,7 @@ export async function GET(request: NextRequest) {
       dateTo,
       timeZone,
       candidateFilter,
+      atsPlatform,
       pipelineStageId,
       pipelineStageIsNull,
       statusIncludeIds,
@@ -386,6 +391,7 @@ export async function GET(request: NextRequest) {
       page: resolvedPage,
       pageSize,
       orphanCandidateNames,
+      ...(includeAtsPlatforms ? { atsPlatforms: await listAtsPlatformCounts(userId) } : {}),
     });
   } catch (error) {
     console.error("Resume DB GET error:", error);

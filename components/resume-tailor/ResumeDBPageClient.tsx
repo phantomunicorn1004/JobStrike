@@ -73,6 +73,7 @@ import {
   Search,
   Trash2,
   Workflow,
+  Globe,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -85,6 +86,8 @@ export type ResumeDbRow = {
   candidate: string;
   profileId: number | null;
   jobLink: string;
+  /** "Greenhouse", "Workday", …; a hostname for sites that are no known platform. */
+  atsPlatform?: string;
   note: string;
   apply: string;
   jobTitle: string;
@@ -576,6 +579,111 @@ function AppliedDateFilter({
   );
 }
 
+type AtsPlatformOption = { name: string; count: number };
+
+function AtsFilter({
+  value,
+  options,
+  onApply,
+  onClear,
+}: {
+  value: string;
+  options: AtsPlatformOption[];
+  onApply: (v: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value || "__all__");
+  const active = Boolean(value);
+
+  useEffect(() => {
+    if (open) setDraft(value || "__all__");
+  }, [open, value]);
+
+  // A platform chosen from a shared link stays selectable even if it has no bids.
+  const shown =
+    value && !options.some((option) => option.name === value)
+      ? [{ name: value, count: 0 }, ...options]
+      : options;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={active ? `ATS filter: ${value}` : "Filter by ATS platform"}
+              className={cn(
+                "relative h-9 w-9 rounded-xl shrink-0",
+                active && "border-primary/60 bg-primary/5 text-primary",
+              )}
+            >
+              <Globe className="h-4 w-4" />
+              {active && (
+                <span
+                  className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                  aria-hidden
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {active ? `ATS: ${value}` : "Filter by ATS platform"}
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent className="w-72 p-3" align="start">
+        <p className="text-sm font-medium mb-3">Filter by ATS platform</p>
+        <Select value={draft} onValueChange={(v) => setDraft(v)}>
+          <SelectTrigger className="h-9 w-full">
+            <SelectValue placeholder="All platforms" />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            <SelectItem value="__all__">All platforms</SelectItem>
+            {shown.map((option) => (
+              <SelectItem key={option.name} value={option.name}>
+                {option.count > 0 ? `${option.name} (${option.count})` : option.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {options.length === 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">No registered bids yet.</p>
+        )}
+        <div className="mt-3 flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8"
+            onClick={() => {
+              setDraft("__all__");
+              onClear();
+              setOpen(false);
+            }}
+          >
+            Clear
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8"
+            onClick={() => {
+              onApply(draft === "__all__" ? "" : draft);
+              setOpen(false);
+            }}
+          >
+            Apply
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function StatusFilter({
   value,
   stages,
@@ -695,6 +803,7 @@ export function ResumeDBPageClient() {
   const dateTo = searchParams.get("dateTo") ?? "";
   const candidateFilter = searchParams.get("candidateFilter") ?? "";
   const statusFilter = searchParams.get("statusFilter") ?? "__all__";
+  const atsFilter = searchParams.get("atsFilter") ?? "";
   const sortKeyRaw = searchParams.get("sortKey") ?? "";
   const sortKey: SortKey =
     sortKeyRaw === "company" || sortKeyRaw === "jobTitle" || sortKeyRaw === "pipeline"
@@ -720,6 +829,8 @@ export function ResumeDBPageClient() {
   const [profiles, setProfiles] = useState<{ id: number; full_name: string }[]>([]);
   const [orphanCandidateNames, setOrphanCandidateNames] = useState<string[]>([]);
   const [orphanCandidateNamesLoaded, setOrphanCandidateNamesLoaded] = useState(false);
+  const [atsPlatforms, setAtsPlatforms] = useState<AtsPlatformOption[]>([]);
+  const [atsPlatformsLoaded, setAtsPlatformsLoaded] = useState(false);
   const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
   const loadRowsAbortRef = useRef<AbortController | null>(null);
   const loadRowsSeqRef = useRef(0);
@@ -773,6 +884,8 @@ export function ResumeDBPageClient() {
       if (!orphanCandidateNamesLoaded) {
         params.set("includeOrphans", "1");
       }
+      if (atsFilter) params.set("atsFilter", atsFilter);
+      if (!atsPlatformsLoaded) params.set("includeAtsPlatforms", "1");
       if (sortKey) params.set("sortKey", sortKey);
       params.set("sortDir", sortDir);
 
@@ -800,6 +913,10 @@ export function ResumeDBPageClient() {
         setOrphanCandidateNames(data.orphanCandidateNames ?? []);
         setOrphanCandidateNamesLoaded(true);
       }
+      if (!atsPlatformsLoaded && Array.isArray(data.atsPlatforms)) {
+        setAtsPlatforms(data.atsPlatforms);
+        setAtsPlatformsLoaded(true);
+      }
       const resolvedPage = Number(data.page ?? page);
       if (resolvedPage !== page && Number.isFinite(resolvedPage) && resolvedPage >= 1) {
         updateParams({ page: String(resolvedPage) });
@@ -821,9 +938,11 @@ export function ResumeDBPageClient() {
     dateTo,
     candidateFilter,
     statusFilter,
+    atsFilter,
     sortKey,
     sortDir,
     orphanCandidateNamesLoaded,
+    atsPlatformsLoaded,
     updateParams,
   ]);
 
@@ -849,7 +968,7 @@ export function ResumeDBPageClient() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [search, dateFrom, dateTo, candidateFilter, statusFilter]);
+  }, [search, dateFrom, dateTo, candidateFilter, statusFilter, atsFilter]);
 
   const candidateFilterOptions = useMemo(
     () =>
@@ -877,7 +996,12 @@ export function ResumeDBPageClient() {
   };
 
   const hasActiveFilters = Boolean(
-    search.trim() || dateFrom || dateTo || candidateFilter || (statusFilter && statusFilter !== "__all__"),
+    search.trim() ||
+      dateFrom ||
+      dateTo ||
+      candidateFilter ||
+      atsFilter ||
+      (statusFilter && statusFilter !== "__all__"),
   );
 
   // Server-side pagination/filtering/sorting: `rows` is already the current page.
@@ -1187,6 +1311,17 @@ export function ResumeDBPageClient() {
             }}
           />
 
+          <AtsFilter
+            value={atsFilter}
+            options={atsPlatforms}
+            onApply={(name) => {
+              updateParams({ atsFilter: name || null, page: "1" });
+            }}
+            onClear={() => {
+              updateParams({ atsFilter: null, page: "1" });
+            }}
+          />
+
           <CandidateFilter
             value={candidateFilter}
             options={candidateFilterOptions}
@@ -1218,6 +1353,7 @@ export function ResumeDBPageClient() {
                   dateTo: null,
                   candidateFilter: null,
                   statusFilter: null,
+                  atsFilter: null,
                   page: "1",
                 });
               }}
@@ -1396,6 +1532,9 @@ export function ResumeDBPageClient() {
                       <ResizableTableHead {...columnResizeProps("jobLink")}>
                         Job link
                       </ResizableTableHead>
+                      <ResizableTableHead {...columnResizeProps("atsPlatform")}>
+                        ATS
+                      </ResizableTableHead>
                       <ResizableTableHead {...columnResizeProps("note")}>
                         Note
                       </ResizableTableHead>
@@ -1493,6 +1632,14 @@ export function ResumeDBPageClient() {
                           ) : (
                             "—"
                           )}
+                        </ResizableTableCell>
+                        <ResizableTableCell widthPercent={percents.atsPlatform}>
+                          <span
+                            className="block truncate text-muted-foreground"
+                            title={row.atsPlatform || undefined}
+                          >
+                            {row.atsPlatform || "—"}
+                          </span>
                         </ResizableTableCell>
                         <ResizableTableCell widthPercent={percents.note}>
                           {row.note ? (

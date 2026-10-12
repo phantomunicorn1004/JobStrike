@@ -30,7 +30,11 @@ export function companiesMatch(
   if (left.length < MIN_SUBSTRING_LEN || right.length < MIN_SUBSTRING_LEN) {
     return false;
   }
-  return left.includes(right) || right.includes(left);
+  // The same letters, spaced differently: "cvshealth" is "cvs health".
+  if (left.replace(/[^a-z0-9]/g, "") === right.replace(/[^a-z0-9]/g, "")) return true;
+  // Whole leading words only: "meta" is "meta platforms", never "metabase".
+  const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left];
+  return longer.startsWith(`${shorter} `);
 }
 
 function significantTokens(value: string | null | undefined): string[] {

@@ -835,6 +835,7 @@ function init() {
   wireOptimizedUi();
   registerPageTabSession();
   loadAllData();
+  wireLearnedAnswers();
   watchActiveTabChanges();
 }
 
@@ -3442,6 +3443,22 @@ function createPlanRow(field) {
   const profileKey = categoryToProfileKey[category];
   const profileValue = profileKey ? (currentProfile[profileKey] || '') : '';
 
+  // What the user answered by hand on an earlier form outranks everything
+  // derived: the profile mapping, adapter defaults, saved Q&A and the AI.
+  const learned = matchLearnedAnswer(field);
+  if (learned) {
+    return {
+      field,
+      suggestedValue: learned.value,
+      source: 'learned',
+      status: 'Ready (your earlier answer)',
+      fillOutcome: null,
+      fillError: '',
+      confidence: learned.confidence,
+      customQuestionId: ''
+    };
+  }
+
   if (category === 'acknowledgment') {
     const ackValue = (field.options && field.options[0]) || 'I have read this';
     return {
@@ -3651,6 +3668,263 @@ function createPlanRow(field) {
   };
 }
 
+// ── Answers learnt from the user's own input ────────────────────────────────
+// The content script records what the user types or picks by hand on a form
+// (see "Learning from the user's own answers" in content.js). Here they are
+// looked up: an earlier answer to the same question outranks the profile
+// mapping, adapter defaults and the AI.
+const LEARNED_KEY = 'autofill_learned_answers_v1';
+const LEARN_ENABLED_KEY = 'autofill_learn_enabled';
+const LEARN_EXEMPT_CATEGORIES = new Set(['resume_upload', 'cover_letter_upload', 'acknowledgment', 'employment_kit']);
+const LEARN_PLACEHOLDER_RE =
+  /^[-–—\s]*(?:(?:please\s+)?(?:select|choose)(?:\s+(?:one|an?\b.*|your\b.*|the\b.*|from\b.*|option.*))?[-–—\s.…:]*|[-–—.\s]+)$/i;
+/** A free-text answer this long was written for one company; elsewhere it is an example for the AI. */
+const LEARN_LONG_ANSWER_CHARS = 220;
+const LEARN_FUZZY_MIN = 0.9;
+
+let learnedStore = {};
+let learnEnabledSetting = true;
+
+/** Must match learnKey() in content.js. */
+function learnedKey(question) {
+  return normalizeText(question)
+    .replace(/\b(required|optional)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function learnedOptionsSig(options) {
+  const list = (Array.isArray(options) ? options : [])
+    .map((o) => normalizeText(o))
+    .filter((o) => o && !LEARN_PLACEHOLDER_RE.test(o));
+  return list.length ? list.slice().sort().join('|').slice(0, 600) : '';
+}
+
+function learnedProfileKey() {
+  return String(document.getElementById('regProfileId')?.value || '').trim() || '_';
+}
+
+function learnedBank() {
+  const bank = learnedStore[learnedProfileKey()];
+  return bank && typeof bank === 'object' ? bank : {};
+}
+
+function learnedTokens(key) {
+  return new Set(String(key || '').split(' ').filter((t) => t.length > 1));
+}
+
+/** Share of words two questions have in common (Jaccard). */
+function learnedSimilarity(a, b) {
+  const x = learnedTokens(a);
+  const y = learnedTokens(b);
+  if (!x.size || !y.size) return 0;
+  let overlap = 0;
+  y.forEach((t) => { if (x.has(t)) overlap += 1; });
+  return overlap / new Set([...x, ...y]).size;
+}
+
+/**
+ * An earlier answer, as one of this field's options. Exact wording first; then
+ * an option that starts with the answer ("No" for "No, I do not"), never a
+ * loose substring: "No" must not land on "I do not know".
+ */
+function learnedAnswerToOptions(answer, options) {
+  const usable = (Array.isArray(options) ? options : [])
+    .map((o) => String(o).trim())
+    .filter((o) => o && !LEARN_PLACEHOLDER_RE.test(o));
+  const pick = (part) => {
+    const want = normalizeText(part);
+    if (!want) return '';
+    const exact = usable.find((o) => normalizeText(o) === want);
+    if (exact) return exact;
+    const leading = usable.filter((o) => {
+      const have = normalizeText(o);
+      return have.startsWith(`${want} `) || want.startsWith(`${have} `);
+    });
+    return leading.length === 1 ? leading[0] : '';
+  };
+  const want = normalizeText(answer);
+  const exact = usable.find((o) => normalizeText(o) === want);
+  if (exact) return exact;
+  // Several ticks, remembered as "A, B": every one of them must still be offered.
+  const parts = String(answer).split(/\s*[,;\n]\s*/).filter(Boolean);
+  if (parts.length > 1) {
+    const picked = parts.map(pick);
+    if (picked.every(Boolean)) return picked.join(', ');
+  }
+  return pick(answer);
+}
+
+function learnedEntryFor(field) {
+  const bank = learnedBank();
+  const question = String(field?.questionText || field?.labelText || '').trim();
+  const key = learnedKey(question);
+  if (!key) return null;
+  if (bank[key]) return { entry: bank[key], confidence: 1 };
+  // Near-identical wording only, and only for questions with enough words to tell apart.
+  if (learnedTokens(key).size < 3) return null;
+  let best = null;
+  for (const [otherKey, entry] of Object.entries(bank)) {
+    const score = learnedSimilarity(key, otherKey);
+    if (score >= LEARN_FUZZY_MIN && (!best || score > best.confidence)) best = { entry, confidence: score };
+  }
+  return best;
+}
+
+/** @returns {{ value: string, confidence: number }|null} */
+function matchLearnedAnswer(field) {
+  if (!learnEnabledSetting || !field) return null;
+  if (LEARN_EXEMPT_CATEGORIES.has(field.fieldCategory || '')) return null;
+  const hit = learnedEntryFor(field);
+  if (!hit) return null;
+  const { entry, confidence } = hit;
+  const options = (Array.isArray(field.options) ? field.options : []).filter(
+    (o) => String(o || '').trim() && !LEARN_PLACEHOLDER_RE.test(String(o).trim())
+  );
+
+  if (options.length) {
+    // The very same set of choices seen before: the pick made then.
+    const sig = learnedOptionsSig(options);
+    const same = sig && entry.alts ? entry.alts[sig] : '';
+    const value = (same && learnedAnswerToOptions(same, options)) || learnedAnswerToOptions(entry.a, options);
+    return value ? { value, confidence } : null;
+  }
+
+  let value = String(entry.a || '').trim();
+  if (!value) return null;
+  const long = value.length > LEARN_LONG_ANSWER_CHARS;
+  if (long) {
+    let host = '';
+    try {
+      host = new URL(currentScanUrl || '').hostname.replace(/^www\./, '');
+    } catch (_) {
+      host = '';
+    }
+    const here = host && entry.hosts ? entry.hosts[host] : '';
+    if (!here) return null;
+    value = String(here).trim();
+  }
+  return value ? { value, confidence } : null;
+}
+
+/** The user's most similar earlier answers, as examples for the AI. */
+function similarLearnedExamples(field, limit = 6) {
+  if (!learnEnabledSetting || !field) return [];
+  const key = learnedKey(field.questionText || field.labelText || '');
+  if (!key) return [];
+  return Object.entries(learnedBank())
+    .map(([otherKey, entry]) => ({ score: learnedSimilarity(key, otherKey), entry }))
+    .filter((item) => item.score >= 0.25 && item.entry?.a)
+    .sort((x, y) => y.score - x.score || (y.entry.at || 0) - (x.entry.at || 0))
+    .slice(0, limit)
+    .map((item) => ({ q: String(item.entry.q || '').slice(0, 300), a: String(item.entry.a).slice(0, 700) }));
+}
+
+function renderLearnedSettings() {
+  const toggle = document.getElementById('learnAnswersSetting');
+  if (toggle) toggle.checked = learnEnabledSetting;
+  const bank = learnedBank();
+  const entries = Object.entries(bank).sort((x, y) => (y[1].at || 0) - (x[1].at || 0));
+  const count = document.getElementById('learnedCount');
+  if (count) {
+    count.textContent = entries.length
+      ? `${entries.length} answer${entries.length === 1 ? '' : 's'} saved for the selected profile.`
+      : 'No answers saved for the selected profile yet. Fill a form by hand, or correct what autofill wrote.';
+  }
+  const clear = document.getElementById('learnedClearBtn');
+  if (clear) clear.disabled = entries.length === 0;
+  const wrap = document.getElementById('learnedListWrap');
+  if (wrap) wrap.hidden = entries.length === 0;
+  const list = document.getElementById('learnedList');
+  if (!list) return;
+  list.textContent = '';
+  entries.slice(0, 300).forEach(([key, entry]) => {
+    const item = document.createElement('li');
+    item.className = 'learned-item';
+    const text = document.createElement('div');
+    text.className = 'learned-text';
+    const q = document.createElement('div');
+    q.className = 'learned-q';
+    q.textContent = entry.q || key;
+    const a = document.createElement('div');
+    a.className = 'learned-a';
+    a.textContent = entry.a || '';
+    a.title = entry.host ? `Last answered on ${entry.host}` : '';
+    text.append(q, a);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'learned-remove';
+    remove.dataset.learnedKey = key;
+    remove.title = 'Forget this answer';
+    remove.setAttribute('aria-label', `Forget the answer to: ${entry.q || key}`);
+    remove.textContent = '×';
+    item.append(text, remove);
+    list.appendChild(item);
+  });
+}
+
+function writeLearnedStore(next, message) {
+  learnedStore = next;
+  chrome.storage.local.set({ [LEARNED_KEY]: next }, () => {
+    renderLearnedSettings();
+    regeneratePlan();
+    if (message) showStatus(message, 'success');
+  });
+}
+
+function loadLearnedAnswers() {
+  chrome.storage.local.get([LEARNED_KEY, LEARN_ENABLED_KEY], (result) => {
+    const stored = (result || {})[LEARNED_KEY];
+    learnedStore = stored && typeof stored === 'object' ? stored : {};
+    learnEnabledSetting = (result || {})[LEARN_ENABLED_KEY] !== false;
+    renderLearnedSettings();
+  });
+}
+
+function wireLearnedAnswers() {
+  loadLearnedAnswers();
+  chrome.storage.onChanged?.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes[LEARN_ENABLED_KEY]) learnEnabledSetting = changes[LEARN_ENABLED_KEY].newValue !== false;
+    if (changes[LEARNED_KEY]) {
+      const stored = changes[LEARNED_KEY].newValue;
+      learnedStore = stored && typeof stored === 'object' ? stored : {};
+    }
+    if (changes[LEARNED_KEY] || changes[LEARN_ENABLED_KEY] || changes.resume_db_selected_profile_id) {
+      renderLearnedSettings();
+    }
+  });
+  document.getElementById('regProfileId')?.addEventListener('change', renderLearnedSettings);
+  // The profile list fills in after start-up, and without a change event.
+  document.addEventListener('click', (event) => {
+    if (event.target.closest?.('[data-tab="settings"], #openSettingsBtn, .settings-open')) renderLearnedSettings();
+  });
+  setTimeout(renderLearnedSettings, 2500);
+  document.getElementById('learnAnswersSetting')?.addEventListener('change', (event) => {
+    learnEnabledSetting = Boolean(event.target.checked);
+    chrome.storage.local.set({ [LEARN_ENABLED_KEY]: learnEnabledSetting });
+    regeneratePlan();
+  });
+  document.getElementById('learnedList')?.addEventListener('click', (event) => {
+    const key = event.target.closest?.('.learned-remove')?.dataset.learnedKey;
+    if (!key) return;
+    const profile = learnedProfileKey();
+    const bank = { ...learnedBank() };
+    delete bank[key];
+    writeLearnedStore({ ...learnedStore, [profile]: bank }, 'Answer forgotten.');
+  });
+  document.getElementById('learnedClearBtn')?.addEventListener('click', async () => {
+    const total = Object.keys(learnedBank()).length;
+    if (!total) return;
+    const ok = await confirmAction(
+      `Forget ${total} saved answer${total === 1 ? '' : 's'}?\n\nAutofill goes back to the profile and the AI for these questions, for the selected profile.`,
+      { confirmLabel: 'Forget', danger: true }
+    );
+    if (!ok) return;
+    writeLearnedStore({ ...learnedStore, [learnedProfileKey()]: {} }, 'Saved answers cleared.');
+  });
+}
+
 function matchCustomQuestion(questionText, bank) {
   let best = null;
   for (const item of bank || []) {
@@ -3849,8 +4123,6 @@ async function resolveJobInfoForAi() {
       kit: null,
       posting
     }) || rawJd;
-  } else if (posting?.resumePromptText && note.length >= minJd) {
-    job_description = posting.resumePromptText;
   }
 
   return {
@@ -3979,7 +4251,7 @@ function matchValueToOptions(value, options) {
 function isDeterministicFactRow(row) {
   if (!row || !isRowFillable(row)) return false;
   const src = row.source;
-  if (src === 'profile' || src === 'custom' || src === 'kit' || src === 'acknowledgment') return true;
+  if (src === 'profile' || src === 'custom' || src === 'kit' || src === 'acknowledgment' || src === 'learned') return true;
   const cat = row.field?.fieldCategory;
   if (cat && DETERMINISTIC_PROFILE_CATEGORIES.has(cat) && String(row.suggestedValue || '').trim()) {
     return true;
@@ -3996,6 +4268,11 @@ function resolveDeterministicValueForRow(row) {
   const field = row.field;
   const options = Array.isArray(field.options) ? field.options : [];
   const qText = field.questionText || field.labelText || field.nearbyText || '';
+
+  const learned = matchLearnedAnswer(field);
+  if (learned) {
+    return { value: learned.value, source: 'learned', status: 'Ready (your earlier answer)' };
+  }
 
   const customMatch = matchCustomQuestion(qText, currentQuestions);
   if (customMatch?.question?.answer) {
@@ -4061,7 +4338,13 @@ async function generateAiValueForRow(row) {
     row.field,
     row,
     contextBlock,
-    { baseUrl: getOpenAiBaseUrl(), usedExamples: sessionUsedExamples }
+    {
+      baseUrl: getOpenAiBaseUrl(),
+      usedExamples: sessionUsedExamples,
+      // No earlier answer fits exactly: the closest ones still show the model
+      // how this candidate answers.
+      learnedExamples: similarLearnedExamples(row.field)
+    }
   );
 
   const needsInput = Boolean(result && typeof result === 'object' && result.needsInput);
@@ -4717,10 +5000,12 @@ async function fillSelectedFields({ useAi = false } = {}) {
     const failed = results.filter((item) => !item.success);
     const succeeded = payload.length - failed.length;
     if (succeeded > 0) bumpLifetimeFilled(succeeded);
+    const fromMemory = fillableEntries.filter(({ row }) => row.source === 'learned' && row.fillOutcome === 'filled').length;
+    const memoryNote = fromMemory ? ` ${fromMemory} from your earlier answers.` : '';
     if (failed.length) {
-      showStatus(`Filled ${succeeded} of ${payload.length} fields (${failed.length} failed). Review highlighted fields.`, 'error', 6000);
+      showStatus(`Filled ${succeeded} of ${payload.length} fields (${failed.length} failed).${memoryNote} Review highlighted fields.`, 'error', 6000);
     } else {
-      showStatus(`Filled ${payload.length} field${payload.length === 1 ? '' : 's'}. Review before submitting.`, 'success', 6000);
+      showStatus(`Filled ${payload.length} field${payload.length === 1 ? '' : 's'}.${memoryNote} Review before submitting.`, 'success', 6000);
     }
   } catch (error) {
     showStatus(error.message, 'error');

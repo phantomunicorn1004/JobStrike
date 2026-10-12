@@ -292,10 +292,16 @@
 
     for (const url of candidates) {
       try {
+        // Ours, not the page's: keep it out of the site-request log.
+        window.__jobstrikeOwnRequest = true;
+        Promise.resolve().then(() => {
+          window.__jobstrikeOwnRequest = false;
+        });
         const response = await fetch(url, {
           method: 'GET',
           credentials: 'include',
           headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(20000),
         });
         if (!response.ok) {
           errors.push(`${response.status} ${url.split('?')[0]}`);
@@ -335,16 +341,29 @@
   async function fetchRecommendApiPageExtension(position, count, sortCondition) {
     const candidates = buildRecommendApiUrls(position, count, sortCondition);
     const errors = [];
+    let sent = 0;
+    let throttled = false;
 
     for (const url of candidates) {
       try {
+        // Ours, not the page's: keep it out of the site-request log.
+        window.__jobstrikeOwnRequest = true;
+        Promise.resolve().then(() => {
+          window.__jobstrikeOwnRequest = false;
+        });
+        sent += 1;
         const response = await fetch(url, {
           method: 'GET',
           credentials: 'include',
           headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(20000),
         });
         if (!response.ok) {
           errors.push(`${response.status} ${url.split('?')[0]}`);
+          if (response.status === 429) {
+            throttled = true;
+            break;
+          }
           continue;
         }
         const json = await response.json().catch(() => null);
@@ -364,6 +383,7 @@
         }
         return {
           ok: true,
+          requests: sent,
           rows,
           total: extractTotalFromPayload(json),
           endpoint: url.split('?')[0],
@@ -379,6 +399,8 @@
 
     return {
       ok: false,
+      requests: sent,
+      rateLimited: throttled,
       rows: [],
       total: null,
       error:
@@ -466,10 +488,16 @@
     const errors = [];
     for (const url of candidates) {
       try {
+        // Ours, not the page's: keep it out of the site-request log.
+        window.__jobstrikeOwnRequest = true;
+        Promise.resolve().then(() => {
+          window.__jobstrikeOwnRequest = false;
+        });
         const response = await fetch(url, {
           method: 'GET',
           credentials: 'include',
           headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(20000),
         });
         if (!response.ok) {
           errors.push(`${response.status} ${url.split('?')[0]}`);
@@ -702,9 +730,12 @@
     const pos = Math.max(0, Number(position) || 0);
     const refresh = pos === 0 ? '&refresh=true' : '';
     const sortRaw = String(sortCondition || '').trim();
-    // Bare Recommend URL first (UI Most Recent is session-side). Optional captured sort after.
-    const sortVariants = [''];
-    if (sortRaw) sortVariants.push(`&sortCondition=${encodeURIComponent(sortRaw)}`);
+    // A known sort goes first: the caller stops at the first batch of old jobs, which
+    // is only right for newest-first pages. The bare URL stays as the fallback.
+    const sortVariants = sortRaw ? [`&sortCondition=${encodeURIComponent(sortRaw)}`, ''] : [''];
+    // Once one address has served the feed, it is the only one asked: the other
+    // only ever cost a request, most of all at the end of the feed.
+    const knownEndpoint = String(window.__jobstrikeRecommendEndpoint || '');
     const candidates = [];
     const seen = new Set();
     for (const sort of sortVariants) {
@@ -714,6 +745,7 @@
       ]) {
         if (seen.has(url)) continue;
         seen.add(url);
+        if (knownEndpoint && url.split('?')[0] !== knownEndpoint) continue;
         candidates.push(url);
       }
     }
@@ -750,15 +782,30 @@
     }
 
     const errors = [];
+    let sent = 0;
+    let throttled = false;
+    let emptyAnswers = 0;
     for (const url of candidates) {
       try {
+        // Ours, not the page's: keep it out of the site-request log.
+        window.__jobstrikeOwnRequest = true;
+        Promise.resolve().then(() => {
+          window.__jobstrikeOwnRequest = false;
+        });
+        sent += 1;
         const response = await fetch(url, {
           method: 'GET',
           credentials: 'include',
           headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(20000),
         });
         if (!response.ok) {
           errors.push(`${response.status} ${url.split('?')[0]}`);
+          // Told to slow down: asking another address would only add to it.
+          if (response.status === 429) {
+            throttled = true;
+            break;
+          }
           continue;
         }
         const json = await response.json().catch(() => null);
@@ -767,8 +814,10 @@
         collect(json, rows);
         if (rows.length === 0) {
           errors.push(`empty ${url.split('?')[0]}`);
+          emptyAnswers += 1;
           continue;
         }
+        window.__jobstrikeRecommendEndpoint = url.split('?')[0];
         let detectedSort = sortRaw;
         try {
           detectedSort = new URL(url).searchParams.get('sortCondition') || detectedSort;
@@ -777,6 +826,7 @@
         }
         return {
           ok: true,
+          requests: sent,
           rows,
           total: readTotal(json),
           endpoint: url.split('?')[0],
@@ -792,6 +842,10 @@
 
     return {
       ok: false,
+      requests: sent,
+      rateLimited: throttled,
+      // The feed's own address answered, with no rows: the feed has ended.
+      empty: Boolean(knownEndpoint) && !throttled && emptyAnswers > 0 && emptyAnswers === sent,
       rows: [],
       total: null,
       error:
@@ -811,6 +865,25 @@
     window.__jobstrikeSwanCapture = [];
     window.__jobstrikeSwanSeen = new Set();
 
+    // What the site itself asks its feed for (method, address, body). Read back
+    // into the run report: the way to learn how "Most Recent" is requested.
+    window.__jobstrikeSwanRequests = window.__jobstrikeSwanRequests || [];
+    const logRequest = (method, url, body) => {
+      try {
+        if (window.__jobstrikeOwnRequest) return;
+        if (!/swan-api\.jobright\.ai/i.test(String(url)) || !/recommend|job\/list|jobs/i.test(String(url))) return;
+        const log = window.__jobstrikeSwanRequests;
+        log.push({
+          method: String(method || 'GET').toUpperCase(),
+          url: String(url).slice(0, 400),
+          body: typeof body === 'string' ? body.slice(0, 400) : '',
+        });
+        if (log.length > 30) log.splice(0, log.length - 30);
+      } catch (_) {
+        /* ignore */
+      }
+    };
+
     const pushPayload = (url, json) => {
       try {
         const key = `${url}::${JSON.stringify(json)?.slice(0, 180)}`;
@@ -824,6 +897,12 @@
 
     const origFetch = window.fetch.bind(window);
     window.fetch = async function jobstrikePatchedFetch(input, init) {
+      try {
+        const reqUrl = typeof input === 'string' ? input : input && input.url;
+        logRequest(init?.method || (input && input.method), reqUrl, init?.body);
+      } catch (_) {
+        /* ignore */
+      }
       const response = await origFetch(input, init);
       try {
         const url = typeof input === 'string' ? input : input && input.url;
@@ -845,9 +924,16 @@
       const xhr = new OrigXHR();
       let reqUrl = '';
       const open = xhr.open;
+      let reqMethod = 'GET';
       xhr.open = function (method, url, ...rest) {
         reqUrl = String(url || '');
+        reqMethod = String(method || 'GET');
         return open.call(xhr, method, url, ...rest);
+      };
+      const send = xhr.send;
+      xhr.send = function (body) {
+        logRequest(reqMethod, reqUrl, body);
+        return send.call(xhr, body);
       };
       xhr.addEventListener('load', function () {
         try {
@@ -868,6 +954,20 @@
     return { ok: true, already: false };
   }
 
+  /** Injected (MAIN): the feed requests the page itself made, newest last, without repeats. */
+  function readSwanRequestLogInTab() {
+    const log = Array.isArray(window.__jobstrikeSwanRequests) ? window.__jobstrikeSwanRequests : [];
+    const seen = new Set();
+    const out = [];
+    for (const item of log) {
+      const key = `${item.method} ${item.url} ${item.body}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
+    }
+    return { ok: true, requests: out.slice(-12) };
+  }
+
   /**
    * Injected (MAIN): after capture is installed, force Recommend to refetch so
    * swan-api responses hit the patched fetch (first paint was usually already done).
@@ -880,17 +980,29 @@
       const candidates = [
         `${SWAN_API}/swan/recommend/list/jobs?position=0&count=20&refresh=true`,
         `${SWAN_API}/swan/job/recommend/list?position=0&count=20&refresh=true`,
-        `${SWAN_API}/swan/recommend/list/jobs?position=0&count=50&refresh=true`,
       ];
 
       let apiRows = 0;
+      let sent = 0;
+      let throttled = false;
       for (const url of candidates) {
         try {
+          // Ours, not the page's: keep it out of the site-request log.
+          window.__jobstrikeOwnRequest = true;
+          Promise.resolve().then(() => {
+            window.__jobstrikeOwnRequest = false;
+          });
+          sent += 1;
           const response = await fetch(url, {
             method: 'GET',
             credentials: 'include',
             headers: { Accept: 'application/json' },
+            signal: AbortSignal.timeout(20000),
           });
+          if (response.status === 429) {
+            throttled = true;
+            break;
+          }
           if (!response.ok) continue;
           const json = await response.json().catch(() => null);
           if (!json) continue;
@@ -921,6 +1033,7 @@
           walk(json);
           if (probe.length) {
             apiRows = probe.length;
+            window.__jobstrikeRecommendEndpoint = url.split('?')[0];
             break;
           }
         } catch (_) {
@@ -940,6 +1053,8 @@
       return {
         ok: apiRows > 0 || (window.__jobstrikeSwanCapture || []).length > 0,
         apiRows,
+        requests: sent,
+        rateLimited: throttled,
         captured: (window.__jobstrikeSwanCapture || []).length,
       };
     } catch (err) {
@@ -1049,8 +1164,8 @@
 
       for (const item of items) {
         const url = String(item?.url || '');
-        // Accept any swan-api payload; Jobright path names change across releases.
-        if (!/swan-api\.jobright\.ai/i.test(url)) continue;
+        // Only the Recommend feed: saved/applied lists also carry jobIds and a total.
+        if (!/swan-api\.jobright\.ai/i.test(url) || !/recommend/i.test(url)) continue;
         try {
           const sort = new URL(url, location.origin).searchParams.get('sortCondition');
           if (sort) sortCondition = sort;
@@ -1146,7 +1261,18 @@
     }
 
     function detectRateLimit() {
-      const text = String(document.body?.innerText || '').slice(0, 10000);
+      // Read notices, not the feed: a job card about "rate limiting" is not a warning.
+      // A near-empty page is an interstitial, so there the whole text counts.
+      const bodyText = String(document.body?.innerText || '');
+      const text =
+        bodyText.length < 1500
+          ? bodyText
+          : [...document.querySelectorAll(
+          '[role="dialog"],[role="alertdialog"],[role="alert"],[class*="modal" i],[class*="toast" i],[class*="message" i],[class*="notification" i]'
+        )]
+          .map((node) => node.innerText || '')
+          .join('\n')
+          .slice(0, 4000);
       return /too\s*fast|scroll(ing)?\s*too\s*fast|slow\s*down|rate\s*limit|too\s*many\s*requests|try\s*again\s*later|temporarily\s*(blocked|restricted|suspended)/i.test(
         text
       );
@@ -1191,6 +1317,7 @@
     let sortCondition = null;
     for (const item of captured) {
       const url = String(item?.url || '');
+      if (!/recommend/i.test(url)) continue;
       try {
         const sort = new URL(url, location.origin).searchParams.get('sortCondition');
         if (sort) sortCondition = sort;
@@ -1254,7 +1381,16 @@
   /** Injected (MAIN): detect Jobright "scrolling too fast" / rate-limit UI. */
   function detectJobrightRateLimitInTab() {
     try {
-      const text = String(document.body?.innerText || '').slice(0, 12000);
+      const bodyText = String(document.body?.innerText || '');
+      const text =
+        bodyText.length < 1500
+          ? bodyText
+          : [...document.querySelectorAll(
+          '[role="dialog"],[role="alertdialog"],[role="alert"],[class*="modal" i],[class*="toast" i],[class*="message" i],[class*="notification" i]'
+        )]
+          .map((node) => node.innerText || '')
+          .join('\n')
+          .slice(0, 4000);
       const title = String(document.title || '');
       const rateLimited =
         /too\s*fast|scroll(ing)?\s*too\s*fast|slow\s*down|rate\s*limit|too\s*many\s*requests|try\s*again\s*later|temporarily\s*(blocked|restricted|suspended)|account\s*(suspended|restricted)/i.test(
@@ -1406,10 +1542,16 @@
     if (/just now|moments? ago|today|a few seconds/.test(s)) {
       return new Date(nowMs).toISOString();
     }
+    if (/yesterday/.test(s)) {
+      return new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    // "an hour ago" / "a day ago" → "1 hour ago"; "30+ days ago" → "30 days ago".
+    const counted = s.replace(/\b(?:an?|one)\s+(?=(?:min|hour|hr|day|week|month|year))/, '1 ').replace(/(\d)\+/, '$1');
 
     let amount;
     let unit;
-    let match = s.match(
+    let match = counted.match(
       /(\d+)\s*(minutes?|mins?|hours?|hrs?|days?|weeks?|months?|mos?|years?|yrs?)\s*ago/
     );
     if (match) {
@@ -1417,7 +1559,7 @@
       unit = match[2];
     } else {
       // Compact forms like "2h ago" / "3d ago" (avoid bare "m" — minutes vs months).
-      match = s.match(/(\d+)\s*(h|d|w)\s*ago/);
+      match = counted.match(/(\d+)\s*(h|d|w)\s*ago/);
       if (!match) return null;
       amount = Number(match[1]);
       unit = match[2];
@@ -1437,7 +1579,58 @@
     return new Date(nowMs - ms).toISOString();
   }
 
+  /**
+   * Jobright sends "2026-10-06 23:21:00" with no zone, and means UTC. Read as
+   * local time (what Date does by default) it lands hours in the future for
+   * anyone west of UTC, so every job looked brand new and passed any freshness
+   * window. Read it as UTC; fall back to local only if UTC would be in the future.
+   */
+  function parseJobrightTimestamp(raw, nowMs = Date.now()) {
+    const zoneless = raw.match(
+      /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/
+    );
+    if (zoneless) {
+      const [, y, mo, d, h, mi, s] = zoneless;
+      const utcMs = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s || 0));
+      if (!Number.isNaN(utcMs) && utcMs <= nowMs + 10 * 60 * 1000) return new Date(utcMs).toISOString();
+      const localMs = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s || 0)).getTime();
+      if (!Number.isNaN(localMs) && localMs <= nowMs + 10 * 60 * 1000) return new Date(localMs).toISOString();
+      return null;
+    }
+    const ms = Date.parse(raw);
+    return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+  }
+
+  /**
+   * Jobright's "3 hours ago" text needs no time zone, so when a row carries both
+   * it is the check on the absolute timestamp: if the two disagree by more than
+   * the text's own precision, the text wins.
+   */
+  function reconcileWithRelative(absoluteIso, desc, nowMs) {
+    const relativeIso = parseRelativePublishDesc(desc, nowMs);
+    if (!absoluteIso || !relativeIso) return absoluteIso || relativeIso || '';
+    const text = String(desc || '').toLowerCase();
+    // "2 days ago" covers 48–72 h; "5 minutes ago" is exact to the minute.
+    const slackMs = /month|mo\b|year|yr/.test(text)
+      ? 45 * 24 * 3600 * 1000
+      : /week|\bw\b/.test(text)
+        ? 8 * 24 * 3600 * 1000
+        : /day|yesterday|\bd\b/.test(text)
+          ? 30 * 3600 * 1000
+          : 90 * 60 * 1000;
+    const gap = Math.abs(Date.parse(absoluteIso) - Date.parse(relativeIso));
+    return gap > slackMs ? relativeIso : absoluteIso;
+  }
+
   function parsePublishDate(jr, nowMs = Date.now()) {
+    return reconcileWithRelative(
+      parseAbsolutePublishDate(jr, nowMs),
+      jr?.publishTimeDesc || jr?.posted,
+      nowMs
+    );
+  }
+
+  function parseAbsolutePublishDate(jr, nowMs = Date.now()) {
     const raw =
       jr?.publishTime ??
       jr?.publishedAt ??
@@ -1453,13 +1646,15 @@
       const ms = n < 1e12 ? n * 1000 : n;
       return new Date(ms).toISOString();
     }
-    if (typeof raw === 'string' && raw.trim() && !Number.isNaN(Date.parse(raw))) {
-      return new Date(raw).toISOString();
+    if (typeof raw === 'string' && raw.trim()) {
+      const parsed = parseJobrightTimestamp(raw.trim(), nowMs);
+      if (parsed) return parsed;
     }
     const relative = parseRelativePublishDesc(jr?.publishTimeDesc || jr?.posted, nowMs);
     if (relative) return relative;
-    // Keep undated Jobright hits in the pool — date filter would otherwise drop all.
-    return new Date(nowMs).toISOString();
+    // Unknown stays unknown: stamping "now" let old jobs pass every freshness window
+    // and exported a made-up date. The panel decides what to do with undated rows.
+    return '';
   }
 
   /** Local display: 2026-09-18 21:34 */
@@ -1490,15 +1685,27 @@
     return `${y}-${m}-${day} ${hh}:${mm}`;
   }
 
+  const JOB_BOARD_LINK_RE =
+    /^https?:\/\/(?:[a-z0-9-]+\.)*(?:jobright\.ai|linkedin\.com|indeed\.com|dice\.com|ziprecruiter\.com|glassdoor\.com|monster\.com|careerbuilder\.com|simplyhired\.com|jobtarget\.com|talent\.com|lensa\.com|builtin\.com|wellfound\.com)\//i;
+
   function extractJobFields(raw) {
     const jr =
       raw?.jobResult && typeof raw.jobResult === 'object' ? raw.jobResult : raw || {};
     const cr =
       raw?.companyResult && typeof raw.companyResult === 'object' ? raw.companyResult : {};
     const jobId = serializeField(jr.jobId || jr.id || raw?.jobId);
-    const applyUrl =
-      serializeField(jr.applyLink || jr.applyUrl || jr.applicationUrl) ||
+    // Jobright gives up to two links: where its Apply button goes (applyLink) and
+    // the posting it was taken from (originalUrl). Take the first that leads to
+    // the employer rather than to a job board.
+    const links = [jr.applyLink, jr.originalUrl, jr.applyUrl, jr.applicationUrl]
+      .map((link) => serializeField(link))
+      .filter((link) => link && /^https?:\/\//i.test(link));
+    const pickedUrl =
+      links.find((link) => !JOB_BOARD_LINK_RE.test(link)) ||
+      links[0] ||
       (jobId ? `${JOBRIGHT_SITE}/jobs/info/${jobId}` : null);
+    // Open the posting, not its application form (Lever ".../apply").
+    const applyUrl = pickedUrl ? (globalThis.SmartJobJobUrl?.postingPageUrl || ((link) => link))(pickedUrl) : pickedUrl;
     const publishedIso = parsePublishDate(jr);
     const applicantsRaw =
       jr.applicantsCount ?? jr.applicantCount ?? jr.applyCount ?? jr.numApplicants;
@@ -1522,6 +1729,14 @@
       applicants_count,
       // ISO for shared date-window filtering in the panel.
       estimated_publish_date: publishedIso,
+      // Facts Jobright states outright, so no reading of the posting is needed.
+      clearance_required: jr.isClearanceRequired === true,
+      work_model: serializeField(jr.workModel),
+      country_code: serializeField(jr.countryCode),
+      repost: jr.repost === true,
+      // Jobright's own flag for a listing whose apply flow stays on the job board.
+      easy_apply: jr.jobtargetEasyapply === true,
+      applicants_text: serializeField(jr.applicantsDisplayText),
       source: 'jobright',
     };
   }
@@ -1681,9 +1896,18 @@
         htmlHead
       );
 
+    const noticeText =
+      String(bodyText || '').length < 1500
+        ? String(bodyText || '')
+        : [...document.querySelectorAll(
+          '[role="dialog"],[role="alertdialog"],[role="alert"],[class*="modal" i],[class*="toast" i],[class*="message" i],[class*="notification" i]'
+        )]
+          .map((node) => node.innerText || '')
+          .join('\n')
+          .slice(0, 4000);
     const rateLimited =
       /too\s*fast|scroll(ing)?\s*too\s*fast|slow\s*down|rate\s*limit|too\s*many\s*requests|temporarily\s*(blocked|restricted|suspended)/i.test(
-        bodyText
+        noticeText
       );
 
     const needsLogin =
@@ -1807,6 +2031,7 @@
     fetchRecommendApiPageInTab,
     ensureMostRecentSort,
     readCapturedRecommendSort,
+    readSwanRequestLogInTab,
     installSwanCaptureInTab,
     forceRecommendRefetchInTab,
     extractDomRecommendJobsInTab,

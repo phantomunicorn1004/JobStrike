@@ -10,6 +10,9 @@
     lastResults: 'job_scraper_last_results',
     scrapeTabId: 'job_scraper_tab_id',
     customSearch: 'job_scraper_custom_search',
+    seen: 'job_scraper_seen_v1',
+    jrGuard: 'job_scraper_jobright_guard_v1',
+    registered: 'job_scraper_registered_v1',
   };
 
   const DEFAULT_PREFS = {
@@ -24,6 +27,19 @@
     /** Per-source freshness (legacy `freshnessWindow` migrates into both). */
     freshnessWindowJr: '1d',
     freshnessWindowHc: '8h',
+    /** Hide jobs whose apply link stays on a job board (easy apply) instead of the employer. */
+    directLinksOnly: true,
+    /** Hide jobs the source marks as requiring a security clearance. */
+    hideClearanceRequired: true,
+    /** Hide jobs the source places in another country (authorised to work in the US only). */
+    usOnly: true,
+    /** Hide jobs the source marks as requiring a Master's or doctorate. */
+    hideAdvancedDegree: true,
+    /** Hide jobs the source marks as requiring a language other than English. */
+    hideForeignLanguage: true,
+    /** Which sources a scrape reads. HiringCafe needs no account; Jobright uses yours. */
+    useJobright: true,
+    useHiringCafe: true,
   };
 
   const state = {
@@ -43,7 +59,15 @@
     rawJobs: [],
     filteredJobs: [],
     selectedKeys: new Set(),
+    /** Jobs already collected by an earlier run: key → first seen (ms). */
+    seen: new Map(),
+    /** Today's Jobright usage: { day, requests, lastRunAt, cooldownUntil }. */
+    jrGuard: null,
     scraping: false,
+    /** True while a run's code is actually executing (not while paused for the user). */
+    runActive: false,
+    stopRequested: false,
+    runStartedAt: 0,
     pausedForChallenge: false,
     scrapeCursor: null,
     combinedRun: null,
@@ -82,7 +106,9 @@
     return 'both';
   }
 
-  function sourceLabel() {
+  function sourceLabel(phase) {
+    if (phase === 'jobright') return 'Jobright';
+    if (phase === 'hiringcafe') return 'HiringCafe';
     return 'HiringCafe + Jobright';
   }
 
@@ -114,6 +140,303 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  // Jobright is read with the user's own account, so it is asked for little and
+  // left alone at the first sign of a limit.
+  // Five full reads of the feed (a full read is about 30 requests).
+  const JR_DAILY_REQUESTS = 150;
+  // What one full read needs; a run with less than this left is asked about first.
+  const JR_FULL_READ_REQUESTS = 30;
+  const JR_MIN_GAP_MS = 3 * 60 * 60 * 1000;
+  const JR_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+
+  function localDayKey(ms = Date.now()) {
+    const d = new Date(ms);
+    const two = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+  }
+
+  /** Today's Jobright usage. The request count starts again each day; a cooldown does not. */
+  function jobrightGuard() {
+    const g = state.jrGuard || {};
+    const today = localDayKey();
+    if (g.day !== today) {
+      state.jrGuard = {
+        day: today,
+        requests: 0,
+        lastRunAt: Number(g.lastRunAt) || 0,
+        cooldownUntil: Number(g.cooldownUntil) || 0,
+      };
+    }
+    return state.jrGuard;
+  }
+
+  /** Another panel may have scraped since this one loaded: read the saved count. */
+  async function loadJobrightGuard() {
+    const result = await storageGet([STORAGE.jrGuard]);
+    const saved = result[STORAGE.jrGuard];
+    if (saved && typeof saved === 'object') {
+      state.jrGuard = {
+        day: String(saved.day || ''),
+        requests: Number(saved.requests) || 0,
+        lastRunAt: Number(saved.lastRunAt) || 0,
+        cooldownUntil: Number(saved.cooldownUntil) || 0,
+      };
+    }
+    return jobrightGuard();
+  }
+
+  async function persistJobrightGuard() {
+    await storageSet({ [STORAGE.jrGuard]: jobrightGuard() });
+  }
+
+  /** This run's Jobright requests by kind, for the run report. */
+  let jobrightRequestKinds = {};
+
+  async function noteJobrightRequests(count, kind = 'other') {
+    const sent = Math.max(0, Number(count) || 0);
+    if (!sent) return;
+    jobrightRequestKinds[kind] = (jobrightRequestKinds[kind] || 0) + sent;
+    jobrightGuard().requests += sent;
+    await persistJobrightGuard();
+  }
+
+  function jobrightRequestsLeft() {
+    return Math.max(0, JR_DAILY_REQUESTS - jobrightGuard().requests);
+  }
+
+  function clockTime(ms) {
+    return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+
+  /** Jobright said to slow down: leave it alone for a few hours. Returns when it ends. */
+  async function startJobrightCooldown() {
+    const until = Date.now() + JR_COOLDOWN_MS;
+    jobrightGuard().cooldownUntil = until;
+    await persistJobrightGuard();
+    renderFeedStatus();
+    return clockTime(until);
+  }
+
+  /** Why Jobright sits this run out, or '' when it may be read. */
+  function jobrightHoldReason() {
+    const g = jobrightGuard();
+    if (g.cooldownUntil > Date.now()) {
+      return `Jobright asked to slow down earlier, so it is skipped until ${clockTime(g.cooldownUntil)}.`;
+    }
+    if (jobrightRequestsLeft() <= 0) {
+      return `Today's Jobright limit (${JR_DAILY_REQUESTS} requests) is used up, so it is skipped until tomorrow.`;
+    }
+    return '';
+  }
+
+  const SEEN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+  const SEEN_MAX = 30000;
+
+  /** A job is remembered by its source id and by its normalised apply link. */
+  function seenKeysFor(job, origin) {
+    const keys = [];
+    const src = origin || jobOriginKey(job);
+    const id = String(job?.id || '').trim();
+    if (id && src) keys.push(`${src === 'jobright' ? 'jr' : 'hc'}:${id}`);
+    // A link is a key only when it names one posting. A shared careers page
+    // would otherwise mark every later job on it as "already seen".
+    const urlApi = window.SmartJobJobUrl;
+    for (const url of [job?.apply_url, job?.listed_url]) {
+      if (!url || !urlApi?.canonicalJobUrl) continue;
+      if (urlApi.urlIdentifiesJob && !urlApi.urlIdentifiesJob(url)) continue;
+      const urlKey = urlApi.canonicalJobUrl(url);
+      if (urlKey) keys.push(`u:${urlKey}`);
+    }
+    // Nothing else to go on (a card read off the page): company + title.
+    if (!keys.length && job?.company_name && job?.title) {
+      keys.push(`t:${String(job.company_name).trim().toLowerCase()}::${String(job.title).trim().toLowerCase()}`);
+    }
+    return keys;
+  }
+
+  function isSeenJob(job, origin) {
+    return seenKeysFor(job, origin).some((key) => state.seen.has(key));
+  }
+
+  function markJobsSeen(jobs, atMs = Date.now()) {
+    for (const job of jobs || []) {
+      for (const key of seenKeysFor(job)) {
+        if (!state.seen.has(key)) state.seen.set(key, atMs);
+      }
+    }
+  }
+
+  /** Old entries go first; a job that old has left both feeds' freshness windows. */
+  function pruneSeen(nowMs = Date.now()) {
+    for (const [key, at] of state.seen) {
+      if (nowMs - at > SEEN_TTL_MS) state.seen.delete(key);
+    }
+    if (state.seen.size > SEEN_MAX) {
+      const oldestFirst = [...state.seen.entries()].sort((a, b) => a[1] - b[1]);
+      for (const [key] of oldestFirst.slice(0, state.seen.size - SEEN_MAX)) state.seen.delete(key);
+    }
+  }
+
+  async function persistSeen() {
+    pruneSeen();
+    await storageSet({ [STORAGE.seen]: Object.fromEntries(state.seen) });
+  }
+
+  // Job boards and aggregators: applying there means their easy-apply flow (or a
+  // second hop), not the employer's own form that the tailored resume and autofill are for.
+  const AGGREGATOR_HOSTS = [
+    'dice.com',
+    'linkedin.com',
+    'indeed.com',
+    'ziprecruiter.com',
+    'glassdoor.com',
+    'monster.com',
+    'careerbuilder.com',
+    'simplyhired.com',
+    'jobright.ai',
+    'hiringcafe.com',
+    'hiring.cafe',
+    'wellfound.com',
+    'angel.co',
+    'builtin.com',
+    'talent.com',
+    'jooble.org',
+    'adzuna.com',
+    'lensa.com',
+    'theladders.com',
+    'snagajob.com',
+    'flexjobs.com',
+    'remoteok.com',
+    'weworkremotely.com',
+    'otta.com',
+    'welcometothejungle.com',
+    'jobot.com',
+    'cybercoders.com',
+    'google.com',
+  ];
+
+  /** True when the link is missing or stays on a job board. */
+  function isAggregatorLink(url) {
+    const raw = String(url || '').trim();
+    if (!raw) return true;
+    try {
+      const host = new URL(raw).hostname.toLowerCase().replace(/^www\./, '');
+      return AGGREGATOR_HOSTS.some((domain) => host === domain || host.endsWith(`.${domain}`));
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /** A LinkedIn listing leads on to the employer's own application page. */
+  function isLinkedInLink(url) {
+    try {
+      const host = new URL(String(url || '')).hostname.toLowerCase().replace(/^www\./, '');
+      return host === 'linkedin.com' || host.endsWith('.linkedin.com');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * What "Direct employer links only" hides: easy-apply flows and listings that
+   * stay on a job board. LinkedIn is the exception: from a LinkedIn posting the
+   * user reaches the employer's careers page, so those are kept as listed.
+   */
+  function hiddenByDirectLinks(job) {
+    if (job?.easy_apply === true) return true;
+    return isAggregatorLink(job?.apply_url) && !isLinkedInLink(job?.apply_url);
+  }
+
+  const EMPLOYER_LOOKUP_MAX = 150;
+
+  /**
+   * For jobs that only have a job-board link, look the posting up on the
+   * employer's own careers board and use that link instead. Each job is tried
+   * once; the ones not found stay as they are (and stay hidden by the
+   * direct-links filter).
+   */
+  async function resolveEmployerLinks(jobs) {
+    const resolver = window.SmartJobLinkResolver;
+    const outcome = { tried: 0, found: 0, duplicates: 0 };
+    if (!resolver?.resolveMany || !state.prefs.directLinksOnly) return outcome;
+    const targets = (jobs || [])
+      .filter(
+        (job) => !job.link_checked && job.company_name && job.title && isAggregatorLink(job.apply_url)
+      )
+      .slice(0, EMPLOYER_LOOKUP_MAX);
+    if (!targets.length) return outcome;
+
+    const show = (done, found) =>
+      setProgress({
+        text: 'Finding employer links…',
+        detail: `${done} of ${targets.length} job-board listings checked · ${found} found on the employer's site`,
+        kind: 'info',
+        current: done,
+        total: targets.length,
+        phase: 'hiringcafe',
+        showTrust: false,
+      });
+    show(0, 0);
+    const hits = await resolver.resolveMany(targets, {
+      concurrency: 4,
+      onProgress: (done, total, found) => show(done, found),
+      shouldStop: () => state.stopRequested,
+    });
+    targets.forEach((job, index) => {
+      const hit = hits.get(index);
+      // Not reached (stopped) or could not be checked (offline, timeout): try
+      // again next run. Only a clean answer settles a job.
+      if (!hit && (state.stopRequested || hits.uncertain?.has(index))) return;
+      job.link_checked = true;
+      if (!hit) return;
+      job.listed_url = job.apply_url || null;
+      job.apply_url = hit.url;
+      job.application_site = hit.ats;
+      outcome.found += 1;
+    });
+    outcome.tried = targets.length;
+    outcome.couldNotCheck = hits.uncertain?.size || 0;
+    outcome.notFoundSample = targets
+      .filter((job, index) => !hits.get(index) && !hits.uncertain?.has(index))
+      .slice(0, 12)
+      .map((job) => `${job.company_name} | ${job.title} | ${String(job.apply_url || '').slice(0, 60)}`);
+    return outcome;
+  }
+
+  /**
+   * When a job was posted, for filtering and for display.
+   *
+   * HiringCafe gives some jobs a date with no time of day. Parsed plainly that is
+   * midnight UTC, which can make a job posted an hour ago look most of a day old
+   * and fall outside a short freshness window. For those: `latestMs` is the end
+   * of that day (used to decide whether a job is inside the window, so a possibly
+   * fresh job is never dropped) and `ms` is the middle of it (used for age and rank).
+   *
+   * @returns {{ ms:number, latestMs:number, approximate:boolean } | null}
+   */
+  function jobPostedTimes(job, nowMs = Date.now()) {
+    const raw = String(job?.estimated_publish_date || job?.posted_at || '').trim();
+    if (!raw) return null;
+    const ms = Date.parse(raw);
+    if (Number.isNaN(ms)) return null;
+    const dateOnly =
+      jobOriginKey(job) !== 'jobright' &&
+      (/^\d{4}-\d{2}-\d{2}$/.test(raw) || /T00:00:00(\.0+)?(Z|[+-]00:?00)$/.test(raw));
+    if (!dateOnly) return { ms, latestMs: ms, approximate: false };
+    const day = 24 * 3600 * 1000;
+    return {
+      // Middle of the part of that day that has already happened.
+      ms: ms + Math.max(0, Math.min(nowMs - ms, day)) / 2,
+      latestMs: Math.min(nowMs, ms + day - 1),
+      approximate: true,
+    };
+  }
+
+  /** Added by the most recent run. */
+  function isNewJob(job) {
+    return Boolean(job?.is_new);
+  }
+
   function jobKey(job, index) {
     const urlApi = window.SmartJobJobUrl?.canonicalJobUrl;
     const urlKey = urlApi ? urlApi(job.apply_url) : String(job.apply_url || '');
@@ -142,6 +465,35 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  /**
+   * Jobright jobs saved before its times were read as UTC are off by the local
+   * UTC offset. Shift them back once. Only when the saved list proves the error:
+   * at least one of its Jobright jobs was "posted" after the scrape that found it.
+   */
+  function repairLegacyJobrightTimes(jobs, scrapedAtMs) {
+    const legacy = (jobs || []).filter(
+      (job) =>
+        jobOriginKey(job) === 'jobright' &&
+        job.time_v !== 2 &&
+        !Number.isNaN(Date.parse(job.estimated_publish_date || ''))
+    );
+    if (!legacy.length) return false;
+    const reference = Number.isNaN(scrapedAtMs) ? Date.now() : scrapedAtMs;
+    const proven = legacy.some(
+      (job) => Date.parse(job.estimated_publish_date) > reference + 5 * 60 * 1000
+    );
+    for (const job of legacy) {
+      if (proven) {
+        const stored = new Date(job.estimated_publish_date);
+        const fixed = new Date(stored.getTime() - stored.getTimezoneOffset() * 60000);
+        job.estimated_publish_date = fixed.toISOString();
+        job.posted_at = formatBidPostedAt(job.estimated_publish_date);
+      }
+      job.time_v = 2;
+    }
+    return true;
+  }
+
   async function loadState() {
     const result = await storageGet([
       STORAGE.prefs,
@@ -150,7 +502,18 @@
       STORAGE.blockedJobs,
       STORAGE.lastResults,
       STORAGE.customSearch,
+      STORAGE.seen,
+      STORAGE.registered,
     ]);
+    await loadJobrightGuard();
+
+    const storedSeen = result[STORAGE.seen];
+    state.seen = new Map(
+      Object.entries(storedSeen && typeof storedSeen === 'object' ? storedSeen : {}).map(
+        ([key, at]) => [key, Number(at) || 0]
+      )
+    );
+    pruneSeen();
 
     const storedPrefs = result[STORAGE.prefs] || {};
     state.prefs = { ...DEFAULT_PREFS, ...storedPrefs };
@@ -185,6 +548,21 @@
         : [],
     });
 
+    // The applied jobs and companies from the last successful sync, for the
+    // profile they belong to. If the next sync fails, what was known is still
+    // hidden, instead of nothing.
+    const savedRegistered = result[STORAGE.registered];
+    if (
+      savedRegistered &&
+      savedRegistered.profile &&
+      savedRegistered.profile === state.prefs.candidateFilter
+    ) {
+      state.registeredJobs = Array.isArray(savedRegistered.jobs) ? savedRegistered.jobs : [];
+      state.registeredCompanies = Array.isArray(savedRegistered.companies)
+        ? savedRegistered.companies
+        : [];
+    }
+
     const custom = result[STORAGE.customSearch];
     if (custom && custom.searchState && typeof custom.searchState === 'object') {
       state.customSearchState = custom.searchState;
@@ -199,6 +577,12 @@
       state.rawJobs = last.rawJobs || last.jobs;
       state.lastScrapedAt = last.scrapedAt || null;
       state.stats = last.stats || null;
+      if (repairLegacyJobrightTimes(state.rawJobs, Date.parse(state.lastScrapedAt || ''))) {
+        recomputeFiltered();
+        await persistResults();
+      }
+      // Whatever is pending counts as seen, including lists saved before this memory existed.
+      markJobsSeen(state.rawJobs, Date.parse(state.lastScrapedAt || '') || Date.now());
       recomputeFiltered();
     }
   }
@@ -219,6 +603,20 @@
     } else {
       await chrome.storage.local.remove(STORAGE.customSearch);
     }
+  }
+
+  /** The hide rules that are switched off, by the name of what they would hide. */
+  function hideRulesSwitchedOff() {
+    return [
+      ['excludeRegisteredJobs', 'jobs you applied to'],
+      ['excludeRegisteredCompanies', 'companies you applied to'],
+      ['excludeBlockedJobs', 'blocked jobs'],
+      ['excludeBlockedCompanies', 'blocked companies'],
+      ['excludeBlockedAts', 'blocked ATS'],
+      ['directLinksOnly', 'easy-apply listings'],
+    ]
+      .filter(([key]) => state.prefs[key] === false)
+      .map(([, label]) => label);
   }
 
   async function persistBlockLists() {
@@ -320,6 +718,11 @@
       bits.push(`${stats.removedBlockedCompanies} blocked cos`);
     }
     if (stats.removedAts) bits.push(`${stats.removedAts} blocked ATS`);
+    if (stats.removedAggregator) bits.push(`${stats.removedAggregator} easy-apply`);
+    if (stats.removedClearance) bits.push(`${stats.removedClearance} clearance`);
+    if (stats.removedForeign) bits.push(`${stats.removedForeign} outside US`);
+    if (stats.removedDegree) bits.push(`${stats.removedDegree} higher degree`);
+    if (stats.removedLanguage) bits.push(`${stats.removedLanguage} other language`);
     if (stats.removedRegisteredJobs) bits.push(`${stats.removedRegisteredJobs} reg. jobs`);
     if (stats.removedRegisteredCompanies) {
       bits.push(`${stats.removedRegisteredCompanies} reg. cos`);
@@ -397,8 +800,8 @@
         undated.push(job);
         continue;
       }
-      const publishedMs = Date.parse(raw);
-      if (Number.isNaN(publishedMs) || publishedMs < cutoffMs) {
+      const times = jobPostedTimes(job, nowMs);
+      if (!times || times.latestMs < cutoffMs) {
         outWindow.push(job);
       } else {
         inWindow.push(job);
@@ -424,8 +827,13 @@
       const origin = jobOriginKey(job);
       const win = origin === 'jobright' ? jrWin : hcWin;
       const part = partitionJobsByDateWindow([job], win, nowMs);
-      if (part.inWindow.length) filtered.push(job);
-      else removedByDate += 1;
+      // An undated Jobright row was admitted on purpose at scrape time (no dates
+      // were available to judge by); it has no date to fail here either.
+      if (part.inWindow.length || (origin === 'jobright' && part.undated.length)) {
+        filtered.push(job);
+      } else {
+        removedByDate += 1;
+      }
     }
     return {
       filtered,
@@ -433,6 +841,12 @@
       dateWindowJr: jrWin,
       dateWindowHc: hcWin,
     };
+  }
+
+  /** The moment the saved results were scraped; "now" only before any run. */
+  function freshnessReferenceMs() {
+    const started = Date.parse(state.stats?.startedAt || state.lastScrapedAt || '');
+    return Number.isNaN(started) ? Date.now() : started;
   }
 
   function recomputeFiltered() {
@@ -443,6 +857,13 @@
     }
 
     const hasProfile = Boolean(state.prefs.candidateFilter);
+    // The freshness window limits what a run reads. Once a job is in the pending
+    // list it stays until cleared, however old it gets.
+    const dated = {
+      removedByDate: 0,
+      dateWindowJr: resolveJrDateWindow(),
+      dateWindowHc: resolveHcDateWindow(),
+    };
     const deduped = scraper.dedupeJobs(state.rawJobs);
     const { filtered: afterBlocks, stats } = scraper.applyLocalFilters(deduped, {
       excludeBlockedCompanies: state.prefs.excludeBlockedCompanies,
@@ -457,9 +878,29 @@
       registeredCompanies: state.registeredCompanies,
     });
 
-    // Per-source freshness (Jobright vs HiringCafe). Keep multiple roles per company.
-    const dated = filterJobsByPerSourceFreshness(afterBlocks);
-    let filtered = sortBidJobs(dated.filtered || []);
+    // After dedupe, so a job found on Jobright and directly on HiringCafe keeps its direct copy.
+    const direct = state.prefs.directLinksOnly
+      ? (afterBlocks || []).filter((job) => !hiddenByDirectLinks(job))
+      : afterBlocks || [];
+    const removedAggregator = (afterBlocks || []).length - direct.length;
+    const cleared = state.prefs.hideClearanceRequired
+      ? direct.filter((job) => job.clearance_required !== true)
+      : direct;
+    const removedClearance = direct.length - cleared.length;
+    // Only a stated, different country excludes; an unknown one does not.
+    const domestic = state.prefs.usOnly
+      ? cleared.filter((job) => !job.country_code || /^(us|usa)$/i.test(String(job.country_code).trim()))
+      : cleared;
+    const removedForeign = cleared.length - domestic.length;
+    const degreeOk = state.prefs.hideAdvancedDegree
+      ? domestic.filter((job) => job.advanced_degree_required !== true)
+      : domestic;
+    const removedDegree = domestic.length - degreeOk.length;
+    const languageOk = state.prefs.hideForeignLanguage
+      ? degreeOk.filter((job) => job.foreign_language_required !== true)
+      : degreeOk;
+    const removedLanguage = degreeOk.length - languageOk.length;
+    let filtered = sortBidJobs(languageOk);
 
     state.filteredJobs = filtered;
     state.stats = {
@@ -475,6 +916,11 @@
       removedAts: stats.removedAts,
       removedRegisteredJobs: stats.removedRegisteredJobs,
       removedRegisteredCompanies: stats.removedRegisteredCompanies,
+      removedAggregator,
+      removedClearance,
+      removedForeign,
+      removedDegree,
+      removedLanguage,
       remaining: filtered.length,
       registeredJobCount: state.registeredJobs.length,
       registeredCompanyCount: state.registeredCompanies.length,
@@ -681,6 +1127,8 @@
   function formatBidPostedAt(value) {
     if (value == null || value === '') return '';
     const raw = String(value).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    if (/^\d{4}-\d{2}-\d{2}T00:00:00(\.0+)?(Z|[+-]00:?00)$/.test(raw)) return raw.slice(0, 10);
     let d = new Date(raw);
     if (Number.isNaN(d.getTime())) {
       const match = raw.match(
@@ -707,6 +1155,7 @@
 
   function escapeXml(value) {
     return String(value ?? '')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -721,7 +1170,8 @@
       ),
       title: job?.title || null,
       company_name: job?.company_name || null,
-      application_site: job?.application_site || 'Unknown',
+      application_site:
+        (job?.apply_url && api()?.detectPlatform?.(job.apply_url)) || job?.application_site || 'Unknown',
       applicants_count:
         job?.applicants_count != null && String(job.applicants_count).trim()
           ? String(job.applicants_count).trim()
@@ -729,15 +1179,209 @@
       origin: origin || job?.origin || '',
       estimated_publish_date: job?.estimated_publish_date || null,
       source: job?.source || origin || '',
+      id: job?.id || null,
+      applicants_text: job?.applicants_text || null,
+      ...sourceStatedFacts(job),
+      work_model: job?.work_model || null,
+      repost: job?.repost === true,
+      easy_apply: job?.easy_apply === true,
+      first_seen_at: job?.first_seen_at || null,
+      time_v: 2,
     };
   }
 
-  /** Source Platform A→Z, then newest posted, then company A→Z — easier ATS batch bidding. */
+  /** Straight-line interpolation through [x, y] points; flat beyond either end. */
+  function interpolate(points, x) {
+    if (x <= points[0][0]) return points[0][1];
+    for (let i = 1; i < points.length; i += 1) {
+      const [x1, y1] = points[i];
+      if (x <= x1) {
+        const [x0, y0] = points[i - 1];
+        return y0 + ((x - x0) / (x1 - x0)) * (y1 - y0);
+      }
+    }
+    return points[points.length - 1][1];
+  }
+
+  // Share of the freshness points left after N hours. Screening usually starts
+  // within a day or two and the shortlist fills during the first week, so the
+  // value falls slowly at first, fastest between day 1 and day 3, then flattens.
+  const FRESHNESS_CURVE = [
+    [0, 1], [6, 0.95], [24, 0.8], [48, 0.6], [72, 0.45], [168, 0.2], [336, 0.08], [720, 0.03],
+  ];
+  // Share of the competition points at N applicants. The count is Jobright's:
+  // its own users who marked the job as applied, which is optional, so the real
+  // number is higher by an unknown factor. It ranks jobs against each other
+  // (more marks, more competition) but says little as a number, so it carries
+  // few points.
+  const COMPETITION_CURVE = [[0, 1], [25, 1], [50, 0.8], [100, 0.5], [200, 0.1], [500, 0]];
+  const FRESHNESS_POINTS = 80;
+  const COMPETITION_POINTS = 20;
+  // A repost shows a fresh date and a small count, but the employer already
+  // holds the earlier applicants, so the real queue is longer than it looks.
+  const REPOST_PENALTY = 10;
+
+  // Age brackets (hours) for "how many applicants does a job this old usually
+  // have": the same shape as the freshness curve, so each covers one stage.
+  const AGE_BRACKETS = [[0, 6], [6, 12], [12, 24], [24, 48], [48, 168], [168, Infinity]];
+  const TYPICAL_MIN_SAMPLES = 5;
+
+  function median(values) {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  /**
+   * Typical applicant counts by age, from the jobs that state one (Jobright).
+   * Fills the gap for sources that give no count (HiringCafe), so a 3-hour-old
+   * job there is scored like other 3-hour-old jobs rather than as a middling one.
+   */
+  function typicalApplicantsByAge(jobs, nowMs = Date.now()) {
+    const buckets = AGE_BRACKETS.map(() => []);
+    const all = [];
+    for (const job of jobs || []) {
+      const count = applicantsEstimate(job);
+      if (count == null) continue;
+      const posted = jobPostedTimes(job, nowMs);
+      if (!posted) continue;
+      const hours = Math.max(0, (nowMs - posted.ms) / 3600000);
+      const index = AGE_BRACKETS.findIndex(([from, to]) => hours >= from && hours < to);
+      if (index >= 0) buckets[index].push(count);
+      all.push(count);
+    }
+    return {
+      brackets: buckets.map((values) => (values.length >= TYPICAL_MIN_SAMPLES ? median(values) : null)),
+      overall: all.length >= TYPICAL_MIN_SAMPLES ? median(all) : null,
+      samples: all.length,
+    };
+  }
+
+  /** The typical count for a job this old, or null when there is too little evidence. */
+  function typicalApplicants(table, hours) {
+    if (!table || hours == null) return null;
+    const index = AGE_BRACKETS.findIndex(([from, to]) => hours >= from && hours < to);
+    const own = index >= 0 ? table.brackets[index] : null;
+    if (own != null) return own;
+    // Nearest bracket with enough samples, then the whole run.
+    for (let step = 1; step < AGE_BRACKETS.length; step += 1) {
+      const below = table.brackets[index - step];
+      const above = table.brackets[index + step];
+      if (below != null) return below;
+      if (above != null) return above;
+    }
+    return table.overall;
+  }
+
+  /**
+   * Job points, 0–100: how much an application sent now is worth, the way a
+   * screener's queue works. Being early counts most (80), a small pile next (20).
+   * Continuous, so two jobs an hour apart get different points. Skills,
+   * experience and the kind of application form are not part of it.
+   * A missing applicant count is taken from `typical`, the run's own counts by
+   * age; without that evidence it scores as middling, never as a zero.
+   * A repost loses REPOST_PENALTY points.
+   */
+  function jobPriority(job, nowMs = Date.now(), typical = null) {
+    const posted = jobPostedTimes(job, nowMs);
+    const hours = posted ? Math.max(0, (nowMs - posted.ms) / 3600000) : null;
+    const freshness = hours == null ? 0.4 : interpolate(FRESHNESS_CURVE, hours);
+
+    let applicants = applicantsEstimate(job);
+    let estimated = false;
+    if (applicants == null) {
+      const guess = typicalApplicants(typical, hours);
+      if (guess != null) {
+        applicants = Math.round(guess);
+        estimated = true;
+      }
+    }
+    const competition = applicants != null ? interpolate(COMPETITION_CURVE, applicants) : 0.5;
+    const repost = job?.repost === true;
+
+    const raw = FRESHNESS_POINTS * freshness + COMPETITION_POINTS * competition - (repost ? REPOST_PENALTY : 0);
+    const score = Math.max(0, Math.round(raw * 10) / 10);
+    return { score, hours, applicants, estimated, repost };
+  }
+
+  /**
+   * Applicants as a number for scoring. Jobright's text is the precise form:
+   * "< 25 applicants" (fewer than 25), "60 applicants" (exactly), "100+
+   * applicants" (at least 100). For "100+" the row's own number is used when it
+   * says more than the text does; otherwise a quarter more. Null when unknown.
+   */
+  function applicantsEstimate(job) {
+    const text = String(job?.applicants_text || '').trim();
+    const number = (s) => Number(String(s).replace(/,/g, ''));
+    const raw = (String(job?.applicants_count ?? '').match(/\d[\d,]*/) || [''])[0];
+    const stated = raw ? number(raw) : NaN;
+    const statedCount = Number.isFinite(stated) && stated > 0 ? stated : null;
+    let m = text.match(/^(?:<|less than|under|fewer than)\s*(\d[\d,]*)/i);
+    if (m) return Math.max(1, number(m[1]) - 1);
+    m = text.match(/^(?:over\s+)?(\d[\d,]*)\s*\+/i) || text.match(/^(?:over|more than)\s+(\d[\d,]*)/i);
+    if (m) {
+      const floor = number(m[1]);
+      return statedCount != null && statedCount > floor ? statedCount : Math.round(floor * 1.25);
+    }
+    m = text.match(/^(\d[\d,]*)/);
+    if (m) return number(m[1]);
+    return statedCount;
+  }
+
+  /** Applicants as shown in the sheet: "< 25", "60", "100+". */
+  function applicantsLabel(job) {
+    const text = String(job?.applicants_text || '').replace(/\s*applicants?\s*$/i, '').trim();
+    return text || (job?.applicants_count ?? '');
+  }
+
+  /**
+   * Hard facts the source states about a job, in one shape for both sources.
+   * Jobright gives flags; HiringCafe gives its own reading of the posting.
+   * Anything not stated stays false / null: unknown never excludes a job.
+   */
+  function sourceStatedFacts(job) {
+    const none = (value) => /^(|none|null|no|n\/a|not mentioned|not required|unknown)$/i.test(String(value ?? '').trim());
+    const required = (value) => /^required$/i.test(String(value ?? '').trim());
+
+    const clearance =
+      job?.clearance_required === true ||
+      (job?.security_clearance != null && !none(job.security_clearance));
+
+    const languages = Array.isArray(job?.language_requirements) ? job.language_requirements : [];
+    const foreignLanguage =
+      job?.foreign_language_required === true ||
+      languages.some((name) => name && !/^english$/i.test(name));
+
+    const advancedDegree =
+      job?.advanced_degree_required === true ||
+      required(job?.masters_degree_requirement) ||
+      required(job?.doctorate_degree_requirement);
+
+    // A list of countries that leaves out the US places the job abroad.
+    const countries = Array.isArray(job?.workplace_countries) ? job.workplace_countries : [];
+    let country = job?.country_code || null;
+    if (!country && countries.length) {
+      country = countries.some((code) => /^(US|USA)$/.test(code)) ? 'US' : countries[0];
+    }
+
+    return {
+      clearance_required: clearance,
+      foreign_language_required: foreignLanguage,
+      advanced_degree_required: advancedDegree,
+      country_code: country,
+    };
+  }
+
+  /** Highest points first; newer first when points are equal. */
   function sortBidJobs(jobs) {
+    const sortedAt = Date.now();
+    // Typical counts come from everything this run found, not only the shown jobs.
+    const typical = typicalApplicantsByAge(state.rawJobs, sortedAt);
     return [...(Array.isArray(jobs) ? jobs : [])].sort((a, b) => {
-      const atsA = String(a?.application_site || '').toLowerCase();
-      const atsB = String(b?.application_site || '').toLowerCase();
-      if (atsA !== atsB) return atsA.localeCompare(atsB);
+      const pA = jobPriority(a, sortedAt, typical).score;
+      const pB = jobPriority(b, sortedAt, typical).score;
+      if (pA !== pB) return pB - pA;
       const tA = Date.parse(a?.estimated_publish_date || a?.posted_at || '') || 0;
       const tB = Date.parse(b?.estimated_publish_date || b?.posted_at || '') || 0;
       if (tA !== tB) return tB - tA;
@@ -774,8 +1418,24 @@
       'Applicants',
       'Source Platform',
       ...(includeOrigin ? ['Origin'] : []),
+      // Appended last so existing column positions do not move.
+      'Age',
+      'New',
+      // A real number, so the sheet can sort and filter on it.
+      'Score',
+      'Listed On',
+      'Repost',
     ];
     const sorted = sortBidJobs(jobs);
+    const exportedAt = Date.now();
+    const typical = typicalApplicantsByAge(state.rawJobs, exportedAt);
+    const ageOf = (job) => {
+      const posted = jobPostedTimes(job, exportedAt);
+      if (!posted) return '';
+      const age = formatAgeMinutes(Math.round((exportedAt - posted.ms) / 60000));
+      // "~" marks a job the source dated by day only.
+      return posted.approximate ? `~${age}` : age;
+    };
     const headerCells = headers
       .map(
         (h) =>
@@ -784,24 +1444,38 @@
       .join('');
     const dataRows = sorted
       .map((job) => {
+        const priority = jobPriority(job, exportedAt, typical);
         const values = [
           job?.apply_url ?? '',
           formatBidPostedAt(job?.posted_at || job?.estimated_publish_date || ''),
           job?.title ?? '',
           job?.company_name ?? '',
-          job?.applicants_count ?? '',
+          // "~" marks a count the source did not give, taken from jobs of the same age.
+          priority.estimated ? `~${priority.applicants}` : applicantsLabel(job),
           job?.application_site ?? '',
           ...(includeOrigin ? [job?.origin || ''] : []),
+          ageOf(job),
+          isNewJob(job) ? 'new' : '',
+          { number: priority.score },
+          // Where the job was first listed, when its link was swapped for the employer's.
+          job?.listed_url || '',
+          priority.repost ? 'repost' : '',
         ];
         return `<Row>${values
-          .map((v) => `<Cell><Data ss:Type="String">${escapeXml(v)}</Data></Cell>`)
+          .map((v) =>
+            v && typeof v === 'object' && Number.isFinite(v.number)
+              ? `<Cell><Data ss:Type="Number">${v.number}</Data></Cell>`
+              : `<Cell><Data ss:Type="String">${escapeXml(v)}</Data></Cell>`
+          )
           .join('')}</Row>`;
       })
       .join('');
 
     const colXml = headers
       .map((_, i) => {
-        const widths = [280, 110, 220, 120, 80, 120, 100];
+        const widths = includeOrigin
+          ? [280, 110, 220, 120, 80, 120, 100, 70, 50, 60, 220, 60]
+          : [280, 110, 220, 120, 80, 120, 70, 50, 60, 220, 60];
         return `<Column ss:Width="${widths[i] || 100}"/>`;
       })
       .join('');
@@ -861,7 +1535,13 @@
         profileSel.value = preferred;
       } else {
         profileSel.value = '';
-        if (state.prefs.candidateFilter && !state.candidates.some((c) => c.key === state.prefs.candidateFilter)) {
+        // Before the list has loaded, "not in the list" means nothing: clearing here
+        // wiped the saved profile on every panel open and disabled the registered filters.
+        if (
+          state.candidates.length &&
+          state.prefs.candidateFilter &&
+          !state.candidates.some((c) => c.key === state.prefs.candidateFilter)
+        ) {
           state.prefs.candidateFilter = '';
         }
       }
@@ -874,6 +1554,13 @@
       ['jsFilterBlockedJobs', 'excludeBlockedJobs'],
       ['jsFilterRegisteredJobs', 'excludeRegisteredJobs'],
       ['jsFilterRegisteredCompanies', 'excludeRegisteredCompanies'],
+      ['jsDirectLinksOnly', 'directLinksOnly'],
+      ['jsHideClearance', 'hideClearanceRequired'],
+      ['jsUsOnly', 'usOnly'],
+      ['jsHideDegree', 'hideAdvancedDegree'],
+      ['jsHideLanguage', 'hideForeignLanguage'],
+      ['jsUseJobright', 'useJobright'],
+      ['jsUseHiringCafe', 'useHiringCafe'],
     ];
     for (const [id, key] of map) {
       const el = document.getElementById(id);
@@ -927,12 +1614,19 @@
 
     const scrapeBtn = document.getElementById('jsScrapeBtn');
     if (scrapeBtn) {
-      scrapeBtn.disabled = state.scraping && !state.pausedForChallenge;
-      scrapeBtn.classList.toggle('is-busy', state.scraping && !state.pausedForChallenge);
+      const busy = state.runActive || (state.scraping && !state.pausedForChallenge);
+      scrapeBtn.disabled = busy;
+      scrapeBtn.classList.toggle('is-busy', busy);
     }
+    if (resumeBtn) resumeBtn.disabled = state.runActive;
 
     const stopBtn = document.getElementById('jsStopBtn');
-    if (stopBtn) stopBtn.hidden = !state.scraping;
+    if (stopBtn) {
+      stopBtn.hidden = !(state.scraping || state.runActive);
+      // Stop takes effect at the next safe point; show that it was heard.
+      stopBtn.disabled = state.stopRequested && state.runActive;
+      stopBtn.textContent = stopBtn.disabled ? 'Stopping…' : 'Stop';
+    }
 
     renderBlockLists();
     renderResults();
@@ -953,15 +1647,38 @@
       ? scraper?.summarizeSearchState?.(state.customSearchState) || 'Custom search imported'
       : 'Built-in default';
 
+    // Freshness has its own control on the row, so the line says only what is searched.
+    const hcOn = state.prefs.useHiringCafe !== false;
+    const jrOn = state.prefs.useJobright !== false;
     if (hcEl) {
-      const text = `${hcLabel} · ${hcSummary}`;
-      hcEl.textContent = text;
-      hcEl.title = `${text} (HiringCafe freshness; API uses whole days for hour windows)`;
+      hcEl.textContent = hcOn ? hcSummary : 'Off';
+      hcEl.title = `${hcSummary} · ${hcLabel} (HiringCafe searches whole days; shorter windows are cut afterwards)`;
     }
     if (jrEl) {
-      jrEl.textContent = `Recommend · ${jrLabel}`;
-      jrEl.title = `Jobright freshness ${jrLabel}. Set filters on jobright.ai → Recommend, then scrape.`;
+      const guard = jobrightGuard();
+      const used = `${guard.requests} of ${JR_DAILY_REQUESTS} requests today`;
+      // Is Jobright read on the next scrape, and if not, until when. The row is
+      // narrow: the request count lives in the tooltip.
+      const held = jrOn && (guard.cooldownUntil > Date.now() || jobrightRequestsLeft() <= 0);
+      jrEl.textContent = !jrOn
+        ? 'Off'
+        : guard.cooldownUntil > Date.now()
+          ? `Paused until ${clockTime(guard.cooldownUntil)}`
+          : jobrightRequestsLeft() <= 0
+            ? 'Daily limit reached'
+            : 'Recommend feed';
+      jrEl.classList.toggle('is-alert', held);
+      jrEl.title =
+        `Jobright freshness ${jrLabel}. Set filters on jobright.ai → Recommend, then scrape. ` +
+        `${used}; Jobright is skipped for a few hours after it asks to slow down.`;
     }
+    for (const [id, on] of [['jsUseJobright', jrOn], ['jsUseHiringCafe', hcOn]]) {
+      document.getElementById(id)?.closest('.js-source-card')?.classList.toggle('is-off', !on);
+    }
+    const jrSelect = document.getElementById('jsFreshnessWindowJr');
+    const hcSelect = document.getElementById('jsFreshnessWindowHc');
+    if (jrSelect) jrSelect.disabled = !jrOn;
+    if (hcSelect) hcSelect.disabled = !hcOn;
   }
 
   function ensureFreshnessSelectValue(sel, value) {
@@ -1000,15 +1717,8 @@
     state.customSearchState = searchState;
     state.customSearchSourceUrl = sourceUrl || '';
 
-    // Seed day-based freshness from HC URL when import has dateFetchedPastNDays.
-    // Hour prefs are left alone only if user already chose hours — importing days
-    // updates to that day window so the imported filter is visible.
-    const scraper = api();
-    const importedDays = Number(searchState?.dateFetchedPastNDays);
-    if (Number.isFinite(importedDays) && importedDays >= 1 && scraper?.dateWindowFromDays) {
-      state.prefs.freshnessWindowHc = scraper.dateWindowFromDays(importedDays);
-    }
-
+    // Freshness stays whatever the row's dropdown says: an imported URL carrying
+    // "past 61 days" must not silently replace an 8-hour window.
     await persistPrefs();
     await persistCustomSearch();
     syncControlsFromState();
@@ -1200,7 +1910,7 @@
       itemsHtml ||
       '<li class="muted" style="border:none;justify-content:flex-start">No items yet.</li>';
 
-    document.querySelectorAll('.js-hide-row').forEach((row) => {
+    document.querySelectorAll('.js-filter-row').forEach((row) => {
       const editEl = row.querySelector('[data-edit-list]');
       const kind = editEl?.dataset?.editList;
       row.classList.toggle('is-editing', Boolean(kind && kind === state.openListEditor));
@@ -1272,7 +1982,11 @@
     const scope = document.getElementById('jsActionScope');
     if (scope) {
       if (state.filteredJobs.length) {
-        scope.textContent = `${state.filteredJobs.length} jobs ready`;
+        const total = state.filteredJobs.length;
+        const fresh = state.filteredJobs.filter(isNewJob).length;
+        scope.textContent =
+          `${total} job${total === 1 ? '' : 's'} ready` +
+          (fresh && fresh !== total ? ` · ${fresh} new` : '');
       } else if (state.rawJobs.length) {
         scope.textContent = '0 jobs after filters';
       } else {
@@ -1280,10 +1994,53 @@
       }
     }
 
+    const reportEl = document.getElementById('jsResultsReport');
+    const copyReportBtn = document.getElementById('jsCopyReportBtn');
+    if (reportEl) {
+      const lines = state.rawJobs.length ? runReportLines() : [];
+      reportEl.textContent = lines.join('\n');
+      reportEl.hidden = lines.length === 0;
+      if (copyReportBtn) copyReportBtn.hidden = lines.length === 0;
+    }
+
+    const warn = document.getElementById('jsResultsWarn');
+    if (warn) {
+      const notes = [...(Array.isArray(state.stats?.warnings) ? state.stats.warnings : [])];
+      // A failed sync or a missing profile means nothing registered was hidden.
+      if (state.listsSyncError) {
+        const known =
+          state.registeredJobs.length + state.registeredCompanies.length +
+          state.blockedJobs.length + state.blockedCompanies.length + state.blockedAts.length;
+        notes.push(
+          known
+            ? `Website lists did not sync (${state.listsSyncError}). The lists from the last sync were used; jobs applied to or blocked since then may be listed.`
+            : `Website lists did not sync (${state.listsSyncError}) and none are saved, so jobs you applied to or blocked are not hidden.`
+        );
+      } else if (!state.prefs.candidateFilter) {
+        notes.push('No profile selected in Filters & lists — jobs you already applied to are not hidden.');
+      }
+      // A hide rule that is switched off lets its jobs through without a word.
+      const off = hideRulesSwitchedOff();
+      if (off.length) notes.push(`Not hidden (switched off in Filters & lists): ${off.join(', ')}.`);
+      warn.textContent = notes.join(' ');
+      warn.hidden = notes.length === 0 || (!state.rawJobs.length && !state.filteredJobs.length);
+    }
+
     const sub = document.getElementById('jsResultsSub');
     if (sub) {
       const bits = [];
-      if (state.stats?.scraped != null) bits.push(`${state.stats.scraped} scraped`);
+      const scrapedMs = Date.parse(state.lastScrapedAt || '');
+      if (!Number.isNaN(scrapedMs)) {
+        const when = new Date(scrapedMs);
+        const sameDay = when.toDateString() === new Date().toDateString();
+        const time = when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        bits.push(
+          sameDay
+            ? `Scraped ${time}`
+            : `Scraped ${when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`
+        );
+      }
+      if (state.stats?.newCount != null) bits.push(`${state.stats.newCount} found`);
       if (state.stats?.removedBlockedJobs) {
         bits.push(`${state.stats.removedBlockedJobs} blocked jobs`);
       }
@@ -1291,6 +2048,14 @@
         bits.push(`${state.stats.removedBlockedCompanies} blocked cos`);
       }
       if (state.stats?.removedAts) bits.push(`${state.stats.removedAts} blocked ATS`);
+      if (state.stats?.employerLinks?.found) {
+        bits.push(`${state.stats.employerLinks.found} moved to employer link`);
+      }
+      if (state.stats?.removedAggregator) bits.push(`${state.stats.removedAggregator} easy-apply hidden`);
+      if (state.stats?.removedClearance) bits.push(`${state.stats.removedClearance} clearance required`);
+      if (state.stats?.removedForeign) bits.push(`${state.stats.removedForeign} outside US`);
+      if (state.stats?.removedDegree) bits.push(`${state.stats.removedDegree} Master's/PhD required`);
+      if (state.stats?.removedLanguage) bits.push(`${state.stats.removedLanguage} other language required`);
       if (state.stats?.removedRegisteredJobs) {
         bits.push(`${state.stats.removedRegisteredJobs} reg. jobs`);
       }
@@ -1340,6 +2105,15 @@
         }
       }
 
+      // A closed tab will never finish loading; fail now instead of after the timeout.
+      function onRemoved(removedTabId) {
+        if (removedTabId !== tabId) return;
+        chrome.tabs.onRemoved.removeListener(onRemoved);
+        finish(false, new Error(`The ${sourceLabel()} tab was closed.`));
+      }
+      chrome.tabs.onRemoved?.addListener(onRemoved);
+      setTimeout(() => chrome.tabs.onRemoved?.removeListener(onRemoved), timeoutMs + 1000);
+
       chrome.tabs.onUpdated.addListener(listener);
       chrome.tabs.get(tabId, (tab) => {
         if (chrome.runtime.lastError) {
@@ -1354,17 +2128,26 @@
   async function ensureScrapeTab(url) {
     let tabId = await getStoredScrapeTabId();
     if (tabId) {
+      let tab = null;
       try {
-        const tab = await chrome.tabs.get(tabId);
-        if (tab?.id) {
-          await chrome.tabs.update(tab.id, { url, active: false });
-          await waitForTabComplete(tab.id);
-          await sleep(400);
-          return tab.id;
-        }
+        tab = await chrome.tabs.get(tabId);
       } catch (_) {
-        await setStoredScrapeTabId(null);
+        tab = null;
       }
+      // Tab ids are reused across browser restarts: only navigate a tab that is
+      // still one of ours (a scrape page, or blank), never something the user opened.
+      const href = String(tab?.url || tab?.pendingUrl || '');
+      const ours =
+        !href ||
+        /^(about:blank|chrome:\/\/newtab)/i.test(href) ||
+        /hiringcafe\.com|hiring\.cafe|jobright\.ai/i.test(href);
+      if (tab?.id && ours) {
+        await chrome.tabs.update(tab.id, { url, active: false });
+        await waitForTabComplete(tab.id);
+        await sleep(400);
+        return tab.id;
+      }
+      await setStoredScrapeTabId(null);
     }
 
     const created = await chrome.tabs.create({ url, active: true });
@@ -1445,12 +2228,15 @@
 
     // Fresh tab already fetched before capture — force another Recommend pull.
     // Reused tab also needs a pull so capture sees jobs (prior SPA loads are gone).
+    let rateLimited = false;
     if (typeof jr?.forceRecommendRefetchInTab === 'function') {
-      await runJobrightTabFn(tabId, jr.forceRecommendRefetchInTab, []);
+      const refetch = await runJobrightTabFn(tabId, jr.forceRecommendRefetchInTab, []);
+      await noteJobrightRequests(refetch?.requests ?? 1, 'openingRefetch');
+      rateLimited = Boolean(refetch?.rateLimited);
       await sleep(1400);
     }
 
-    return { tabId, reused };
+    return { tabId, reused, rateLimited };
   }
 
   function scrapePhaseSource() {
@@ -1485,7 +2271,7 @@
     const label = sourceLabel(phase);
     const maxAttempts = 10;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      if (!state.scraping) throw new Error('Scrape stopped.');
+      if (!state.scraping || state.stopRequested) throw new Error('Scrape stopped.');
       const extracted = await extractFromTab(tabId);
       if (extracted?.ok) return extracted;
 
@@ -1526,6 +2312,234 @@
     };
   }
 
+  /**
+   * Single exit for a run. Whatever was collected becomes the result set, whether
+   * the run finished, was stopped, or broke part-way — so a late failure can no
+   * longer throw away earlier pages. Returns false when there is nothing to keep.
+   */
+  async function finishRun({
+    jrJobs = [],
+    hcJobs = [],
+    pagesFetched = 0,
+    reportedTotal = null,
+    outcome = 'done',
+    error = '',
+    warnings = [],
+    report = {},
+    known = 0,
+  } = {}) {
+    const stamp = new Date().toISOString();
+    const merged = dedupeBidJobs([...jrJobs, ...hcJobs]).map((job) => ({
+      ...job,
+      first_seen_at: stamp,
+      // Only a label: was this job in any earlier run? It is listed either way.
+      is_new: !isSeenJob(job),
+    }));
+    state.scrapeCursor = null;
+    state.combinedRun = null;
+    state.pausedForChallenge = false;
+    // Nothing new and nothing recognised: the sources returned nothing at all.
+    if (merged.length === 0 && !known) return false;
+
+    let employerLinks = { tried: 0, found: 0, duplicates: 0 };
+
+    const notes = warnings.filter(Boolean);
+    if (outcome === 'partial' && error) notes.unshift(`The run ended early: ${error}`);
+    if (outcome === 'stopped') notes.unshift('Stopped before the run finished.');
+
+    // The list is what this run found. Bids, blocks and companies are filtered
+    // from it; having been scraped before is not a reason to leave a job out.
+    state.rawJobs = merged;
+    state.lastScrapedAt = stamp;
+    state.stats = {
+      pagesFetched,
+      reportedTotal,
+      scraped: merged.length,
+      newCount: merged.length,
+      knownCount: known,
+      source: 'both',
+      jrCount: jrJobs.length,
+      hcCount: hcJobs.length,
+      startedAt: new Date(state.runStartedAt || Date.now()).toISOString(),
+      warnings: notes,
+      // What each source actually returned — the check that a scrape was complete.
+      employerLinks,
+      report: {
+        employerLinks,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+        jobright: { ...summarizeSourceAges(jrJobs), ...(report?.jobright || {}) },
+        hiringcafe: { ...summarizeSourceAges(hcJobs), ...(report?.hiringcafe || {}) },
+      },
+    };
+    state.selectedKeys = new Set();
+    recomputeFiltered();
+    await persistResults();
+    // Only now, with the results saved, do these jobs count as seen: a run that
+    // dies before this point must be able to find them again.
+    markJobsSeen(merged);
+    await persistSeen();
+
+    // Easy-apply and aggregator listings: find the same job on the employer's
+    // board, for the new jobs and any still pending. After the save above, so
+    // closing the panel during the lookups cannot lose the run.
+    if (outcome !== 'stopped') {
+      employerLinks = await resolveEmployerLinks(state.rawJobs).catch(() => employerLinks);
+      if (employerLinks.tried) {
+        state.rawJobs = dedupeBidJobs(state.rawJobs.filter((job) => !job.duplicate_of_seen));
+        state.stats.employerLinks = employerLinks;
+        if (state.stats.report) state.stats.report.employerLinks = employerLinks;
+        if (employerLinks.duplicates) {
+          state.stats.newCount = Math.max(0, state.stats.newCount - employerLinks.duplicates);
+          state.stats.knownCount = (state.stats.knownCount || 0) + employerLinks.duplicates;
+        }
+        markJobsSeen(state.rawJobs);
+        recomputeFiltered();
+        await persistResults();
+        await persistSeen();
+      }
+    }
+
+    const ready = state.filteredJobs.length;
+    const newReady = state.filteredJobs.filter(isNewJob).length;
+    const removalDetail = formatFilterRemovalDetail(state.stats);
+    const jobsText = `${ready} job${ready === 1 ? '' : 's'}`;
+    const newText = newReady && newReady !== ready ? ` · ${newReady} new` : '';
+    const head =
+      outcome === 'stopped'
+        ? `Stopped · ${jobsText} kept${newText}`
+        : outcome === 'partial'
+          ? `Ended early · ${jobsText} kept${newText}`
+          : `Done · ${jobsText} ready${newText}`;
+    const clean = outcome === 'done' && notes.length === 0;
+    setProgress({
+      text: head,
+      detail:
+        `JR ${jrJobs.length} + HC ${hcJobs.length} → ${merged.length} unique` +
+        (known ? ` · ${known} already seen` : '') +
+        (pagesFetched ? ` · ${pagesFetched} pages` : '') +
+        (removalDetail ? ` · ${removalDetail}` : ''),
+      kind: clean ? 'success' : 'warn',
+      current: 1,
+      total: 1,
+      phase: 'done',
+      showTrust: false,
+    });
+    // setProgress only reveals the results for a clean success.
+    if (!clean) finishScrapeUiReveal();
+    showToast(
+      `${head}.` + (notes.length ? ` ${notes[0]}` : removalDetail ? ` ${removalDetail}` : ''),
+      clean ? 'success' : 'warn'
+    );
+    return true;
+  }
+
+  /** Count and age span of one source's jobs, measured from when the run started. */
+  function summarizeSourceAges(jobs) {
+    const ref = state.runStartedAt || Date.now();
+    const ages = [];
+    let undated = 0;
+    for (const job of jobs || []) {
+      const posted = jobPostedTimes(job, ref);
+      if (!posted) undated += 1;
+      else ages.push(Math.max(0, Math.round((ref - posted.ms) / 60000)));
+    }
+    return {
+      kept: (jobs || []).length,
+      undated,
+      newestMinutesAgo: ages.length ? Math.min(...ages) : null,
+      oldestMinutesAgo: ages.length ? Math.max(...ages) : null,
+    };
+  }
+
+  function formatAgeMinutes(minutes) {
+    if (minutes == null || !Number.isFinite(minutes)) return '?';
+    const m = Math.max(0, minutes);
+    if (m < 60) return `${m}m`;
+    if (m < 48 * 60) return `${Math.floor(m / 60)}h ${m % 60}m`;
+    return `${Math.round(m / 1440)}d`;
+  }
+
+  /** One line per source: how many, how old, and how much of the site's list was read. */
+  function runReportLines() {
+    const report = state.stats?.report;
+    if (!report) return [];
+    const line = (label, src, readText) => {
+      if (!src) return '';
+      if (!src.kept) return `${label}: 0 jobs${readText ? ` · ${readText}` : ''}`;
+      const span =
+        src.newestMinutesAgo == null
+          ? 'no dates'
+          : `posted ${formatAgeMinutes(src.newestMinutesAgo)} – ${formatAgeMinutes(src.oldestMinutesAgo)} ago`;
+      return `${label}: ${src.kept} job${src.kept === 1 ? "" : "s"} · ${span}${readText ? ` · ${readText}` : ''}`;
+    };
+    const jr = report.jobright;
+    const hc = report.hiringcafe;
+    return [
+      line(
+        'Jobright',
+        jr,
+        jr?.rowsRead != null
+          ? `read ${jr.rowsRead}${jr.siteTotal ? ` of ${jr.siteTotal}` : ''} rows` +
+              (jr.alreadySeen ? ` · ${jr.alreadySeen} already seen` : '')
+          : ''
+      ),
+      line(
+        'HiringCafe',
+        hc,
+        hc?.pagesRead != null
+          ? `read ${hc.pagesRead} page${hc.pagesRead === 1 ? '' : 's'}${hc.siteTotal ? ` · site total ${hc.siteTotal}` : ''}` +
+              (hc.alreadySeen ? ` · ${hc.alreadySeen} already seen` : '')
+          : ''
+      ),
+    ].filter(Boolean);
+  }
+
+  /** Stop pressed while the run is parked on a browser check: keep what it holds. */
+  async function commitPausedRun() {
+    if (state.runActive) return;
+    state.runActive = true;
+    syncControlsFromState();
+    try {
+      await settlePausedRun();
+    } finally {
+      state.runActive = false;
+      state.stopRequested = false;
+      syncControlsFromState();
+    }
+  }
+
+  async function settlePausedRun() {
+    const cursor = state.scrapeCursor;
+    const held = state.combinedRun || {};
+    const inHc = cursor?.phase === 'hiringcafe';
+    const cursorJobs = Array.isArray(cursor?.jobs) ? cursor.jobs : [];
+    const jrJobs = inHc
+      ? state.combinedRun?.jrJobs || []
+      : cursorJobs.map((job) => normalizeBidJob(job, 'Jobright'));
+    const hcJobs = inHc ? cursorJobs.map((job) => normalizeBidJob(job, 'HiringCafe')) : [];
+    const kept = await finishRun({
+      jrJobs,
+      hcJobs,
+      pagesFetched: (Number(held.jrPages) || 0) + (Number(cursor?.pagesFetched) || 0),
+      reportedTotal: cursor?.reportedTotal ?? null,
+      outcome: 'stopped',
+      known: (Number(held.jrKnown) || 0) + (Number(cursor?.knownCount) || 0) + (Number(cursor?.hcKnown) || 0),
+      warnings: held.jrWarnings || [],
+      report: { jobright: held.jrReport || null },
+    });
+    state.scraping = false;
+    if (!kept) {
+      setProgress({
+        text: 'Scrape stopped',
+        detail: 'Nothing had been collected yet.',
+        kind: 'warn',
+        indeterminate: true,
+        showTrust: false,
+      });
+    }
+    syncControlsFromState();
+  }
+
   async function runHiringCafeScrape({ resume = false } = {}) {
     const scraper = api();
     if (!scraper) {
@@ -1549,11 +2563,20 @@
     syncControlsFromState();
 
     const combined = Boolean(state.combinedRun?.active);
-    const maxPages = Math.max(1, Math.min(Number(state.prefs.maxPages) || 8, 20));
+    // Jobright was read first (or tried); otherwise this is a one-source run.
+    const twoStep = combined && !state.combinedRun?.jrSkipped;
+    // "A page of only old jobs means we are past the window" holds for date order only.
+    const sortedByDate =
+      !state.customSearchState || String(state.customSearchState.sortBy || '') === 'date';
+    // Newest-first paging ends itself once it leaves the window, so it may read
+    // on to the hard limit instead of cutting a busy window off at the usual 8.
+    const maxPages = sortedByDate
+      ? 20
+      : Math.max(1, Math.min(Number(state.prefs.maxPages) || 8, 20));
     const delayMs = Math.max(400, Math.min(Number(state.prefs.delayMs) || 700, 3000));
     const jrPages = Number(state.combinedRun?.jrPages) || 0;
-    const overallTotal = combined ? maxPages * 2 : maxPages;
-    const overallOffset = combined ? maxPages : 0;
+    const overallTotal = twoStep ? maxPages * 2 : maxPages;
+    const overallOffset = twoStep ? maxPages : 0;
     const dateWindow = resolveHcDateWindow();
 
     let page = resume && state.scrapeCursor ? state.scrapeCursor.page : 0;
@@ -1564,13 +2587,43 @@
     let pagesFetched =
       resume && state.scrapeCursor ? state.scrapeCursor.pagesFetched : 0;
     let staleDatePages = 0;
+    let runError = '';
+    let hitPageCap = false;
+    let hcDateSample = null;
+    const hcPagesLog = [];
+    let hcHitFields = null;
+    let hcExpired = 0;
+    // What HiringCafe's requirement fields actually contain, so filters can be
+    // built on them from evidence: value → count, for the fields that matter.
+    const HC_FIELDS_OF_INTEREST = [
+      'security_clearance', 'visa_sponsorship', 'language_requirements', 'num_language_requirements',
+      'bachelors_degree_requirement', 'masters_degree_requirement', 'doctorate_degree_requirement',
+      'licenses_or_certifications_not_mentioned', 'role_type', 'commitment', 'seniority_level',
+      'boundless_workplace_countries', 'is_workplace_worldwide_ok', 'min_industry_and_role_yoe',
+      'physical_position', 'position_employer_type',
+    ];
+    const hcValueStats = {};
+    const tallyHiringCafeHit = (hit) => {
+      const data = hit?.v5_processed_job_data || {};
+      const record = (field, value) => {
+        const bag = (hcValueStats[field] = hcValueStats[field] || {});
+        const label = (Array.isArray(value) ? value.join(', ') : String(value ?? 'null')).slice(0, 48) || '(empty)';
+        if (label in bag || Object.keys(bag).length < 10) bag[label] = (bag[label] || 0) + 1;
+        else bag['(other)'] = (bag['(other)'] || 0) + 1;
+      };
+      for (const field of HC_FIELDS_OF_INTEREST) record(field, data[field]);
+      record('is_expired', hit?.is_expired);
+      record('source', hit?.source);
+    };
+    let hcKnown = resume && state.scrapeCursor ? Number(state.scrapeCursor.hcKnown) || 0 : 0;
+    let knownPages = resume && state.scrapeCursor ? Number(state.scrapeCursor.knownPages) || 0 : 0;
 
     try {
       for (; page < maxPages; page += 1) {
-        if (!state.scraping) break;
+        if (!state.scraping || state.stopRequested) break;
 
         setProgress({
-          text: combined
+          text: twoStep
             ? `Both · Step 2 of 2 · HiringCafe · Page ${page + 1} of ${maxPages}`
             : `HiringCafe · Page ${page + 1} of ${maxPages}`,
           detail:
@@ -1587,8 +2640,16 @@
           page,
           state.customSearchState
         );
-        const tabId = await ensureScrapeTab(url);
-        const extracted = await waitUntilPageReady(tabId);
+        // A page that fails ends the paging, not the run: earlier pages and the
+        // Jobright jobs are still worth having.
+        let extracted;
+        try {
+          const tabId = await ensureScrapeTab(url);
+          extracted = await waitUntilPageReady(tabId);
+        } catch (err) {
+          if (!state.stopRequested) runError = err?.message || String(err);
+          break;
+        }
 
         if (extracted?.paused) {
           state.scrapeCursor = {
@@ -1597,6 +2658,8 @@
             reportedTotal,
             lastHitId,
             pagesFetched,
+            hcKnown,
+            knownPages,
             combined: combined || undefined,
             phase: combined ? 'hiringcafe' : undefined,
           };
@@ -1607,7 +2670,13 @@
         }
 
         if (!extracted?.ok) {
-          throw new Error(extracted?.error || 'HiringCafe page did not return job data.');
+          runError = extracted?.error || 'HiringCafe page did not return job data.';
+          break;
+        }
+        // No result list at all is an error page, not the end of the results.
+        if (extracted.pageProps.hasHits === false) {
+          runError = `HiringCafe page ${page + 1} had no result list (rate limit or site change).`;
+          break;
         }
 
         const hits = extracted.pageProps.ssrHits || [];
@@ -1615,40 +2684,96 @@
 
         if (hits.length === 0) break;
 
+        // Same first job as the previous page: the site ignored the page number.
         const firstHitId = scraper.extractJobFields(hits[0]).id || '';
         if (page > 0 && firstHitId && firstHitId === lastHitId) break;
-        lastHitId =
-          scraper.extractJobFields(hits[hits.length - 1]).id || lastHitId;
+        lastHitId = firstHitId || lastHitId;
 
-        const mapped = hits.map((hit) => scraper.extractJobFields(hit));
+        if (hcDateSample == null) {
+          const dates = hits.map((hit) => hit?.v5_processed_job_data?.estimated_publish_date ?? null);
+          hcDateSample = {
+            first: dates[0] ?? null,
+            // How many of this page's jobs carry a date with no time of day.
+            dateOnly: dates.filter(
+              (d) => typeof d === 'string' && (/^\d{4}-\d{2}-\d{2}$/.test(d) || /T00:00:00/.test(d))
+            ).length,
+            of: dates.length,
+            title: hits[0]?.job_information?.title ?? null,
+          };
+        }
+        for (const hit of hits) tallyHiringCafeHit(hit);
+        const expiredOnPage = hits.filter((hit) => hit?.is_expired === true).length;
+        hcExpired += expiredOnPage;
+        const mapped = hits
+          .map((hit) => scraper.extractJobFields(hit))
+          .filter((job) => !job.is_expired);
         const part = partitionJobsByDateWindow(mapped, dateWindow);
-        for (const job of part.inWindow) {
+        // Every job inside the window is taken, whether or not an earlier run had it.
+        const fresh = part.inWindow;
+        {
+          // One line per page, so a report shows where and why the paging stopped.
+          const stamps = mapped
+            .map((job) => Date.parse(job.estimated_publish_date || ''))
+            .filter((ms) => !Number.isNaN(ms));
+          const hoursAgo = (ms) => Math.round(((Date.now() - ms) / 3600000) * 10) / 10;
+          hcPagesLog.push({
+            page: page + 1,
+            hits: hits.length,
+            inWindow: part.inWindow.length,
+            older: part.outWindow.length,
+            undated: part.undated.length,
+            newestHoursAgo: stamps.length ? hoursAgo(Math.max(...stamps)) : null,
+            oldestHoursAgo: stamps.length ? hoursAgo(Math.min(...stamps)) : null,
+            lastPage: Boolean(extracted.pageProps.ssrIsLastPage),
+          });
+          if (!hcHitFields && hits[0]) {
+            hcHitFields = {
+              top: Object.keys(hits[0]).slice(0, 40),
+              processed: Object.keys(hits[0].v5_processed_job_data || {}).slice(0, 80),
+            };
+          }
+        }
+        hcKnown += part.inWindow.length - fresh.length;
+        for (const job of fresh) {
           jobs.push(job);
         }
         pagesFetched += 1;
+
+        // Newest-first, and two pages in a row hold nothing new: caught up with the last run.
+        if (fresh.length > 0) {
+          knownPages = 0;
+        } else if (part.inWindow.length > 0) {
+          knownPages += 1;
+          if (sortedByDate && knownPages >= 2) break;
+        }
 
         // Sorted by date: a full page of only older dated jobs → past the window.
         if (part.inWindow.length === 0 && part.outWindow.length > 0) {
           staleDatePages += 1;
           setProgress({
-            text: combined
+            text: twoStep
               ? `Both · Step 2 of 2 · HiringCafe · Page ${page + 1} of ${maxPages}`
               : `HiringCafe · Page ${page + 1} of ${maxPages}`,
-            detail: `Page outside ${dateWindow} (${part.outWindow.length} older) · stopping deeper pages`,
+            detail: sortedByDate
+              ? `Page outside ${dateWindow} (${part.outWindow.length} older) · ${staleDatePages}/2 before stopping`
+              : `Page outside ${dateWindow} (${part.outWindow.length} older) · search is not date-sorted, reading on`,
             kind: 'info',
             current: overallOffset + page + 1,
             total: overallTotal,
             phase: combined ? 'hiringcafe' : null,
           });
-          if (staleDatePages >= 1) break;
+          // Two in a row: the site orders by the date it found the job, which can
+          // run slightly out of step with the posting date used for the window.
+          if (sortedByDate && staleDatePages >= 2) break;
         } else {
           staleDatePages = 0;
           setProgress({
-            text: combined
+            text: twoStep
               ? `Both · Step 2 of 2 · HiringCafe · Page ${page + 1} of ${maxPages}`
               : `HiringCafe · Page ${page + 1} of ${maxPages}`,
             detail:
-              `+${part.inWindow.length} in ${dateWindow} · collected ${jobs.length}` +
+              `+${fresh.length} new · collected ${jobs.length}` +
+              (hcKnown ? ` · ${hcKnown} already seen` : '') +
               (part.outWindow.length ? ` · skipped ${part.outWindow.length} older` : '') +
               (reportedTotal != null ? ` / ${reportedTotal}` : '') +
               (combined
@@ -1663,77 +2788,79 @@
 
         if (extracted.pageProps.ssrIsLastPage) break;
         if (page < maxPages - 1) await sleep(delayMs);
+        // Out of pages while they were still yielding jobs: the list is cut short.
+        else if (fresh.length > 0) hitPageCap = true;
       }
 
-      const hcJobs = jobs.map((job) => normalizeBidJob(job, 'HiringCafe'));
-      let merged = hcJobs;
-      let jrCount = 0;
-      if (combined) {
-        jrCount = state.combinedRun?.jrJobs?.length || 0;
-        merged = dedupeBidJobs([...(state.combinedRun?.jrJobs || []), ...hcJobs]);
-        state.combinedRun = null;
-      }
-
-      if (merged.length === 0) {
-        throw new Error(
-          'No jobs found from HiringCafe' +
-            (combined ? ' (and Jobright returned none).' : '.')
-        );
-      }
-
-      state.rawJobs = merged;
-      state.lastScrapedAt = new Date().toISOString();
-      state.stats = {
-        pagesFetched: combined ? jrPages + pagesFetched : pagesFetched,
+      const stopped = state.stopRequested;
+      const kept = await finishRun({
+        jrJobs: combined ? state.combinedRun?.jrJobs || [] : [],
+        hcJobs: jobs.map((job) => normalizeBidJob(job, 'HiringCafe')),
+        pagesFetched: jrPages + pagesFetched,
         reportedTotal,
-        scraped: merged.length,
-        source: combined ? 'both' : 'hiringcafe',
-        jrCount: combined ? jrCount : undefined,
-        hcCount: hcJobs.length,
-      };
-      state.scrapeCursor = null;
-      state.selectedKeys = new Set();
-      recomputeFiltered();
-      await persistResults();
-      const removalDetail = formatFilterRemovalDetail(state.stats);
-      setProgress({
-        text: `Done · ${state.filteredJobs.length} jobs ready`,
-        detail:
-          (combined
-            ? `JR ${jrCount} + HC ${hcJobs.length} → ${merged.length} unique`
-            : `${jobs.length} scraped`) +
-          (pagesFetched
-            ? ` · ${combined ? jrPages + pagesFetched : pagesFetched} pages`
-            : '') +
-          (reportedTotal != null && !combined
-            ? ` · HiringCafe total ${reportedTotal}`
-            : '') +
-          (removalDetail ? ` · ${removalDetail}` : ''),
-        kind: 'success',
-        current: 1,
-        total: 1,
-        phase: combined ? 'done' : null,
-        showTrust: false,
+        outcome: stopped ? 'stopped' : runError ? 'partial' : 'done',
+        error: runError,
+        warnings: [
+          ...(combined ? state.combinedRun?.jrWarnings || [] : []),
+          hitPageCap
+            ? `HiringCafe reached its ${maxPages}-page limit with jobs still inside ${dateWindow}; some are missing. Use a shorter freshness window.`
+            : '',
+        ],
+        known: (combined ? state.combinedRun?.jrKnown || 0 : 0) + hcKnown,
+        report: {
+          jobright: combined ? state.combinedRun?.jrReport || null : null,
+          hiringcafe: {
+            alreadySeen: hcKnown,
+            pagesRead: pagesFetched,
+            siteTotal: reportedTotal,
+            sortedByDate,
+            window: dateWindow,
+            dateSample: hcDateSample,
+            maxPages,
+            expiredSkipped: hcExpired,
+            pages: hcPagesLog,
+            fieldValues: hcValueStats,
+          },
+        },
       });
-      showToast(
-        `Scraped ${merged.length} · ${state.filteredJobs.length} after filters.` +
-          (removalDetail ? ` ${removalDetail}` : ''),
-        'success'
-      );
+      if (!kept) {
+        if (!stopped) {
+          throw new Error(runError || 'No jobs found from Jobright or HiringCafe.');
+        }
+        setProgress({
+          text: 'Scrape stopped',
+          detail: 'Nothing had been collected yet.',
+          kind: 'warn',
+          indeterminate: true,
+          showTrust: false,
+        });
+      }
     } catch (err) {
       const message = err?.message || String(err);
-      setProgress({
-        text: 'Scrape failed',
-        detail: message,
-        kind: 'error',
-        indeterminate: true,
-        showTrust: false,
-        phase: combined ? 'hiringcafe' : null,
-      });
-      showToast(message, 'error');
+      // Anything unexpected still keeps what both sources had gathered.
+      const kept = await finishRun({
+        jrJobs: combined ? state.combinedRun?.jrJobs || [] : [],
+        hcJobs: jobs.map((job) => normalizeBidJob(job, 'HiringCafe')),
+        pagesFetched: jrPages + pagesFetched,
+        reportedTotal,
+        outcome: 'partial',
+        error: message,
+        known: (combined ? state.combinedRun?.jrKnown || 0 : 0) + hcKnown,
+      }).catch(() => false);
+      if (!kept) {
+        setProgress({
+          text: 'Scrape failed',
+          detail: message,
+          kind: 'error',
+          indeterminate: true,
+          showTrust: false,
+          phase: combined ? 'hiringcafe' : null,
+        });
+        showToast(message, 'error');
+      }
       state.pausedForChallenge = false;
       state.scrapeCursor = null;
-      if (combined) state.combinedRun = null;
+      state.combinedRun = null;
     } finally {
       if (!state.pausedForChallenge) {
         state.scraping = false;
@@ -1771,14 +2898,27 @@
         count,
         sort || '',
       ]);
+      await noteJobrightRequests(tabResult?.requests ?? 1, 'feedInTab');
       if (tabResult?.ok && tabResult.rows?.length) return tabResult;
+      // Neither answer is a failure to work around by other routes.
+      if (tabResult?.rateLimited || tabResult?.empty) {
+        return {
+          ok: false,
+          rows: [],
+          total: null,
+          rateLimited: Boolean(tabResult.rateLimited),
+          empty: Boolean(tabResult.empty),
+        };
+      }
       if (tabResult?.error) errors.push(`tab: ${tabResult.error}`);
     }
 
     if (typeof jr?.fetchRecommendApiPageExtension === 'function') {
       try {
         const ext = await jr.fetchRecommendApiPageExtension(position, count, sort);
+        await noteJobrightRequests(ext?.requests ?? 1, 'feedFromExtension');
         if (ext?.ok && ext.rows?.length) return ext;
+        if (ext?.rateLimited) return { ok: false, rows: [], total: null, rateLimited: true };
         if (ext?.error) errors.push(`ext: ${ext.error}`);
       } catch (err) {
         errors.push(`ext: ${err?.message || String(err)}`);
@@ -1790,7 +2930,9 @@
     }
     if (typeof jr?.harvestMoreJobsInTab === 'function') {
       const harvested = await runJobrightTabFn(tabId, jr.harvestMoreJobsInTab, [3]);
-      if (harvested?.ok && harvested.rows?.length) return harvested;
+      await noteJobrightRequests(1, 'scroll');
+      // Scrolled rows say nothing about the API offset; mark them so paging ignores them.
+      if (harvested?.ok && harvested.rows?.length) return { ...harvested, viaScroll: true };
       if (harvested?.error) errors.push(`scroll: ${harvested.error}`);
     }
 
@@ -1808,7 +2950,7 @@
   async function waitUntilJobrightRecommendReady(tabId) {
     const maxAttempts = 10;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      if (!state.scraping) throw new Error('Scrape stopped.');
+      if (!state.scraping || state.stopRequested) throw new Error('Scrape stopped.');
       const extracted = await extractFromTab(tabId);
 
       if (extracted?.challenge) {
@@ -1825,20 +2967,7 @@
         return { paused: true };
       }
 
-      if (extracted?.rateLimited) {
-        state.pausedForChallenge = true;
-        syncControlsFromState();
-        setProgress({
-          text: 'Jobright rate limit',
-          detail:
-            'Jobright asked you to slow down. Wait a few minutes in the tab, then Resume — or stop and use HiringCafe only.',
-          kind: 'warn',
-          indeterminate: true,
-          phase: state.combinedRun?.active ? 'jobright' : null,
-        });
-        showToast('Jobright rate limit — slow down before Resume.', 'warn');
-        return { paused: true };
-      }
+      if (extracted?.rateLimited) return { rateLimited: true };
 
       if (extracted?.needsLogin) {
         state.pausedForChallenge = true;
@@ -1894,10 +3023,124 @@
 
     const combined = Boolean(state.combinedRun?.active);
     const pageSize = jr.PAGE_SIZE || 20;
+    // The site's own page size. Asking for more was ignored (20 rows came back)
+    // and made the requests unlike anything the page itself sends.
+    let apiPageSize = pageSize;
+    if (!resume) jobrightRequestKinds = {};
+    const requestsBeforeRun = resume && state.scrapeCursor?.requestsBeforeRun != null
+      ? Number(state.scrapeCursor.requestsBeforeRun)
+      : jobrightGuard().requests;
+    const hcOff = combined && state.combinedRun?.hcOff === true;
+    // Set when the guard cuts the reading short: the reason, and the note for the user.
+    let endReason = '';
+    let limitNote = '';
+    const jrFieldStats = {
+      rows: 0,
+      clearanceRequired: 0,
+      citizenOnly: 0,
+      repost: 0,
+      easyApplyFlag: 0,
+      companySiteLink: 0,
+      applyLinkOnJobBoard: 0,
+      originalUrlIsEmployer: 0,
+      workModel: {},
+      country: {},
+      applicantsText: [],
+      // For "N+" rows: how often the numeric field is above N, with examples.
+      applicantsPlusRows: 0,
+      applicantsCountAbovePlus: 0,
+      applicantsPairs: [],
+      // Candidate markers for staffing-agency postings, overall and among the
+      // rows whose apply link is a job board (where agencies cluster).
+      toB: 0,
+      toBOnJobBoard: 0,
+      recruiterNamed: 0,
+      recruiterNamedOnJobBoard: 0,
+      hiddenJob: 0,
+      jobBoardSample: [],
+    };
+    // Share of neighbouring rows that arrive newer-then-older. The stop rules
+    // and the "oldest are missing" wording are only right for a sorted feed.
+    let orderPairs = 0;
+    let orderedPairs = 0;
+    let lastRowPostedMs = null;
+    const measureOrder = (mapped) => {
+      for (const job of mapped || []) {
+        const ms = Date.parse(job?.estimated_publish_date || '');
+        if (Number.isNaN(ms)) continue;
+        if (lastRowPostedMs != null) {
+          orderPairs += 1;
+          if (ms <= lastRowPostedMs + 60 * 1000) orderedPairs += 1;
+        }
+        lastRowPostedMs = ms;
+      }
+      // Enough rows to judge, and plainly not in time order: stop trusting it.
+      if (orderPairs >= 40 && orderedPairs / orderPairs < 0.85) {
+        feedSorted = false;
+        maxScrollBatches = UNSORTED_BATCH_LIMIT;
+      }
+    };
+    const bump = (bag, key) => {
+      const name = String(key ?? 'none');
+      bag[name] = (bag[name] || 0) + 1;
+    };
+    const tallyJobrightRows = (hits) => {
+      for (const hit of hits || []) {
+        const row = hit?.jobResult && typeof hit.jobResult === 'object' ? hit.jobResult : hit || {};
+        jrFieldStats.rows += 1;
+        if (row.isClearanceRequired === true) jrFieldStats.clearanceRequired += 1;
+        if (row.isCitizenOnly === true) jrFieldStats.citizenOnly += 1;
+        if (row.repost === true) jrFieldStats.repost += 1;
+        if (row.jobtargetEasyapply === true) jrFieldStats.easyApplyFlag += 1;
+        if (row.isCompanySiteLink === true) jrFieldStats.companySiteLink += 1;
+        const onBoard = (link) => !link || isAggregatorLink(link);
+        if (row.isToB === true) jrFieldStats.toB += 1;
+        if (row.jobRecruiter) jrFieldStats.recruiterNamed += 1;
+        if (row.hiddenJob === true) jrFieldStats.hiddenJob += 1;
+        if (onBoard(row.applyLink)) {
+          jrFieldStats.applyLinkOnJobBoard += 1;
+          if (row.originalUrl && !onBoard(row.originalUrl)) jrFieldStats.originalUrlIsEmployer += 1;
+          if (row.isToB === true) jrFieldStats.toBOnJobBoard += 1;
+          if (row.jobRecruiter) jrFieldStats.recruiterNamedOnJobBoard += 1;
+          if (jrFieldStats.jobBoardSample.length < 10) {
+            const company = hit?.companyResult?.companyName || row.companyName || '';
+            jrFieldStats.jobBoardSample.push(
+              `${company} | toB=${row.isToB === true} | recruiter=${row.jobRecruiter ? 'yes' : 'no'} | source=${row.source || ''}`
+            );
+          }
+        }
+        bump(jrFieldStats.workModel, row.workModel);
+        bump(jrFieldStats.country, row.countryCode);
+        const text = String(row.applicantsDisplayText || '').trim();
+        if (text && jrFieldStats.applicantsText.length < 6 && !jrFieldStats.applicantsText.includes(text)) {
+          jrFieldStats.applicantsText.push(text);
+        }
+        const plus = text.match(/^(\d[\d,]*)\s*\+/);
+        if (plus) {
+          const floor = Number(plus[1].replace(/,/g, ''));
+          const count = Number(row.applicantsCount);
+          jrFieldStats.applicantsPlusRows += 1;
+          if (Number.isFinite(count) && count > floor) jrFieldStats.applicantsCountAbovePlus += 1;
+          if (jrFieldStats.applicantsPairs.length < 8) {
+            jrFieldStats.applicantsPairs.push(`${row.applicantsCount} | ${text}`);
+          }
+        }
+      }
+    };
+    let jrDateSample = null;
+    let jrSortAttempt = null;
     // Safer caps: fewer batches, longer pauses — Jobright bans aggressive scroll.
-    const maxScrollBatches = Math.max(3, Math.min(Number(state.prefs.maxPages) || 8, 10) * 2);
+    // Jobright serves 20 rows a request (it ignores a larger count), and a full
+    // day of a busy feed is close to 300 rows. Newest-first paging stops by
+    // itself once it leaves the window, so the cap only has to be high enough.
+    let maxScrollBatches = 30;
+    // A feed that is not newest-first cannot be cut short without losing jobs of
+    // any age, so it is read on: to its end, or to 1,000 rows. Real runs held
+    // about 540 rows; reading 2,000 was more than an account should ask for.
+    const UNSORTED_BATCH_LIMIT = 50;
     const scrollsPerBatch = 2;
-    const delayMs = Math.max(2200, Math.min(Number(state.prefs.delayMs) || 2500, 6000));
+    // 4–7 s between requests, and a longer rest every tenth.
+    const delayMs = 4000;
     const overallTotal = combined ? maxScrollBatches + 8 : maxScrollBatches;
     const overallOffset = 0;
     const recommendUrl = jr.JOBRIGHT_RECOMMEND || 'https://jobright.ai/jobs/recommend';
@@ -1909,9 +3152,27 @@
       resume && state.scrapeCursor ? state.scrapeCursor.reportedTotal : null;
     let pagesFetched =
       resume && state.scrapeCursor ? state.scrapeCursor.pagesFetched : 0;
+    // Rows read from the API so far. Paging by the number of jobs *kept* re-read
+    // or skipped pages whenever a page held old or duplicate jobs.
+    let rawOffset =
+      resume && state.scrapeCursor ? Number(state.scrapeCursor.rawOffset) || jobs.length : 0;
+    // Same key order as pushMapped, so a resumed run cannot re-add a row.
     const seenIds = new Set(
-      jobs.map((j) => String(j.id || j.apply_url || '').trim()).filter(Boolean)
+      jobs
+        .map(
+          (j) =>
+            String(j.id || '').trim() ||
+            String(j.apply_url || '').trim() ||
+            `${j.company_name || ''}::${j.title || ''}`
+        )
+        .filter(Boolean)
     );
+    let sawDated = Boolean(resume && state.scrapeCursor?.sawDated);
+    let undatedKept = resume && state.scrapeCursor ? Number(state.scrapeCursor.undatedKept) || 0 : 0;
+    let feedSorted = false;
+    let endedOnApiError = '';
+    let lastBatchAdded = 0;
+    let knownCount = resume && state.scrapeCursor ? Number(state.scrapeCursor.knownCount) || 0 : 0;
 
     const pushMapped = (mappedList) => {
       let added = 0;
@@ -1930,11 +3191,39 @@
 
     /** Keep only Past N days jobs; do not auto-drop same-company roles. */
     const pushRawHitsInWindow = (hits) => {
+      tallyJobrightRows(hits);
+      if (!jrDateSample && hits?.[0]) {
+        // How Jobright expresses the posting time, kept for the run report.
+        const first = hits[0]?.jobResult && typeof hits[0].jobResult === 'object' ? hits[0].jobResult : hits[0];
+        jrDateSample = {
+          publishTime: first?.publishTime ?? null,
+          publishTimeType: typeof first?.publishTime,
+          publishTimeDesc: first?.publishTimeDesc ?? first?.posted ?? null,
+          // How it was read, and what else the row offers — to verify against the site.
+          readAs: jr.extractJobFields(hits[0]).estimated_publish_date || null,
+          applicants:
+            first?.applicantsCount ?? first?.applicantCount ?? first?.applyCount ?? first?.numApplicants ?? null,
+          title: first?.jobTitle ?? first?.title ?? null,
+          fields: Object.keys(first || {}).slice(0, 80),
+        };
+      }
       const mapped = (hits || []).map((hit) => jr.extractJobFields(hit));
+      measureOrder(mapped);
       const part = partitionJobsByDateWindow(mapped, dateWindow);
-      const added = pushMapped(part.inWindow);
+      const knownBefore = knownCount;
+      if (part.inWindow.length || part.outWindow.length) sawDated = true;
+      let added = pushMapped(part.inWindow);
+      // Rows with no date (cards read off the page) are taken only while the feed
+      // has given no dates at all. Once it has, an undated row is most likely a
+      // card the date filter already turned away.
+      if (!sawDated && part.undated.length) {
+        const kept = pushMapped(part.undated);
+        undatedKept += kept;
+        added += kept;
+      }
       return {
         added,
+        known: knownCount - knownBefore,
         inWindow: part.inWindow.length,
         outWindow: part.outWindow.length,
         undated: part.undated.length,
@@ -1942,39 +3231,13 @@
     };
 
     let lastApiError = '';
-    let recommendSort = '';
+    let recommendSort = resume && state.scrapeCursor?.recommendSort ? state.scrapeCursor.recommendSort : '';
     let stagnantBatches = 0;
     let staleDateBatches = 0;
     const jrProgressLabel = (batchNum) =>
-      combined
+      combined && !hcOff
         ? `Both · Step 1 of 2 · Jobright · Scroll ${batchNum} of ${maxScrollBatches}`
         : `Jobright · Scroll ${batchNum} of ${maxScrollBatches}`;
-
-    const pauseForJobrightRateLimit = async (tabIdForCursor, batchForCursor) => {
-      state.scrapeCursor = {
-        page: batchForCursor,
-        jobs,
-        reportedTotal,
-        pagesFetched,
-        combined: combined || undefined,
-        phase: combined ? 'jobright' : undefined,
-      };
-      state.pausedForChallenge = true;
-      state.scraping = true;
-      syncControlsFromState();
-      setProgress({
-        text: 'Jobright rate limit',
-        detail:
-          'Dismiss the “too fast” message in the Jobright tab, wait 2–5 minutes, then click Resume. Prefer fewer scrapes per day.',
-        kind: 'warn',
-        indeterminate: true,
-        phase: 'jobright',
-      });
-      showToast('Jobright rate limit — pause and Resume later.', 'warn');
-      if (tabIdForCursor && typeof jr.detectJobrightRateLimitInTab === 'function') {
-        /* cursor already set */
-      }
-    };
 
     const checkJobrightRateLimit = async (tabIdCheck) => {
       if (typeof jr.detectJobrightRateLimitInTab !== 'function') return false;
@@ -1982,8 +3245,36 @@
       return Boolean(probe?.rateLimited);
     };
 
+    // A pause ends this function; Resume starts it afresh. Pick the run's
+    // measurements back up, or the report and the row limit forget what was learnt.
+    const carried = resume ? state.scrapeCursor?.reportState : null;
+    if (carried) {
+      Object.assign(jrFieldStats, carried.jrFieldStats || {});
+      orderPairs = Number(carried.orderPairs) || 0;
+      orderedPairs = Number(carried.orderedPairs) || 0;
+      jrDateSample = carried.jrDateSample || null;
+      if (carried.maxScrollBatches) maxScrollBatches = carried.maxScrollBatches;
+      if (carried.feedSorted === false) feedSorted = false;
+    }
+
     try {
       let tabId = null;
+
+      const backOffFromJobright = async () => {
+        const until = await startJobrightCooldown();
+        endReason = 'rate limit';
+        limitNote =
+          `Jobright asked to slow down after ${rawOffset} rows, so reading stopped there and Jobright is skipped until ${until}. ` +
+          `Jobs inside ${dateWindow} may be missing.`;
+        showToast(`Jobright asked to slow down — skipped until ${until}.`, 'warn');
+      };
+      // Before any rows were read there is nothing to keep: end the Jobright half.
+      const backOffBeforeReading = async () => {
+        await backOffFromJobright();
+        const err = new Error(limitNote);
+        err.jobrightLimit = true;
+        throw err;
+      };
 
       if (batch === 0) {
         setProgress({
@@ -1998,7 +3289,9 @@
 
         const prepared = await prepareJobrightRecommendTab(recommendUrl);
         tabId = prepared.tabId;
+        if (prepared.rateLimited) await backOffBeforeReading();
         const ready = await waitUntilJobrightRecommendReady(tabId);
+        if (ready?.rateLimited) await backOffBeforeReading();
 
         if (ready?.paused) {
           state.scrapeCursor = {
@@ -2006,6 +3299,14 @@
             jobs,
             reportedTotal,
             pagesFetched,
+            rawOffset,
+            recommendSort,
+            knownCount,
+            sawDated,
+            undatedKept,
+            apiPageSize,
+            requestsBeforeRun,
+            reportState: { jrFieldStats, orderPairs, orderedPairs, jrDateSample, maxScrollBatches, feedSorted },
             combined: combined || undefined,
             phase: combined ? 'jobright' : undefined,
           };
@@ -2015,12 +3316,10 @@
           return;
         }
 
-        // Capture may have been wiped if challenge redirected — reinstall + refetch.
+        // Capture may have been wiped if a challenge redirected: reinstall it. No
+        // second refetch; the first page is asked for below if the capture is empty.
         if (typeof jr.installSwanCaptureInTab === 'function') {
           await runJobrightTabFn(tabId, jr.installSwanCaptureInTab, []);
-        }
-        if (typeof jr.forceRecommendRefetchInTab === 'function') {
-          await runJobrightTabFn(tabId, jr.forceRecommendRefetchInTab, []);
         }
 
         setProgress({
@@ -2037,6 +3336,17 @@
         if (typeof jr.ensureMostRecentSort === 'function') {
           const sortResult = await runJobrightTabFn(tabId, jr.ensureMostRecentSort, []);
           sortOk = Boolean(sortResult?.ok && (sortResult.clicked || sortResult.already));
+          feedSorted = sortOk;
+          // Kept for the run report: whether the site's sort control took the choice.
+          jrSortAttempt = {
+            ok: Boolean(sortResult?.ok),
+            clicked: Boolean(sortResult?.clicked),
+            already: Boolean(sortResult?.already),
+            label: sortResult?.label || null,
+            reason: sortResult?.reason || sortResult?.error || null,
+          };
+          // Choosing a sort makes the page load its list again.
+          if (sortResult?.clicked) await noteJobrightRequests(1, 'sortClick');
           if (sortOk) {
             await sleep(sortResult.clicked ? 3200 : 1000);
             if (typeof jr.readCapturedRecommendSort === 'function') {
@@ -2072,6 +3382,8 @@
           const drained = await runJobrightTabFn(tabId, jr.drainSwanCaptureInTab, []);
           if (drained?.rows?.length) {
             pushRawHitsInWindow(drained.rows);
+            // The capture can hold more than one fetch of page one; count one page.
+            rawOffset = Math.min(drained.rows.length, pageSize);
             if (drained.total != null) reportedTotal = drained.total;
             if (drained.sortCondition) recommendSort = drained.sortCondition;
             pagesFetched = jobs.length > 0 ? 1 : 0;
@@ -2079,11 +3391,13 @@
         }
 
         // Seed from API only if capture empty
-        if (jobs.length === 0) {
+        if (jobs.length === 0 && knownCount === 0) {
           const first = await fetchJobrightApiPage(tabId, 0, pageSize, recommendSort || undefined);
+          if (first.rateLimited) await backOffBeforeReading();
           if (first.sortCondition) recommendSort = first.sortCondition;
           if (first.total != null) reportedTotal = first.total;
           if (first.ok && first.rows?.length) {
+            if (!first.viaScroll) rawOffset = first.rows.length;
             pushRawHitsInWindow(first.rows);
             pagesFetched = jobs.length > 0 ? 1 : 0;
           } else if (first.error) {
@@ -2091,7 +3405,7 @@
           }
         }
 
-        if (jobs.length === 0) {
+        if (jobs.length === 0 && knownCount === 0) {
           const extracted = ready?.extracted;
           const ssrHits = extracted?.pageProps?.jobList || [];
           if (ssrHits.length) {
@@ -2102,7 +3416,11 @@
         }
 
         // DOM cards on the open Recommend page
-        if (jobs.length === 0 && typeof jr.extractDomRecommendJobsInTab === 'function') {
+        if (
+          jobs.length === 0 &&
+          knownCount === 0 &&
+          typeof jr.extractDomRecommendJobsInTab === 'function'
+        ) {
           const dom = await runJobrightTabFn(tabId, jr.extractDomRecommendJobsInTab, []);
           if (dom?.rows?.length) {
             pushRawHitsInWindow(dom.rows);
@@ -2127,10 +3445,35 @@
         batch = 1;
       }
 
+      if (resume && batch > 0 && typeof jr.ensureMostRecentSort === 'function') {
+        // The pause may have reloaded the tab and dropped Most Recent, which the
+        // stop-at-old-jobs rule below depends on.
+        const resumeTabId = await ensureJobrightApiTab(recommendUrl);
+        const sortResult = await runJobrightTabFn(resumeTabId, jr.ensureMostRecentSort, []);
+        feedSorted = Boolean(sortResult?.ok && (sortResult.clicked || sortResult.already));
+        if (sortResult?.clicked) {
+          await noteJobrightRequests(1, 'sortClick');
+          await sleep(3200);
+        }
+      }
+
       // Primary: prefer API paging; gentle scroll only as backup (avoids bans).
       for (; batch < maxScrollBatches; batch += 1) {
-        if (!state.scraping) break;
-        if (reportedTotal != null && jobs.length >= reportedTotal) break;
+        if (!state.scraping || state.stopRequested) break;
+        if (
+          reportedTotal != null &&
+          reportedTotal > 0 &&
+          (jobs.length >= reportedTotal || rawOffset >= reportedTotal)
+        ) {
+          break;
+        }
+        if (jobrightRequestsLeft() <= 0) {
+          endReason = 'daily request limit';
+          limitNote =
+            `Today's Jobright limit (${JR_DAILY_REQUESTS} requests) was reached after ${rawOffset} rows, so reading stopped there. ` +
+            `Jobs inside ${dateWindow} may be missing.`;
+          break;
+        }
 
         setProgress({
           text: jrProgressLabel(batch + 1),
@@ -2145,43 +3488,43 @@
         tabId = await ensureJobrightApiTab(recommendUrl);
 
         if (await checkJobrightRateLimit(tabId)) {
-          await pauseForJobrightRateLimit(tabId, batch);
-          return;
+          await backOffFromJobright();
+          break;
         }
 
         const probe = await extractFromTab(tabId);
-        if (probe?.challenge || probe?.needsLogin || probe?.rateLimited) {
+        if (probe?.rateLimited) {
+          await backOffFromJobright();
+          break;
+        }
+        if (probe?.challenge || probe?.needsLogin) {
           state.scrapeCursor = {
             page: batch,
             jobs,
             reportedTotal,
             pagesFetched,
+            rawOffset,
+            recommendSort,
+            knownCount,
+            sawDated,
+            undatedKept,
+            apiPageSize,
+            requestsBeforeRun,
+            reportState: { jrFieldStats, orderPairs, orderedPairs, jrDateSample, maxScrollBatches, feedSorted },
             combined: combined || undefined,
             phase: combined ? 'jobright' : undefined,
           };
           state.pausedForChallenge = true;
           state.scraping = true;
           syncControlsFromState();
-          const rate = Boolean(probe?.rateLimited);
           setProgress({
-            text: probe?.needsLogin
-              ? 'Sign-in required'
-              : rate
-                ? 'Jobright rate limit'
-                : 'Browser check required',
-            detail: rate
-              ? 'Wait in the Jobright tab, then Resume. Do not keep scraping today.'
-              : 'Complete it in the open Jobright tab, then click Resume.',
+            text: probe?.needsLogin ? 'Sign-in required' : 'Browser check required',
+            detail: 'Complete it in the open Jobright tab, then click Resume.',
             kind: 'warn',
             indeterminate: true,
             phase: 'jobright',
           });
-          showToast(
-            rate
-              ? 'Jobright rate limit — pause before Resume.'
-              : 'Complete the Jobright check, then click Resume.',
-            'warn'
-          );
+          showToast('Complete the Jobright check, then click Resume.', 'warn');
           return;
         }
 
@@ -2193,28 +3536,49 @@
         let pushResult = { added: 0, inWindow: 0, outWindow: 0, undated: 0 };
 
         // API first — quieter than rapid scroll.
-        const apiResult = await fetchJobrightApiPage(
+        let apiResult = await fetchJobrightApiPage(
           tabId,
-          jobs.length,
-          pageSize,
+          rawOffset,
+          apiPageSize,
           recommendSort || undefined
         );
+        if (apiPageSize > pageSize && (apiResult.viaScroll || !apiResult.ok || !apiResult.rows?.length)) {
+          // The large page was not served: use the site's own size from here on.
+          apiPageSize = pageSize;
+          if (!apiResult.rows?.length) {
+            apiResult = await fetchJobrightApiPage(tabId, rawOffset, apiPageSize, recommendSort || undefined);
+          }
+        }
+        if (apiResult.rateLimited) {
+          await backOffFromJobright();
+          break;
+        }
+        // The feed's own address answered with no rows: that is its end.
+        if (apiResult.empty && rawOffset > 0) {
+          stagnantBatches = 2;
+          break;
+        }
         if (apiResult.total != null) reportedTotal = apiResult.total;
         if (apiResult.sortCondition) recommendSort = apiResult.sortCondition;
+        let batchApiError = '';
         if (apiResult.ok && apiResult.rows?.length) {
+          if (!apiResult.viaScroll) rawOffset += apiResult.rows.length;
           pushResult = pushRawHitsInWindow(apiResult.rows);
         } else if (apiResult.error) {
           lastApiError = apiResult.error;
+          batchApiError = apiResult.error;
         }
 
-        // Gentle scroll only if API added nothing in-window.
-        if (pushResult.added === 0) {
+        // Gentle scroll only if the API gave nothing at all. A page of jobs we
+        // already have is an answer, not a failure.
+        if (pushResult.added === 0 && !pushResult.known) {
           const harvest = await runJobrightTabFn(tabId, jr.harvestMoreJobsInTab, [
             scrollsPerBatch,
           ]);
+          await noteJobrightRequests(1, 'scroll');
           if (harvest?.rateLimited) {
-            await pauseForJobrightRateLimit(tabId, batch);
-            return;
+            await backOffFromJobright();
+            break;
           }
           if (harvest?.total != null) reportedTotal = harvest.total;
           if (harvest?.sortCondition) recommendSort = harvest.sortCondition;
@@ -2225,6 +3589,7 @@
 
         if (
           pushResult.added === 0 &&
+          !pushResult.known &&
           jobs.length === 0 &&
           typeof jr.extractDomRecommendJobsInTab === 'function'
         ) {
@@ -2235,11 +3600,14 @@
         }
 
         if (await checkJobrightRateLimit(tabId)) {
-          await pauseForJobrightRateLimit(tabId, batch);
-          return;
+          await backOffFromJobright();
+          break;
         }
 
         const added = pushResult.added;
+        lastBatchAdded = added;
+        // Remember whether the run was still failing when it ran out of batches.
+        endedOnApiError = added > 0 ? '' : batchApiError || endedOnApiError;
         if (added > 0) {
           pagesFetched += 1;
           stagnantBatches = 0;
@@ -2257,7 +3625,8 @@
           });
         } else if (pushResult.outWindow > 0) {
           staleDateBatches += 1;
-          stagnantBatches += 1;
+          // Unsorted, old jobs here say nothing about the next page: keep reading.
+          if (feedSorted) stagnantBatches += 1;
           setProgress({
             text: jrProgressLabel(batch + 1),
             detail: `Batch outside ${dateWindow} (${pushResult.outWindow} older) · ${staleDateBatches}/2`,
@@ -2267,7 +3636,10 @@
             phase: 'jobright',
             showTrust: true,
           });
-          if (staleDateBatches >= 2) break;
+          if (feedSorted && staleDateBatches >= 2) break;
+        } else if (pushResult.known && !feedSorted) {
+          // Not newest-first: the same known jobs sit on top every run, so they
+          // are no sign of having caught up. Keep reading.
         } else {
           stagnantBatches += 1;
           if (stagnantBatches >= 2) break;
@@ -2275,8 +3647,8 @@
 
         if (jobs.length === before && stagnantBatches >= 2) break;
         if (batch < maxScrollBatches - 1) {
-          // Extra jitter between batches so traffic looks less bot-like.
-          await sleep(delayMs + Math.floor(Math.random() * 800));
+          await sleep(delayMs + Math.floor(Math.random() * 3000));
+          if ((batch + 1) % 10 === 0) await sleep(8000 + Math.floor(Math.random() * 7000));
         }
       }
 
@@ -2287,6 +3659,111 @@
         );
       }
 
+      const jrWarnings = [];
+      if (endedOnApiError) jrWarnings.push(`Jobright stopped responding part-way (${endedOnApiError}).`);
+      if (undatedKept) {
+        jrWarnings.push(
+          `Jobright gave no posting date for ${undatedKept} job${undatedKept === 1 ? '' : 's'}; the freshness window was not applied to them.`
+        );
+      }
+      if (limitNote) jrWarnings.push(limitNote);
+      const hitCap = batch >= maxScrollBatches && lastBatchAdded > 0 && !state.stopRequested;
+      if (!feedSorted) {
+        jrWarnings.push(
+          hitCap
+            ? `Jobright returned its jobs in its own order, not newest-first, and one run reads ${rawOffset} rows. Some jobs inside ${dateWindow} were not reached; narrow the filters on Jobright Recommend to see all of them.`
+            : 'Jobright returned its jobs in its own order, not newest-first.'
+        );
+      } else if (hitCap) {
+        jrWarnings.push(
+          `Jobright had more jobs inside ${dateWindow} than one run reads (${rawOffset} rows read); the oldest ones are missing. Narrow the filters on Jobright Recommend, or scrape more often.`
+        );
+      }
+      let jrRequests = null;
+      if (typeof jr.readSwanRequestLogInTab === 'function') {
+        const tabForLog = await getStoredScrapeTabId();
+        if (tabForLog) {
+          const logged = await runJobrightTabFn(tabForLog, jr.readSwanRequestLogInTab, []);
+          jrRequests = logged?.requests || null;
+        }
+      }
+
+      const jrReport = {
+        alreadySeen: knownCount,
+        rowsRead: rawOffset,
+        batches: batch,
+        siteTotal: reportedTotal,
+        sortedMostRecent: feedSorted,
+        sortAttempt: jrSortAttempt,
+        sortCondition: recommendSort || null,
+        pageSize: apiPageSize,
+        window: dateWindow,
+        dateSample: jrDateSample,
+        fieldStats: jrFieldStats,
+        // 1 = strictly newest-first; near 0.5 = no time order at all.
+        timeOrderedShare: orderPairs ? Math.round((orderedPairs / orderPairs) * 100) / 100 : null,
+        resumedAfterPause: Boolean(resume),
+        batchLimit: maxScrollBatches,
+        requestsToday: jobrightGuard().requests,
+        requestsThisRun: jobrightGuard().requests - requestsBeforeRun,
+        requestsByKind: { ...jobrightRequestKinds },
+        requestLimit: JR_DAILY_REQUESTS,
+        endedBecause: state.stopRequested
+          ? 'stopped'
+          : endReason
+            ? endReason
+            : batch >= maxScrollBatches
+            ? 'batch limit reached'
+            : feedSorted && staleDateBatches >= 2
+              ? 'passed the freshness window'
+              : stagnantBatches >= 2
+                ? 'no more rows'
+                : 'site total reached',
+        siteRequests: jrRequests,
+      };
+
+      if (combined && state.stopRequested) {
+        // Stop means stop: do not carry on into HiringCafe.
+        const kept = await finishRun({
+          jrJobs: jobs.map((job) => normalizeBidJob(job, 'Jobright')),
+          pagesFetched,
+          reportedTotal,
+          outcome: 'stopped',
+          warnings: jrWarnings,
+          report: { jobright: jrReport },
+          known: knownCount,
+        });
+        if (!kept) {
+          setProgress({
+            text: 'Scrape stopped',
+            detail: 'Nothing had been collected yet.',
+            kind: 'warn',
+            indeterminate: true,
+            showTrust: false,
+          });
+        }
+        return;
+      }
+
+      if (hcOff) {
+        const kept = await finishRun({
+          jrJobs: jobs.map((job) => normalizeBidJob(job, 'Jobright')),
+          pagesFetched,
+          reportedTotal,
+          outcome: 'done',
+          warnings: jrWarnings,
+          report: { jobright: jrReport },
+          known: knownCount,
+        });
+        if (!kept) {
+          throw new Error(
+            lastApiError ||
+              'No Recommend jobs found. Sign in on jobright.ai, open Recommend with your Saved Filters, then scrape again.'
+          );
+        }
+        return;
+      }
+
       if (combined) {
         const jrEmpty = jobs.length === 0;
         state.combinedRun = {
@@ -2295,6 +3772,9 @@
           jrJobs: jobs.map((job) => normalizeBidJob(job, 'Jobright')),
           jrPages: pagesFetched,
           jrCount: jobs.length,
+          jrWarnings,
+          jrReport,
+          jrKnown: knownCount,
         };
         state.scrapeCursor = null;
         state.pausedForChallenge = false;
@@ -2357,18 +3837,47 @@
       );
     } catch (err) {
       const message = err?.message || String(err);
-      setProgress({
-        text: 'Scrape failed',
-        detail: message,
-        kind: 'error',
-        indeterminate: true,
-        showTrust: false,
-        phase: combined ? 'jobright' : null,
-      });
-      showToast(message, 'error');
+      const jrJobs = jobs.map((job) => normalizeBidJob(job, 'Jobright'));
+
+      // A Jobright failure costs the Jobright half, not the whole run.
+      if (combined && !hcOff && !state.stopRequested) {
+        state.combinedRun = {
+          active: true,
+          phase: 'hiringcafe',
+          jrJobs,
+          jrPages: pagesFetched,
+          jrCount: jrJobs.length,
+          jrWarnings: [err?.jobrightLimit ? message : `Jobright failed part-way (${message}).`],
+          jrKnown: knownCount,
+        };
+        state.scrapeCursor = null;
+        state.pausedForChallenge = false;
+        if (!err?.jobrightLimit) showToast(`Jobright failed (${message}) — continuing with HiringCafe.`, 'warn');
+        await runHiringCafeScrape({ resume: false });
+        return;
+      }
+
+      const kept = await finishRun({
+        jrJobs,
+        pagesFetched,
+        reportedTotal,
+        outcome: state.stopRequested ? 'stopped' : 'partial',
+        error: state.stopRequested ? '' : message,
+      }).catch(() => false);
+      if (!kept) {
+        setProgress({
+          text: state.stopRequested ? 'Scrape stopped' : 'Scrape failed',
+          detail: state.stopRequested ? 'Nothing had been collected yet.' : message,
+          kind: state.stopRequested ? 'warn' : 'error',
+          indeterminate: true,
+          showTrust: false,
+          phase: combined ? 'jobright' : null,
+        });
+        if (!state.stopRequested) showToast(message, 'error');
+      }
       state.pausedForChallenge = false;
       state.scrapeCursor = null;
-      if (combined) state.combinedRun = null;
+      state.combinedRun = null;
     } finally {
       // Combined handoff to HiringCafe keeps scraping true.
       if (!state.pausedForChallenge && !(combined && state.combinedRun?.phase === 'hiringcafe')) {
@@ -2378,24 +3887,103 @@
     }
   }
 
+  /** One run at a time. The flag is set before any await, so a double-click cannot start two. */
   async function runScrape({ resume = false } = {}) {
+    if (state.runActive) return;
+    if (resume && !state.pausedForChallenge) return;
+    state.runActive = true;
+    state.stopRequested = false;
+    if (!resume) state.runStartedAt = Date.now();
+    syncControlsFromState();
+    let stoppedWhileParking = false;
+    try {
+      await dispatchScrape({ resume });
+    } finally {
+      stoppedWhileParking = state.stopRequested && state.pausedForChallenge;
+      state.runActive = false;
+      state.stopRequested = false;
+      syncControlsFromState();
+    }
+    // The user asked to stop; do not leave the run waiting for a Resume.
+    if (stoppedWhileParking) {
+      state.stopRequested = true;
+      await commitPausedRun();
+    }
+  }
+
+  async function dispatchScrape({ resume = false } = {}) {
     if (activeSource() === 'both' || state.combinedRun?.active) {
       if (!resume || !state.combinedRun?.active) {
+        const useJr = state.prefs.useJobright !== false;
+        const useHc = state.prefs.useHiringCafe !== false;
+        if (!useJr && !useHc) {
+          showToast('Both sources are switched off. Switch one on to scrape.', 'warn');
+          return;
+        }
+        await loadJobrightGuard();
+        // Cooling down or out of requests: Jobright sits this run out.
+        const hold = useJr ? jobrightHoldReason() : '';
+        let declined = false;
+        const sinceLast = Date.now() - jobrightGuard().lastRunAt;
+        const left = jobrightRequestsLeft();
+        // Two reasons to ask first: a repeat read soon after the last one, or too
+        // little of the day's budget left for a whole read (a partial read misses jobs).
+        let question = '';
+        if (useJr && !hold && jobrightGuard().lastRunAt && sinceLast < JR_MIN_GAP_MS) {
+          const minutes = Math.max(1, Math.round(sinceLast / 60000));
+          const ago = minutes < 90 ? `${minutes} min` : `${Math.round(minutes / 6) / 10} h`;
+          question =
+            `Read Jobright again so soon?\n\nJobright was read ${ago} ago. Reading it often is what gets an account limited. ` +
+            `${jobrightGuard().requests} of ${JR_DAILY_REQUESTS} requests are used today.`;
+        } else if (useJr && !hold && left < JR_FULL_READ_REQUESTS) {
+          question =
+            `Read Jobright with ${left} request${left === 1 ? '' : 's'} left today?\n\nA full read of the feed needs about ${JR_FULL_READ_REQUESTS}. ` +
+            `With fewer, the read stops part-way and the jobs it did not reach are missing from the list.`;
+        }
+        if (question) {
+          const ask =
+            typeof window.rwhConfirm === 'function'
+              ? window.rwhConfirm
+              : (m) => Promise.resolve(window.confirm(m));
+          declined = !(await ask(question, {
+            confirmLabel: 'Read Jobright',
+            cancelLabel: useHc ? 'Skip Jobright' : 'Cancel',
+          }));
+        }
+        const skipJr = !useJr || Boolean(hold) || declined;
+        if (skipJr && !useHc) {
+          if (hold) showToast(hold, 'warn');
+          return;
+        }
         state.combinedRun = {
           active: true,
-          phase: 'jobright',
+          phase: skipJr ? 'hiringcafe' : 'jobright',
           jrJobs: [],
           jrPages: 0,
           jrCount: 0,
+          jrSkipped: skipJr,
+          jrWarnings: hold ? [hold] : [],
+          hcOff: !useHc,
         };
         setProgress({
           text: 'Starting scrape…',
-          detail: 'Step 1 of 2 · Jobright (Most Recent) → HiringCafe',
+          detail: skipJr
+            ? 'HiringCafe only'
+            : useHc
+              ? 'Step 1 of 2 · Jobright → HiringCafe'
+              : 'Jobright only',
           kind: 'info',
           indeterminate: true,
-          phase: 'jobright',
+          phase: skipJr ? 'hiringcafe' : 'jobright',
           showTrust: true,
         });
+        if (skipJr) {
+          if (hold) showToast(hold, 'warn');
+          await runHiringCafeScrape({ resume: false });
+          return;
+        }
+        jobrightGuard().lastRunAt = Date.now();
+        await persistJobrightGuard();
       }
       if (resume && state.scrapeCursor?.phase === 'hiringcafe') {
         state.combinedRun.phase = 'hiringcafe';
@@ -2563,7 +4151,10 @@
     return state.prefs.candidateFilter || '';
   }
 
+  let profileLoadSeq = 0;
+
   async function loadProfileFilterContext({ silent = false } = {}) {
+    const seq = ++profileLoadSeq;
     state.profileLoading = true;
     state.listsSyncError = '';
     syncControlsFromState();
@@ -2600,6 +4191,8 @@
         }
       );
       const data = await res.json().catch(() => ({}));
+      // A newer request (another profile) is already on its way: do not overwrite it.
+      if (seq !== profileLoadSeq) return;
       if (!res.ok) {
         throw new Error(data.error || 'Failed to load profile filter lists.');
       }
@@ -2631,6 +4224,14 @@
       state.listsSyncedAt = Date.now();
       state.listsSyncError = '';
       await persistPrefs();
+      await storageSet({
+        [STORAGE.registered]: {
+          profile: state.prefs.candidateFilter || '',
+          jobs: state.registeredJobs,
+          companies: state.registeredCompanies,
+          at: state.listsSyncedAt,
+        },
+      });
       recomputeFiltered();
       await persistResults();
       if (!silent) {
@@ -2646,11 +4247,14 @@
         showToast(`Website lists loaded (${bits.join(', ')}).`, 'success');
       }
     } catch (err) {
+      if (seq !== profileLoadSeq) return;
       state.listsSyncError = err?.message || String(err);
       if (!silent) showToast(err?.message || String(err), 'error');
     } finally {
-      state.profileLoading = false;
-      syncControlsFromState();
+      if (seq === profileLoadSeq) {
+        state.profileLoading = false;
+        syncControlsFromState();
+      }
     }
   }
 
@@ -2734,6 +4338,11 @@
       ['jsFilterBlockedJobs', 'excludeBlockedJobs'],
       ['jsFilterRegisteredJobs', 'excludeRegisteredJobs'],
       ['jsFilterRegisteredCompanies', 'excludeRegisteredCompanies'],
+      ['jsDirectLinksOnly', 'directLinksOnly'],
+      ['jsHideClearance', 'hideClearanceRequired'],
+      ['jsUsOnly', 'usOnly'],
+      ['jsHideDegree', 'hideAdvancedDegree'],
+      ['jsHideLanguage', 'hideForeignLanguage'],
     ].forEach(([id, key]) => {
       document.getElementById(id)?.addEventListener('change', async (event) => {
         state.prefs[key] = Boolean(event.target.checked);
@@ -2742,6 +4351,18 @@
         await persistResults();
         renderResults();
         renderMeta();
+      });
+    });
+
+    // Which sources the next scrape reads. Results already listed are not touched.
+    [
+      ['jsUseJobright', 'useJobright'],
+      ['jsUseHiringCafe', 'useHiringCafe'],
+    ].forEach(([id, key]) => {
+      document.getElementById(id)?.addEventListener('change', async (event) => {
+        state.prefs[key] = Boolean(event.target.checked);
+        await persistPrefs();
+        renderFeedStatus();
       });
     });
 
@@ -2794,12 +4415,19 @@
       void runScrape({ resume: true });
     });
     document.getElementById('jsStopBtn')?.addEventListener('click', () => {
+      state.stopRequested = true;
+      // Parked on a browser check: no code is running, so settle it here.
+      if (!state.runActive) {
+        void commitPausedRun();
+        return;
+      }
+      // Running: the loop sees this at its next step and finishes through
+      // finishRun, which keeps everything collected so far.
       state.scraping = false;
       state.pausedForChallenge = false;
-      state.combinedRun = null;
       setProgress({
-        text: 'Scrape stopped',
-        detail: 'Partial results were kept if any pages finished.',
+        text: 'Stopping…',
+        detail: 'Finishing the current step. Jobs collected so far are kept.',
         kind: 'warn',
         indeterminate: true,
         showTrust: false,
@@ -2808,6 +4436,16 @@
     });
 
     document.getElementById('jsClearResultsBtn')?.addEventListener('click', async () => {
+      if (state.runActive || state.scraping) return;
+      if (state.filteredJobs.length || state.rawJobs.length) {
+        const ask = typeof window.rwhConfirm === 'function' ? window.rwhConfirm : (m) => Promise.resolve(window.confirm(m));
+        const count = state.filteredJobs.length || state.rawJobs.length;
+        const proceed = await ask(
+          `Clear ${count} job${count === 1 ? '' : 's'}?\n\nThe next scrape lists whatever is inside the freshness window again.`,
+          { confirmLabel: 'Clear', danger: true }
+        );
+        if (!proceed) return;
+      }
       state.rawJobs = [];
       state.filteredJobs = [];
       state.selectedKeys = new Set();
@@ -2839,7 +4477,7 @@
         `${prefix}-jobs.xls`,
         'application/vnd.ms-excel;charset=utf-8'
       );
-      showToast(`Spreadsheet downloaded (${jobs.length}).`, 'success');
+      showToast(`Spreadsheet downloaded (${jobs.length}), highest score first.`, 'success');
     });
 
     document.getElementById('jsLinksBtn')?.addEventListener('click', () => {
@@ -2862,6 +4500,54 @@
         'text/plain;charset=utf-8'
       );
       showToast(`Links file downloaded (${links.length}).`, 'success');
+    });
+
+    document.getElementById('jsCopyReportBtn')?.addEventListener('click', async () => {
+      const stats = state.stats || {};
+      const text = JSON.stringify(
+        {
+          scrapedAt: state.lastScrapedAt,
+          startedAt: stats.startedAt,
+          found: state.rawJobs.length,
+          ready: state.filteredJobs.length,
+          hidden: {
+            tooOld: stats.removedByDate || 0,
+            blockedJobs: stats.removedBlockedJobs || 0,
+            blockedCompanies: stats.removedBlockedCompanies || 0,
+            blockedAts: stats.removedAts || 0,
+            easyApplyOrAggregator: stats.removedAggregator || 0,
+            clearanceRequired: stats.removedClearance || 0,
+            outsideUS: stats.removedForeign || 0,
+            higherDegreeRequired: stats.removedDegree || 0,
+            otherLanguageRequired: stats.removedLanguage || 0,
+            registeredJobs: stats.removedRegisteredJobs || 0,
+            registeredCompanies: stats.removedRegisteredCompanies || 0,
+          },
+          // What the hide rules worked from: a list that is empty, stale, or
+          // exactly 1,000 long is the first thing to check when a job slips through.
+          lists: {
+            profile: state.prefs.candidateFilter || null,
+            syncedAt: state.listsSyncedAt ? new Date(state.listsSyncedAt).toISOString() : null,
+            syncError: state.listsSyncError || null,
+            appliedJobs: state.registeredJobs.length,
+            appliedCompanies: state.registeredCompanies.length,
+            blockedJobs: state.blockedJobs.length,
+            blockedCompanies: state.blockedCompanies.length,
+            blockedAts: state.blockedAts.length,
+            switchedOff: hideRulesSwitchedOff(),
+          },
+          warnings: stats.warnings || [],
+          report: stats.report || null,
+        },
+        null,
+        2
+      );
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('Run report copied.', 'success');
+      } catch (_) {
+        showToast('Copy failed.', 'error');
+      }
     });
 
     document.getElementById('jsCopyLinksBtn')?.addEventListener('click', async () => {
@@ -2903,10 +4589,13 @@
       }
     });
 
-    document.querySelector('.js-hide-group')?.addEventListener('dblclick', (event) => {
-      const target = event.target.closest('[data-edit-list]');
+    // The count badge opens that list for editing. It sits inside the row's
+    // <label>, so the click must not also toggle the checkbox.
+    document.getElementById('jsFiltersModal')?.addEventListener('click', (event) => {
+      const target = event.target.closest('.js-filter-count[data-edit-list]');
       if (!target) return;
       event.preventDefault();
+      event.stopPropagation();
       openListEditor(String(target.dataset.editList || ''));
     });
 

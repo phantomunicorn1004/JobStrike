@@ -7,6 +7,7 @@ import type {
 import { DEFAULT_TIMEZONE, endOfDayUtcIso, normalizeTimeZone, startOfDayUtcIso } from "@/lib/timezone";
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 import type { ProfileAutofill } from "@/lib/resume-db/profile-autofill";
+import { atsPlatformFromLink, atsPlatformLinkPatterns, countAtsPlatforms } from "@/lib/ats-platform";
 
 type DbRow = {
   id: number;
@@ -17,6 +18,8 @@ type DbRow = {
   job_link: string;
   job_title: string;
   company: string;
+  /** Absent until scripts/add-ats-platform-to-resume-db.sql has run; null on rows registered before it. */
+  ats_platform?: string | null;
   note: string | null;
   apply: string;
   resume_url: string;
@@ -34,6 +37,13 @@ type DbRow = {
 /** Columns needed for Resume DB table list (avoid select *). */
 export const RESUME_DB_LIST_COLUMNS =
   "id, entry_id, profile_id, user_id, candidate_name, job_link, job_title, company, note, apply, resume_url, cover_letter_url, applied_at, created_at, pipeline_job_id, pipeline_stage_id";
+
+/** Set once a query shows the ats_platform column is not there yet (its script has not run). */
+let atsPlatformColumnMissing = false;
+
+function isMissingAtsPlatformColumn(message: string): boolean {
+  return /ats_platform/i.test(message);
+}
 
 type ProfileRow = {
   id: number;
@@ -66,6 +76,7 @@ function mapRow(row: DbRow): ResumeDbApplication {
     jobLink: row.job_link,
     jobTitle: row.job_title,
     company: row.company,
+    atsPlatform: row.ats_platform?.trim() || atsPlatformFromLink(row.job_link),
     note: row.note ?? "",
     apply: row.apply,
     resumeUrl: row.resume_url,
@@ -210,12 +221,30 @@ export async function listApplications(userId: string): Promise<ResumeDbApplicat
   return data.map(mapRow);
 }
 
+/** The user's registered bids per ATS platform, most used first. */
+export async function listAtsPlatformCounts(
+  userId: string,
+): Promise<Array<{ name: string; count: number }>> {
+  const supabase = getSupabaseAdminClient();
+  const rows = await fetchAllByRange<{ job_link: string | null }>((from, to) =>
+    supabase
+      .from("resume_db_applications")
+      .select("job_link")
+      .eq("user_id", userId)
+      .order("id", { ascending: false })
+      .range(from, to),
+  );
+  return countAtsPlatforms(rows.map((row) => row.job_link));
+}
+
 export type ResumeDbApplicationsListQuery = {
   search?: string;
   dateFrom?: string; // YYYY-MM-DD
   dateTo?: string; // YYYY-MM-DD
   timeZone?: string;
   candidateFilter?: string; // "profile-{id}" | "name-{encodedName}"
+  /** A platform name ("Greenhouse") or a hostname, as atsPlatformFromLink gives it. */
+  atsPlatform?: string;
   /** Prefer denormalized stage filter over ID include/exclude scans. */
   pipelineStageId?: string | null;
   /** When true, only rows with pipeline_stage_id IS NULL (Registered). */
@@ -292,6 +321,14 @@ function applyCommonFilters(
       "candidate_name",
       candidate.nameEquals,
     );
+  }
+
+  const atsPlatform = q.atsPlatform?.trim();
+  if (atsPlatform) {
+    // By the link itself, so bids registered before the platform was saved are found too.
+    const patterns = atsPlatformLinkPatterns(atsPlatform);
+    if (patterns.length === 0) builder = builder.eq("id", -1);
+    else builder = builder.or(patterns.map((pattern) => `job_link.ilike."${pattern}"`).join(","));
   }
 
   if (q.pipelineStageIsNull) {
@@ -377,7 +414,9 @@ export async function listApplicationsWithFilters(
 
   let builder = supabase
     .from("resume_db_applications")
-    .select(RESUME_DB_LIST_COLUMNS);
+    .select(
+      atsPlatformColumnMissing ? RESUME_DB_LIST_COLUMNS : `${RESUME_DB_LIST_COLUMNS}, ats_platform`,
+    );
 
   builder = applyCommonFilters(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -403,6 +442,12 @@ export async function listApplicationsWithFilters(
   }
 
   let { data, error } = await builder.range(start, end);
+  if (error && !atsPlatformColumnMissing && isMissingAtsPlatformColumn(error.message)) {
+    // The column's script has not run: list without it; the platform is then
+    // worked out from each job link.
+    atsPlatformColumnMissing = true;
+    return listApplicationsWithFilters(userId, query);
+  }
   if (error && /pipeline_stage_id/i.test(error.message)) {
     // Column missing: if the caller asked for a stage filter, fail so the route
     // can fall back to the legacy marker scan — never silently drop the filter.
@@ -479,14 +524,21 @@ export async function createApplication(
     cover_drive_file_id: input.coverDriveFileId ?? null,
   };
 
-  const { data, error } = await supabase
-    .from("resume_db_applications")
-    .insert(row as never)
-    .select("*")
-    .single();
+  const atsPlatform = input.atsPlatform?.trim() || atsPlatformFromLink(input.jobLink);
+  const insert = (values: Record<string, unknown>) =>
+    supabase.from("resume_db_applications").insert(values as never).select("*").single();
+
+  let { data, error } = atsPlatformColumnMissing
+    ? await insert(row)
+    : await insert({ ...row, ats_platform: atsPlatform || null });
+  if (error && !atsPlatformColumnMissing && isMissingAtsPlatformColumn(error.message)) {
+    // The column's script has not run: register the bid without it.
+    atsPlatformColumnMissing = true;
+    ({ data, error } = await insert(row));
+  }
 
   if (error) throw new Error(error.message);
-  return mapRow(data as DbRow);
+  return mapRow(data as unknown as DbRow);
 }
 
 export async function updateApplication(
@@ -522,11 +574,27 @@ export async function updateApplication(
     patch.cover_drive_file_id = input.coverDriveFileId;
   }
 
-  const { error } = await supabase
-    .from("resume_db_applications")
-    .update(patch as never)
-    .eq("id", id)
-    .eq("user_id", userId);
+  const update = (values: Record<string, unknown>) =>
+    supabase
+      .from("resume_db_applications")
+      .update(values as never)
+      .eq("id", id)
+      .eq("user_id", userId);
+
+  // A changed link can mean a different platform.
+  const withPlatform =
+    input.atsPlatform !== undefined
+      ? { ...patch, ats_platform: input.atsPlatform.trim() || null }
+      : input.jobLink !== undefined
+        ? { ...patch, ats_platform: atsPlatformFromLink(input.jobLink) || null }
+        : null;
+
+  let { error } =
+    withPlatform && !atsPlatformColumnMissing ? await update(withPlatform) : await update(patch);
+  if (error && withPlatform && !atsPlatformColumnMissing && isMissingAtsPlatformColumn(error.message)) {
+    atsPlatformColumnMissing = true;
+    ({ error } = await update(patch));
+  }
 
   if (error) throw new Error(error.message);
 }

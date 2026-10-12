@@ -32,14 +32,18 @@ function mapBlockedCompany(row: BlockedCompanyRow): BlockedCompany {
 
 export async function listBlockedCompanies(userId: string): Promise<BlockedCompany[]> {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from("resume_db_blocked_companies")
-    .select("*")
-    .eq("user_id", userId)
-    .order("company_name", { ascending: true });
-
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as BlockedCompanyRow[]).map(mapBlockedCompany);
+  // Paged: a plain select stops at 1,000 rows, and a block list cut short lets
+  // blocked companies back into the scraper's results.
+  const data = await fetchAllByRange<BlockedCompanyRow>((from, to) =>
+    supabase
+      .from("resume_db_blocked_companies")
+      .select("*")
+      .eq("user_id", userId)
+      .order("company_name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  return data.map(mapBlockedCompany);
 }
 
 export async function addBlockedCompany(
@@ -275,14 +279,16 @@ function normalizeAtsForStorage(value: string): string {
 
 export async function listBlockedAts(userId: string): Promise<BlockedAts[]> {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from("resume_db_blocked_ats")
-    .select("*")
-    .eq("user_id", userId)
-    .order("ats_name", { ascending: true });
-
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as BlockedAtsRow[]).map(mapBlockedAts);
+  const data = await fetchAllByRange<BlockedAtsRow>((from, to) =>
+    supabase
+      .from("resume_db_blocked_ats")
+      .select("*")
+      .eq("user_id", userId)
+      .order("ats_name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  return data.map(mapBlockedAts);
 }
 
 export async function addBlockedAts(
@@ -356,14 +362,17 @@ function mapBlockedJob(row: BlockedJobRow): BlockedJob {
 
 export async function listBlockedJobs(userId: string): Promise<BlockedJob[]> {
   const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from("resume_db_blocked_jobs")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as BlockedJobRow[]).map(mapBlockedJob);
+  // Paged for the same reason: jobs blocked as a mismatch add up to thousands.
+  const data = await fetchAllByRange<BlockedJobRow>((from, to) =>
+    supabase
+      .from("resume_db_blocked_jobs")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  return data.map(mapBlockedJob);
 }
 
 export async function addBlockedJob(

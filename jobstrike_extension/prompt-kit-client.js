@@ -360,33 +360,19 @@ Return valid JSON only. No markdown fences, no commentary.`;
     return trim(kit?.jobDescription);
   }
 
+  /**
+   * The job description for the resume prompt: exactly what the Note holds, or
+   * the loaded posting's full text when the Note is empty. Nothing is cut: the
+   * sections a posting devotes to benefits or the company are part of the job,
+   * and the user tailors the summary to them. (The compatibility check reads the
+   * same text; only its excerpt is split out, by resolveJobDescriptionForCompat.)
+   */
   function resolveJobDescriptionForResume({ noteText, kit, posting }) {
-    // Non-empty Note always wins over last scrape's resumePromptText.
     const note = trim(noteText);
-    if (note) {
-      if (typeof SmartJobPostingIngest !== 'undefined') {
-        const split = SmartJobPostingIngest.splitJobDescription(note);
-        const resume = trim(split.resumePromptText);
-        if (resume && resume.length >= note.length * 0.35) return resume;
-      }
-      return note;
-    }
-    const fromPosting = trim(posting?.resumePromptText);
-    if (fromPosting) return fromPosting;
+    if (note) return note;
     const rawPosting = trim(posting?.rawFullText);
-    if (rawPosting) {
-      if (typeof SmartJobPostingIngest !== 'undefined') {
-        const split = SmartJobPostingIngest.splitJobDescription(rawPosting);
-        return trim(split.resumePromptText) || rawPosting;
-      }
-      return rawPosting;
-    }
-    const kitJd = trim(kit?.jobDescription);
-    if (kitJd && typeof SmartJobPostingIngest !== 'undefined') {
-      const split = SmartJobPostingIngest.splitJobDescription(kitJd);
-      return trim(split.resumePromptText) || kitJd;
-    }
-    return kitJd;
+    if (rawPosting) return rawPosting;
+    return trim(kit?.jobDescription);
   }
 
   global.SmartJobPromptKit = {

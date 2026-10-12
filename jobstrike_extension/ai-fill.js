@@ -40,9 +40,9 @@
 
   const DEFAULT_TIMEOUT_MS = 60000;
 
-  /** Reasoning models reject a custom temperature. */
+  /** Reasoning models reject a custom temperature: the o-series, and GPT-5 onward. */
   function isReasoningModel(model) {
-    return /^(o\d|gpt-5)/i.test(trim(model));
+    return /^(o\d|gpt-(?:[5-9]|\d{2,}))/i.test(trim(model));
   }
 
   async function chatCompletion(apiKey, {
@@ -368,6 +368,7 @@
       'Use ONLY facts from the profile, work experience, job description, and saved answers provided.',
       'Do not invent employers, degrees, dates, credentials, salary numbers, or personal facts.',
       'Prefer matching a Saved custom Q&A answer when the question is substantially the same.',
+      'Answers the candidate gave by hand on earlier applications, when listed, outrank the profile and your own judgement.',
       'For multiple-choice fields, the "value" must exactly match one listed option when options are given.',
       'For yes/no questions, answer with Yes or No unless options specify otherwise.',
       'If the context does not contain enough facts to answer honestly, set "needs_input": true and "value": "".',
@@ -422,7 +423,16 @@
       qType === 'growth'     ? 0.60 :
       0.40; // normal
 
-    const user = `${contextBlock}\n\n${buildFieldUserPrompt(field, row)}`;
+    // Answers the candidate gave by hand on earlier applications, closest first.
+    const learned = (Array.isArray(options.learnedExamples) ? options.learnedExamples : [])
+      .filter((item) => item && trim(item.q) && trim(item.a))
+      .slice(0, 6);
+    const learnedBlock = learned.length
+      ? `\n\n## Answers the candidate gave by hand on earlier applications (closest first)\n` +
+        learned.map((item) => `Q: ${trim(item.q)}\nA: ${String(item.a).trim()}`).join('\n\n') +
+        `\n\nThese are the candidate's own facts and wording. If one of them answers this question, reuse it, changing only a company or role name. Otherwise keep to the same facts, choices and tone.`
+      : '';
+    const user = `${contextBlock}${learnedBlock}\n\n${buildFieldUserPrompt(field, row)}`;
     const data = await chatCompletion(key, {
       model,
       temperature,
@@ -448,7 +458,7 @@
 
   /** Geo hints plus the other hard-blocker topics (clearance, sponsorship, eligibility). */
   const COMPAT_HINT = new RegExp(
-    `${GEO_HINT.source}|\\b(clearance|ts\\/sci|sponsor\\w*|visa|citizen\\w*|authoriz\\w*|eligib\\w*|licen[sc]\\w*|certifi\\w*)\\b`,
+    `${GEO_HINT.source}|\\b(clearance|ts\\/sci|sponsor\\w*|visa|citizen\\w*|authoriz\\w*|eligib\\w*|licen[sc]\\w*|certifi\\w*|degree|master'?s|ph\\.?\\s?d|doctora\\w*|bilingual|fluen\\w*|proficien\\w*|language\\w*)\\b`,
     'i'
   );
 
@@ -487,13 +497,15 @@
     'occupation',
     'eligibility',
     'language',
+    'education',
   ];
 
   /** Compatibility needs whole-posting context, capped to keep the call cheap. */
   const COMPAT_MAX_JD_CHARS = 9000;
   /** Share of the cap spent on the start of an over-long posting. */
   const COMPAT_HEAD_CHARS = 6000;
-  const COMPAT_TIMEOUT_MS = 30000;
+  // A top-tier reasoning model can think for most of a minute on a long posting.
+  const COMPAT_TIMEOUT_MS = 60000;
 
   /**
    * Fit a posting into the cap. Location and eligibility terms often sit at
@@ -537,7 +549,13 @@
 
     const location = [trim(c.city), trim(c.state)].filter(Boolean).join(', ');
     push('Location', location ? `${location}, USA` : '', 'works remotely from here');
-    push('Years of experience', c.yearsOfExperience);
+    // Years of experience are deliberately not listed: the resume is written per
+    // posting, so a years requirement never disqualifies.
+    push(
+      'Highest education completed',
+      c.education,
+      'fixed fact — reject jobs that REQUIRE a higher degree than this'
+    );
     push(
       'Needs visa sponsorship',
       trim(c.sponsorshipRequirement) || 'No',
@@ -609,7 +627,7 @@
       '{',
       '  "verdict": "pass" | "warn" | "fail",',
       '  "hard_blockers": [{ "category": "...", "candidate_conflict": "...", "evidence": "...", "confidence": 0.0-1.0 }],',
-      '  "warnings": [{ "category": "...", "note": "..." }],',
+      '  "warnings": [{ "category": "...", "note": "...", "evidence": "..." }],',
       '  "signal_reviews": [{ "index": 1, "decision": "hard_blocker" | "not_blocker", "reason": "..." }],',
       '  "summary": "one sentence"',
       '}',
@@ -625,7 +643,7 @@
       '2. A KNOWN candidate fact directly contradicts it.',
       '3. You quote the requirement VERBATIM from the posting in "evidence".',
       '4. Your confidence is at least 0.90.',
-      'If any one of these is missing, it is NOT a hard blocker. Put it in "warnings" instead.',
+      'If any one of these is missing, it is NOT a hard blocker. It is a warning only if it fits WARNINGS below; otherwise it is nothing.',
       '',
       `Allowed "category" values: ${COMPAT_CATEGORIES.join(', ')}.`,
       'Never invent a category. Never claim a blocker for an UNKNOWN candidate fact.',
@@ -639,24 +657,37 @@
       '  • occupation — Posting is for a registered nurse, CDL driver, attorney, or commission-only sales role.',
       '  • eligibility — A mandatory license or legal eligibility the candidate provably lacks, including the right to work in another country ("Must be authorized to work in Canada", "EU work permit required").',
       '  • language — A spoken language other than English is MANDATORY: "Fluent German required", "Must be bilingual in English and Spanish", "Native-level Japanese is a must".',
+      '  • education — A degree ABOVE the candidate\'s highest education is MANDATORY: "Master\'s degree required", "PhD in a quantitative field is required" when the candidate holds a Bachelor\'s. Only when Highest education is a KNOWN fact.',
       '',
-      '=== NEVER A HARD BLOCKER (verdict: warn at most, keep the job) ===',
+      '=== NOT A PROBLEM — never a hard blocker and never a warning; do not mention these at all ===',
       '  • "Must be clearable" / "able to obtain clearance" — that is NOT an active-clearance requirement.',
       '  • "Clearance preferred" or clearance not mentioned.',
       '  • "Unable to sponsor visas" when candidate does not need sponsorship (US citizen).',
       '  • "Must be authorized to work in the US" — citizen satisfies this.',
       '  • Missing or "preferred" / "ideally" / "nice to have" / "bonus" skills.',
       '  • More years of experience than the candidate has; one-level seniority stretch.',
-      '  • Degree requirements, unless a legally mandatory professional license.',
+      '  • A degree the candidate already holds or exceeds; any degree that is "preferred", "a plus" or "desired"; "or equivalent experience"; a higher degree offered as an alternative ("BS/MS", "Bachelor\'s or Master\'s", "Master\'s or 5+ years"); a different major or field of study.',
+      '  • ANY number of years of experience, however many — never a blocker and never a warning.',
       '  • Staffing agency, recruiting firm, or contract-to-hire posting.',
       '  • Hub preference ("prefer candidates near Austin").',
-      '  • Ambiguous hybrid / travel wording with no stated office-day mandate.',
       '  • Salary, travel %, W2/contract/1099 language.',
       '  • Another spoken language that is only "a plus", "preferred", "nice to have", or "an advantage".',
       '  • English proficiency requirements — the candidate speaks English.',
       '  • Programming languages (Python, Java, Go, Swift…) — those are skills, never a "language" blocker.',
       '  • "US citizenship required" or "US persons only" — the candidate is a US citizen.',
-      '  • Anything you are unsure about.',
+      '',
+      '=== WARNINGS — rare, and only these ===',
+      'A warning is a requirement that WOULD be a hard blocker but misses exactly one test:',
+      'the wording is not clearly mandatory, or your confidence is below 0.90.',
+      'Typical cases:',
+      '  • onsite — hybrid or office wording with no stated attendance mandate.',
+      '  • location — a residency or state list that may or may not exclude the candidate.',
+      '  • language — another spoken language "strongly preferred" for the role.',
+      '  • clearance / eligibility — a requirement worded so that it is unclear whether it is mandatory.',
+      'Each warning needs an allowed category and the sentence quoted VERBATIM in "evidence". No quote, no warning.',
+      'Most postings have NO warnings. Never warn about anything in the NOT A PROBLEM list.',
+      'Be consistent: the same posting must get the same answer every time. If you are unsure whether',
+      'something deserves a warning, leave it out.',
       '',
       '=== DECISION RULES ===',
       '  • Missing information is NEVER incompatibility. Silence means PASS.',
@@ -725,7 +756,11 @@
     const warnings = (Array.isArray(parsed.warnings) ? parsed.warnings : [])
       .map((w) => (typeof w === 'string'
         ? { category: 'other', note: trim(w) }
-        : { category: String(w?.category || 'other').trim().toLowerCase(), note: trim(w?.note) }))
+        : {
+            category: String(w?.category || 'other').trim().toLowerCase(),
+            note: trim(w?.note),
+            evidence: trim(w?.evidence || w?.quote),
+          }))
       .filter((w) => w.note);
 
     // Verdict is derived, not trusted: a "fail" with no surviving blocker is a warn.

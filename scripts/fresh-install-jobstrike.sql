@@ -208,6 +208,7 @@ ALTER TABLE resume_db_applications ADD COLUMN IF NOT EXISTS user_id UUID REFEREN
 ALTER TABLE resume_db_applications ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
 ALTER TABLE resume_db_applications ADD COLUMN IF NOT EXISTS pipeline_job_id BIGINT REFERENCES jobs(id) ON DELETE SET NULL;
 ALTER TABLE resume_db_applications ADD COLUMN IF NOT EXISTS pipeline_stage_id TEXT;
+ALTER TABLE resume_db_applications ADD COLUMN IF NOT EXISTS ats_platform TEXT;
 ALTER TABLE resume_db_applications ADD COLUMN IF NOT EXISTS resume_drive_file_id TEXT;
 ALTER TABLE resume_db_applications ADD COLUMN IF NOT EXISTS cover_drive_file_id TEXT;
 

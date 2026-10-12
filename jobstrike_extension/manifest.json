@@ -97,6 +97,7 @@
         "job-posting-ingest.js",
         "job-posting-frames.js",
         "job-url.js",
+        "job-link-resolver.js",
         "company-name.js",
         "job-scraper-hiringcafe.js",
         "job-scraper-jobright.js",

@@ -6,6 +6,8 @@ export type ResumeDbApplication = {
   jobLink: string;
   jobTitle: string;
   company: string;
+  /** "Greenhouse", "Workday", …; a hostname for sites that are no known platform. */
+  atsPlatform: string;
   note: string;
   apply: string;
   resumeUrl: string;
@@ -28,6 +30,8 @@ export type ResumeDbApplicationInput = {
   jobLink: string;
   jobTitle: string;
   company: string;
+  /** Left out, it is worked out from the job link. */
+  atsPlatform?: string;
   note?: string;
   apply?: string;
   resumeUrl: string;

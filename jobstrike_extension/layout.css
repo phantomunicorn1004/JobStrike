@@ -3055,3 +3055,1010 @@ body.sidepanel.assistant-dialog {
   font-weight: 500;
   color: var(--muted);
 }
+
+/* ── Side panel spacing: the panel has the height, so give each group room.
+   The on-page overlay (.assistant-dialog) keeps its compact sizes. ── */
+html:not(.assistant-dialog) .register-card.register-fit.rb-card {
+  padding: 16px;
+  gap: 16px;
+}
+
+html:not(.assistant-dialog) #tab-register .register-body {
+  gap: 18px;
+  padding-bottom: 16px;
+}
+
+html:not(.assistant-dialog) .rb-card-head {
+  gap: 12px;
+}
+
+html:not(.assistant-dialog) .rb-card-head .rb-profile-select {
+  min-height: 42px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+html:not(.assistant-dialog) .rb-chips-header {
+  gap: 8px;
+}
+
+html:not(.assistant-dialog) .rb-progress .apply-progress-track {
+  gap: 6px;
+}
+
+html:not(.assistant-dialog) .rb-progress .apply-step-node {
+  height: 5px;
+}
+
+html:not(.assistant-dialog) .rb-progress .rb-progress-reset {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+}
+
+html:not(.assistant-dialog) .rb-progress .rb-next-cue {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+html:not(.assistant-dialog) .rb-section {
+  gap: 12px;
+}
+
+html:not(.assistant-dialog) .rb-config.rb-job > summary {
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+html:not(.assistant-dialog) .rb-job-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+html:not(.assistant-dialog) .rb-job-text {
+  gap: 3px;
+}
+
+html:not(.assistant-dialog) .rb-job-title {
+  font-size: 14px;
+}
+
+html:not(.assistant-dialog) .rb-job .rb-details-summary {
+  font-size: 12px;
+}
+
+html:not(.assistant-dialog) .rb-job > .rb-config-body {
+  padding: 14px;
+  gap: 12px;
+}
+
+html:not(.assistant-dialog) .rb-job .rb-details-pair {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+html:not(.assistant-dialog) .rb-job label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+
+html:not(.assistant-dialog) .rb-job .register-field-with-action {
+  gap: 6px;
+}
+
+html:not(.assistant-dialog) .rb-job input {
+  min-height: 36px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 9px;
+}
+
+html:not(.assistant-dialog) .rb-job .register-field-actions {
+  gap: 4px;
+}
+
+html:not(.assistant-dialog) .rb-job .register-field-action-btn {
+  width: 36px;
+  min-width: 36px;
+  border-radius: 9px;
+}
+
+html:not(.assistant-dialog) .reg-jd-status-head {
+  gap: 9px;
+}
+
+html:not(.assistant-dialog) .reg-jd-status-title,
+html:not(.assistant-dialog) .rb-fit-cue-text {
+  font-size: 13px;
+}
+
+html:not(.assistant-dialog) .reg-jd-toggle,
+html:not(.assistant-dialog) .rb-fit-sub {
+  font-size: 12px;
+}
+
+html:not(.assistant-dialog) .rb-fit-cue[data-state="ready"] .rb-fit-head,
+html:not(.assistant-dialog) .rb-fit-cue[data-state="checking"] .rb-fit-head {
+  gap: 9px;
+  padding: 2px 4px 2px 0;
+}
+
+html:not(.assistant-dialog) #tab-register .rb-actions {
+  gap: 12px;
+}
+
+html:not(.assistant-dialog) #tab-register .rb-action-group {
+  gap: 10px;
+}
+
+html:not(.assistant-dialog) #tab-register .rb-action-group--prompt {
+  gap: 12px;
+}
+
+html:not(.assistant-dialog) #tab-register .rb-actions .btn {
+  min-height: 44px;
+  padding: 10px 14px;
+  gap: 8px;
+  font-size: 14px;
+  border-radius: 12px;
+}
+
+html:not(.assistant-dialog) #tab-register .rb-action-group--register .btn {
+  min-height: 46px;
+}
+
+html:not(.assistant-dialog) .rb-section--autofill {
+  margin-top: 6px;
+  padding-top: 18px;
+}
+
+html:not(.assistant-dialog) #tab-register .rb-actions .rb-action-autofill {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+html:not(.assistant-dialog) #tab-register .rb-actions .rb-section .rb-utility-btn {
+  min-height: 0;
+  padding: 0 2px;
+  font-size: 12px;
+}
+
+html:not(.assistant-dialog) .rb-more {
+  margin-top: 4px;
+}
+
+html:not(.assistant-dialog) .rb-more > .rb-config > summary {
+  padding: 13px 2px;
+  font-size: 13px;
+}
+
+html:not(.assistant-dialog) .rb-more > .rb-config > .rb-config-body {
+  gap: 10px;
+  padding: 2px 0 16px;
+}
+
+/* Keyboard focus only, in the brand colour — not the browser's white ring on click. */
+.rb-config > summary:focus {
+  outline: none;
+}
+
+.rb-config > summary:focus-visible {
+  outline: 2px solid var(--cta, #3b6fd4);
+  outline-offset: -2px;
+  border-radius: 10px;
+}
+
+/* Other open job tabs, checked ahead. One quiet line; the list opens on demand. */
+.rb-ahead {
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  font-size: 12px;
+}
+
+.rb-ahead-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  list-style: none;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rb-ahead-summary::-webkit-details-marker {
+  display: none;
+}
+
+.rb-ahead-summary::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.15s ease;
+}
+
+.rb-ahead[open] .rb-ahead-summary::after {
+  transform: rotate(-135deg) translateY(-1px);
+}
+
+.rb-ahead-count[data-level="ok"],
+.rb-ahead-row[data-level="ok"] .rb-ahead-tag {
+  color: var(--success);
+}
+
+.rb-ahead-count[data-level="review"],
+.rb-ahead-row[data-level="review"] .rb-ahead-tag {
+  color: #ca8a04;
+}
+
+[data-theme="dark"] .rb-ahead-count[data-level="review"],
+[data-theme="dark"] .rb-ahead-row[data-level="review"] .rb-ahead-tag {
+  color: #fbbf24;
+}
+
+.rb-ahead-count[data-level="skip"],
+.rb-ahead-row[data-level="skip"] .rb-ahead-tag {
+  color: var(--danger);
+}
+
+.rb-ahead-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 190px;
+  margin: 0;
+  padding: 0 6px 6px;
+  overflow: auto;
+  list-style: none;
+}
+
+.rb-ahead-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rb-ahead-row:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.rb-ahead-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.rb-ahead-row[data-level="ok"] .rb-ahead-dot { background: var(--success); }
+.rb-ahead-row[data-level="review"] .rb-ahead-dot { background: #ca8a04; }
+.rb-ahead-row[data-level="skip"] .rb-ahead-dot { background: var(--danger); }
+
+.rb-ahead-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rb-ahead-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* A live check that already has a lead from the local rules reads as a caution. */
+.rb-fit-cue[data-state="checking"][data-quick="lead"] { --fit-tone: #ca8a04; }
+[data-theme="dark"] .rb-fit-cue[data-state="checking"][data-quick="lead"] { --fit-tone: #fbbf24; }
+
+/* Saved answers list (Settings). */
+.learned-wrap {
+  margin: 10px 0 4px;
+  font-size: 12.5px;
+}
+
+.learned-wrap > summary {
+  padding: 4px 0;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.learned-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.learned-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 8px 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+}
+
+.learned-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.learned-q {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.learned-a {
+  margin-top: 2px;
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.learned-remove {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.learned-remove:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+/* ── Job Scraper tab ──────────────────────────────────────────────────────
+   One card, same rhythm as the Bid tab: sources (with freshness on the row)
+   → filters → Scrape → progress or results. Nothing shows until it has
+   something to say.
+──────────────────────────────────────────────────────────────────────── */
+#tab-job-scraper .js-scraper {
+  gap: 0;
+  padding: 0;
+}
+
+#tab-job-scraper .js-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  padding: 16px;
+}
+
+/* Sources: two rows in one bordered list. */
+#tab-job-scraper .js-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+#tab-job-scraper .js-source-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 12px 12px 14px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+#tab-job-scraper .js-source-card + .js-source-card {
+  border-top: 1px solid var(--border);
+}
+
+#tab-job-scraper .js-source-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cta, #3b6fd4) 12%, var(--bg-elevated));
+  color: var(--brand, #3b6fd4);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+#tab-job-scraper .js-source-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#tab-job-scraper .js-source-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text);
+}
+
+#tab-job-scraper .js-source-status {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#tab-job-scraper .js-fresh {
+  flex-shrink: 0;
+  width: auto;
+  min-height: 34px;
+  padding: 5px 26px 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background-color: var(--input-bg, var(--bg-elevated));
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#tab-job-scraper .js-fresh:hover,
+#tab-job-scraper .js-source-card .btn-icon:hover {
+  border-color: color-mix(in srgb, var(--cta, #3b6fd4) 50%, var(--border-strong));
+}
+
+#tab-job-scraper .js-source-card .btn-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#tab-job-scraper .js-source-card .btn-icon:hover {
+  color: var(--text);
+}
+
+/* Source on/off: a small switch; an off row is dimmed, its switch is not. */
+#tab-job-scraper .js-source-switch {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  width: 32px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+}
+
+#tab-job-scraper .js-source-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+#tab-job-scraper .js-source-switch span {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 0.15s ease;
+}
+
+#tab-job-scraper .js-source-switch span::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+}
+
+#tab-job-scraper .js-source-switch input:checked + span {
+  background: var(--cta, #3b6fd4);
+}
+
+#tab-job-scraper .js-source-switch input:checked + span::after {
+  transform: translateX(14px);
+}
+
+#tab-job-scraper .js-source-switch input:focus-visible + span {
+  outline: 2px solid var(--cta, #3b6fd4);
+  outline-offset: 2px;
+}
+
+/* Jobright sitting out a run: say so in full, on two lines if needed. */
+#tab-job-scraper .js-source-status.is-alert {
+  white-space: normal;
+  color: color-mix(in srgb, var(--warn, #f59e0b) 65%, var(--text));
+  font-weight: 600;
+}
+
+#tab-job-scraper .js-source-card.is-off .js-source-icon,
+#tab-job-scraper .js-source-card.is-off .js-source-info,
+#tab-job-scraper .js-source-card.is-off .js-fresh {
+  opacity: 0.5;
+}
+
+/* Filters: a quiet row, not a second card. */
+#tab-job-scraper .js-filters-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 11px 12px 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+#tab-job-scraper .js-filters-card > span {
+  flex: 1;
+}
+
+#tab-job-scraper .js-filters-card:hover {
+  border-color: color-mix(in srgb, var(--cta, #3b6fd4) 45%, var(--border));
+  color: var(--text);
+  transform: none;
+}
+
+#tab-job-scraper .js-filters-arrow {
+  color: var(--muted);
+}
+
+/* Action row */
+#tab-job-scraper .js-action-row {
+  display: flex;
+  gap: 10px;
+}
+
+#tab-job-scraper .js-scrape-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--cta, #3b6fd4);
+  border-radius: 12px;
+  background: var(--cta, #3b6fd4);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--cta, #3b6fd4) 75%, transparent);
+  cursor: pointer;
+  opacity: 1;
+  transform: none;
+}
+
+#tab-job-scraper .js-scrape-btn:hover:not(:disabled) {
+  background: var(--cta-hover, #2f5bb8);
+  border-color: var(--cta-hover, #2f5bb8);
+  transform: none;
+}
+
+/* While a run is live the button reports it instead of offering a second run. */
+#tab-job-scraper .js-scrape-btn.is-busy {
+  background: color-mix(in srgb, var(--cta, #3b6fd4) 14%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--cta, #3b6fd4) 35%, var(--border));
+  color: var(--brand, #3b6fd4);
+  box-shadow: none;
+  cursor: default;
+}
+
+#tab-job-scraper .js-scrape-btn.is-busy > svg,
+#tab-job-scraper .js-scrape-btn.is-busy > span {
+  display: none;
+}
+
+#tab-job-scraper .js-scrape-btn.is-busy::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: rb-spin 0.7s linear infinite;
+}
+
+#tab-job-scraper .js-scrape-btn.is-busy::after {
+  content: "Scraping…";
+}
+
+#tab-job-scraper .js-action-row .btn-secondary {
+  flex-shrink: 0;
+  min-height: 46px;
+  margin: 0;
+  padding: 10px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#tab-job-scraper .js-action-row .btn-secondary[hidden] {
+  display: none;
+}
+
+#tab-job-scraper #jsStopBtn:hover {
+  border-color: var(--danger, #dc2626);
+  color: var(--danger, #dc2626);
+}
+
+/* Progress: phases on one line, then the bar. */
+#tab-job-scraper .js-progress-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  box-shadow: none;
+}
+
+#tab-job-scraper .js-progress-card[hidden] {
+  display: none;
+}
+
+#tab-job-scraper .js-progress-phases {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+#tab-job-scraper .js-progress-phases[hidden] {
+  display: none;
+}
+
+#tab-job-scraper .js-progress-phase {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+#tab-job-scraper .js-phase-dot {
+  width: 8px;
+  height: 8px;
+  box-shadow: none;
+}
+
+#tab-job-scraper .js-phase-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#tab-job-scraper .js-progress-connector {
+  flex: 1;
+  height: 1px;
+  margin: 0;
+  background: var(--border-strong);
+}
+
+#tab-job-scraper .js-progress-header {
+  margin: 4px 0 0;
+}
+
+#tab-job-scraper .js-progress-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#tab-job-scraper .js-progress-pct {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+#tab-job-scraper .js-progress-bar-wrap {
+  height: 5px;
+  margin: 0;
+  border-radius: 999px;
+}
+
+#tab-job-scraper .js-progress-detail {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Results: the count is the headline; the breakdown explains it. */
+#tab-job-scraper .js-results-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+#tab-job-scraper .js-results-card[hidden],
+#tab-job-scraper .js-results-card.is-idle {
+  display: none;
+}
+
+#tab-job-scraper .js-results-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+#tab-job-scraper .js-results-count {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+#tab-job-scraper .js-results-sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+#tab-job-scraper .js-results-empty {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+#tab-job-scraper .js-results-empty[hidden] {
+  display: none;
+}
+
+#tab-job-scraper .js-results-empty p {
+  margin: 0;
+}
+
+#tab-job-scraper .js-results-actions {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+}
+
+#tab-job-scraper .js-results-actions[hidden] {
+  display: none;
+}
+
+#tab-job-scraper .js-result-action-btn {
+  flex: 1;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  box-shadow: none;
+  cursor: pointer;
+  transform: none;
+}
+
+#tab-job-scraper .js-result-action-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--cta, #3b6fd4) 50%, var(--border-strong));
+  background: var(--bg-subtle);
+  transform: none;
+}
+
+#tab-job-scraper .js-result-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#tab-job-scraper .js-result-action-primary {
+  border-color: var(--cta, #3b6fd4);
+  background: var(--cta, #3b6fd4);
+  color: #fff;
+}
+
+#tab-job-scraper .js-result-action-primary:hover:not(:disabled) {
+  border-color: var(--cta-hover, #2f5bb8);
+  background: var(--cta-hover, #2f5bb8);
+}
+
+#tab-job-scraper .js-result-action-quiet {
+  flex: 0 0 42px;
+  padding: 0;
+  color: var(--muted);
+}
+
+#tab-job-scraper .js-result-action-quiet:hover:not(:disabled) {
+  border-color: var(--danger, #dc2626);
+  color: var(--danger, #dc2626);
+}
+
+/* Filters sheet: tighter sections, one clear heading each. */
+#tab-job-scraper .js-modal-content {
+  gap: 18px;
+}
+
+#tab-job-scraper .js-modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#tab-job-scraper .js-results-header {
+  align-items: flex-start;
+  padding: 0;
+  text-align: left;
+}
+
+#tab-job-scraper .js-results-actions {
+  padding: 0;
+}
+
+#tab-job-scraper .js-scrape-btn {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+/* What to be careful about in these results (stopped early, lists not synced, …). */
+#tab-job-scraper .js-results-warn {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #f59e0b 40%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in srgb, #f59e0b 9%, var(--bg-elevated));
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+#tab-job-scraper .js-results-warn[hidden] {
+  display: none;
+}
+
+/* The count on a block list opens that list. */
+#tab-job-scraper .js-filter-count[data-edit-list] {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+#tab-job-scraper .js-filter-count[data-edit-list]:hover,
+#tab-job-scraper .js-filter-count[data-edit-list]:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--cta, #3b6fd4) 18%, transparent);
+  color: var(--brand, #3b6fd4);
+}
+
+#tab-job-scraper #jsStopBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Per-source run report: how many, how old, how much of the site's list was read. */
+#tab-job-scraper .js-results-report {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre-line;
+  font-variant-numeric: tabular-nums;
+}
+
+#tab-job-scraper .js-results-report[hidden],
+#tab-job-scraper .js-results-report-copy[hidden] {
+  display: none;
+}
+
+#tab-job-scraper .js-results-report-copy {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand, #3b6fd4);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#tab-job-scraper .js-results-report-copy:hover {
+  text-decoration: underline;
+}

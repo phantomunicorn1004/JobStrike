@@ -64,7 +64,8 @@
    * paid for a fresh API call on text that had already been checked.
    */
   const aiCompatCache = new Map();
-  const AI_COMPAT_CACHE_MAX = 40;
+  // Roomy: checks run ahead for every open job tab, not only the one in front.
+  const AI_COMPAT_CACHE_MAX = 300;
   /**
    * True once the Note has been replaced by the built resume JSON's copy of the
    * description. The verdict was reached on the real posting, so it stays
@@ -202,7 +203,7 @@
   function aiCompatCacheKey(jobDescription, profileCity, profileState, constraints) {
     const jd = String(jobDescription || '').replace(/\s+/g, ' ').trim();
     const c = constraints || {};
-    const facts = [c.sponsorshipRequirement, c.workAuthorizationUS, c.securityClearance, c.citizenship, c.languages, c.remotePreference]
+    const facts = [c.sponsorshipRequirement, c.workAuthorizationUS, c.securityClearance, c.citizenship, c.languages, c.remotePreference, c.educationLevel]
       .map((v) => String(v || '').trim().toLowerCase())
       .join('|');
     let hash = 5381;
@@ -3300,6 +3301,8 @@
     const isChecking = Boolean(result.aiChecking);
     const aiFailed = Boolean(result.aiFailed);
     const hasProblem = level === 'blocked' || level === 'risky' || aiFailed;
+    // While the AI reads, a lead from the local rules is worth showing at once.
+    const quickFlag = isChecking && Boolean(result.quickLeads);
     const shownLevel = isChecking ? 'ready' : aiFailed && level === 'ready' ? 'risky' : level;
 
     // Always visible once there is a JD: a pass is confirmed, not implied by
@@ -3308,6 +3311,7 @@
     if (cue.dataset.level !== shownLevel) bidFitReasonsExpanded = null;
     cue.dataset.level = shownLevel;
     cue.dataset.state = isChecking ? 'checking' : shownLevel;
+    cue.dataset.quick = quickFlag ? 'lead' : '';
     text.textContent = preflight?.summarizeFit?.(result) || 'Preflight: —';
 
     if (sub) {
@@ -3339,7 +3343,9 @@
 
       // Problems always show reasons clearly; checking has no reason list yet.
       const shouldExpand =
-        bidFitReasonsExpanded == null ? hasProblem && !isChecking : bidFitReasonsExpanded;
+        bidFitReasonsExpanded == null
+          ? (hasProblem && !isChecking) || quickFlag
+          : bidFitReasonsExpanded;
       const canExpand = reasons.length > 0;
       list.hidden = !canExpand || !shouldExpand;
       if (toggle) {
@@ -3359,6 +3365,350 @@
       if (!list) return;
       bidFitReasonsExpanded = list.hidden;
       renderBidFitCard(lastBidFitResult);
+    });
+  }
+
+  /** One AI verdict for a posting, in the shape the preflight engine stores. */
+  async function requestAiCompatVerdict({ jd, profileState, constraints, settings }) {
+    const ai = global.SmartJobAiFill;
+    const engine = global.SmartJobBidFitPreflight;
+    // Point the model at every sentence the local rules find suspicious, so a
+    // requirement buried in a long posting gets an explicit ruling.
+    const signals = engine?.collectHardSignals
+      ? engine.collectHardSignals(jd, { profileState, education: constraints?.educationLevel })
+      : [];
+    const result = await ai.evaluateJobCompatibility(settings.apiKey, settings.model, {
+      jobDescription: jd,
+      constraints,
+      baseUrl: settings.baseUrl,
+      signals,
+    });
+
+    // Only evidence-backed blockers may reject; the rest become warnings.
+    const { accepted } = engine?.validateHardBlockers
+      ? engine.validateHardBlockers(result.blockers, jd)
+      : { accepted: [] };
+
+    // Record which quotes were found in the checked text. The Note may later
+    // hold the resume JSON's rewording, where the same quote no longer appears.
+    const acceptedEvidence = new Set(accepted.map((b) => b.evidence));
+    const verdict = {
+      status: 'done',
+      blockers: result.blockers.map((b) => ({
+        ...b,
+        validated: acceptedEvidence.has(String(b.evidence || '').trim()),
+      })),
+      // Keep only warnings whose quote is in the text the model read; mark them
+      // so a later rewording of the Note cannot drop them.
+      warnings: (engine?.validateSoftWarnings
+        ? engine.validateSoftWarnings(result.warnings, jd)
+        : []
+      ).map((w) => ({ ...w, validated: true })),
+      summary: result.summary,
+      signals,
+      signalReviews: result.signalReviews,
+    };
+    return { accepted, verdict };
+  }
+
+  /** Calls in flight by posting: the live check and a check-ahead share one. */
+  const aiCompatInFlight = new Map();
+
+  function sharedAiCompatVerdict(cacheKey, args, { fresh = false } = {}) {
+    if (!fresh && aiCompatInFlight.has(cacheKey)) return aiCompatInFlight.get(cacheKey);
+    const run = requestAiCompatVerdict(args)
+      .then((out) => {
+        rememberAiCompatResult(cacheKey, out.verdict);
+        return out;
+      })
+      .finally(() => {
+        if (aiCompatInFlight.get(cacheKey) === run) aiCompatInFlight.delete(cacheKey);
+      });
+    aiCompatInFlight.set(cacheKey, run);
+    return run;
+  }
+
+  // ── Checks ahead of time ────────────────────────────────────────────────
+  // Applying to one job takes minutes; a check takes seconds. So the other job
+  // tabs open in this window are read and checked while the user works, and the
+  // verdict is already there when they switch to one. A check-ahead only fills
+  // the cache: the Bid tab still looks its own text up, so a page that changed
+  // since is simply checked again.
+  const AHEAD_PARALLEL = 3;
+  const AHEAD_SETTLE_MS = 2500;
+  const AHEAD_RETRY_MS = 7000;
+  const AHEAD_READ_TIMEOUT_MS = 20000;
+  const AHEAD_MIN_JD_CHARS = 400;
+  /** tabId → { url, state: 'queued'|'reading'|'checking'|'done'|'none'|'error', level, title, company, reason, tries } */
+  const aheadTabs = new Map();
+  const aheadQueue = [];
+  const aheadTimers = new Map();
+  let aheadActive = 0;
+  let aheadWindowId = null;
+  let aheadActiveTabId = null;
+
+  /** Only the pinned side panel checks ahead; an overlay lives inside one tab. */
+  function aheadSupported() {
+    if (document.documentElement.classList.contains('assistant-dialog')) return false;
+    if (/[?&]dialog=1(?:&|$)/.test(location.search || '')) return false;
+    return Boolean(chrome.tabs?.query) && typeof global.sendMessageToTab === 'function';
+  }
+
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
+  }
+
+  /** A page whose extracted text reads like a job posting, not any page with text. */
+  function looksLikeJobPosting(posting, jd) {
+    if (jd.length < AHEAD_MIN_JD_CHARS) return false;
+    if (!String(posting?.jobTitle || '').trim()) return false;
+    const warnings = Array.isArray(posting?.meta?.warnings) ? posting.meta.warnings : [];
+    if (warnings.some((w) => w === 'apply_only' || w === 'empty_jd' || w === 'short_jd' || w === 'missing_body')) {
+      return false;
+    }
+    const source = String(posting?.meta?.source || '');
+    if (source === 'adapter' || source === 'jsonld') return true;
+    return /\b(responsibilit|qualification|requirement|experience)/i.test(jd);
+  }
+
+  function aheadLevel(verdict, jd) {
+    const engine = global.SmartJobBidFitPreflight;
+    const accepted = engine?.validateHardBlockers
+      ? engine.validateHardBlockers(verdict.blockers, jd).accepted
+      : [];
+    if (accepted.length) {
+      const first = accepted[0];
+      const quote = String(first.evidence || '').replace(/\s+/g, ' ').trim();
+      return { level: 'skip', reason: quote ? `${first.conflict} — “${quote}”` : String(first.conflict || '') };
+    }
+    const warnings = engine?.validateSoftWarnings ? engine.validateSoftWarnings(verdict.warnings, jd) : [];
+    const open = engine?.unresolvedSignals ? engine.unresolvedSignals(verdict) : [];
+    if (warnings.length || open.length) {
+      const note = warnings[0]?.note || (open[0] ? `Unconfirmed ${open[0].category} requirement` : '');
+      return { level: 'review', reason: String(note || '') };
+    }
+    return { level: 'ok', reason: '' };
+  }
+
+  function scheduleAheadCheck(tabId, delayMs) {
+    if (!aheadSupported() || !tabId) return;
+    if (aheadTimers.has(tabId)) clearTimeout(aheadTimers.get(tabId));
+    aheadTimers.set(
+      tabId,
+      setTimeout(() => {
+        aheadTimers.delete(tabId);
+        if (!aheadQueue.includes(tabId)) aheadQueue.push(tabId);
+        pumpAheadQueue();
+      }, Math.max(0, Number(delayMs) || 0))
+    );
+  }
+
+  function pumpAheadQueue() {
+    while (aheadActive < AHEAD_PARALLEL && aheadQueue.length) {
+      const tabId = aheadQueue.shift();
+      aheadActive += 1;
+      runAheadCheck(tabId)
+        .catch(() => {
+          const entry = aheadTabs.get(tabId);
+          if (entry) entry.state = 'error';
+        })
+        .finally(() => {
+          aheadActive -= 1;
+          renderAheadSummary();
+          pumpAheadQueue();
+        });
+    }
+  }
+
+  async function runAheadCheck(tabId) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab || !/^https?:\/\//i.test(tab.url || '')) {
+      aheadTabs.delete(tabId);
+      return;
+    }
+    if (aheadWindowId != null && tab.windowId !== aheadWindowId) return;
+    // The tab in front is checked by the Bid tab itself; a sleeping tab has no page to read.
+    if (tab.active || tab.discarded) return;
+
+    const settings = await readAiAutofillSettings();
+    if (!settings.apiKey || !global.SmartJobAiFill?.evaluateJobCompatibility) return;
+
+    const previous = aheadTabs.get(tabId);
+    const entry = {
+      url: tab.url,
+      state: 'reading',
+      tries: previous && previous.url === tab.url ? previous.tries || 0 : 0,
+    };
+    aheadTabs.set(tabId, entry);
+
+    const top = await withTimeout(
+      global.sendMessageToTab(tabId, { action: 'fetchJobPosting' }),
+      AHEAD_READ_TIMEOUT_MS
+    ).catch(() => null);
+    const frames = global.SmartJobPostingFrames;
+    const response =
+      top && frames?.withFrameFallback
+        ? await frames.withFrameFallback(tabId, top).catch(() => top)
+        : top;
+    if (aheadTabs.get(tabId) !== entry) return;
+
+    const posting = response?.posting || null;
+    // The same text the Bid tab puts in the Note, so the cache key is the same.
+    const jd = String(response?.job_description || posting?.rawFullText || '').trim();
+    if (!looksLikeJobPosting(posting, jd)) {
+      // Some pages fill their description in late: look once more, then leave it.
+      if (entry.tries < 1) {
+        entry.tries += 1;
+        entry.state = 'queued';
+        scheduleAheadCheck(tabId, AHEAD_RETRY_MS);
+      } else {
+        entry.state = 'none';
+      }
+      return;
+    }
+
+    entry.title = String(response?.job_title || posting?.jobTitle || '').trim();
+    entry.company = String(response?.company_name || posting?.companyName || '').trim();
+
+    const profileId = getSelectedRegisterProfileId();
+    const { city, state, constraints } = await getProfileLocation(profileId);
+    const cacheKey = aiCompatCacheKey(jd, city, state, constraints);
+
+    let verdict = aiCompatCache.get(cacheKey) || null;
+    if (!verdict) {
+      entry.state = 'checking';
+      renderAheadSummary();
+      ({ verdict } = await sharedAiCompatVerdict(cacheKey, {
+        jd,
+        profileState: state,
+        constraints,
+        settings,
+      }));
+    }
+    if (aheadTabs.get(tabId) !== entry) return;
+    Object.assign(entry, aheadLevel(verdict, jd), { state: 'done' });
+  }
+
+  const AHEAD_ORDER = { skip: 0, review: 1, ok: 2, checking: 3 };
+  const AHEAD_TAG = { skip: 'Skip', review: 'Review', ok: 'OK', checking: 'Checking…' };
+
+  /** One quiet line for the other open jobs; the list opens on demand. */
+  function renderAheadSummary() {
+    const box = document.getElementById('rbAhead');
+    const summary = document.getElementById('rbAheadSummary');
+    const list = document.getElementById('rbAheadList');
+    if (!box || !summary || !list) return;
+
+    const rows = [...aheadTabs.entries()]
+      .filter(([tabId, entry]) => tabId !== aheadActiveTabId && (entry.state === 'done' || entry.state === 'checking'))
+      .map(([tabId, entry]) => ({ tabId, ...entry, level: entry.state === 'done' ? entry.level : 'checking' }))
+      .sort((a, b) => AHEAD_ORDER[a.level] - AHEAD_ORDER[b.level]);
+
+    if (!rows.length) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+
+    const count = (level) => rows.filter((row) => row.level === level).length;
+    summary.textContent = '';
+    const lead = document.createElement('span');
+    lead.textContent = 'Other open jobs:';
+    summary.appendChild(lead);
+    [['ok', 'OK'], ['review', 'review'], ['skip', 'skip'], ['checking', 'checking']].forEach(([level, word]) => {
+      const n = count(level);
+      if (!n) return;
+      const part = document.createElement('span');
+      part.className = 'rb-ahead-count';
+      part.dataset.level = level;
+      part.textContent = `${n} ${word}`;
+      summary.appendChild(part);
+    });
+
+    list.textContent = '';
+    rows.forEach((row) => {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'rb-ahead-row';
+      button.dataset.level = row.level;
+      button.dataset.tabId = String(row.tabId);
+      button.title = row.reason || 'Switch to this tab';
+      const dot = document.createElement('span');
+      dot.className = 'rb-ahead-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      const name = document.createElement('span');
+      name.className = 'rb-ahead-name';
+      name.textContent = [row.title, row.company].filter(Boolean).join(' · ') || row.url;
+      const tag = document.createElement('span');
+      tag.className = 'rb-ahead-tag';
+      tag.textContent = AHEAD_TAG[row.level];
+      button.append(dot, name, tag);
+      item.appendChild(button);
+      list.appendChild(item);
+    });
+  }
+
+  function rescanAheadTabs() {
+    if (!aheadSupported()) return;
+    aheadTabs.clear();
+    renderAheadSummary();
+    chrome.tabs.query({ currentWindow: true }, (tabs) => {
+      void chrome.runtime.lastError;
+      (Array.isArray(tabs) ? tabs : []).forEach((tab, index) => {
+        if (tab?.active) aheadActiveTabId = tab.id;
+        else if (tab?.id) scheduleAheadCheck(tab.id, 400 + index * 150);
+      });
+    });
+  }
+
+  function initAheadChecks() {
+    if (!aheadSupported()) return;
+    const list = document.getElementById('rbAheadList');
+    if (!list || list.dataset.wired === '1') return;
+    list.dataset.wired = '1';
+    list.addEventListener('click', (event) => {
+      const tabId = Number(event.target.closest?.('.rb-ahead-row')?.dataset.tabId);
+      if (tabId) void chrome.tabs.update(tabId, { active: true });
+    });
+
+    Promise.resolve(chrome.windows?.getCurrent?.())
+      .then((win) => {
+        if (win && Number.isFinite(win.id)) aheadWindowId = win.id;
+      })
+      .catch(() => {})
+      .finally(rescanAheadTabs);
+
+    chrome.tabs.onUpdated?.addListener((tabId, changeInfo, tab) => {
+      if (aheadWindowId != null && tab?.windowId !== aheadWindowId) return;
+      const moved = Object.prototype.hasOwnProperty.call(changeInfo, 'url');
+      if (moved) aheadTabs.delete(tabId);
+      if (changeInfo.status === 'complete') scheduleAheadCheck(tabId, AHEAD_SETTLE_MS);
+      if (moved) renderAheadSummary();
+    });
+    chrome.tabs.onRemoved?.addListener((tabId) => {
+      aheadTabs.delete(tabId);
+      if (aheadTimers.has(tabId)) {
+        clearTimeout(aheadTimers.get(tabId));
+        aheadTimers.delete(tabId);
+      }
+      renderAheadSummary();
+    });
+    chrome.tabs.onActivated?.addListener((info) => {
+      if (aheadWindowId != null && info?.windowId !== aheadWindowId) return;
+      const left = aheadActiveTabId;
+      aheadActiveTabId = info?.tabId ?? null;
+      renderAheadSummary();
+      // The tab just left was the one in front, so it was never checked ahead.
+      if (left && left !== aheadActiveTabId && !aheadTabs.has(left)) scheduleAheadCheck(left, 600);
+    });
+    // Verdicts belong to a profile and need a key: start over when either changes.
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== 'local') return;
+      if (changes[SELECTED_PROFILE_KEY] || changes[AI_AUTOFILL_SETTINGS_KEY]) rescanAheadTabs();
     });
   }
 
@@ -3462,42 +3812,19 @@
     }
 
     try {
-      // Point the model at every sentence the local rules find suspicious, so a
-      // requirement buried in a long posting gets an explicit ruling.
-      const signals = engine?.collectHardSignals
-        ? engine.collectHardSignals(jd, { profileState: inputs.profileState })
-        : [];
-      const result = await ai.evaluateJobCompatibility(settings.apiKey, settings.model, {
-        jobDescription: jd,
-        constraints: inputs.constraints,
-        baseUrl: settings.baseUrl,
-        signals,
-      });
+      // A check-ahead for this same posting may already be in flight: share it.
+      // A manual re-check always asks again.
+      const { accepted, verdict } = await sharedAiCompatVerdict(
+        cacheKey,
+        { jd, profileState: inputs.profileState, constraints: inputs.constraints, settings },
+        { fresh: manual }
+      );
 
       // Note/job changed while this call was in flight — discard stale result.
       if (runId !== aiCompatRunId) return null;
 
-      // Only evidence-backed blockers may reject; the rest become warnings.
-      const { accepted } = engine?.validateHardBlockers
-        ? engine.validateHardBlockers(result.blockers, jd)
-        : { accepted: [] };
-
-      // Record which quotes were found in the checked text. The Note may later
-      // hold the resume JSON's rewording, where the same quote no longer appears.
-      const acceptedEvidence = new Set(accepted.map((b) => b.evidence));
-      lastAiCompatResult = {
-        status: 'done',
-        blockers: result.blockers.map((b) => ({
-          ...b,
-          validated: acceptedEvidence.has(String(b.evidence || '').trim()),
-        })),
-        warnings: result.warnings,
-        summary: result.summary,
-        signals,
-        signalReviews: result.signalReviews,
-      };
+      lastAiCompatResult = verdict;
       lastAiCompatCacheKey = cacheKey;
-      rememberAiCompatResult(cacheKey, lastAiCompatResult);
       aiCompatPending = false;
       // Keep the verdict with this tab's draft so switching back does not re-run it.
       syncTabSession();
@@ -3624,7 +3951,18 @@
     // to a profile that has not filled them in.
     const details = record?.autofill && typeof record.autofill === 'object' ? record.autofill : {};
     const languages = str(details.languages);
+    const degree = [str(details.degree), str(details.major)].filter(Boolean).join(' in ');
+    const education = [
+      str(details.highestEducation),
+      degree ? `(${degree})` : '',
+      str(details.graduationYear) ? `graduated ${str(details.graduationYear)}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
     return {
+      // Empty when the profile has no education saved: then it is unknown, not a conflict.
+      education: str(details.highestEducation) ? education : '',
+      educationLevel: str(details.highestEducation),
       city: str(record?.city),
       state: str(record?.state),
       yearsOfExperience: str(details.yearsOfExperience),
@@ -4195,6 +4533,7 @@
     wireJson2docxGenerate(showStatus);
     wireBidFitToggle();
     wireBidFitAiCompat(showStatus);
+    initAheadChecks();
     wireBidDetailsSummary();
     // Kick off the first check shortly after init (a JD may already be present).
     if (noteJdReadyForAi(document.getElementById('regNote'))) {

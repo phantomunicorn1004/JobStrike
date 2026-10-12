@@ -77,10 +77,37 @@ async function restoreAssistantDialogOnTab(tabId, url) {
 }
 
 function configureSidePanelBehavior() {
+  void enableGlobalSidePanel();
   if (!chrome.sidePanel?.setPanelBehavior) return;
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: false })
     .catch((error) => console.warn('setPanelBehavior failed:', error));
+}
+
+/**
+ * The pinned panel is one panel for the whole window. Options set with a tabId
+ * give that tab its own, separate panel instance, which is open on that tab
+ * only and closes with it: closing the job tab the panel was opened from used
+ * to take JobStrike away from every other tab. So the panel is enabled
+ * globally, and a tab gets options of its own only to undo an overlay mode
+ * that switched the panel off there.
+ */
+function enableGlobalSidePanel() {
+  if (!chrome.sidePanel?.setOptions) return Promise.resolve();
+  return chrome.sidePanel.setOptions({ path: 'sidepanel.html', enabled: true }).catch(() => {});
+}
+
+async function reenableSidePanelOnTab(tabId) {
+  if (!tabId || !chrome.sidePanel?.getOptions || !chrome.sidePanel?.setOptions) return;
+  try {
+    // A tab with no options of its own reports the global ones (enabled).
+    const options = await chrome.sidePanel.getOptions({ tabId });
+    if (options && options.enabled === false) {
+      await chrome.sidePanel.setOptions({ tabId, path: 'sidepanel.html', enabled: true });
+    }
+  } catch (_) {
+    /* ignore */
+  }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -107,17 +134,8 @@ async function preparePinnedSidePanel(tabId) {
   } catch (_) {
     /* ignore */
   }
-  if (chrome.sidePanel?.setOptions) {
-    try {
-      await chrome.sidePanel.setOptions({
-        tabId,
-        path: 'sidepanel.html',
-        enabled: true
-      });
-    } catch (_) {
-      /* ignore */
-    }
-  }
+  await enableGlobalSidePanel();
+  await reenableSidePanelOnTab(tabId);
   return { success: true, mode: 'panel' };
 }
 
@@ -150,6 +168,29 @@ async function openPreparedJobTabs(urls) {
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // A Greenhouse application form has no description; its page policy stops the
+  // content script from asking the job board API, so the worker asks for it.
+  if (request && (request.action === 'fetchGreenhouseJob' || request.action === 'fetchSmartRecruitersJob')) {
+    const board = String(request.board || '');
+    const token = String(request.token || '');
+    const greenhouse = request.action === 'fetchGreenhouseJob';
+    // Only these two public job APIs, and only well-formed ids.
+    const valid = greenhouse
+      ? /^[a-z0-9_-]+$/i.test(board) && /^\d+$/.test(token)
+      : /^[a-z0-9_-]+$/i.test(board) && /^[0-9a-f-]{8,40}$/i.test(token);
+    if (!valid) {
+      sendResponse({ success: false });
+      return false;
+    }
+    const address = greenhouse
+      ? `https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${token}`
+      : `https://api.smartrecruiters.com/v1/companies/${board}/postings/${token}`;
+    fetch(address, { credentials: 'omit' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((job) => sendResponse({ success: Boolean(job), job }))
+      .catch(() => sendResponse({ success: false }));
+    return true;
+  }
   if (request && request.action === 'openPreparedJobTabs') {
     void openPreparedJobTabs(request.urls)
       .then((result) => sendResponse(result))
@@ -172,19 +213,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return false;
     }
-    // Re-enable before open — Initial UI disables the panel for this tab.
-    if (chrome.sidePanel?.setOptions) {
-      try {
-        chrome.sidePanel.setOptions({
-          tabId,
-          path: 'sidepanel.html',
-          enabled: true
-        });
-      } catch (_) {
-        /* ignore */
-      }
-    }
+    // Global, not for this tab: a tab-specific panel would close with the tab.
+    void enableGlobalSidePanel();
     // Start open synchronously in the message turn to preserve the user gesture.
+    // With no tab-specific panel on this tab, this opens the window's panel.
     const openPromise = chrome.sidePanel.open({ tabId });
     void openPromise
       .then(() => preparePinnedSidePanel(tabId))
@@ -236,13 +268,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (mode === 'panel') {
         // Open immediately inside this callback — do not await cleanup first.
         try {
-          if (chrome.sidePanel?.setOptions) {
-            void chrome.sidePanel.setOptions({
-              tabId: tab.id,
-              path: 'sidepanel.html',
-              enabled: true
-            });
-          }
+          void enableGlobalSidePanel();
           if (!chrome.sidePanel?.open) {
             throw new Error('Chrome side panel is unavailable in this browser.');
           }
@@ -345,13 +371,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
       try {
-        if (chrome.sidePanel?.setOptions) {
-          await chrome.sidePanel.setOptions({
-            tabId: tab.id,
-            path: 'sidepanel.html',
-            enabled: true
-          });
-        }
+        await enableGlobalSidePanel();
+        await reenableSidePanelOnTab(tab.id);
         sendResponse({ success: true });
       } catch (error) {
         sendResponse({ success: false, error: error?.message || String(error) });
@@ -393,13 +414,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           }
         } else {
           try {
-            if (chrome.sidePanel?.setOptions) {
-              await chrome.sidePanel.setOptions({
-                tabId: tab.id,
-                path: 'sidepanel.html',
-                enabled: true
-              });
-            }
+            await enableGlobalSidePanel();
+            await reenableSidePanelOnTab(tab.id);
             if (chrome.sidePanel?.open) {
               await chrome.sidePanel.open({ tabId: tab.id });
             }
@@ -588,13 +604,7 @@ chrome.commands.onCommand.addListener((command) => {
     if (assistantMode) {
       try {
         if (assistantMode === 'panel') {
-          if (chrome.sidePanel?.setOptions) {
-            void chrome.sidePanel.setOptions({
-              tabId: tab.id,
-              path: 'sidepanel.html',
-              enabled: true
-            });
-          }
+          void enableGlobalSidePanel();
           if (!chrome.sidePanel?.open) {
             throw new Error('Chrome side panel is unavailable in this browser.');
           }

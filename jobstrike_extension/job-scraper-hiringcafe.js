@@ -40,25 +40,60 @@
       'NOT ("Consultant" OR "Manager" OR "Director") AND ("Software" OR "Data" OR "AI" OR "Developer" OR "Engineer")',
   };
 
+  /** Host is the domain or a subdomain of it — "lever.co" must not claim clever.com. */
+  const on = (host, domain) => host === domain || host.endsWith(`.${domain}`);
+
   const PLATFORM_RULES = [
-    ['Greenhouse', (h) => h.includes('greenhouse.io')],
-    ['Lever', (h) => h.includes('lever.co')],
-    ['Workday', (h) => h.includes('myworkdayjobs.com') || h.includes('workday.com')],
-    ['iCIMS', (h) => h.includes('icims.com')],
-    ['Gem', (h) => h.includes('jobs.gem.com')],
-    ['Ashby', (h) => h.includes('ashbyhq.com')],
-    ['Rippling', (h) => h.includes('rippling.com') || h.includes('atsrecruiting.com')],
-    ['Jobvite', (h) => h.includes('jobvite.com')],
-    ['SmartRecruiters', (h) => h.includes('smartrecruiters.com')],
-    ['BambooHR', (h) => h.includes('bamboohr.com')],
-    ['Taleo', (h) => h.includes('taleo.net')],
-    ['Indeed', (h) => h.includes('indeed.com')],
-    ['LinkedIn', (h) => h.includes('linkedin.com')],
-    ['Wellfound', (h) => h.includes('wellfound.com') || h.includes('angel.co')],
-    ['Recruitee', (h) => h.includes('recruitee.com')],
-    ['Breezy', (h) => h.includes('breezy.hr')],
-    ['Workable', (h) => h.includes('workable.com')],
-    ['JazzHR', (h) => h.includes('jazz.co') || h.includes('applytojob.com')],
+    ['Greenhouse', (h) => on(h, 'greenhouse.io')],
+    ['Lever', (h) => on(h, 'lever.co')],
+    ['Workday', (h) => on(h, 'myworkdayjobs.com') || on(h, 'myworkdaysite.com') || on(h, 'workday.com')],
+    ['iCIMS', (h) => on(h, 'icims.com')],
+    ['Gem', (h) => on(h, 'jobs.gem.com')],
+    ['Ashby', (h) => on(h, 'ashbyhq.com')],
+    ['Rippling', (h) => on(h, 'rippling.com') || on(h, 'atsrecruiting.com')],
+    ['Jobvite', (h) => on(h, 'jobvite.com')],
+    ['SmartRecruiters', (h) => on(h, 'smartrecruiters.com')],
+    ['BambooHR', (h) => on(h, 'bamboohr.com')],
+    ['Taleo', (h) => on(h, 'taleo.net')],
+    ['Indeed', (h) => on(h, 'indeed.com')],
+    ['LinkedIn', (h) => on(h, 'linkedin.com')],
+    ['Wellfound', (h) => on(h, 'wellfound.com') || on(h, 'angel.co')],
+    ['Recruitee', (h) => on(h, 'recruitee.com')],
+    ['Breezy', (h) => on(h, 'breezy.hr')],
+    ['Workable', (h) => on(h, 'workable.com')],
+    ['JazzHR', (h) => on(h, 'jazz.co') || on(h, 'applytojob.com')],
+    ['Oracle HCM', (h) => on(h, 'oraclecloud.com')],
+    ['SuccessFactors', (h) => on(h, 'successfactors.com') || on(h, 'sapsf.com') || on(h, 'successfactors.eu') || on(h, 'hr.cloud.sap') || on(h, 'jobs2web.com')],
+    ['ADP', (h) => on(h, 'adp.com')],
+    ['UKG', (h) => on(h, 'ultipro.com') || on(h, 'ukg.com') || on(h, 'ukg.net') || on(h, 'entertimeonline.com')],
+    ['Dayforce', (h) => on(h, 'dayforcehcm.com')],
+    ['Paylocity', (h) => on(h, 'paylocity.com')],
+    ['Paycom', (h) => on(h, 'paycomonline.net')],
+    ['Avature', (h) => on(h, 'avature.net')],
+    ['Eightfold', (h) => on(h, 'eightfold.ai')],
+    ['Njoyn', (h) => on(h, 'njoyn.com')],
+    ['Teamtailor', (h) => on(h, 'teamtailor.com')],
+    ['Pinpoint', (h) => on(h, 'pinpointhq.com')],
+    // Seen as bare hostnames in real exports.
+    ['Paycor', (h) => on(h, 'recruitingbypaycor.com') || on(h, 'paycor.com')],
+    ['Personio', (h) => on(h, 'personio.com') || on(h, 'personio.de')],
+    ['Dover', (h) => on(h, 'dover.com')],
+    ['Jibe', (h) => on(h, 'jibeapply.com')],
+    ['isolved', (h) => on(h, 'isolvedhire.com')],
+    ['BrassRing', (h) => on(h, 'brassring.com')],
+    ['CATS', (h) => on(h, 'catsone.com')],
+    ['HiringThing', (h) => on(h, 'hiringthing.com')],
+    ['Comeet', (h) => on(h, 'comeet.com')],
+    ['JOIN', (h) => on(h, 'join.com')],
+    ['Kula', (h) => on(h, 'kula.ai')],
+    ['Recruiterflow', (h) => on(h, 'recruiterflow.com')],
+    ['JobDiva', (h) => on(h, 'jobdiva.com')],
+    ['Fountain', (h) => on(h, 'fountain.com')],
+    ['Infor', (h) => on(h, 'inforcloudsuite.com')],
+    ['RippleHire', (h) => on(h, 'ripplehire.com')],
+    ['Jobsoid', (h) => on(h, 'jobsoid.com')],
+    ['Ceipal', (h) => on(h, 'ceipal.com')],
+    ['Manatal', (h) => on(h, 'careers-page.com')],
   ];
 
   /**
@@ -165,6 +200,9 @@
         let url;
         if (/^https?:\/\//i.test(raw)) {
           url = new URL(raw);
+        } else if (/^(?:www\.)?(?:hiringcafe\.com|hiring\.cafe)\b/i.test(raw)) {
+          // Copied without the scheme.
+          url = new URL(`https://${raw}`);
         } else if (raw.includes('searchState=')) {
           url = new URL(raw.startsWith('?') ? raw : `?${raw}`, HIRING_CAFE_BASE);
         } else {
@@ -298,7 +336,8 @@
       hit?.enriched_company_data && typeof hit.enriched_company_data === 'object'
         ? hit.enriched_company_data
         : {};
-    const applyUrl = serializeField(hit?.apply_url);
+    // Open the posting, not its application form (Lever ".../apply").
+    const applyUrl = (globalThis.SmartJobJobUrl?.postingPageUrl || ((link) => link))(serializeField(hit?.apply_url));
 
     return {
       id: serializeField(hit?.id),
@@ -308,7 +347,26 @@
       requirements_summary: serializeField(processed.requirements_summary),
       technical_tools: serializeField(processed.technical_tools),
       job_category: serializeField(processed.job_category),
-      estimated_publish_date: serializeField(processed.estimated_publish_date),
+      // The millisecond stamp is exact; the text form is the fallback.
+      estimated_publish_date:
+        typeof processed.estimated_publish_date_millis === 'number' &&
+        Number.isFinite(processed.estimated_publish_date_millis) &&
+        processed.estimated_publish_date_millis > 0
+          ? new Date(processed.estimated_publish_date_millis).toISOString()
+          : serializeField(processed.estimated_publish_date),
+      is_expired: hit?.is_expired === true,
+      // HiringCafe's own reading of the posting. Values seen in real runs:
+      // security_clearance "None"; degree requirements "Required" / "Preferred" /
+      // "Not Mentioned"; language_requirements ["English"]; workplace countries ["US", "CA"].
+      security_clearance: serializeField(processed.security_clearance),
+      masters_degree_requirement: serializeField(processed.masters_degree_requirement),
+      doctorate_degree_requirement: serializeField(processed.doctorate_degree_requirement),
+      language_requirements: Array.isArray(processed.language_requirements)
+        ? processed.language_requirements.map((x) => String(x || '').trim()).filter(Boolean)
+        : [],
+      workplace_countries: Array.isArray(processed.boundless_workplace_countries)
+        ? processed.boundless_workplace_countries.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean)
+        : [],
       role_activities: serializeField(processed.role_activities),
       company_name:
         serializeField(company.name) ||
@@ -331,10 +389,12 @@
     if (!atsKey || !Array.isArray(atsList) || atsList.length === 0) return false;
     return atsList.some((ats) => {
       const blocked = normalizeAtsName(ats);
-      return (
-        Boolean(blocked) &&
-        (atsKey === blocked || atsKey.includes(blocked) || blocked.includes(atsKey))
-      );
+      if (!blocked) return false;
+      if (atsKey === blocked) return true;
+      // An unrecognised ATS is stored as its host: match a whole domain or a whole
+      // label of it ("adp" → workforcenow.adp.com), never a fragment (roadpass.com).
+      if (!atsKey.includes('.')) return false;
+      return on(atsKey, blocked) || atsKey.split('.').includes(blocked);
     });
   }
 
@@ -451,8 +511,11 @@
 
   function dedupeJobs(jobs) {
     const seenUrls = new Set();
-    const seenCompanyTitle = new Set();
+    const titleIndex = new Map();
     const unique = [];
+    const originOf = (job) => String(job?.origin || job?.source || '').trim().toLowerCase();
+    // A jobright.ai info link (or none) is a pointer to the posting, not the posting.
+    const viaAggregator = (url) => !url || /(^|\.)jobright\.ai\//i.test(String(url).replace(/^https?:\/\//i, ''));
     const normalizeCompany =
       global.SmartJobCompanyName?.normalizeCompanyName ||
       ((v) =>
@@ -463,8 +526,14 @@
       global.SmartJobJobUrl?.canonicalJobUrl ||
       ((v) => String(v ?? '').trim().toLowerCase());
 
+    const identifies = global.SmartJobJobUrl?.urlIdentifiesJob;
     for (const job of jobs) {
-      const urlKey = canonical(job.apply_url);
+      // Only a link that names one posting may merge two rows; otherwise compare
+      // the full link, so two jobs on one careers page stay two jobs.
+      const urlKey =
+        !identifies || identifies(job.apply_url)
+          ? canonical(job.apply_url)
+          : String(job.apply_url ?? '').trim().toLowerCase();
       if (urlKey && seenUrls.has(urlKey)) continue;
 
       const companyKey = normalizeCompany(job.company_name);
@@ -472,14 +541,41 @@
         .trim()
         .toLowerCase();
       const companyTitleKey = companyKey && titleKey ? `${companyKey}::${titleKey}` : '';
-      if (companyTitleKey && seenCompanyTitle.has(companyTitleKey)) continue;
+      if (companyTitleKey && titleIndex.has(companyTitleKey)) {
+        const at = titleIndex.get(companyTitleKey);
+        const kept = unique[at];
+        // Two direct links from one source are separate openings (locations,
+        // requisitions). Otherwise it is one posting seen twice.
+        const separateOpenings =
+          originOf(kept) === originOf(job) &&
+          !viaAggregator(kept.apply_url) &&
+          !viaAggregator(job.apply_url);
+        if (!separateOpenings) {
+          // Keep the copy that links straight to the employer's form.
+          if (viaAggregator(kept.apply_url) && !viaAggregator(job.apply_url)) {
+            unique[at] = job;
+            if (urlKey) seenUrls.add(urlKey);
+          }
+          continue;
+        }
+      }
 
       if (urlKey) seenUrls.add(urlKey);
-      if (companyTitleKey) seenCompanyTitle.add(companyTitleKey);
+      if (companyTitleKey && !titleIndex.has(companyTitleKey)) {
+        titleIndex.set(companyTitleKey, unique.length);
+      }
       unique.push(job);
     }
 
     return unique;
+  }
+
+  function hostOfLink(url) {
+    try {
+      return new URL(String(url || '')).hostname.toLowerCase().replace(/^www\./, '');
+    } catch (_) {
+      return '';
+    }
   }
 
   function applyLocalFilters(jobs, options = {}) {
@@ -519,7 +615,10 @@
         removedRegisteredCompanies += 1;
         continue;
       }
-      if (excludeBlockedAts && atsMatchesList(job.application_site, blockedAts)) {
+      if (
+        excludeBlockedAts &&
+        (atsMatchesList(job.application_site, blockedAts) || atsMatchesList(hostOfLink(job.apply_url), blockedAts))
+      ) {
         removedAts += 1;
         continue;
       }
@@ -599,6 +698,8 @@
         url: location.href,
         pageProps: {
           ssrHits: Array.isArray(pageProps.ssrHits) ? pageProps.ssrHits : [],
+          // False means the page had no result list at all (error page, changed shape).
+          hasHits: Array.isArray(pageProps.ssrHits),
           ssrIsLastPage: Boolean(pageProps.ssrIsLastPage),
           ssrTotalCount:
             typeof pageProps.ssrTotalCount === 'number' ? pageProps.ssrTotalCount : null,

@@ -45,15 +45,20 @@
     return { value: v, source, weight: Number(weight) || 0.5 };
   }
 
+  /** One entry per value, carrying the strongest source that gave it. */
   function dedupeCandidates(list) {
     const out = [];
-    const seen = new Set();
+    const index = new Map();
     for (const item of list || []) {
       if (!item || !item.value) continue;
       const key = normLower(item.value).slice(0, 200);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(item);
+      const at = index.get(key);
+      if (at == null) {
+        index.set(key, out.length);
+        out.push(item);
+      } else if ((item.weight || 0) > (out[at].weight || 0)) {
+        out[at] = item;
+      }
     }
     return out;
   }
@@ -102,11 +107,33 @@
         continue;
       }
       const kept = out[at];
-      if (item.value.length >= kept.value.length * LONGER_COPY_RATIO) {
-        out[at] = { ...item, weight: Math.max(item.weight || 0, kept.weight || 0) };
+      const merged = { ...item, weight: Math.max(item.weight || 0, kept.weight || 0) };
+      const flatItem = isFlatCopy(item.value);
+      const flatKept = isFlatCopy(kept.value);
+      if (flatKept && !flatItem && item.value.length * FLAT_COPY_RATIO >= kept.value.length) {
+        // The laid-out copy of the same text: take it over the unbroken one.
+        out[at] = merged;
+      } else if (item.value.length >= kept.value.length * LONGER_COPY_RATIO) {
+        // A flat copy replaces a laid-out one only when it is plainly the fuller
+        // text, not the same posting padded with page boilerplate.
+        const losesLayout = flatItem && !flatKept && item.value.length < kept.value.length * FLAT_COPY_RATIO;
+        if (!losesLayout) out[at] = merged;
       }
     }
     return out;
+  }
+
+  /** How much longer an unbroken copy must be before it counts as the fuller text. */
+  const FLAT_COPY_RATIO = 1.6;
+
+  /**
+   * One unbroken block: a posting that lost its paragraphs and lists on the way
+   * (Workday's JSON-LD description, for one). Hard to read in the Note and worse
+   * as a prompt than the page's own layout.
+   */
+  function isFlatCopy(text) {
+    const value = String(text || '');
+    return value.length >= 600 && value.split(/\n+/).filter((line) => line.trim()).length <= 2;
   }
 
   function wordSet(text, limit) {
@@ -166,6 +193,19 @@
     return { value: best.value, source: best.source, score: bestScore };
   }
 
+  /** True when `needle` occurs in `haystack` bounded by non-letters and non-digits. */
+  function containsWholeWords(haystack, needle) {
+    let from = 0;
+    for (;;) {
+      const at = haystack.indexOf(needle, from);
+      if (at < 0) return false;
+      const before = at === 0 ? '' : haystack[at - 1];
+      const after = haystack[at + needle.length] || '';
+      if (!/[a-z0-9]/i.test(before) && !/[a-z0-9]/i.test(after)) return true;
+      from = at + 1;
+    }
+  }
+
   function pickAlignedField(candidates, description, kind) {
     const list = dedupeCandidates(candidates);
     const desc = normLower(description);
@@ -175,7 +215,8 @@
       const v = item.value;
       const lower = normLower(v);
       let score = (item.weight || 0.5) * 100;
-      if (desc && lower.length >= 3 && desc.includes(lower)) score += 20;
+      // Whole words only: "Central Ban" is not named by "Central Bank of the Ozarks".
+      if (desc && lower.length >= 3 && containsWholeWords(desc, lower)) score += 20;
       if (kind === 'title' && lower.length > 120) score -= 30;
       if (kind === 'company' && /^(greenhouse|lever|workday|oracle|linkedin)$/i.test(lower)) score -= 40;
       if (score > bestScore) {

@@ -14,8 +14,6 @@
     arrangement: 14,
     domain: 12,
     geo: 10,
-    seniority: 4,
-    stack_overlap: 5,
     policy: 4,
   };
 
@@ -34,6 +32,7 @@
     'occupation',   // clearly unrelated occupation (nurse, driver, attorney, sales)
     'eligibility',  // mandatory licence / right to work the candidate cannot meet
     'language',     // a spoken language other than English is mandatory
+    'education',    // a degree above the candidate's highest is mandatory
   ]);
 
   /** A hard blocker must clear this confidence bar to be honoured as a FAIL. */
@@ -89,10 +88,73 @@
         continue;
       }
 
+      // The quote itself must carry the requirement. A model that blocks on
+      // "Master's preferred" or "ability to obtain a clearance" is overruled here.
+      const softened = softenedBlockerReason(category, evidence);
+      if (softened) {
+        rejected.push({ ...blocker, why: softened });
+        continue;
+      }
+
       accepted.push(blocker);
     }
 
     return { accepted, rejected };
+  }
+
+  const OPTIONAL_WORDING =
+    /\b(preferred|a plus|is a plus|nice to have|bonus|desired|desirable|ideally|advantage|helpful|optional|not required|asset)\b/i;
+  const CLEARANCE_OBTAINABLE =
+    /\b(ab(le|ility) to (obtain|get|acquire|secure|be granted)|eligib(le|ility) (to obtain|for)|obtainable|clearable|willing(ness)? to (obtain|undergo))\b/i;
+
+  /**
+   * Why a blocker's quote does not actually state a hard requirement, or '' when it does.
+   * Deterministic, so the same quote always gets the same ruling.
+   */
+  function softenedBlockerReason(category, evidence) {
+    const quote = String(evidence || '');
+    if (category === 'education') {
+      if (!ADVANCED_DEGREE.test(quote)) return 'quote does not name a degree above a Bachelor\'s';
+      if (DEGREE_ESCAPE.test(quote)) return 'degree is preferred or has an alternative';
+    }
+    if (category === 'clearance') {
+      if (CLEARANCE_OBTAINABLE.test(quote)) return 'clearance only needs to be obtainable';
+      if (OPTIONAL_WORDING.test(quote)) return 'clearance is preferred, not required';
+    }
+    if (category === 'language' && OPTIONAL_WORDING.test(quote)) {
+      return 'language is preferred, not required';
+    }
+    return '';
+  }
+
+  /**
+   * Gate AI warnings the same way as blockers, minus the confidence bar: an
+   * approved category and a quote that really is in the posting. Free-form
+   * remarks ("no sponsorship offered", "5+ years asked") are dropped — they
+   * differ from one call to the next and made the same job flip between pass
+   * and warn on a re-check.
+   *
+   * @returns {Array<{category:string, note:string, evidence:string}>}
+   */
+  function validateSoftWarnings(warnings, jd) {
+    const haystack = normalizeQuote(jd);
+    const kept = [];
+    const seen = new Set();
+    for (const raw of Array.isArray(warnings) ? warnings : []) {
+      if (!raw || typeof raw !== 'object') continue;
+      const category = String(raw.category || '').trim().toLowerCase();
+      const evidence = String(raw.evidence || '').trim();
+      const note = String(raw.note || '').trim();
+      if (!APPROVED_HARD_BLOCKERS.has(category)) continue;
+      if (evidence.length < HARD_BLOCKER_MIN_EVIDENCE_CHARS) continue;
+      // `validated` is set when the quote was found in the text the model read.
+      if (raw.validated !== true && !evidenceInPosting(evidence, haystack)) continue;
+      const key = normalizeQuote(evidence);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      kept.push({ category, note, evidence });
+    }
+    return kept;
   }
 
   const US_STATES = {
@@ -187,20 +249,6 @@
 
   const RESIDENCY_RADIUS =
     /\b(residency within|within a?\s*\d{2,3}[\s-]?mile|must (live|reside) (within|near|in)|commutable distance|radius of .{0,40}office)\b/i;
-
-  /** Extreme eng ladder only — not every "Principal …" product title. */
-  const EXTREME_ENG_SENIORITY =
-    /\b((staff|principal|distinguished)\s+(software|swe|sde|engineer)|staff engineer|principal engineer|distinguished engineer|engineering (director|fellow)|cto|vp\s+engineering|vice president of engineering)\b/i;
-
-  const EXEC_NON_IC =
-    /\b(director of|vp of|vice president|head of (engineering|product|security)|chief (technology|information|product) officer)\b/i;
-
-  function normalizeText(value) {
-    return String(value || '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
 
   /**
    * Like normalizeText, but also folds the punctuation variants a model tends
@@ -323,18 +371,6 @@
       });
     }
     return roles;
-  }
-
-  function keywordOverlapScore(jdNorm, roles) {
-    const titleBlob = normalizeText(roles.map((r) => r.title).join(' '));
-    if (!jdNorm || !titleBlob) return 50;
-    const tokens = titleBlob.split(' ').filter((t) => t.length > 2);
-    if (!tokens.length) return 50;
-    let hits = 0;
-    for (const token of tokens) {
-      if (jdNorm.includes(token)) hits += 1;
-    }
-    return Math.round((hits / tokens.length) * 100);
   }
 
   function parseYearMonth(value) {
@@ -794,7 +830,15 @@
    *
    * @returns {Array<{ index:number, category:string, strength:'strong'|'weak', sentence:string }>}
    */
-  function collectHardSignals(jd, { profileState } = {}) {
+  const ADVANCED_DEGREE =
+    /\b(master'?s|m\.?sc\b|ph\.?\s?d\b|doctorate|doctoral|advanced degree|graduate degree|post[\s-]?graduate degree)/i;
+  const DEGREE_DEMAND = /\b(required|requires?|must (have|hold|possess)|mandatory|minimum|necessary)\b/i;
+  const DEGREE_ESCAPE =
+    /\b(preferred|a plus|nice to have|desired|ideally|bonus|or equivalent|equivalent (work |practical |professional )?experience|bachelor'?s?\s*(degree\s*)?(or|\/)|b\.?s\.?\s*(or|\/)|bs\/ms|or \d+\+? years)\b/i;
+  const BELOW_MASTERS =
+    /^(high school|associate'?s?|bachelor'?s?|some college|ged|diploma)(\s+(degree|diploma))?$/i;
+
+  function collectHardSignals(jd, { profileState, education } = {}) {
     const stateKey = normalizeUsState(profileState);
     const out = [];
     const seen = new Set();
@@ -840,6 +884,15 @@
       // Authorised to work in the US only.
       if (WORK_AUTH_PHRASE.test(s) && NON_US_SCOPE.test(s) && !US_SCOPE.test(s)) {
         add('eligibility', 'strong', s);
+      }
+    }
+    // A known highest degree below a Master's: a demanded advanced degree is a lead.
+    const level = String(education || '').trim();
+    if (level && BELOW_MASTERS.test(level)) {
+      for (const s of sentences) {
+        if (ADVANCED_DEGREE.test(s) && DEGREE_DEMAND.test(s)) {
+          add('education', DEGREE_ESCAPE.test(s) ? 'weak' : 'strong', s);
+        }
       }
     }
     for (const s of sentences) {
@@ -940,12 +993,22 @@
 
     // A claimed blocker that failed the evidence gate is still worth surfacing,
     // but only as something to check — never as a reject.
-    const warnings = Array.isArray(aiCompat.warnings) ? aiCompat.warnings : [];
+    // Only near-blockers whose quote is really in the posting: a claim with an
+    // unapproved category or an invented quote is noise, not a reason to hesitate.
+    const haystack = normalizeQuote(jd);
+    const nearBlockers = rejected.filter(
+      (r) =>
+        APPROVED_HARD_BLOCKERS.has(r.category) &&
+        String(r.evidence || '').length >= HARD_BLOCKER_MIN_EVIDENCE_CHARS &&
+        evidenceInPosting(r.evidence, haystack)
+    );
+    const quoted = (text, evidence) =>
+      `${text} — JD states: “${String(evidence || '').replace(/\s+/g, ' ').trim()}”`;
     const softNotes = [
-      ...rejected.map((r) => r.conflict || r.category).filter(Boolean),
-      ...warnings
-        .map((w) => (typeof w === 'string' ? w : w?.note || w?.category))
-        .filter(Boolean),
+      ...nearBlockers.map((r) => quoted(r.conflict || `Possible ${r.category} requirement`, r.evidence)),
+      ...validateSoftWarnings(aiCompat.warnings, jd).map((w) =>
+        quoted(w.note || `Possible ${w.category} requirement`, w.evidence)
+      ),
       ...unresolvedSignals(aiCompat).map(
         (signal) => `AI did not rule on this ${signal.category} requirement — check it: “${signal.sentence}”`
       ),
@@ -983,7 +1046,6 @@
     const swe = SWE_SIGNALS.test(jd);
     const nonSwe = NON_SWE_STRONG.test(jd);
     const analyst = ANALYST_OPS.test(jd);
-    const templateSwe = roles.some((r) => /engineer|developer/i.test(r.title));
 
     if (nonSwe && !swe) {
       pushCriterion(
@@ -1003,71 +1065,11 @@
       );
       return;
     }
-    if (templateSwe && !swe) {
-      pushCriterion(
-        criteria,
-        'domain',
-        'warn',
-        'Weak software/engineering signals in the JD vs fixed engineer titles.'
-      );
-      return;
-    }
     if (swe) {
       pushCriterion(criteria, 'domain', 'pass', 'JD has software/engineering-relevant signals.');
       return;
     }
     pushCriterion(criteria, 'domain', 'info', 'Domain signals mixed; GPT may still Unresolved.');
-  }
-
-  function evaluateSeniority(jd, roles, criteria) {
-    if (!jd || !roles.length) {
-      pushCriterion(criteria, 'seniority', 'pass', 'Skipped.');
-      return;
-    }
-    const templateTitles = normalizeText(roles.map((r) => r.title).join(' '));
-    const templateHasExtreme = EXTREME_ENG_SENIORITY.test(templateTitles);
-    const templateHasSenior = /\b(senior|sr\.?|lead)\b/i.test(templateTitles);
-
-    // Extreme IC ladder only — Principal Product Engineer / TPE should NOT warn.
-    if (EXTREME_ENG_SENIORITY.test(jd) && !templateHasExtreme) {
-      pushCriterion(
-        criteria,
-        'seniority',
-        templateHasSenior ? 'info' : 'warn',
-        'JD asks for Staff/Principal Engineer ladder; template titles are lower.'
-      );
-      return;
-    }
-    if (EXEC_NON_IC.test(jd) && !templateHasExtreme) {
-      pushCriterion(
-        criteria,
-        'seniority',
-        'info',
-        'JD looks director/VP-level; GPT may still draft but fit can be stretchy.'
-      );
-      return;
-    }
-    pushCriterion(criteria, 'seniority', 'pass', 'Seniority not a hard mismatch.');
-  }
-
-  function evaluateStackOverlap(jdNorm, roles, criteria) {
-    if (!jdNorm || !roles.length) {
-      pushCriterion(criteria, 'stack_overlap', 'pass', 'Skipped.');
-      return;
-    }
-    const overlap = keywordOverlapScore(jdNorm, roles);
-    if (overlap < 20 && SWE_SIGNALS.test(jdNorm)) {
-      pushCriterion(
-        criteria,
-        'stack_overlap',
-        'info',
-        'Low wording overlap with fixed role titles (soft signal).'
-      );
-      return;
-    }
-    pushCriterion(criteria, 'stack_overlap', 'pass', `Title/keyword overlap ~${overlap}.`, {
-      overlap,
-    });
   }
 
   function evaluatePolicy(jd, runSettings, isV9, isFictional, criteria) {
@@ -1171,10 +1173,10 @@
     resumeTemplateJson,
     profileState,
     profileCity,
+    constraints,
     aiCompat,
   } = {}) {
     const jd = String(jobDescription || '').trim();
-    const jdNorm = normalizeText(jd);
     const flavor = detectKitFlavor(template);
     const runSettings = parseRunSettings(template);
     const resumeObj = parseResumeTemplate(resumeTemplateJson);
@@ -1191,14 +1193,23 @@
     // does not flash a temporary heuristic verdict that AI later replaces.
     const aiStatus = aiCompatStatus(aiCompat);
     const aiWaiting = Boolean(jd) && aiStatus === 'pending';
+    // While the AI is still reading, say what the local rules already see, so
+    // the wait is not empty. These are leads for the user, never a verdict.
+    const quickLeads = aiWaiting
+      ? collectHardSignals(jd, { profileState, education: constraints?.educationLevel }).filter(
+          (signal) => signal.strength === 'strong'
+        )
+      : [];
     if (!aiWaiting) {
       evaluateArrangement(jd, roles, isV9, isFictional, criteria);
       evaluateGeoFit(jd, profileState, profileCity, criteria, aiCompat);
       evaluateDomain(jd, roles, criteria);
     }
 
-    evaluateSeniority(jd, roles, criteria);
-    evaluateStackOverlap(jdNorm, roles, criteria);
+    // Deliberately no seniority / skill / title comparison with the resume: the
+    // experience, skills and summary are written per posting, so they cannot
+    // disqualify one. Only fixed facts (location, authorisation, clearance,
+    // language) and the posting's own nature are judged.
     evaluatePolicy(jd, runSettings, isV9, isFictional, criteria);
 
     if (isV9 && isFictional && roles.length) {
@@ -1262,6 +1273,15 @@
       if (notice) displayReasons = [...displayReasons, notice];
     }
 
+    if (aiWaiting && quickLeads.length) {
+      displayReasons = quickLeads.slice(0, 4).map((lead) => ({
+        code: 'quick_lead',
+        severity: 'warn',
+        criterion: 'quick',
+        message: `Quick check, possible ${lead.category} requirement: “${lead.sentence}”`,
+      }));
+    }
+
     // A wrong AI blocker must not strand the user; missing JD / broken kit stay hard.
     const failed = criteria.filter((c) => c.status === 'fail');
     const overridable = failed.length > 0 && failed.every((c) => c.id === 'compatibility');
@@ -1275,18 +1295,22 @@
       overridable,
       requireConfirm: level === 'risky',
       aiChecking: aiCompatChecking,
+      quickLeads: quickLeads.length,
       aiFailed,
       aiRan: aiStatus === 'done',
       aiHasProblem: aiCompatFail || aiCompatWarn,
       flavor,
       mode: runSettings.mode,
-      overlap: keywordOverlapScore(jdNorm, roles),
     };
   }
 
   function summarizeFit(result) {
     if (!result) return 'Preflight: —';
-    if (result.aiChecking) return 'Checking compatibility…';
+    if (result.aiChecking) {
+      return result.quickLeads
+        ? 'Possible blocker — AI confirming…'
+        : 'No blocker in quick check — AI confirming…';
+    }
     if (result.level === 'blocked') return 'Skip — don’t waste a ChatGPT run';
     if (result.level === 'risky') return 'Review before Copy Prompt';
     if (result.aiFailed) return 'Local rules passed';
@@ -1300,6 +1324,7 @@
     parseRunSettings,
     parseResumeTemplate,
     validateHardBlockers,
+    validateSoftWarnings,
     collectHardSignals,
     unresolvedSignals,
     APPROVED_HARD_BLOCKERS,

@@ -24,7 +24,7 @@ export function canonicalJobUrl(value: string | null | undefined): string {
 
     ({ host, path } = normalizeAtsHostPath(host, path));
 
-    return `${host}${path}${jobIdQuery(parsed.searchParams)}`;
+    return `${host}${path}${jobIdQuery(parsed.searchParams, host, path)}`;
   } catch {
     return "";
   }
@@ -33,14 +33,21 @@ export function canonicalJobUrl(value: string | null | undefined): string {
 // Query parameters that name the job itself. Boards that put the job in the
 // query (company.com/careers?gh_jid=123) would otherwise all share one key.
 const JOB_ID_PARAM_RE =
-  /^(?:gh_jid|jid|job_?id|job|req_?id|requisition_?id|posting_?id|position_?id|opening_?id|vacancy_?id|currentjobid|jk|vjk|pid|id)$/;
+  /^(?:gh_jid|ashby_jid|jid|job_?id|job|req_?id|requisition_?id|career_job_req_id|posting_?id|position_?id|opening_?id|opportunity_?id|vacancy_?id|currentjobid|jk|jvi|pid|id)$/;
+// A long number or a UUID in the path already names the job.
+const PATH_HAS_JOB_ID_RE = /\d{4,}|[0-9a-f]{8}-[0-9a-f]{4}-/;
 
-function jobIdQuery(searchParams: URLSearchParams): string {
+function jobIdQuery(searchParams: URLSearchParams, host: string, path: string): string {
+  // Then the query adds nothing, and ?gh_jid=123 on /jobs/123 must not split one job in two.
+  if (PATH_HAS_JOB_ID_RE.test(path)) return "";
   const pairs: string[] = [];
   searchParams.forEach((value, key) => {
     const name = key.toLowerCase();
     const id = String(value || "").trim().toLowerCase();
-    if (id && JOB_ID_PARAM_RE.test(name)) pairs.push(`${name}=${id}`);
+    if (!id) return;
+    // Greenhouse embeds: /embed/job_app?for=acme&token=123
+    const greenhouseToken = name === "token" && host.endsWith("greenhouse.io");
+    if (greenhouseToken || JOB_ID_PARAM_RE.test(name)) pairs.push(`${name}=${id}`);
   });
   return pairs.length ? `?${pairs.sort().join("&")}` : "";
 }
@@ -66,6 +73,10 @@ function normalizeAtsHostPath(
   if (host === "app.ashbyhq.com" || host === "jobs.ashbyhq.com") {
     host = "jobs.ashbyhq.com";
   }
+
+  // The application form of a posting is the same job as the posting.
+  if (host === "jobs.lever.co") path = path.replace(/\/apply\/?$/i, "");
+  if (host === "jobs.ashbyhq.com") path = path.replace(/\/application\/?$/i, "");
 
   // Workday locale prefixes (/en-us/, /en-gb/, etc.) are often optional in apply links.
   if (host.includes("myworkdayjobs.com") || host.endsWith("workday.com")) {

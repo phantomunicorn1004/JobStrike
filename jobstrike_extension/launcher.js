@@ -138,9 +138,10 @@
 
         // Must call open() in this user-gesture turn (popup click). Routing
         // through the service worker with awaits drops the gesture token.
+        // Enabled globally, not for this tab: options set with a tabId make a
+        // separate panel that is open on that tab only and closes with it.
         if (chrome.sidePanel.setOptions) {
           void chrome.sidePanel.setOptions({
-            tabId: tab.id,
             path: 'sidepanel.html',
             enabled: true
           });

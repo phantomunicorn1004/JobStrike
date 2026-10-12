@@ -7,7 +7,7 @@
 (function (global) {
   const CONTENT_FILES = ['field-registry.js', 'job-posting-ingest.js', 'content.js'];
   const ATS_FRAME_HOST_RE =
-    /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|icims\.com|smartrecruiters\.com|workable\.com|bamboohr\.com|rippling\.com|jobvite\.com|personio\.(com|de)|oraclecloud\.com)$/i;
+    /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|myworkdaysite\.com|icims\.com|smartrecruiters\.com|workable\.com|bamboohr\.com|rippling\.com|jobvite\.com|personio\.(com|de)|oraclecloud\.com|recruitingbypaycor\.com|paycomonline\.net|paylocity\.com|adp\.com|ultipro\.com|ukg\.net|dayforcehcm\.com|taleo\.net|successfactors\.com|brassring\.com|applytojob\.com|breezy\.hr|teamtailor\.com|recruitee\.com|pinpointhq\.com|gem\.com|dover\.com|jibeapply\.com|isolvedhire\.com|catsone\.com|comeet\.com?|hiringthing\.com|recruiterflow\.com|kula\.ai|join\.com)$/i;
 
   /** Below this the top frame is treated as not having the posting. */
   const USABLE_JD_CHARS = 300;
@@ -161,7 +161,9 @@
     if (frameLength < USABLE_JD_CHARS || frameLength < topLength * FRAME_WIN_RATIO) return top;
 
     const topPosting = top.posting || {};
-    const fromBoard = Boolean(frame.adapter && frame.adapter !== 'default');
+    // A known board's own page names the job; the host page's heading is its own.
+    const fromBoard =
+      Boolean(frame.adapter && frame.adapter !== 'default') || ATS_FRAME_HOST_RE.test(hostOf(frameResult.frameUrl));
     const prefer = (frameValue, topValue) =>
       String((fromBoard ? frameValue || topValue : topValue || frameValue) || '').trim();
 

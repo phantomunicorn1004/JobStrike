@@ -164,17 +164,32 @@
 
   function isWorkdayHost() {
     const host = location.hostname.toLowerCase();
-    return /\.workday\.com$/i.test(host) || host.includes('myworkdayjobs.com') || isWorkdayPageContext();
+    return /\.workday\.com$/i.test(host) || host.includes('myworkdayjobs.com') || host.includes('myworkdaysite.com') || isWorkdayPageContext();
   }
 
   function isUnreliableWorkdayCompanyName(name) {
     const text = trim(name);
     if (!text) return true;
     if (/^wd\d+$/i.test(text)) return true;
-    if (/^workday$/i.test(text)) return true;
+    if (/^workday$/i.test(text)) return workdayTenantSlug() !== 'workday';
     if (/^(careers|jobs|apply|home)$/i.test(text)) return true;
     if (/myworkdayjobs/i.test(text)) return true;
+    // An asset name read off an image ("NV-rgb-blk-apr2026", "logo_v2.png"):
+    // one token, no spaces, with digits or a file extension.
+    if (/\.(png|jpe?g|svg|gif|webp)$/i.test(text)) return true;
+    if (!/\s/.test(text) && /\d/.test(text) && /[-_]/.test(text)) return true;
     return false;
+  }
+
+  /** "Careers at NVIDIA" / "Jobs at Acme" page headings name the employer outright. */
+  function parseWorkdayCompanyFromHeading() {
+    for (const node of document.querySelectorAll('h1, h2')) {
+      const text = trim(node.textContent || '');
+      if (!text || text.length > 60) continue;
+      const m = /^(?:careers|jobs|opportunities|work|working)\s+(?:at|with)\s+(.+)$/i.exec(text);
+      if (m?.[1]) return trim(m[1]);
+    }
+    return '';
   }
 
   function formatWorkdayCompanySlug(slug) {
@@ -226,7 +241,7 @@
     for (const h3 of headings) {
       const text = trim(h3.textContent || '');
       const aboutMatch = /^about\s+(.+)$/i.exec(text);
-      if (aboutMatch?.[1]) return trim(aboutMatch[1]);
+      if (aboutMatch?.[1] && !isGenericAboutTarget(aboutMatch[1])) return trim(aboutMatch[1]);
     }
     return '';
   }
@@ -239,7 +254,9 @@
     for (const node of desc.querySelectorAll('b, strong, h2, h3, p')) {
       const text = trim(node.textContent || '');
       const aboutMatch = /^about\s+(.+)$/i.exec(text);
-      if (aboutMatch?.[1] && aboutMatch[1].length < 80) return trim(aboutMatch[1]);
+      if (aboutMatch?.[1] && aboutMatch[1].length < 60 && !isGenericAboutTarget(aboutMatch[1])) {
+        return trim(aboutMatch[1]);
+      }
     }
     return '';
   }
@@ -251,18 +268,85 @@
     return cleanCompany(name);
   }
 
-  function resolveWorkdayCompanyName() {
-    const candidates = [
-      parseWorkdayCompanyFromSidebar(),
-      parseWorkdayCompanyFromJobDescription(),
-      parseWorkdayCompanyFromLogo(),
-      parseWorkdayCompanyFromHost(),
-      parseWorkdayCompanyFromTitle(document.querySelector('meta[property="og:title"]')?.content || ''),
-      parseWorkdayCompanyFromTitle(document.title),
-      document.querySelector('meta[property="og:site_name"]')?.getAttribute('content') || '',
-      document.querySelector('meta[name="application-name"]')?.getAttribute('content') || ''
-    ];
+  /** "About the Role", "About Us:", "About You": section headings, not a company. */
+  function isGenericAboutTarget(text) {
+    const t = trim(text).replace(/[:.\s]+$/, '');
+    if (!t) return true;
+    return /^(the|this|our|us|you|your|yours|we|me|my|role|team|job|position|opportunity|company|program|work|what|who|why|how)\b/i.test(t);
+  }
 
+  /**
+   * The Workday tenant: "cvshealth" in cvshealth.wd1.myworkdayjobs.com, "paypal"
+   * in wd1.myworkdaysite.com/recruiting/paypal/jobs. It identifies the employer
+   * reliably but is not how the name is written.
+   */
+  function workdayTenantSlug() {
+    const host = location.hostname.toLowerCase();
+    const sub = /^([a-z0-9-]+)\.wd\d+\.myworkdayjobs\.com$/i.exec(host);
+    if (sub && sub[1]) return sub[1];
+    if (/(^|\.)myworkdaysite\.com$/i.test(host)) {
+      const viaPath = /\/recruiting\/([a-z0-9_-]+)\//i.exec(location.pathname);
+      if (viaPath && viaPath[1]) return viaPath[1].toLowerCase();
+    }
+    const legacy = /^(?:[a-z0-9-]+\.)?([a-z0-9-]+)\.myworkdayjobs\.com$/i.exec(host);
+    if (legacy && legacy[1] && !/^wd\d+$/i.test(legacy[1])) return legacy[1];
+    return '';
+  }
+
+  /**
+   * The legal-entity wrapping Workday puts around a brand in its metadata:
+   * "0650 PayPal Pte. Ltd.", "ADUS-Adobe Inc.", "631 Booz Allen Hamilton_United States",
+   * "1072-28 Target India (Non-USA)".
+   */
+  function stripLegalEntityNoise(name) {
+    let text = trim(String(name || '').replace(/_/g, ' '));
+    text = text.replace(/^[A-Z]{2,5}\d*-\s*(?=[A-Z])/, '');
+    text = text.replace(/^[A-Za-z]{0,4}\d[\w-]*\s+/, '');
+    text = text.replace(/\s*\([^)]*\)\s*$/, '');
+    const suffix =
+      /[\s,]+(?:inc|incorporated|llc|l\.l\.c|ltd|limited|pte|pvt|private|plc|gmbh|corp|corporation|company|co|lp|llp|pty|holdings?|group|united states|usa|u\.s\.a?|us|uk|united kingdom|india|canada|germany|france|ireland|singapore|japan|china|mexico|brazil|australia|serbia|poland|israel|netherlands|spain|italy)\.?$/i;
+    for (let i = 0; i < 6 && suffix.test(text); i += 1) text = trim(text.replace(suffix, ''));
+    return trim(text.replace(/[,.:;]+$/, ''));
+  }
+
+  /**
+   * How the employer writes its own name, found by the tenant slug: the run of
+   * words whose letters spell it ("CVS Health" for cvshealth, "Target" inside
+   * "Target India"), or whose initials do ("Booz Allen Hamilton" for bah).
+   */
+  function brandForSlug(slug, candidates, { capitalised = false } = {}) {
+    const key = String(slug || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (key.length < 2) return '';
+    const letters = (word) => word.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const tidy = (words) => trim(words.join(' ').replace(/^[("'“‘]+|[)"'”’,.:;!?]+$/g, ''));
+
+    for (const raw of candidates) {
+      const words = trim(raw).split(/\s+/).filter(Boolean);
+      for (let i = 0; i < words.length; i += 1) {
+        if (capitalised && !/^[("'“‘]*[A-Z0-9]/.test(words[i])) continue;
+        let run = '';
+        for (let j = i; j < words.length && j < i + 5; j += 1) {
+          run += letters(words[j]);
+          if (run === key) return tidy(words.slice(i, j + 1));
+          if (run.length >= key.length) break;
+        }
+      }
+    }
+    // Initials are only trusted in names, not in running text.
+    if (!capitalised && key.length <= 5) {
+      for (const raw of candidates) {
+        const words = trim(raw).split(/\s+/).filter((w) => /[a-z0-9]/i.test(w) && !/^(and|of|the)$/i.test(w));
+        for (let i = 0; i + key.length <= words.length; i += 1) {
+          const run = words.slice(i, i + key.length);
+          if (run.map((w) => letters(w)[0] || '').join('') === key) return tidy(run);
+        }
+      }
+    }
+    return '';
+  }
+
+  function resolveWorkdayCompanyName() {
+    const jsonLdOrgs = [];
     try {
       const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
       for (const script of scripts) {
@@ -273,19 +357,71 @@
             continue;
           }
           const org = item.hiringOrganization?.name || item.hiringOrganization;
-          if (typeof org === 'string') candidates.push(org);
-          else if (org?.name) candidates.push(org.name);
+          if (typeof org === 'string') jsonLdOrgs.push(org);
+          else if (org?.name) jsonLdOrgs.push(org.name);
         }
       }
     } catch (_) {}
 
-    for (const candidate of candidates) {
-      const cleaned = cleanWorkdayCompanyLabel(candidate);
-      if (cleaned && !isUnreliableWorkdayCompanyName(cleaned)) return cleaned;
-    }
+    const usable = (value) => {
+      const cleaned = cleanWorkdayCompanyLabel(value);
+      return cleaned && !isUnreliableWorkdayCompanyName(cleaned) && !isGenericAboutTarget(cleaned) ? cleaned : '';
+    };
+    const careersAt = usable(parseWorkdayCompanyFromHeading());
+    const about = usable(parseWorkdayCompanyFromSidebar()) || usable(parseWorkdayCompanyFromJobDescription());
+    // Any image's alt text may carry the brand; it only counts when it spells the tenant.
+    const logoAlts = Array.from(document.images)
+      .slice(0, 20)
+      .map((img) => trim(String(img.getAttribute('alt') || '').replace(/\b(logo|careers?|home|search for jobs)\b/gi, ' ')))
+      .filter((alt) => alt.length >= 2);
+    const titled = [
+      parseWorkdayCompanyFromTitle(document.querySelector('meta[property="og:title"]')?.content || ''),
+      parseWorkdayCompanyFromTitle(document.title),
+      document.querySelector('meta[property="og:site_name"]')?.getAttribute('content') || '',
+      document.querySelector('meta[name="application-name"]')?.getAttribute('content') || '',
+    ].map(usable).filter(Boolean);
 
-    const fallback = formatWorkdayCompanySlug(parseWorkdayCompanyFromHost());
-    return fallback || '';
+    // The tenant says who the employer is; the page says how the name is written.
+    const slug = workdayTenantSlug();
+    const spelled = brandForSlug(slug, [
+      careersAt,
+      about,
+      ...logoAlts,
+      ...titled,
+      ...jsonLdOrgs.map(stripLegalEntityNoise),
+    ].filter(Boolean));
+    if (spelled) return spelled;
+
+    // The posting usually names its employer in the text ("At CVS Health, we…").
+    // Capitalised matches only: "target" is also an ordinary word.
+    const descEl = document.querySelector('[data-automation-id="jobPostingDescription"]');
+    const descText = trim((descEl && (descEl.innerText || descEl.textContent)) || '').slice(0, 8000);
+    const inText = descText ? brandForSlug(slug, [descText], { capitalised: true }) : '';
+    if (inText) return inText;
+
+    // No spelling of the tenant on the page: a name the page states outright,
+    // then the tenant itself. The metadata's legal entity is last, since it is
+    // often a subsidiary ("Mellanox Technologies" on NVIDIA's site).
+    if (careersAt) return careersAt;
+    if (about) return about;
+    const tabTitle = trim(document.title).toLowerCase();
+    const fromTab = titled.find((name) => name.toLowerCase() !== tabTitle);
+    if (fromTab) return fromTab;
+    // Nothing on the page spells the tenant, so the tenant is a code ("myhcm",
+    // "kbi", "mtb"), not a name. The posting's own sentences name the employer
+    // ("M&T Bank is…"); failing that, the organisation in the page's metadata.
+    const rawDesc = String((descEl && (descEl.innerText || descEl.textContent)) || '').slice(0, 20000);
+    const namedInText = rawDesc ? usable(companyFromPostingText(rawDesc)) : '';
+    if (namedInText) return namedInText;
+    // The employer's own closing lines sit outside the description on some tenants.
+    const pageNamed = usable(companyFromPostingText(String(document.body?.innerText || '').slice(0, 30000)));
+    if (pageNamed) return pageNamed;
+    for (const org of jsonLdOrgs) {
+      const cleaned = usable(tidyCompanyName(stripLegalEntityNoise(org).replace(/^\d+\s+/, '')));
+      if (cleaned) return cleaned;
+    }
+    if (slug) return formatWorkdayCompanySlug(slug);
+    return formatWorkdayCompanySlug(parseWorkdayCompanyFromHost()) || '';
   }
 
   function isWorkdayPageContext() {
@@ -571,14 +707,32 @@
   function resolveIcimsCompanyName() {
     const jsonLd = readJobPostingJsonLd();
     const fromJson = cleanCompany(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization);
-    if (fromJson) return fromJson;
     const siteName = cleanCompany(
       document.querySelector('meta[property="og:site_name"]')?.getAttribute('content') || ''
     );
+    // The customer part of the address says who the employer is; the page says
+    // how the name is written ("ComPsych" for compsych, "Applied Systems" for
+    // appliedsystems). The tab title's "Careers at …" is often a site code or a
+    // city on iCIMS, so it only counts when it spells the customer.
+    const customer = tenantSlugFromAddress();
+    if (customer) {
+      const titled = /careers at\s+([^|]+)$/i.exec(document.title || '');
+      const logoAlts = Array.from(document.images)
+        .slice(0, 20)
+        .map((img) => tidyCompanyName(img.getAttribute('alt') || ''))
+        .filter(Boolean);
+      const body = document.querySelector('.iCIMS_JobContent, #iCIMS_JobContent, .iCIMS_MainWrapper') || document.body;
+      const text = trim((body && (body.innerText || body.textContent)) || '').slice(0, 15000);
+      const spelled =
+        brandForSlug(customer, [fromJson, siteName, titled ? tidyCompanyName(titled[1]) : '', ...logoAlts].filter(Boolean)) ||
+        (text ? brandForSlug(customer, [text], { capitalised: true }) : '');
+      if (spelled) return spelled;
+    }
+    if (fromJson) return fromJson;
     if (siteName) return siteName;
     // Tenant subdomain: careers-fedwriters.icims.com -> Fedwriters
     const sub = location.hostname.toLowerCase().split('.')[0];
-    const slug = sub.replace(/^(careers?|jobs?|employees|employment|apply|portal)[-_]?/i, '');
+    const slug = sub.replace(/^(careers?|jobs?|employees|employment|affiliates|external|internal|apply|portal)[-_]?/i, '');
     if (slug && slug !== sub.toLowerCase()) {
       return slug.replace(/[-_+]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     }
@@ -1484,7 +1638,8 @@
   }
 
   function getSmartRecruitersJobPostingInfo() {
-    if (!document.querySelector('main.jobad-main, .jobad-container, [itemprop="description"], .job-section[id^="st-"]')) {
+    if (!document.querySelector('main.jobad-main, .jobad-container, .job-section[id^="st-"]') &&
+        !(isSmartRecruitersHost() && document.querySelector('[itemprop="description"]'))) {
       return {};
     }
     const job_title = findSmartRecruitersPostingTitle();
@@ -1807,7 +1962,7 @@
     score() {
       let score = 0;
       const host = location.hostname.toLowerCase();
-      if (/\.workday\.com$/i.test(host) || host.includes('myworkdayjobs.com')) score += 45;
+      if (/\.workday\.com$/i.test(host) || host.includes('myworkdayjobs.com') || host.includes('myworkdaysite.com')) score += 45;
       if (document.querySelector('[data-automation-id="jobPostingPage"], [data-automation-id="jobPostingDescription"]')) score += 22;
       if (document.querySelector('[data-automation-id="job-posting-details"]')) score += 14;
       if (document.querySelector('[data-automation-id="jobSidebar"], [data-automation-id="sidebar"]')) score += 8;
@@ -3139,9 +3294,17 @@
       if (document.querySelector('[data-automation="job-application-form"], [data-automation="apply-form"], spl-application-form, [class*="ApplicationForm" i]')) score += 30;
       const srNames = countNamedFields((n) => /^(firstname|lastname|email|phone|resume)$/i.test(n.replace(/[-_]/g, '')));
       if (srNames) score += Math.min(20, 5 + srNames * 3);
-      if (/\/(job|jobs|posting|postings|apply|application)/i.test(location.pathname)) score += 10;
+      // A job-like path and an itemprop description are on many boards; they
+      // only count next to something that is SmartRecruiters' own.
+      const ownMarkup = Boolean(
+        isSmartRecruitersHost() ||
+          document.querySelector(
+            'main.jobad-main, .jobad-container, .job-section[id^="st-"], spl-application-form, script[src*="smartrecruiters" i], link[href*="smartrecruiters" i]'
+          )
+      );
+      if (ownMarkup && /\/(job|jobs|posting|postings|apply|application)/i.test(location.pathname)) score += 10;
       if (document.querySelector('main.jobad-main, .jobad-container')) score += 28;
-      if (document.querySelector('[itemprop="description"], .job-section[id^="st-"]')) score += 16;
+      if (ownMarkup && document.querySelector('[itemprop="description"], .job-section[id^="st-"]')) score += 16;
       if (document.querySelector('h1.job-title[itemprop="title"], h1.job-title')) score += 10;
       if (document.querySelector('script[src*="smartrecruiters" i], link[href*="smartrecruiters" i]')) score += 8;
       if (countNamedFields((n) => /^job_application\[/i.test(n))) score -= 35;
@@ -3448,12 +3611,128 @@
     return lines.join('\n');
   }
 
+  // ── ADP "My Jobs" career sites (myjobs.adp.com/<employer>/cx/job-details) ──
+  // The posting is a list of titled sections ("Company", "Job Description",
+  // "Requirements", "Position Type", …) drawn well after the page reports it
+  // has loaded. The title is a plain div, and the tab title is the employer.
+  function adpMyJobsPage() {
+    return document.querySelector('#cx-job-details-page, cx-job-details-page');
+  }
+
+  function isAdpMyJobsContext() {
+    return location.hostname.toLowerCase() === 'myjobs.adp.com' || Boolean(adpMyJobsPage());
+  }
+
+  function adpMyJobsSections() {
+    const page = adpMyJobsPage();
+    if (!page) return [];
+    return Array.from(page.querySelectorAll('cx-job-details-section'))
+      .map((section) => {
+        const heading = trim(section.querySelector('.section-heading, h3')?.textContent || '');
+        const body = section.querySelector('.section-content');
+        const text = trim((body && (body.innerText || body.textContent)) || '');
+        return { heading, body, text };
+      })
+      .filter((section) => section.heading && section.text);
+  }
+
+  /** Sections that are prose (the description) rather than one fact ("Position Type: Full Time"). */
+  function isAdpNarrativeSection(section) {
+    if (/^company$/i.test(section.heading)) return section.text.length > 120;
+    return (
+      section.text.length > 160 ||
+      /description|requirement|responsibilit|qualification|dut(y|ies)|summary|about|benefit|skills|experience/i.test(section.heading)
+    );
+  }
+
+  function getAdpMyJobsPostingInfo() {
+    const page = adpMyJobsPage();
+    if (!page) return {};
+    const titleEl = page.querySelector('.title-content > div, .title-section .text-4xl');
+    const job_title = trim(titleEl?.textContent || '');
+    const sections = adpMyJobsSections();
+
+    // A short "Company" section names the hiring entity; otherwise the career
+    // site's own name does (the tab title, e.g. "Central Bancompany").
+    const companySection = sections.find((s) => /^company$/i.test(s.heading));
+    const company_name =
+      (companySection && companySection.text.length <= 120 ? trim(companySection.text.split('\n')[0]) : '') ||
+      tidyCompanyName(document.title);
+
+    const escapeHtml = (value) =>
+      String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const job_description = sections
+      .filter(isAdpNarrativeSection)
+      .map((s) => `<h3>${escapeHtml(s.heading)}</h3>${s.body.innerHTML}`)
+      .join('\n');
+
+    return { job_title, company_name, job_description };
+  }
+
+  /** The one-fact sections and the header line, as "Label: value" rows. */
+  function getAdpMyJobsDetailsBlock() {
+    const page = adpMyJobsPage();
+    if (!page) return '';
+    const lines = [];
+    const location = trim(page.querySelector('#cx-detail-single-loc, .location-section span')?.textContent || '');
+    if (location) lines.push(`Location: ${location}`);
+    const reqId = trim(page.querySelector('.title-content > div:nth-child(2)')?.textContent || '');
+    if (/^#?\s*[\w-]{2,20}$/.test(reqId)) lines.push(`Requisition: ${reqId.replace(/^#\s*/, '')}`);
+    for (const section of adpMyJobsSections()) {
+      if (isAdpNarrativeSection(section) || /^company$/i.test(section.heading)) continue;
+      const value = section.text.replace(/\s*\n+\s*/g, '; ');
+      if (value.length <= 200) lines.push(`${section.heading}: ${value}`);
+    }
+    return lines.join('\n');
+  }
+
+  // ── ADP Workforce Now career centres (workforcenow.adp.com/…/recruitment.html) ──
+  // Title, facts and description each have their own element. The employer is
+  // shown only as a logo image, so its name has to come from the posting text.
+  function isAdpWfnContext() {
+    return (
+      /(^|\.)workforcenow\.adp\.com$/i.test(location.hostname) ||
+      Boolean(document.querySelector('.job-description-title') && document.querySelector('.job-description-data'))
+    );
+  }
+
+  function getAdpWfnPostingInfo() {
+    const body = document.querySelector('.job-description-data');
+    if (!body) return {};
+    return {
+      job_title: trim(document.querySelector('.job-description-title')?.textContent || ''),
+      company_name: '',
+      job_description: body.innerHTML,
+    };
+  }
+
+  function getAdpWfnDetailsBlock() {
+    if (!document.querySelector('.job-description-data')) return '';
+    const text = (selector) => trim(document.querySelector(selector)?.textContent || '');
+    const lines = [];
+    const location = text('.job-description-location');
+    if (location) lines.push(`Location: ${location}`);
+    const worker = text('.job-description-worker-catergory');
+    if (worker) lines.push(`Employment type: ${worker}`);
+    const jobClass = text('.job-description-job-class');
+    if (jobClass) lines.push(`Job class: ${jobClass}`);
+    const requisition = text('.job-description-requisition').replace(/^requisition id\s*:?\s*/i, '');
+    if (requisition) lines.push(`Requisition: ${requisition}`);
+    return lines.join('\n');
+  }
+
   function getAdapterJobDetailsBlock() {
     if (activeAdapter?.name === 'workday' || isWorkdayPageContext()) {
       return getWorkdayJobDetailsBlock();
     }
     if (activeAdapter?.name === 'oracle_ce' || isOracleCeHost()) {
       return getOracleCeJobDetailsBlock();
+    }
+    if (isAdpMyJobsContext()) {
+      return getAdpMyJobsDetailsBlock();
+    }
+    if (isAdpWfnContext()) {
+      return getAdpWfnDetailsBlock();
     }
     return '';
   }
@@ -4208,7 +4487,7 @@
         const leverLabel = getLeverOptionLabel(input);
         if (leverLabel) return leverLabel;
       }
-      const label = getLabelText(input) || input.value || input.id || input.name;
+      const label = choiceInputLabel(input) || getLabelText(input) || input.value || input.id || input.name;
       return trim(label);
     }).filter(Boolean);
   }
@@ -5059,6 +5338,11 @@
     const personioInfo = isPersonioHost() ? getPersonioJobPostingInfo() : {};
     const icimsInfo = isIcimsHost() ? getIcimsJobPostingInfo() : {};
     const oracleInfo = isOracleCeHost() ? getOracleCeJobPostingInfo() : {};
+    const adpInfo = isAdpMyJobsContext()
+      ? getAdpMyJobsPostingInfo()
+      : isAdpWfnContext()
+        ? getAdpWfnPostingInfo()
+        : {};
     const jsonLd = readJobPostingJsonLd();
     const metaTitle = document.querySelector('meta[property="og:title"], meta[name="twitter:title"]')?.content || '';
     const canonical =
@@ -5070,6 +5354,7 @@
     const companies = [];
     const descriptions = [];
     const urls = [];
+    const genericTitle = genericPostingTitle(jsonLd);
 
     const pushTitle = (v, source, weight) => {
       const t = cleanTitle(v);
@@ -5097,8 +5382,13 @@
       if (c) urls.push(c);
     };
 
+    const behindForm = formPostingInfo.href === location.href ? formPostingInfo.info : {};
+    pushTitle(behindForm.job_title, 'posting-behind-form', 0.96);
+    pushCompany(behindForm.company_name, 'posting-behind-form', 0.9);
+    pushDesc(behindForm.job_description, 'posting-behind-form', 0.96);
     pushTitle(adapterInfo.job_title, 'adapter', 0.92);
     pushTitle(oracleInfo.job_title, 'oracle_ce', 0.94);
+    pushTitle(adpInfo.job_title, 'adp_myjobs', 0.94);
     pushTitle(doverInfo.job_title, 'dover', 0.88);
     pushTitle(workableInfo.job_title, 'workable', 0.88);
     pushTitle(leverInfo.job_title, 'lever', 0.9);
@@ -5110,40 +5400,70 @@
     pushTitle(workdayInfo.job_title, 'workday', 0.9);
     pushTitle(personioInfo.job_title, 'personio', 0.86);
     pushTitle(icimsInfo.job_title, 'icims', 0.86);
+    pushTitle(genericTitle, 'declared', 0.87);
     pushTitle(jsonLd?.title, 'jsonld', 0.85);
-    pushTitle(findPlausiblePostingTitle(), 'dom-h1', 0.72);
-    pushTitle(metaTitle.split('|')[0], 'og-title', 0.55);
-    pushTitle(document.title.split('|')[0], 'document-title', 0.45);
+    // A bare heading is a guess: it only counts when nothing declares the title.
+    if (!genericTitle) pushTitle(tidyPostingTitle(findPlausiblePostingTitle()), 'dom-h1', 0.72);
+    pushTitle(tidyPostingTitle(metaTitle.split('|')[0]), 'og-title', 0.55);
+    pushTitle(tidyPostingTitle(document.title.split('|')[0]), 'document-title', 0.45);
 
     pushCompany(adapterInfo.company_name, 'adapter', 0.9);
     pushCompany(oracleInfo.company_name, 'oracle_ce', 0.9);
+    pushCompany(adpInfo.company_name, 'adp_myjobs', 0.9);
     pushCompany(workdayInfo.company_name, 'workday', 0.88);
-    pushCompany(resolveWorkdayCompanyName(), 'workday-resolve', 0.82);
+    if (isWorkdayHost() || isWorkdayPageContext()) pushCompany(resolveWorkdayCompanyName(), 'workday-resolve', 0.82);
     pushCompany(bamboohrInfo.company_name, 'bamboohr', 0.86);
-    pushCompany(resolveBamboohrCompanyName(), 'bamboohr-resolve', 0.8);
+    if (isBamboohrHost()) pushCompany(resolveBamboohrCompanyName(), 'bamboohr-resolve', 0.8);
     pushCompany(ashbyInfo.company_name, 'ashby', 0.88);
-    pushCompany(resolveAshbyCompanyName(), 'ashby-resolve', 0.8);
+    if (isAshbyHost()) pushCompany(resolveAshbyCompanyName(), 'ashby-resolve', 0.8);
     pushCompany(smartRecruitersInfo.company_name, 'smartrecruiters', 0.86);
-    pushCompany(resolveSmartRecruitersCompanyName(), 'smartrecruiters-resolve', 0.8);
+    if (isSmartRecruitersHost()) pushCompany(resolveSmartRecruitersCompanyName(), 'smartrecruiters-resolve', 0.8);
+    const formTabTitle = isGreenhouseHost() ? /^job application for\s+.+\s+at\s+([^|]+)$/i.exec(trim(document.title)) : null;
+    if (formTabTitle) {
+      const named = trim(formTabTitle[1]);
+      const c = named && named.length <= 80 ? mk(named, 'greenhouse-form-title', 0.93) : null;
+      if (c) companies.push(c);
+    }
     pushCompany(greenhouseInfo.company_name, 'greenhouse', 0.88);
-    pushCompany(resolveGreenhouseCompanyName(), 'greenhouse-resolve', 0.8);
+    if (isGreenhouseHost()) pushCompany(resolveGreenhouseCompanyName(), 'greenhouse-resolve', 0.8);
     pushCompany(leverInfo.company_name, 'lever', 0.88);
-    pushCompany(resolveLeverCompanyName(), 'lever-resolve', 0.8);
+    if (isLeverHost()) pushCompany(resolveLeverCompanyName(), 'lever-resolve', 0.8);
     pushCompany(workableInfo.company_name, 'workable', 0.86);
-    pushCompany(resolveWorkableCompanyName(), 'workable-resolve', 0.8);
+    if (isWorkableHost()) pushCompany(resolveWorkableCompanyName(), 'workable-resolve', 0.8);
     pushCompany(doverInfo.company_name, 'dover', 0.84);
-    pushCompany(resolveDoverCompanyName(), 'dover-resolve', 0.78);
+    if (isDoverHost()) pushCompany(resolveDoverCompanyName(), 'dover-resolve', 0.78);
     pushCompany(ripplingInfo.company_name, 'rippling', 0.86);
-    pushCompany(resolveRipplingCompanyName(), 'rippling-resolve', 0.8);
+    if (isRipplingHost() || isRipplingPageContext()) pushCompany(resolveRipplingCompanyName(), 'rippling-resolve', 0.8);
     pushCompany(personioInfo.company_name, 'personio', 0.84);
     pushCompany(icimsInfo.company_name, 'icims', 0.84);
+    const knownTitle =
+      genericTitle || titles.slice().sort((a, b) => (b.weight || 0) - (a.weight || 0))[0]?.value || '';
+    const genericCompany = genericPostingCompany(knownTitle, jsonLd);
+    pushCompany(genericCompany, 'declared', 0.83);
+    // A "title" that is the employer's name is the page's banner, not the job.
+    if (genericCompany) {
+      const banner = genericCompany.toLowerCase();
+      for (let i = titles.length - 1; i >= 0; i -= 1) {
+        if (titles[i].value.toLowerCase() === banner) titles.splice(i, 1);
+      }
+    }
     pushCompany(jsonLd?.hiringOrganization?.name || jsonLd?.hiringOrganization, 'jsonld', 0.88);
     pushCompany(findPlausibleCompanyName(), 'dom', 0.7);
     pushCompany(parseCompanyFromTitle(metaTitle), 'og-title-parse', 0.5);
     pushCompany(parseCompanyFromTitle(document.title), 'document-title-parse', 0.45);
 
+    for (const selector of ['.joqReqDescription', '.externalPosting', '.rich-text-container']) {
+      if (!/gusto\.com$|successfactors\.(com|eu)$|sapsf\.(com|eu)$/i.test(location.hostname)) break;
+      // A page can hold several such blocks ("About us", then the description).
+      const blocks = Array.from(document.querySelectorAll(selector)).filter((el) => trim(el.innerText || '').length >= 300);
+      if (blocks.length) {
+        pushDesc(blocks.map((el) => el.innerHTML).join('\n'), 'board-block', 0.9);
+        break;
+      }
+    }
     pushDesc(adapterInfo.job_description, 'adapter', 0.92);
     pushDesc(oracleInfo.job_description, 'oracle_ce', 0.93);
+    pushDesc(adpInfo.job_description, 'adp_myjobs', 0.93);
     pushDesc(doverInfo.job_description, 'dover', 0.86);
     pushDesc(workableInfo.job_description, 'workable', 0.86);
     pushDesc(leverInfo.job_description, 'lever', 0.9);
@@ -5168,6 +5488,10 @@
       pushDesc(extractRipplingJobDescription(document), 'rippling-dom', 0.86);
     }
     pushDesc(jsonLd?.description, 'jsonld', 0.91);
+    if (/(^|\.)taleo\.net$/i.test(location.hostname)) {
+      const taleoBody = document.querySelector('[id^="requisitionDescriptionInterface.descRequisition"]');
+      if (taleoBody) pushDesc(taleoBody.innerHTML, 'taleo-dom', 0.86);
+    }
     pushDesc(extractWorkdayJobDescription(document), 'workday-dom', 0.84);
     pushDesc(extractGenericJobDescription(document), 'generic-dom', 0.52);
 
@@ -5392,8 +5716,10 @@
     const labels = scope.querySelectorAll(
       'dt, th, [class*="field-label" i], [class*="detail-label" i], [class*="info-label" i], [class*="meta-label" i], label'
     );
+    const furniture =
+      'nav, footer, form, header, [class*="cookie" i], [id*="cookie" i], [id*="onetrust" i], [class*="onetrust" i], [class*="ot-sdk" i], [id^="ot-"], [class*="consent" i], [role="dialog"], [aria-modal="true"], [class*="footer" i]';
     for (const labelEl of Array.from(labels).slice(0, 80)) {
-      if (labelEl.closest('nav, footer, form, [class*="cookie" i]')) continue;
+      if (labelEl.closest(furniture)) continue;
       const label = trim(labelEl.textContent || '');
       if (!label || label.length > 60) continue;
       let valueEl = null;
@@ -5412,17 +5738,27 @@
             '[class*="field-value" i], [class*="detail-value" i], [class*="info-value" i], [class*="meta-value" i]'
           ) || labelEl.nextElementSibling;
       }
+      // A tick box's "value" is its state ("on"), not information.
+      if (valueEl && /^(checkbox|radio)$/i.test(valueEl.getAttribute?.('type') || '')) continue;
       const value = trim(valueEl?.innerText || valueEl?.textContent || valueEl?.value || '');
-      if (value && value !== label) pushPair(label, value);
+      if (value && value.toLowerCase() !== label.toLowerCase() && !/^(on|off)$/i.test(value)) pushPair(label, value);
     }
 
     // aria / data labeled items
     const ariaNodes = scope.querySelectorAll('[aria-label], [data-label]');
     for (const el of Array.from(ariaNodes).slice(0, 40)) {
-      if (el.closest('nav, footer, form')) continue;
+      if (el.closest(furniture)) continue;
+      // A control's aria-label names the control ("Share Button", "Back"), not a fact.
+      if (
+        el.matches('button, a, input, select, textarea, [role="button"], [role="link"], [role="switch"], [role="checkbox"], [role="menu"], [role="menuitem"]') ||
+        el.tagName.includes('-') ||
+        el.closest('button, a, [role="button"]')
+      ) {
+        continue;
+      }
       const lab = trim(el.getAttribute('data-label') || el.getAttribute('aria-label') || '');
       const val = trim(el.innerText || el.textContent || '');
-      if (lab && val && lab.length <= 60 && val.length <= 200 && !/^apply/i.test(lab)) {
+      if (lab && val && lab.length <= 60 && val.length <= 200 && !/^apply/i.test(lab) && val.toLowerCase() !== lab.toLowerCase()) {
         pushPair(lab, val);
       }
     }
@@ -5582,7 +5918,10 @@
    */
   function collectJobDetailsBlock(bodyText) {
     const body = trim(bodyText || '');
-    const adapterBlock = trim(getAdapterJobDetailsBlock());
+    const adapterBlock = String(getAdapterJobDetailsBlock() || '').trim();
+    // ADP My Jobs states every fact in its own titled section: nothing to add
+    // from a guess at which part of the page is a details panel.
+    const adapterOnly = (isAdpMyJobsContext() || isAdpWfnContext()) && adapterBlock.length >= 20;
     const region = extractBestJobDetailsRegion(document);
     const structuredLines = extractStructuredDetailsLines(document);
     const jsonLd = readJobPostingJsonLd();
@@ -5615,6 +5954,7 @@
     }
 
     const regionOk =
+      !adapterOnly &&
       region &&
       region.text &&
       region.text.length >= 40 &&
@@ -5638,7 +5978,7 @@
       else source = 'panel+structured';
     }
 
-    structuredLines.forEach(addLine);
+    if (!adapterOnly) structuredLines.forEach(addLine);
     jsonLines.forEach(addLine);
 
     // Final guard: if assembled details still mostly equal the body, drop narrative lines
@@ -5756,7 +6096,178 @@
     );
   }
 
+  /**
+   * Workday draws the posting after the page reports it has loaded. Read too
+   * soon, only the metadata is there: its description is one unbroken line and
+   * its employer is a legal-entity code.
+   */
+  async function waitForWorkdayPosting() {
+    // ADP My Jobs is slower still: its sections arrive after several requests.
+    if (location.hostname.toLowerCase() === 'myjobs.adp.com') {
+      const drawn = () => document.querySelector('#cx-job-details-page .section-content, cx-job-details-section .section-content');
+      for (let waited = 0; waited < 15000 && !drawn(); waited += 250) await delay(250);
+      return;
+    }
+    if (/(^|\.)workforcenow\.adp\.com$/i.test(location.hostname)) {
+      const drawn = () => document.querySelector('.job-description-data');
+      for (let waited = 0; waited < 15000 && !drawn(); waited += 250) await delay(250);
+      return;
+    }
+    if (!isWorkdayHost()) return;
+    const ready = () => document.querySelector('[data-automation-id="jobPostingDescription"]');
+    for (let waited = 0; waited < 8000 && !ready(); waited += 250) await delay(250);
+  }
+
+  // ── Application-form addresses ───────────────────────────────────────────
+  // Lever ".../apply" and Greenhouse "embed/job_app" show the form alone: the
+  // posting is on another page of the same board. It is read from there, so
+  // the note holds the description itself and not the form's questions.
+
+  /** What the posting behind the current form says; reset for every address. */
+  let formPostingInfo = { href: '', info: {} };
+
+  async function fetchWithTimeout(url, ms) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      return await fetch(url, { signal: controller.signal, credentials: 'omit' });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function readLeverPostingBehindForm() {
+    const m = /^(\/[^/]+\/[0-9a-f-]{36})\/apply\/?$/i.exec(location.pathname);
+    if (!m || !isLeverHost()) return {};
+    const response = await fetchWithTimeout(`${location.origin}${m[1]}`, 8000);
+    if (!response.ok) return {};
+    const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const job_description = extractLeverJobDescription(doc);
+    if (!job_description) return {};
+    const title = cleanTitle(trim(doc.querySelector('.posting-headline h2, [data-qa="posting-name"]')?.textContent || ''));
+    const labels = { location: 'Location', department: 'Department', commitment: 'Employment Type', workplaceTypes: 'Workplace' };
+    const meta = [];
+    doc.querySelectorAll('.posting-categories .posting-category').forEach((el) => {
+      const key = Array.from(el.classList).find((name) => labels[name]);
+      const value = trim((el.textContent || '').replace(/\/\s*$/, ''));
+      if (key && value && value.length <= 120) meta.push(`${labels[key]}: ${value}`);
+    });
+    return {
+      job_title: title,
+      job_description: meta.length ? `${meta.join('\n')}\n\n${job_description}` : job_description,
+    };
+  }
+
+  /** A job from a board's public API: asked directly, then through the worker. */
+  async function fetchBoardJob(address, workerMessage) {
+    try {
+      const response = await fetchWithTimeout(address, 8000);
+      if (response.ok) return await response.json();
+    } catch (_) {
+      /* the form's page policy can forbid the request; the worker is not bound by it */
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 9000);
+      try {
+        chrome.runtime.sendMessage(workerMessage, (reply) => {
+          clearTimeout(timer);
+          resolve(chrome.runtime.lastError || !reply?.success ? null : reply.job);
+        });
+      } catch (_) {
+        clearTimeout(timer);
+        resolve(null);
+      }
+    });
+  }
+
+  /** SmartRecruiters "one-click apply" pages ("?oga=true") show the form alone. */
+  async function readSmartRecruitersPostingBehindForm() {
+    if (!/(^|\.)smartrecruiters\.com$/i.test(location.hostname)) return {};
+    const m = /\/oneclick-ui\/company\/([a-z0-9_-]+)\/publication\/([0-9a-f-]{8,40})/i.exec(location.pathname);
+    if (!m) return {};
+    const job = await fetchBoardJob(
+      `https://api.smartrecruiters.com/v1/companies/${m[1]}/postings/${m[2]}`,
+      { action: 'fetchSmartRecruitersJob', board: m[1], token: m[2] }
+    );
+    const sections = job?.jobAd?.sections;
+    if (!sections) return {};
+    const parts = [];
+    for (const key of ['companyDescription', 'jobDescription', 'qualifications', 'additionalInformation']) {
+      const text = htmlDescriptionToText(String(sections[key]?.text || ''));
+      if (text) parts.push(`${trim(sections[key]?.title) || key}\n${text}`);
+    }
+    if (!parts.length) return {};
+    const place = trim(job?.location?.fullLocation || [job?.location?.city, job?.location?.region].filter(Boolean).join(', '));
+    return {
+      job_title: cleanTitle(trim(job?.name)),
+      company_name: cleanCompany(job?.company?.name),
+      job_description: `${place ? `Location: ${place}\n\n` : ''}${parts.join('\n\n')}`,
+    };
+  }
+
+  /** The employer's board on a company page that embeds Greenhouse ("…/embed/job_board/js?for=acme"). */
+  function embeddedGreenhouseBoard() {
+    const nodes = document.querySelectorAll('script[src*="greenhouse.io/embed/"], iframe[src*="greenhouse.io/embed/"]');
+    for (const node of Array.from(nodes)) {
+      const m = /[?&]for=([a-z0-9_-]+)/i.exec(node.getAttribute('src') || '');
+      if (m) return m[1];
+    }
+    return '';
+  }
+
+  async function readGreenhousePostingBehindForm() {
+    const params = new URLSearchParams(location.search);
+    let board = '';
+    let token = '';
+    if (/(^|\.)greenhouse\.io$/i.test(location.hostname)) {
+      if (!/\/embed\/job_app/i.test(location.pathname)) return {};
+      // The page already carries the description on boards that embed it.
+      const shown = document.querySelector('.job__description');
+      if (shown && trim(shown.innerText || '').length >= 300) return {};
+      board = trim(params.get('for'));
+      token = trim(params.get('token'));
+    } else {
+      // A company's own careers page: "?gh_jid=123" names the job, the embed script names the board.
+      token = trim(params.get('gh_jid'));
+      if (!/^\d+$/.test(token)) return {};
+      board = embeddedGreenhouseBoard();
+    }
+    if (!/^[a-z0-9_-]+$/i.test(board) || !/^\d+$/.test(token)) return {};
+    const job = await fetchBoardJob(
+      `https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${token}`,
+      { action: 'fetchGreenhouseJob', board, token }
+    );
+    if (!job) return {};
+    // The description arrives as escaped HTML.
+    const holder = document.createElement('textarea');
+    holder.innerHTML = String(job?.content || '');
+    const job_description = htmlDescriptionToText(holder.value);
+    if (!job_description) return {};
+    const place = trim(job?.location?.name);
+    return {
+      job_title: cleanTitle(trim(job?.title)),
+      // On the employer's own site the page's name for itself is the current one (a board can keep an old name).
+      company_name: /(^|\.)greenhouse\.io$/i.test(location.hostname) ? cleanCompany(job?.company_name) : '',
+      job_description: place ? `Location: ${place}\n\n${job_description}` : job_description,
+    };
+  }
+
+  async function loadPostingBehindForm() {
+    if (formPostingInfo.href === location.href) return;
+    let info = {};
+    try {
+      info = (await readLeverPostingBehindForm()) || {};
+      if (!info.job_description) info = (await readSmartRecruitersPostingBehindForm()) || {};
+      if (!info.job_description) info = (await readGreenhousePostingBehindForm()) || {};
+    } catch (_) {
+      info = {};
+    }
+    formPostingInfo = { href: location.href, info };
+  }
+
   async function fetchJobPosting() {
+    await waitForWorkdayPosting();
+    await loadPostingBehindForm();
     const pick = pickAdapterWithDebug();
     activeAdapter = pick.adapter;
     await prepareForScan();
@@ -5793,14 +6304,20 @@
   function cleanTitle(value) {
     const text = trim(value);
     if (!text || text.length > 220) return '';
-    return text.replace(/\s+[-|]\s+Apply.*$/i, '').replace(/\s+job\s*$/i, '').trim();
+    return text
+      .replace(/\s+[-|]\s+Apply.*$/i, '')
+      .replace(/\s+job\s*$/i, '')
+      // "Staff Software Engineer, " as a board stores it; "Role @ Acme" as a tab title writes it.
+      .replace(/\s+@\s+[^@|]{2,60}$/, '')
+      .replace(/[\s,;:]+$/, '')
+      .trim();
   }
 
   function cleanCompany(value) {
     const text = trim(typeof value === 'string' ? value : value?.name);
     if (!text || text.length > 160) return '';
     if (/^(apply|jobs|careers|home|sign in|login)$/i.test(text)) return '';
-    return text;
+    return tidyCompanyName(text);
   }
 
   /** Page chrome headings that must never become a job title. */
@@ -5835,6 +6352,383 @@
    * prefer one the document title also mentions — page chrome such as
    * "Search Jobs" rarely appears in both.
    */
+  // ── Title and employer on boards without an adapter of their own ─────────
+  // Measured on live ADP, SuccessFactors, Taleo, Paylocity, UKG, Dayforce,
+  // Breezy and JazzHR postings: the first heading on the page is often a cookie
+  // dialog, a section label or the employer, and the document title is often
+  // the board's own name. So a title must be something the page declares as the
+  // title, or a heading the document title agrees with; and an employer is what
+  // is left of the document title once the job is taken out, or the tenant in
+  // the address as the page spells it.
+
+  /** Headings and labels that are page furniture, never a job title. */
+  const TITLE_CHROME_RE =
+    /^(apply( now| for this (job|position))?\b.*|career center|company|department|position type|work hours|standard hours|area of interest|work location options|privacy preference center|set your cookie preferences|cookie.*|manage consent.*|primary location:?|description:?|job description:?|job details:?|job info:?|job posting:?|job:|posting details|qualifications:?|responsibilities:?|requirements:?|locations?:?|similar jobs.*|about us:?|compensation:?|overview:?|share this job|are you still with us\??|work summary|skills|behaviors|motivations|education|experience|schedule:?|industry:?|employee status:?|unposting date|sign in|search jobs|your application|privacy statement|equal employment opportunit.*|about (the|this|our) (role|job|position|team|company|opportunity):?|standard job description|application form|candidate portal|career portal|current opportunities|open positions.*|job posting(job posting)?|us openings|404)$/i;
+
+  function tidyPostingTitle(raw) {
+    let text = trim(raw);
+    text = text.replace(/^(job title|position title|position|role|title)\s*[:\-–]\s*/i, '');
+    text = text.replace(/^now hiring[!:]?\s*/i, '');
+    text = text.replace(/^job opportunity\s*:\s*/i, '');
+    text = text.replace(/^(let'?s begin!?|career opportunities\s*:)\s*/i, '');
+    text = text.replace(/^job application for\s+(.+?)\s+at\s+[^|]+$/i, '$1');
+    text = text.replace(/^job description\s*[-–:]\s*/i, '');
+    // A requisition number in brackets at the end: "(196807)", "(26001EF)".
+    text = text.replace(/\s*\((?:req(?:uisition)?\.?\s*(?:id|#|no\.?)?\s*:?\s*)?[A-Za-z]{0,4}[-_]?\d[\w-]{2,}\)\s*$/i, '');
+    text = text.replace(/\s+job details$/i, '');
+    // "AI Engineer | Broomfield, CO, US": the place is not part of the title.
+    text = text.replace(/\s+\|\s+[A-Z][A-Za-z .'-]+,\s*[A-Z]{2}(,\s*[A-Z]{2,3})?$/, '');
+    text = cleanTitle(text);
+    if (!text || text.length < 2 || text.length > 160) return '';
+    if (TITLE_CHROME_RE.test(text) || NAVIGATIONAL_TITLE.test(text)) return '';
+    return text;
+  }
+
+  /** Where `needle` sits in `haystack` as whole words, or -1. Both lower-case. */
+  function wholeWordIndex(haystack, needle) {
+    if (!needle) return -1;
+    let from = 0;
+    for (;;) {
+      const at = haystack.indexOf(needle, from);
+      if (at < 0) return -1;
+      const before = at === 0 ? '' : haystack[at - 1];
+      const after = haystack[at + needle.length] || '';
+      if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return at;
+      from = at + 1;
+    }
+  }
+
+  /** Inside a cookie banner, a dialog or the page frame: not the posting. */
+  function inPageFurniture(node) {
+    return Boolean(
+      node.closest(
+        'nav, footer, aside, [role="dialog"], [aria-modal="true"], [id*="onetrust" i], [class*="onetrust" i], [id*="cookie" i], [class*="cookie" i], [class*="consent" i]'
+      )
+    );
+  }
+
+  const ATS_VENDOR_RE =
+    /^(dayforce|workday|adp|ukg|ultipro|ultimate software|paylocity|paycom|icims|oracle|taleo|sap|successfactors|jobvite|bamboohr|greenhouse|lever|ashby|jazzhr|breezy(\s*hr)?|teamtailor|recruitee|pinpoint|personio|smartrecruiters|workable|rippling|eightfold|onetrust|google|maptiler|openstreetmap|cloudflare|linkedin|indeed|paycor|newton software|spark hire|comeet|brassring|kenexa|avature|phenom|isolved|hiringthing|jobdiva|ceipal|bullhorn|ripplehire(\.com)?|jobsoid|tally( forms)?|gusto)(\s+(jobs|careers|hcm|recruiting|inc|corporation))*\.?$/i;
+
+  /** Names of pages and boards, not of employers. */
+  const COMPANY_GENERIC_RE =
+    /^(inc|llc|ltd|limited|corp|corporation|gmbh|plc|recruitment|career center|career page|careers?|careersection|jobs?|job (opportunities|details|search|board|description|posting)|opportunities|current openings?|open (positions|roles|jobs)|home|apply|privacy preference center|search|welcome|candidate experience site|candidate portal|talent (community|network)|company( logo)?|logo( large)?|career banner|about us|us|you|firefox|chrome|google chrome|internet explorer|safari|edge|microsoft edge|link to job posting.*)$/i;
+
+  /** A board's own name is an employer's name on that board's own job pages (Workday, Rippling). */
+  function isOwnTenantName(text) {
+    const compact = String(text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (compact.length < 2) return false;
+    const host = location.hostname.toLowerCase();
+    const labels = host.split('.');
+    const domain = labels.length >= 2 ? labels[labels.length - 2] : labels[0];
+    const parts = `${host}${location.pathname.toLowerCase()}`.split(/[./]/).filter(Boolean);
+    const hits = parts.filter((part) => part === compact).length;
+    return hits >= 2 || (hits >= 1 && domain !== compact);
+  }
+
+  /**
+   * An employer's name without the wrapping a careers site puts round it:
+   * "(External) Simmons Foods Job Opportunities" → "Simmons Foods",
+   * "Pearson Candidate Experience Site" → "Pearson", "BASF SE" → "BASF".
+   * "Company" and "Group" stay: they are often part of the name.
+   */
+  function tidyCompanyName(raw) {
+    let text = trim(String(raw || '').replace(/[®™©]/g, '').replace(/^[\s,.:;|–—-]+/, ''));
+    if (!text) return '';
+    text = text.replace(/^\((external|internal)\)\s*/i, '');
+    text = text.replace(/^(powered by|at|apply for)\s+/i, '');
+    // "ORGA-SOFT | Karriere? Mit uns!": a name, then a slogan.
+    if (/\s\|\s/.test(text)) text = trim(text.split(/\s+\|\s+/)[0]);
+    text = text.replace(/^career site\s+/i, '').replace(/\s+-\s+(external|internal) site$/i, '');
+    if (/^jobs? in\b/i.test(text)) return '';
+    text = text.replace(/^(careers?|jobs?|work|working)\s+(at|with|across)\s+/i, '');
+    text = text.replace(/\s*(&|and)\s+our family of (brands|companies)$/i, '');
+    const siteTail =
+      /[\s,|:–—-]+(candidate experience site|careers? (site|page|center|portal)|career (site|page|center|portal)|careers?|job opportunities|opportunities|jobs|job board|recruiting|recruitment|talent (community|network)|logo( large| banner)?)$/i;
+    for (let i = 0; i < 4 && siteTail.test(text); i += 1) text = trim(text.replace(siteTail, ''));
+    const legalTail = /[\s,]+(inc|incorporated|llc|l\.l\.c|ltd|limited|pvt|private|gmbh|plc|pte|pty|corp|corporation|lp|llp|s\.a|b\.v|n\.v)\.?$/i;
+    const legalCaps = /[\s,]+(AG|SE|SA|NV|BV|KG)\.?$/;
+    for (let i = 0; i < 3 && (legalTail.test(text) || legalCaps.test(text)); i += 1) {
+      text = trim(text.replace(legalTail, '').replace(legalCaps, ''));
+    }
+    text = trim(text.replace(/[,.:;|–—-]+$/, ''));
+    if (!text || COMPANY_GENERIC_RE.test(text)) return '';
+    // A requisition number left over from a tab title ("Server Test Engineer - - 82543").
+    if (!/[A-Za-z\u00C0-\uFFFF]/.test(text)) return '';
+    if (ATS_VENDOR_RE.test(text) && !isOwnTenantName(text)) return '';
+    return text;
+  }
+
+  function pageHeadings(limit) {
+    const out = [];
+    for (const node of Array.from(document.querySelectorAll('h1, h2, h3')).slice(0, 60)) {
+      if (inPageFurniture(node)) continue;
+      const text = trim(node.textContent || '');
+      if (text && text.length <= 160) out.push(text);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  /** The employer's part of the address on boards that give each employer one. */
+  function tenantSlugFromAddress() {
+    const host = location.hostname.toLowerCase();
+    const sub =
+      /^([a-z0-9-]+)\.(?:taleo\.net|breezy\.hr|applytojob\.com|bamboohr\.com|recruitee\.com|teamtailor\.com|pinpointhq\.com|jobs\.personio\.(?:com|de)|workable\.com)$/.exec(host);
+    if (sub && sub[1] && !/^(www|jobs|apply|careers|app)$/.test(sub[1])) return sub[1];
+    const icims = /^([a-z0-9-]+)\.icims\.com$/.exec(host);
+    if (icims && icims[1]) {
+      const dash = icims[1].indexOf('-');
+      return dash > 0 ? icims[1].slice(dash + 1) : icims[1];
+    }
+    const path = location.pathname;
+    if (/(^|\.)dayforcehcm\.com$/.test(host)) {
+      const m = /^\/[a-z]{2}-[A-Za-z0-9]{2,4}\/([a-z0-9_-]+)\//i.exec(path);
+      if (m) return m[1].toLowerCase();
+    }
+    if (/(^|\.)comeet\.com$/.test(host)) {
+      const m = /^\/jobs\/([a-z0-9_-]+)\//i.exec(path);
+      if (m) return m[1].toLowerCase();
+    }
+    if (host === 'myjobs.adp.com' || host === 'jobs.jobvite.com') {
+      const m = /^\/([a-z0-9_-]+)\//i.exec(path);
+      if (m && !/^(search|careers|jobs|job)$/i.test(m[1])) return m[1].toLowerCase();
+    }
+    return '';
+  }
+
+  /** Sites the posting links out to that could be the employer's own. */
+  function employerLinkSlugs() {
+    const skip =
+      /(^|\.)(ultipro|ukg|adp|dayforcehcm|paylocity|paycomonline|icims|oraclecloud|taleo|successfactors|jobs2web|jobvite|bamboohr|greenhouse|lever|ashbyhq|applytojob|jazzhr|breezy|teamtailor|recruitee|pinpointhq|personio|smartrecruiters|workable|rippling|myworkdayjobs|onetrust|cookielaw|mozilla|google|microsoft|apple|facebook|linkedin|twitter|x|youtube|instagram|tiktok|glassdoor|indeed|urldefense|eeoc|dol|e-verify|uscis)\.[a-z.]+$/i;
+    const seen = new Set();
+    const out = [];
+    for (const link of Array.from(document.querySelectorAll('a[href^="http"]')).slice(0, 200)) {
+      let host = '';
+      try {
+        host = new URL(link.href).hostname.toLowerCase().replace(/^www\./, '');
+      } catch (_) {
+        continue;
+      }
+      if (!host || host === location.hostname.toLowerCase() || skip.test(host) || /\.gov$/.test(host)) continue;
+      const labels = host.split('.');
+      const label = labels.length >= 2 ? labels[labels.length - 2] : labels[0];
+      if (label.length < 3 || seen.has(label)) continue;
+      seen.add(label);
+      out.push(label);
+      if (out.length >= 3) break;
+    }
+    return out;
+  }
+
+  /** The posting's own title: declared by the page, or a heading its document title agrees with. */
+  function genericPostingTitle(jsonLd) {
+    const declared = tidyPostingTitle(jsonLd && jsonLd.title);
+    if (declared) return declared;
+
+    const selectors = [
+      '[itemprop="title"]',
+      '[data-careersite-propertyid="title"]',
+      '[data-automation="opportunity-title"]',
+      '.job-description-title',
+      '.job-preview-title',
+      '[id="requisitionDescriptionInterface.reqTitleLinkAction.row1"]',
+      '.job-details__title',
+      '.opportunity-title-heading',
+      '.jobtitleInJobDetails',
+      '#gnewtonJobPosition',
+      'h2.positionName',
+      '.careerHeroHeaderPosition h1',
+      'h1 span.text-3xl',
+    ];
+    for (const selector of selectors) {
+      let node = null;
+      try {
+        node = document.querySelector(selector);
+      } catch (_) {
+        node = null;
+      }
+      if (!node || inPageFurniture(node)) continue;
+      const text = tidyPostingTitle(node.getAttribute('content') || node.textContent || '');
+      if (text) return text;
+    }
+
+    const docTitle = String(document.title || '');
+    const ogTitle = String(document.querySelector('meta[property="og:title"], meta[name="twitter:title"]')?.content || '');
+    const hay = `${docTitle} ¦ ${ogTitle}`.toLowerCase();
+    const hostKey = location.hostname.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const headings = pageHeadings(14).map(tidyPostingTitle).filter(Boolean);
+    // A heading that also spells the address is the employer ("Embraer" on embraer.breezy.hr).
+    const isEmployer = (text) => {
+      const compact = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return compact.length >= 3 && hostKey.includes(compact);
+    };
+    const agreed = headings.filter((text) => wholeWordIndex(hay, text.toLowerCase()) >= 0 && !isEmployer(text));
+    if (agreed.length) return agreed.sort((a, b) => b.length - a.length)[0];
+
+    const og = tidyPostingTitle(ogTitle);
+    if (og && headings.some((text) => text.toLowerCase() === og.toLowerCase())) return og;
+    return '';
+  }
+
+  /** "About Acme", "At Acme, we…", "Acme is an equal opportunity employer": the posting naming its employer. */
+  function companyFromPostingText(text, minScore = 2) {
+    const counts = new Map();
+    const note = (name, weight) => {
+      const cleaned = tidyCompanyName(String(name || '').replace(/[,.;:!?]+$/, ''));
+      if (!cleaned || cleaned.length < 2 || cleaned.length > 60 || isGenericAboutTarget(cleaned)) return;
+      counts.set(cleaned, (counts.get(cleaned) || 0) + weight);
+    };
+    // Any spacing but a line break: rich-text editors use non-breaking spaces.
+    const name = "([A-Z][\\w&'.-]*(?:[^\\S\\r\\n]+(?:[A-Z][\\w&'.-]*|of|and|&)){0,4})";
+    const lead = new RegExp(`\\b(?:About|At|Join|Why)\\s+${name}`, 'g');
+    // "Benefits at Vince:", "Life at Acme".
+    const place = new RegExp(`\\b(?:Benefits|Careers|Life|Working|Work)\\s+at\\s+${name}`, 'g');
+    // "Acme is an Equal Employment Opportunity employer", "Acme is a leading…",
+    // "Acme will provide reasonable accommodation", "Acme offers competitive…".
+    const eeo = new RegExp(
+      // "Vince, LLC is an equal opportunity employer": the suffix is stepped over, not taken as the name.
+      `${name}(?:,?\\s+(?:Inc|LLC|Ltd|Corp|Corporation|Co)\\.?)?\\s+(?:is\\s+(?:an?\\s+|the\\s+)?(?:equal (?:employment )?opportunit|proud to be|committed to|leading|largest|remote-first)|will provide reasonable|offers (?:highly )?competitive)`,
+      'gi'
+    );
+    let m;
+    while ((m = lead.exec(text))) note(m[1], 1);
+    while ((m = place.exec(text))) note(m[1], 2);
+    while ((m = eeo.exec(text))) {
+      // The name itself must be capitalised; only the phrase after it is matched loosely.
+      if (/^[A-Z]/.test(m[1])) note(m[1], 2);
+    }
+    let best = '';
+    let bestScore = minScore - 1;
+    counts.forEach((score, key) => {
+      if (score > bestScore) {
+        best = key;
+        bestScore = score;
+      }
+    });
+    return best;
+  }
+
+  /** The employer, for a posting whose title is known. */
+  function genericPostingCompany(jobTitle, jsonLd) {
+    const org = jsonLd && (jsonLd.hiringOrganization?.name || jsonLd.hiringOrganization);
+    const declared = typeof org === 'string' ? tidyCompanyName(stripLegalEntityNoise(org) || org) : '';
+
+    // What is left of the document title once the job is taken out.
+    const job = trim(jobTitle).toLowerCase();
+    const fromTitle = (() => {
+      if (!job) return '';
+      const sources = [
+        String(document.title || ''),
+        String(document.querySelector('meta[property="og:title"]')?.content || ''),
+      ];
+      for (const source of sources) {
+        const at = wholeWordIndex(source.toLowerCase(), job);
+        if (at < 0) continue;
+        const rest = `${source.slice(0, at)} | ${source.slice(at + job.length)}`;
+        const parts = rest
+          .split(/\s*[|–—·:]\s*|\s+-\s+|\s+\bat\b\s+|^\s*at\s+/i)
+          .map((part) => part.replace(/\(\s*[\w-]*\d[\w-]*\s*\)/g, ' '))
+          .map((part) => tidyCompanyName(part.replace(/\b(job details|job description)\b/gi, ' ')))
+          .filter(Boolean);
+        // "Job - City | Acme Careers": the employer closes the title.
+        if (parts.length) return parts[parts.length - 1];
+      }
+      return '';
+    })();
+
+    const marked = (() => {
+      const node = document.querySelector('[itemprop="hiringOrganization"]');
+      if (!node) return '';
+      const inner = node.querySelector('[itemprop="name"]');
+      return tidyCompanyName((inner || node).getAttribute('content') || (inner || node).textContent || '');
+    })();
+    const siteName = tidyCompanyName(document.querySelector('meta[property="og:site_name"]')?.getAttribute('content') || '');
+
+    // Paycor: the tab title or the small heading over the posting names the employer.
+    if (/(^|\.)recruitingbypaycor\.com$/.test(location.hostname.toLowerCase()) && !declared) {
+      const named =
+        tidyCompanyName(String(document.title || '').split('|').pop()) ||
+        tidyCompanyName(document.querySelector('h4')?.textContent || '');
+      if (named) return named;
+    }
+
+    const headings = pageHeadings(14);
+    const logoAlts = Array.from(document.images)
+      .slice(0, 20)
+      .map((img) => trim(String(img.getAttribute('alt') || '')))
+      .filter((alt) => alt.length >= 2);
+    // The posting's own text, line breaks kept (sentences are read one line at a
+    // time further down). A cookie dialog can put thousands of characters ahead
+    // of the posting, so the page as a whole is the last resort and skips it.
+    const rawText = (() => {
+      // In this order: a combined selector would return whichever comes first in
+      // the page, and a cookie dialog can be a "main" of its own.
+      let scope = null;
+      for (const selector of [
+        '.job-description-data',
+        '#cx-job-details-page',
+        '[data-automation-id="jobPostingDescription"]',
+        '[itemprop="description"]',
+        'main',
+        '[role="main"]',
+        'article',
+      ]) {
+        const node = document.querySelector(selector);
+        if (node && !inPageFurniture(node) && String(node.innerText || '').length >= 400) {
+          scope = node;
+          break;
+        }
+      }
+      let text = String((scope && scope.innerText) || '');
+      if (text.length < 400 && document.body) {
+        text = Array.from(document.body.children)
+          .filter((el) => !el.matches('script, style, noscript, [id*="onetrust" i], [class*="onetrust" i], [id*="cookie" i], [class*="cookie" i], [id*="consent" i]'))
+          .map((el) => el.innerText || '')
+          .join('\n');
+      }
+      return text.slice(0, 20000);
+    })();
+    const pageText = trim(rawText);
+    const copyright = (pageText.match(/(?:©|\(c\)|copyright)\s*(?:©\s*)?(?:\d{4}(?:\s*[-–]\s*\d{4})?[,\s]*)?([^.\n|©]{2,50})/i) || [])[1] || '';
+
+    // The tenant in the address, as the page spells it.
+    // "Data Engineer Sr Job Details | lockheed": one lower-case word is the
+    // site's code for the employer; the page spells the name elsewhere.
+    const titleCode = /^[a-z0-9]{3,}$/.test(fromTitle) ? fromTitle : '';
+    const slugs = [tenantSlugFromAddress(), titleCode, ...employerLinkSlugs()].filter(Boolean);
+    let spelled = '';
+    for (const slug of slugs) {
+      spelled =
+        brandForSlug(slug, [declared, titleCode ? '' : fromTitle, marked, siteName, titleCode ? '' : tidyCompanyName(document.title), ...headings, ...logoAlts.map(tidyCompanyName), tidyCompanyName(copyright)].filter(Boolean)) ||
+        brandForSlug(slug, [pageText], { capitalised: true });
+      if (spelled) break;
+    }
+
+    // "hdr" read off a logo is HDR.
+    const cased = (name) => (/^[a-z]{2,4}$/.test(name) ? name.toUpperCase() : name);
+    if (declared) return declared;
+    if (fromTitle && !titleCode) return fromTitle;
+    if (marked) return marked;
+    if (spelled) return cased(spelled);
+    if (siteName) return siteName;
+
+    for (const alt of logoAlts) {
+      const m = /^(.+?)\s+(?:logo|careers?)(?:\s+(?:large|banner|small))?$/i.exec(alt);
+      const name = m ? tidyCompanyName(m[1]) : '';
+      if (name && name.length >= 2) return /^[a-z]{2,4}$/.test(name) ? name.toUpperCase() : name;
+    }
+    const owner = tidyCompanyName(copyright.replace(/,?\s*all rights reserved.*$/i, ''));
+    if (owner) return owner;
+    // ADP Workforce Now shows the employer only as a logo image: one naming
+    // sentence ("At Makeready we are…") is all there is to go on.
+    const named = companyFromPostingText(rawText) || (isAdpWfnContext() ? companyFromPostingText(rawText, 1) : '');
+    if (named) return named;
+    // Nothing spells it: the address still identifies the employer, and a name
+    // run together ("Daybreakfoods") matches the spaced one when jobs are compared.
+    return slugs[0] ? cased(slugs[0]).replace(/^[a-z]/, (c) => c.toUpperCase()) : '';
+  }
+
   function findPlausiblePostingTitle() {
     let nodes;
     try {
@@ -7804,16 +8698,26 @@
   async function fillApplicationFields(fields, thresholds) {
     pickAdapter();
     const results = [];
-    for (const field of fields || []) {
-      try {
-        const result = await fillField(field, thresholds);
-        results.push({ id: field.id, elementPath: field.elementPath, ...result });
-      } catch (error) {
-        results.push({ id: field.id, elementPath: field.elementPath, success: false, error: error?.message || String(error) });
+    // What the extension writes is not the user's answer: stay deaf while filling.
+    learnOwnFillDepth += 1;
+    try {
+      for (const field of fields || []) {
+        try {
+          const result = await fillField(field, thresholds);
+          results.push({ id: field.id, elementPath: field.elementPath, ...result });
+        } catch (error) {
+          results.push({ id: field.id, elementPath: field.elementPath, success: false, error: error?.message || String(error) });
+        }
       }
-    }
-    if (isLeverFormContext()) {
-      tickUncheckedLeverAcknowledgments();
+      if (isLeverFormContext()) {
+        tickUncheckedLeverAcknowledgments();
+      }
+    } finally {
+      learnOwnFillDepth -= 1;
+      // Pages go on reacting for a moment after the last field is written.
+      learnQuietUntil = Date.now() + 1500;
+      learnTouched.clear();
+      learnLast = null;
     }
     return { success: true, results };
   }
@@ -8233,6 +9137,352 @@
     window.addEventListener('resize', state.onViewportChange, true);
     return { success: true };
   }
+
+  // ── Learning from the user's own answers ────────────────────────────────
+  // What the user types or picks by hand on an application form is the truth
+  // for that question. It is remembered per profile and used the next time the
+  // same question appears: before the profile mapping, and before the AI. Only
+  // real input counts. The extension's own fills are synthetic events
+  // (isTrusted is false) and are ignored, so it never learns from itself.
+  const LEARNED_KEY = 'autofill_learned_answers_v1';
+  const LEARN_ENABLED_KEY = 'autofill_learn_enabled';
+  const LEARN_PROFILE_KEY = 'resume_db_selected_profile_id';
+  const LEARN_FLUSH_MS = 1200;
+  const LEARN_RESCAN_MS = 4000;
+  const LEARN_CARRY_MS = 30000;
+  const LEARN_MAX_PER_PROFILE = 3000;
+  const LEARN_MAX_ANSWER_CHARS = 4000;
+  const LEARN_EXEMPT_CATEGORIES = new Set(['resume_upload', 'cover_letter_upload', 'acknowledgment', 'employment_kit']);
+  /** Never remembered, whatever the answer. */
+  const LEARN_NEVER_QUESTION_RE =
+    /\b(password|passcode|ssn|social security|national id|passport (number|no)|driver'?s? licen[cs]e (number|no)|bank|routing|iban|credit card|card number|cvv|security code|verification code|one[- ]time|otp|captcha)\b/i;
+  /** A tick or a Yes on these is a legal act for one application, not a reusable answer. */
+  const LEARN_CONSENT_RE =
+    /\b(terms|conditions?|certif\w*|agree\w*|consent\w*|privacy|accurate|truth\w*|background check|signature|acknowledg\w*)\b/i;
+  const LEARN_NEVER_ANSWER_RE = /^\d{3}-?\d{2}-?\d{4}$|^(?:\d[ -]?){13,19}$/;
+  /** "Select...", "Choose one", "--": not answers. "Choose not to disclose" is one. */
+  const LEARN_PLACEHOLDER_RE =
+    /^[-–—\s]*(?:(?:please\s+)?(?:select|choose)(?:\s+(?:one|an?\b.*|your\b.*|the\b.*|from\b.*|option.*))?[-–—\s.…:]*|[-–—.\s]+)$/i;
+  /** Labels too generic to stand for a question ("Search", "Other"). */
+  const LEARN_GENERIC_KEY_RE = /^(select|search|choose|type here|enter|please select|option|options|other|yes|no|none|value|text|input|required)$/;
+
+  let learnEnabled = true;
+  let learnProfileId = '';
+  let learnEntries = [];
+  let learnScannedAt = 0;
+  let learnFormCheckedAt = 0;
+  let learnHasForm = false;
+  let learnTimer = null;
+  let learnLast = null;
+  let learnOwnFillDepth = 0;
+  let learnQuietUntil = 0;
+  const learnTouched = new Map();
+
+  /** Same normalisation as the side panel's lookup, so both sides agree on a question. */
+  function learnKey(question) {
+    return normalizeText(question)
+      .replace(/\b(required|optional)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function learnOptionsSig(options) {
+    const list = (Array.isArray(options) ? options : [])
+      .map((o) => normalizeText(o))
+      .filter((o) => o && !LEARN_PLACEHOLDER_RE.test(o));
+    return list.length ? list.slice().sort().join('|').slice(0, 600) : '';
+  }
+
+  function loadLearnSettings() {
+    try {
+      chrome.storage.local.get([LEARN_ENABLED_KEY, LEARN_PROFILE_KEY], (result) => {
+        void chrome.runtime.lastError;
+        learnEnabled = (result || {})[LEARN_ENABLED_KEY] !== false;
+        learnProfileId = String((result || {})[LEARN_PROFILE_KEY] || '').trim();
+      });
+    } catch (_) {
+      /* the extension was reloaded under this page */
+    }
+  }
+
+  function learnPageHasForm() {
+    const now = Date.now();
+    if (now - learnFormCheckedAt < 3000) return learnHasForm;
+    learnFormCheckedAt = now;
+    learnHasForm = document.querySelectorAll('input:not([type="hidden"]), textarea, select').length >= 3;
+    return learnHasForm;
+  }
+
+  function learnScan() {
+    const now = Date.now();
+    if (learnEntries.length && now - learnScannedAt < LEARN_RESCAN_MS) return learnEntries;
+    learnScannedAt = now;
+    let fields = [];
+    try {
+      fields = scanApplicationForm().fields || [];
+    } catch (_) {
+      fields = [];
+    }
+    learnEntries = fields
+      .map((field) => ({ field, el: resolveFieldElement(field) }))
+      .filter((entry) => entry.el);
+    return learnEntries;
+  }
+
+  /** The scanned field a real click or keystroke belongs to: the nearest ancestor holding exactly one. */
+  function learnFieldFor(target) {
+    const entries = learnScan();
+    if (!entries.length) return null;
+    let node = target;
+    for (let depth = 0; node && depth < 12; depth += 1, node = node.parentElement) {
+      const inside = entries.filter((entry) => entry.el === node || node.contains(entry.el));
+      if (inside.length === 1) return inside[0];
+      if (inside.length > 1) {
+        return inside.find((entry) => entry.el === target || entry.el.contains(target)) || null;
+      }
+    }
+    return null;
+  }
+
+  function learnContainer(el) {
+    let box = null;
+    try {
+      box = activeAdapter && activeAdapter.getQuestionContainer ? activeAdapter.getQuestionContainer(el) : null;
+    } catch (_) {
+      box = null;
+    }
+    return (
+      box ||
+      el.closest('fieldset, [role="group"], [role="radiogroup"], [class*="field" i], [class*="question" i], li') ||
+      (el.parentElement && el.parentElement.parentElement) ||
+      el.parentElement
+    );
+  }
+
+  /** What the field holds now, as the text a person would read: an option's label, not its value attribute. */
+  function learnReadAnswer(el, field) {
+    const tag = el.tagName;
+    const type = tag === 'INPUT' ? (el.getAttribute('type') || 'text').toLowerCase() : tag.toLowerCase();
+    if (type === 'file' || type === 'password') return '';
+
+    if (tag === 'SELECT') {
+      return Array.from(el.selectedOptions || [])
+        .filter((option) => String(option.value || '').trim() !== '')
+        .map((option) => trim(option.text))
+        .filter((text) => text && !LEARN_PLACEHOLDER_RE.test(text))
+        .join(', ');
+    }
+
+    if (type === 'radio') {
+      const name = el.getAttribute('name');
+      let group = name ? Array.from(document.querySelectorAll(`input[type="radio"][name="${cssEscape(name)}"]`)) : [];
+      if (group.length < 2) {
+        const loose = namelessChoiceGroup(el);
+        group = loose ? loose.inputs : [el];
+      }
+      const checked = group.find((input) => input.checked);
+      return checked ? choiceInputLabel(checked) : '';
+    }
+
+    if (type === 'checkbox') {
+      const group = checkboxGroupFor(el);
+      // A lone tick box is a consent or a flag for this one form.
+      if (group.length < 2) return '';
+      return group.filter((input) => input.checked).map((input) => choiceInputLabel(input)).filter(Boolean).join(', ');
+    }
+
+    const fieldType = String(field.fieldType || '');
+    const box = learnContainer(el);
+    if (field.isCombobox || /combobox|dropdown|autocomplete|multi-select/.test(fieldType)) {
+      if (box) {
+        const many = Array.from(
+          box.querySelectorAll(
+            '[class*="multiValue" i] [class*="label" i], [class*="multi-value" i] [class*="label" i], [data-automation-id="selectedItem"]'
+          )
+        )
+          .map((node) => trim(node.textContent))
+          .filter(Boolean);
+        if (many.length) return many.join(', ');
+        const one = box.querySelector('[class*="singleValue" i], [class*="single-value" i], [class*="selected-value" i]');
+        if (one && trim(one.textContent)) return trim(one.textContent);
+      }
+      if (tag === 'BUTTON') return trim(el.textContent);
+      return trim(el.value || '');
+    }
+
+    // Button-style Yes / No and similar widgets with no native input behind them.
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && box) {
+      const on = box.querySelector('[aria-checked="true"], [aria-pressed="true"], [aria-selected="true"]');
+      if (on && trim(on.textContent)) return trim(on.textContent);
+    }
+    if (fieldType === 'yes-no' && box) {
+      const on = box.querySelector('[aria-checked="true"], [aria-pressed="true"]');
+      if (on && trim(on.textContent)) return trim(on.textContent);
+    }
+
+    if (el.isContentEditable) return trim(el.innerText || el.textContent || '');
+    return String(el.value || '').trim();
+  }
+
+  function learnRecordFor(el, field) {
+    const category = field.fieldCategory || 'unknown';
+    if (LEARN_EXEMPT_CATEGORIES.has(category)) return null;
+    const question = trim(field.questionText || field.labelText || '');
+    if (question.length < 3 || question.length > 600 || !looksMeaningful(question)) return null;
+    if (LEARN_NEVER_QUESTION_RE.test(question)) return null;
+    const key = learnKey(question);
+    if (!key || LEARN_GENERIC_KEY_RE.test(key)) return null;
+    // With no real label the "question" is only the field's name or id
+    // ("auth", "field_12"): too little to recognise the question elsewhere.
+    if (!field.hasMeaningfulLabel) {
+      const asAttr = (value) => normalizeText(value);
+      if (key === asAttr(field.name) || key === asAttr(field.idAttr)) return null;
+    }
+
+    const fieldType = String(field.fieldType || field.inputType || '');
+    const isChoice = /radio|checkbox|yes-no/.test(fieldType) || field.inputType === 'radio' || field.inputType === 'checkbox';
+    if (isChoice && LEARN_CONSENT_RE.test(question)) return null;
+
+    const answer = learnReadAnswer(el, field).slice(0, LEARN_MAX_ANSWER_CHARS).trim();
+    if (!answer || LEARN_PLACEHOLDER_RE.test(answer) || LEARN_NEVER_ANSWER_RE.test(answer)) return null;
+
+    return {
+      key,
+      q: question.slice(0, 600),
+      a: answer,
+      type: fieldType,
+      category,
+      options: (Array.isArray(field.options) ? field.options : []).slice(0, 40).map((o) => trim(o)),
+      host: location.hostname.replace(/^www\./, ''),
+      ats: (activeAdapter && activeAdapter.name) || '',
+      at: Date.now(),
+    };
+  }
+
+  function saveLearned(records) {
+    try {
+      chrome.storage.local.get([LEARNED_KEY], (result) => {
+        if (chrome.runtime.lastError) return;
+        const stored = (result || {})[LEARNED_KEY];
+        const store = stored && typeof stored === 'object' ? stored : {};
+        const profile = learnProfileId || '_';
+        const bank = store[profile] && typeof store[profile] === 'object' ? store[profile] : {};
+        const keepLast = (map, limit) => {
+          const keys = Object.keys(map);
+          keys.slice(0, Math.max(0, keys.length - limit)).forEach((k) => delete map[k]);
+          return map;
+        };
+
+        for (const record of records) {
+          const previous = bank[record.key] || {};
+          // The same question is asked with different choices on different sites:
+          // keep what was picked for each set of choices, and on each site.
+          const alts = { ...(previous.alts || {}) };
+          const sig = learnOptionsSig(record.options);
+          if (sig) {
+            delete alts[sig];
+            alts[sig] = record.a;
+          }
+          const hosts = { ...(previous.hosts || {}) };
+          delete hosts[record.host];
+          hosts[record.host] = record.a;
+          bank[record.key] = {
+            q: record.q,
+            a: record.a,
+            type: record.type,
+            category: record.category,
+            options: record.options,
+            host: record.host,
+            ats: record.ats,
+            at: record.at,
+            n: (Number(previous.n) || 0) + (previous.a === record.a ? 0 : 1) || 1,
+            alts: keepLast(alts, 6),
+            hosts: keepLast(hosts, 8),
+          };
+        }
+
+        const keys = Object.keys(bank);
+        if (keys.length > LEARN_MAX_PER_PROFILE) {
+          keys
+            .sort((x, y) => (bank[x].at || 0) - (bank[y].at || 0))
+            .slice(0, keys.length - LEARN_MAX_PER_PROFILE)
+            .forEach((k) => delete bank[k]);
+        }
+        store[profile] = bank;
+        chrome.storage.local.set({ [LEARNED_KEY]: store }, () => void chrome.runtime.lastError);
+      });
+    } catch (_) {
+      /* the extension was reloaded under this page */
+    }
+  }
+
+  function flushLearned() {
+    if (learnTimer) clearTimeout(learnTimer);
+    learnTimer = null;
+    if (!learnTouched.size) return;
+    const fields = Array.from(learnTouched.values());
+    learnTouched.clear();
+    const records = [];
+    for (const field of fields) {
+      let el = null;
+      try {
+        el = resolveFieldElement(field);
+      } catch (_) {
+        el = null;
+      }
+      if (!el) continue;
+      const record = learnRecordFor(el, field);
+      if (record) records.push(record);
+    }
+    if (records.length) saveLearned(records);
+  }
+
+  function onLearnEvent(event) {
+    if (!learnEnabled || !event.isTrusted) return;
+    if (learnOwnFillDepth > 0 || Date.now() < learnQuietUntil) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.id === 'remote-helper-assistant-host') return;
+    if (!learnPageHasForm()) return;
+
+    const entry = learnFieldFor(target);
+    const now = Date.now();
+    if (entry) {
+      learnLast = { field: entry.field, at: now };
+      learnTouched.set(entry.field.elementPath || entry.field.id, entry.field);
+    } else if (learnLast && now - learnLast.at < LEARN_CARRY_MS) {
+      // A choice list often opens outside the field (a menu attached to the page
+      // body). A click there still answers the field that was just opened.
+      learnTouched.set(learnLast.field.elementPath || learnLast.field.id, learnLast.field);
+    }
+    if (!learnTouched.size) return;
+    if (learnTimer) clearTimeout(learnTimer);
+    learnTimer = setTimeout(flushLearned, LEARN_FLUSH_MS);
+  }
+
+  function initAnswerLearning() {
+    if (window.__jobstrikeLearnInstalled) return;
+    window.__jobstrikeLearnInstalled = true;
+    loadLearnSettings();
+    try {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local') return;
+        if (changes[LEARN_ENABLED_KEY] || changes[LEARN_PROFILE_KEY]) loadLearnSettings();
+      });
+    } catch (_) {
+      /* ignore */
+    }
+    ['input', 'change', 'click', 'keyup'].forEach((type) => {
+      document.addEventListener(type, onLearnEvent, true);
+    });
+    // Leaving the page (often by submitting it) is the last chance to record.
+    window.addEventListener('pagehide', flushLearned);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushLearned();
+    });
+  }
+
+  initAnswerLearning();
 
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     try {

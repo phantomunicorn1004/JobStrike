@@ -4,6 +4,7 @@ type ResumeDbRowForMeasure = {
   candidate: string;
   company: string;
   jobTitle: string;
+  atsPlatform?: string;
   note?: string;
   appliedAt: string;
   date: string;
@@ -14,6 +15,7 @@ export const COLUMN_ORDER: ResumeDBColumnId[] = [
   "no",
   "profile",
   "jobLink",
+  "atsPlatform",
   "note",
   "company",
   "jobTitle",
@@ -29,6 +31,7 @@ export const COLUMN_HEADERS: Record<ResumeDBColumnId, string> = {
   no: "No",
   profile: "Profile",
   jobLink: "Job link",
+  atsPlatform: "ATS",
   note: "Note",
   company: "Company",
   jobTitle: "Job title",
@@ -101,6 +104,9 @@ export function measureColumnFitPx(
         break;
       case "jobLink":
         text = "Open";
+        break;
+      case "atsPlatform":
+        text = row.atsPlatform || "—";
         break;
       case "note":
         text = row.note || "—";
