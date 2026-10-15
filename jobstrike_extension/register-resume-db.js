@@ -1150,7 +1150,7 @@
     const resumes = [];
     for (let page = 1; page <= APPLICATIONS_MAX_PAGES; page += 1) {
       const res = await fetch(
-        `${config.baseUrl}/api/resume-db?page=${page}&pageSize=${APPLICATIONS_PAGE_SIZE}`,
+        `${config.baseUrl}/api/resume-db?page=${page}&pageSize=${APPLICATIONS_PAGE_SIZE}&lite=1`,
         { headers: apiHeaders(config), cache: 'no-store' }
       );
       const data = await res.json().catch(() => ({}));
@@ -1167,6 +1167,33 @@
 
   function invalidateApplicationsCache() {
     applicationsCache = { at: 0, resumes: null };
+  }
+
+  /**
+   * A registration just saved joins the cached list, so the next duplicate check
+   * knows it without reading every application again.
+   */
+  function rememberRegisteredApplication(result) {
+    if (!Array.isArray(applicationsCache.resumes) || !result?.id) {
+      invalidateApplicationsCache();
+      return;
+    }
+    const appliedAt = new Date().toISOString();
+    applicationsCache.resumes.unshift({
+      id: result.id,
+      rowIndex: result.id,
+      entryId: result.entryId || '',
+      profileId: result.profileId ?? null,
+      candidate: result.candidateName || '',
+      candidateName: result.candidateName || '',
+      jobLink: result.jobLink || '',
+      jobTitle: result.jobTitle || '',
+      company: result.companyName || '',
+      note: result.note || '',
+      apply: 'Registered',
+      appliedAt,
+      date: appliedAt,
+    });
   }
 
   async function checkFieldDuplicate(field, showStatus, { quietIfNone = false } = {}) {
@@ -4643,7 +4670,7 @@
           );
           const submittedLinkKey = canonicalJobLinkKey(draft.fields?.jobLink || '');
           const result = await registerJobToBackend();
-          invalidateApplicationsCache();
+          rememberRegisteredApplication(result);
           const record = { id: String(result.id || ''), at: Date.now(), jobLinkKey: submittedLinkKey };
           // Switched tabs during the upload: the record belongs to the tab it
           // was sent from. Mark that one, and leave this one untouched.

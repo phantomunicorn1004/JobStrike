@@ -35,7 +35,37 @@
     if (status === 429) {
       return 'API rate limit reached. Wait a moment and try again.';
     }
-    return msg;
+    // "Rejected by the upstream service": the gateway in Settings passed the
+    // request on and the model provider refused it or failed.
+    // The provider's own code or type (content_filter, invalid_request_error, …) names the cause.
+    const detail = [data?.error?.code, data?.error?.type].filter((v) => v && typeof v !== 'object').join(', ');
+    return status ? `${msg} (HTTP ${status}${detail ? `, ${detail}` : ''})` : msg;
+  }
+
+  /**
+   * The same conversation without a system role: its instructions lead the first
+   * user message. Some gateway routes answer "System messages are not allowed".
+   */
+  function foldSystemIntoUser(messages) {
+    const list = Array.isArray(messages) ? messages : [];
+    const system = list
+      .filter((m) => m && m.role === 'system')
+      .map((m) => String(m.content || '').trim())
+      .filter(Boolean)
+      .join('\n\n');
+    const rest = list.filter((m) => m && m.role !== 'system').map((m) => ({ ...m }));
+    if (!system) return rest;
+    const first = rest.findIndex((m) => m.role === 'user');
+    const lead = `INSTRUCTIONS:\n${system}\n\n---\n\n`;
+    if (first >= 0) rest[first].content = `${lead}${String(rest[first].content || '')}`;
+    else rest.unshift({ role: 'user', content: lead.trim() });
+    return rest;
+  }
+
+  /** A failure on the provider's side that a second attempt often gets past. */
+  function isPassingUpstreamFailure(status, data) {
+    if ([500, 502, 503, 504, 520, 522, 524, 529].includes(status)) return true;
+    return /upstream|overloaded|temporarily unavailable|try again/i.test(String(data?.error?.message || ''));
   }
 
   const DEFAULT_TIMEOUT_MS = 60000;
@@ -65,31 +95,49 @@
     }
     if (responseFormat) body.response_format = responseFormat;
 
-    let response;
-    try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS),
+    const send = async () => {
+      let response;
+      try {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS),
+        });
+      } catch (error) {
+        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+          throw new Error('AI request timed out. Try again.');
+        }
+        throw error;
+      }
+      const data = await response.json().catch((error) => {
+        // The timeout also covers reading the body; say so instead of "could not parse".
+        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+          throw new Error('AI request timed out. Try again.');
+        }
+        return {};
       });
-    } catch (error) {
-      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-        throw new Error('AI request timed out. Try again.');
-      }
-      throw error;
-    }
+      return { response, data };
+    };
 
-    const data = await response.json().catch((error) => {
-      // The timeout also covers reading the body; say so instead of "could not parse".
-      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-        throw new Error('AI request timed out. Try again.');
+    let { response, data } = await send();
+    if (!response.ok && isPassingUpstreamFailure(response.status, data)) {
+      // Once, after a short pause: a second refusal is reported as it is.
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      ({ response, data } = await send());
+    }
+    if (!response.ok && response.status === 400 && body.messages.some((m) => m && m.role === 'system')) {
+      // A gateway can route the same model to providers with different rules; one
+      // that refuses the system role (or the request as sent) may take this form.
+      const refusal = String(data?.error?.message || '');
+      if (/system/i.test(refusal) || /upstream|rejected/i.test(refusal)) {
+        body.messages = foldSystemIntoUser(body.messages);
+        ({ response, data } = await send());
       }
-      return {};
-    });
+    }
     if (!response.ok) {
       throw new Error(providerErrorMessage(response.status, data, endpoint));
     }

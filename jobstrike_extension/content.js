@@ -6412,7 +6412,7 @@
 
   /** Names of pages and boards, not of employers. */
   const COMPANY_GENERIC_RE =
-    /^(inc|llc|ltd|limited|corp|corporation|gmbh|plc|recruitment|career center|career page|careers?|careersection|jobs?|job (opportunities|details|search|board|description|posting)|opportunities|current openings?|open (positions|roles|jobs)|home|apply|privacy preference center|search|welcome|candidate experience site|candidate portal|talent (community|network)|company( logo)?|logo( large)?|career banner|about us|us|you|firefox|chrome|google chrome|internet explorer|safari|edge|microsoft edge|link to job posting.*)$/i;
+    /^(inc|llc|ltd|limited|corp|corporation|gmbh|plc|recruitment|career center|career page|careers?|careersection|jobs?|job (opportunities|details|search|board|description|posting)|opportunities|current openings?|open (positions|roles|jobs)|home|apply|privacy preference center|search|welcome|candidate experience site|candidate portal|talent (community|network)|company( logo)?|logo( large)?|career banner|career site|external career site|about us|us|you|firefox|chrome|google chrome|internet explorer|safari|edge|microsoft edge|link to job posting.*)$/i;
 
   /** A board's own name is an employer's name on that board's own job pages (Workday, Rippling). */
   function isOwnTenantName(text) {
@@ -6451,6 +6451,8 @@
     for (let i = 0; i < 3 && (legalTail.test(text) || legalCaps.test(text)); i += 1) {
       text = trim(text.replace(legalTail, '').replace(legalCaps, ''));
     }
+    // "Everforth ECS External" is what is left of "… External Career Site".
+    text = trim(text.replace(/\s+(external|internal)$/i, ''));
     text = trim(text.replace(/[,.:;|–—-]+$/, ''));
     if (!text || COMPANY_GENERIC_RE.test(text)) return '';
     // A requisition number left over from a tab title ("Server Test Engineer - - 82543").
@@ -6492,7 +6494,10 @@
     }
     if (host === 'myjobs.adp.com' || host === 'jobs.jobvite.com') {
       const m = /^\/([a-z0-9_-]+)\//i.exec(path);
-      if (m && !/^(search|careers|jobs|job)$/i.test(m[1])) return m[1].toLowerCase();
+      // "babcockwilcoxcareers": the employer, then the word the site adds.
+      if (m && !/^(search|careers|jobs|job)$/i.test(m[1])) {
+        return m[1].toLowerCase().replace(/[-_]?(careers?|jobs)$/, '') || m[1].toLowerCase();
+      }
     }
     return '';
   }

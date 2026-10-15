@@ -1736,6 +1736,8 @@
       repost: jr.repost === true,
       // Jobright's own flag for a listing whose apply flow stays on the job board.
       easy_apply: jr.jobtargetEasyapply === true,
+      // A recruiter named on the listing: usually an agency post on LinkedIn.
+      recruiter_named: Boolean(jr.jobRecruiter),
       applicants_text: serializeField(jr.applicantsDisplayText),
       source: 'jobright',
     };

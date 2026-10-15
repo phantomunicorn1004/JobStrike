@@ -13,7 +13,52 @@
     seen: 'job_scraper_seen_v1',
     jrGuard: 'job_scraper_jobright_guard_v1',
     registered: 'job_scraper_registered_v1',
+    scrapedNames: 'job_scraper_names_by_link_v1',
   };
+
+  /** How many scraped jobs' names are remembered for the Bid tab. */
+  const SCRAPED_NAMES_MAX = 4000;
+
+  function scrapedNameKey(url) {
+    const canonical = window.SmartJobJobUrl?.canonicalJobUrl?.(url);
+    return String(canonical || url || '').trim().toLowerCase();
+  }
+
+  /**
+   * Remember each ready job's company and title by its link. The Bid tab reads
+   * this when the job's page is opened, so the company registered is the one
+   * the scrape compared against the applied and blocked lists.
+   */
+  async function rememberScrapedNames(jobs) {
+    const stored = (await storageGet([STORAGE.scrapedNames]))[STORAGE.scrapedNames];
+    const names = stored && typeof stored === 'object' ? stored : {};
+    const now = Date.now();
+    for (const job of Array.isArray(jobs) ? jobs : []) {
+      const key = scrapedNameKey(job?.apply_url);
+      const company = String(job?.company_name || '').trim();
+      if (!key || !company) continue;
+      names[key] = { c: company, t: String(job?.title || '').trim(), at: now };
+    }
+    const keys = Object.keys(names);
+    if (keys.length > SCRAPED_NAMES_MAX) {
+      keys
+        .sort((a, b) => (names[a].at || 0) - (names[b].at || 0))
+        .slice(0, keys.length - SCRAPED_NAMES_MAX)
+        .forEach((key) => delete names[key]);
+    }
+    await storageSet({ [STORAGE.scrapedNames]: names });
+  }
+
+  /** The scraped company and title for a job link, or null when it was not scraped. */
+  async function lookupScrapedJob(url) {
+    const key = scrapedNameKey(url);
+    if (!key) return null;
+    const stored = (await storageGet([STORAGE.scrapedNames]))[STORAGE.scrapedNames];
+    const hit = stored && typeof stored === 'object' ? stored[key] : null;
+    return hit && hit.c ? { company: hit.c, title: hit.t || '' } : null;
+  }
+
+  window.SmartJobScrapedNames = { lookup: lookupScrapedJob };
 
   const DEFAULT_PREFS = {
     excludeBlockedCompanies: true,
@@ -191,6 +236,12 @@
 
   /** This run's Jobright requests by kind, for the run report. */
   let jobrightRequestKinds = {};
+  /**
+   * Set once in a run when the in-tab fetch failed and the extension's own fetch
+   * worked: from then on the extension asks first, instead of spending two failed
+   * requests on every page.
+   */
+  let jobrightPreferExtension = false;
 
   async function noteJobrightRequests(count, kind = 'other') {
     const sent = Math.max(0, Number(count) || 0);
@@ -327,27 +378,30 @@
     }
   }
 
-  /** A LinkedIn listing leads on to the employer's own application page. */
-  function isLinkedInLink(url) {
-    try {
-      const host = new URL(String(url || '')).hostname.toLowerCase().replace(/^www\./, '');
-      return host === 'linkedin.com' || host.endsWith('.linkedin.com');
-    } catch (_) {
-      return false;
-    }
-  }
-
   /**
-   * What "Direct employer links only" hides: easy-apply flows and listings that
-   * stay on a job board. LinkedIn is the exception: from a LinkedIn posting the
-   * user reaches the employer's careers page, so those are kept as listed.
+   * What "Direct employer links only" hides: easy-apply flows and listings whose
+   * link stays on a job board, LinkedIn included. A job the scraper found on the
+   * employer's own board has had its link replaced before this runs, so it stays.
    */
   function hiddenByDirectLinks(job) {
     if (job?.easy_apply === true) return true;
-    return isAggregatorLink(job?.apply_url) && !isLinkedInLink(job?.apply_url);
+    return isAggregatorLink(job?.apply_url);
   }
 
   const EMPLOYER_LOOKUP_MAX = 150;
+
+  /**
+   * Staffing and recruiting firms. Their postings are for someone else's job,
+   * so the firm has no careers board holding it and a lookup can only miss.
+   */
+  const STAFFING_NAME_RE =
+    /\b(staffing|recruit(ing|ment|ers)|talent (solutions|partners|group)|search (group|partners|firm)|placements?|workforce solutions|cybercoders|kforce|robert half|teksystems|insight global|randstad|aerotek|apex systems|motion recruitment|jobot|hays|harnham|hunter bond|radley james|goliath partners|calance|beaconfire|xforia|biztech|tricom technical|mbo partners|henderson scott|strativ group|burtch works|revature|akkodis|modis|collabera|mindlance|diverse lynx|kelly services|adecco|manpower|experis|signature consultants|beacon hill|vaco|matlen silver|infojini|jefferson frank|nigel frank|mason frank|lorien|oliver bernard|crossing hurdles|dice)\b/i;
+
+  /** A job-board listing whose employer board is worth looking up. */
+  function worthEmployerLookup(job) {
+    if (job.recruiter_named === true) return false;
+    return !STAFFING_NAME_RE.test(String(job.company_name || ''));
+  }
 
   /**
    * For jobs that only have a job-board link, look the posting up on the
@@ -361,9 +415,17 @@
     if (!resolver?.resolveMany || !state.prefs.directLinksOnly) return outcome;
     const targets = (jobs || [])
       .filter(
-        (job) => !job.link_checked && job.company_name && job.title && isAggregatorLink(job.apply_url)
+        (job) =>
+          !job.link_checked &&
+          job.company_name &&
+          job.title &&
+          isAggregatorLink(job.apply_url) &&
+          worthEmployerLookup(job)
       )
       .slice(0, EMPLOYER_LOOKUP_MAX);
+    outcome.skippedAgencies = (jobs || []).filter(
+      (job) => !job.link_checked && isAggregatorLink(job.apply_url) && job.company_name && !worthEmployerLookup(job)
+    ).length;
     if (!targets.length) return outcome;
 
     const show = (done, found) =>
@@ -378,7 +440,7 @@
       });
     show(0, 0);
     const hits = await resolver.resolveMany(targets, {
-      concurrency: 4,
+      concurrency: 8,
       onProgress: (done, total, found) => show(done, found),
       shouldStop: () => state.stopRequested,
     });
@@ -699,6 +761,7 @@
   }
 
   async function persistResults() {
+    await rememberScrapedNames(state.filteredJobs).catch(() => {});
     await storageSet({
       [STORAGE.lastResults]: {
         jobs: state.filteredJobs,
@@ -2891,7 +2954,26 @@
     const errors = [];
     const sort = sortCondition || undefined;
 
+    const viaExtension = async () => {
+      const ext = await jr.fetchRecommendApiPageExtension(position, count, sort);
+      await noteJobrightRequests(ext?.requests ?? 1, 'feedFromExtension');
+      return ext;
+    };
+    let extensionTried = false;
+    if (jobrightPreferExtension && typeof jr?.fetchRecommendApiPageExtension === 'function') {
+      extensionTried = true;
+      try {
+        const ext = await viaExtension();
+        if (ext?.ok && ext.rows?.length) return ext;
+        if (ext?.rateLimited) return { ok: false, rows: [], total: null, rateLimited: true };
+        if (ext?.error) errors.push(`ext: ${ext.error}`);
+      } catch (err) {
+        errors.push(`ext: ${err?.message || String(err)}`);
+      }
+    }
+
     // Prefer in-tab fetch so UI "Most Recent" session applies.
+    let tabFailed = false;
     if (typeof jr?.fetchRecommendApiPageInTab === 'function') {
       const tabResult = await runJobrightTabFn(tabId, jr.fetchRecommendApiPageInTab, [
         position,
@@ -2911,13 +2993,16 @@
         };
       }
       if (tabResult?.error) errors.push(`tab: ${tabResult.error}`);
+      tabFailed = true;
     }
 
-    if (typeof jr?.fetchRecommendApiPageExtension === 'function') {
+    if (!extensionTried && typeof jr?.fetchRecommendApiPageExtension === 'function') {
       try {
-        const ext = await jr.fetchRecommendApiPageExtension(position, count, sort);
-        await noteJobrightRequests(ext?.requests ?? 1, 'feedFromExtension');
-        if (ext?.ok && ext.rows?.length) return ext;
+        const ext = await viaExtension();
+        if (ext?.ok && ext.rows?.length) {
+          if (tabFailed) jobrightPreferExtension = true;
+          return ext;
+        }
         if (ext?.rateLimited) return { ok: false, rows: [], total: null, rateLimited: true };
         if (ext?.error) errors.push(`ext: ${ext.error}`);
       } catch (err) {
@@ -3026,7 +3111,10 @@
     // The site's own page size. Asking for more was ignored (20 rows came back)
     // and made the requests unlike anything the page itself sends.
     let apiPageSize = pageSize;
-    if (!resume) jobrightRequestKinds = {};
+    if (!resume) {
+      jobrightRequestKinds = {};
+      jobrightPreferExtension = false;
+    }
     const requestsBeforeRun = resume && state.scrapeCursor?.requestsBeforeRun != null
       ? Number(state.scrapeCursor.requestsBeforeRun)
       : jobrightGuard().requests;
@@ -4610,6 +4698,8 @@
   async function initJobScraperPanel() {
     if (!document.getElementById('tab-job-scraper')) return;
     await loadState();
+    // The list already on screen counts too, not only the next scrape.
+    void rememberScrapedNames(state.filteredJobs).catch(() => {});
     wireUi();
     syncControlsFromState();
     void loadProfileFilterContext({ silent: true });

@@ -285,8 +285,8 @@ def export_docx_to_pdf(docx_path: Path, pdf_path: Path) -> None:
         # If copy fails (e.g., very long paths), surface a clear error.
         raise RuntimeError(f"Failed to stage DOCX for export: {e}") from e
 
-    # Best-effort: remove Mark-of-the-web on the staged file
-    _try_unblock_file_windows(str(tmp_docx))
+    # The staged file was written by this program and carries no Mark-of-the-Web;
+    # unblocking (two PowerShell launches) is kept for the case Word refuses it.
 
     # Remove any existing destination PDF to avoid Word prompts
     try:
@@ -319,6 +319,9 @@ def export_docx_to_pdf(docx_path: Path, pdf_path: Path) -> None:
             pass
 
         doc, pv, last_exc = _open_doc_in_word(word, str(tmp_docx.resolve()))
+        if doc is None:
+            _try_unblock_file_windows(str(tmp_docx))
+            doc, pv, last_exc = _open_doc_in_word(word, str(tmp_docx.resolve()))
 
         if doc is None:
             details = f" Last error: {repr(last_exc)}" if last_exc is not None else ""

@@ -152,6 +152,17 @@ export async function GET(request: NextRequest) {
     const page = parsePage(searchParams.get("page"));
     const pageSize = parsePageSize(searchParams.get("pageSize"));
 
+    // The extension pages through every application to check for duplicates. It
+    // needs the rows only: no total, pipeline stages or filter options.
+    if (searchParams.get("lite") === "1") {
+      const entries = await listApplicationsWithFilters(userId, { page, pageSize });
+      return corsJson({
+        resumes: entries.map((entry) => mapForList(entry, timeZone)),
+        page,
+        pageSize,
+      });
+    }
+
     const search = (searchParams.get("search") ?? "").toString();
     const dateFrom = searchParams.get("dateFrom") ?? "";
     const dateTo = searchParams.get("dateTo") ?? "";

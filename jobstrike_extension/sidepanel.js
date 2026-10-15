@@ -2967,8 +2967,17 @@ async function scrapeJobInfoToAllForms({ showSuccess = true, forceOverwrite = fa
   }
 
   const jobTitle = response.job_title || posting?.jobTitle || '';
-  const company = response.company_name || posting?.companyName || '';
   const jobLink = response.job_link || posting?.jobLink || tab.url || '';
+  // A job that came from a scrape keeps the scraper's company name: that is the
+  // name the applied and blocked lists were compared against, and some boards
+  // (ADP) do not state the employer on the page at all.
+  const scraped =
+    (await window.SmartJobScrapedNames?.lookup?.(jobLink).catch(() => null)) ||
+    (tab.url && tab.url !== jobLink
+      ? await window.SmartJobScrapedNames?.lookup?.(tab.url).catch(() => null)
+      : null);
+  if (scrapeSession && !scrapeSession.isCurrentGeneration(scrapeToken)) return null;
+  const company = scraped?.company || response.company_name || posting?.companyName || '';
   const jobDescription = response.job_description || posting?.rawFullText || '';
   const preferResumeJson = Boolean(
     window.SmartJobRegisterResumeDb?.hasActiveResumeJsonOverride?.()

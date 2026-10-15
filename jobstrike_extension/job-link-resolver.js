@@ -11,7 +11,9 @@
   const FOUND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const MISSING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
   const BOARD_TTL_MS = 30 * 60 * 1000;
-  const REQUEST_TIMEOUT_MS = 12000;
+  // The three public board APIs answer in well under a second; a slow one is skipped
+  // as "could not check" and tried again next run.
+  const REQUEST_TIMEOUT_MS = 6000;
 
   const LEGAL_SUFFIX_RE =
     /\b(inc|incorporated|llc|ltd|limited|corp|corporation|co|company|gmbh|plc|pbc)\b\.?/g;

@@ -104,27 +104,29 @@ export async function resolveRegisterFiles(input: {
 }): Promise<ResolvedRegisterFiles> {
   const driveSettings = await getUserGoogleDriveSettings(input.userId);
 
-  const resume = await uploadResumeOrCover({
-    userId: input.userId,
-    origin: input.origin,
-    entryId: input.entryId,
-    kind: "resume",
-    urlProvided: input.resumeUrlProvided,
-    file: input.resumeFile,
-    useDefault: input.resumeIsDefault,
-    defaultUrl: driveSettings?.defaultResumeUrl ?? "",
-  });
-
-  const cover = await uploadResumeOrCover({
-    userId: input.userId,
-    origin: input.origin,
-    entryId: input.entryId,
-    kind: "cover",
-    urlProvided: input.coverUrlProvided,
-    file: input.coverFile,
-    useDefault: input.coverIsDefault,
-    defaultUrl: driveSettings?.defaultCoverUrl ?? "",
-  });
+  // Each upload is several round trips to Google Drive; the two do not depend on each other.
+  const [resume, cover] = await Promise.all([
+    uploadResumeOrCover({
+      userId: input.userId,
+      origin: input.origin,
+      entryId: input.entryId,
+      kind: "resume",
+      urlProvided: input.resumeUrlProvided,
+      file: input.resumeFile,
+      useDefault: input.resumeIsDefault,
+      defaultUrl: driveSettings?.defaultResumeUrl ?? "",
+    }),
+    uploadResumeOrCover({
+      userId: input.userId,
+      origin: input.origin,
+      entryId: input.entryId,
+      kind: "cover",
+      urlProvided: input.coverUrlProvided,
+      file: input.coverFile,
+      useDefault: input.coverIsDefault,
+      defaultUrl: driveSettings?.defaultCoverUrl ?? "",
+    }),
+  ]);
 
   const storage =
     resume.storage === "google_drive_user" ||
