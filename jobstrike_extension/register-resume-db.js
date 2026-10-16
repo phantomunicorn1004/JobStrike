@@ -4756,6 +4756,27 @@
           if (!draft.ok) {
             throw new Error(draft.errors[0] || 'Register draft is incomplete.');
           }
+          // The files live only in this panel: reopening it, a tab switch before
+          // Generate finished, or a removed chip leaves none. Saving anyway made a
+          // Resume DB row with no resume, so say so and let the user decide.
+          if (!draft.resumeFile && !draft.fields?.resumeIsDefault) {
+            const missing = draft.coverFile ? 'No resume is attached' : 'No resume or cover letter is attached';
+            const proceed = await confirmAction(
+              `${missing} to this job.\n\nClick Generate (or attach your own files) first, or register it without files?`,
+              { confirmLabel: 'Register without files', cancelLabel: 'Cancel' }
+            );
+            if (!proceed) {
+              throw new Error('Not registered: no resume attached. Click Generate, then Register.');
+            }
+          } else if (draft.resumeFile && !draft.coverFile) {
+            const proceed = await confirmAction(
+              'No cover letter is attached to this job.\n\nRegister with the resume only?',
+              { confirmLabel: 'Register', cancelLabel: 'Cancel' }
+            );
+            if (!proceed) {
+              throw new Error('Not registered: no cover letter attached.');
+            }
+          }
           const registerToken = tabSession()?.getGeneration();
           const registerTabId = tabSession()?.getBoundTabId?.();
           if (draft.warnings?.length) {

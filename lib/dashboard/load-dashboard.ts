@@ -5,7 +5,9 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { countApplicationsWithFilters } from "@/lib/resume-db/repository";
 import { listJobScraperCandidates } from "@/lib/job-scraper-repository";
 import { colorForCandidateKey } from "@/lib/dashboard/candidate-colors";
+import { buildResponseStats, type ResponseStats } from "@/lib/dashboard/response-stats";
 import {
+  listApplicationsForResponseStats,
   listApplicationCandidateKeysForDashboard,
   listApplicationsForDashboardRange,
   listPipelineJobsForDashboard,
@@ -70,6 +72,8 @@ export type DashboardData = {
     color?: string;
   }>;
   candidates: Array<{ key: string; label: string; color?: string }>;
+  /** Answers by platform and by when the bid was sent, all time. */
+  responseStats: ResponseStats | null;
   userId: string;
 };
 
@@ -141,6 +145,7 @@ export async function loadDashboardData(
     techJobs,
     stagesRes,
     candidates,
+    responseRows,
   ] = await Promise.all([
     listApplicationsForDashboardRange(user.id, bidFrom, bidTo, timezone),
     listApplicationCandidateKeysForDashboard(user.id),
@@ -152,6 +157,11 @@ export async function loadDashboardData(
       .select("id, name, sort_order")
       .order("sort_order", { ascending: true }),
     listJobScraperCandidates(user.id),
+    // The statistics are extra: a failure leaves the rest of the dashboard working.
+    listApplicationsForResponseStats(user.id).catch((error) => {
+      console.error("Dashboard response stats load failed:", error);
+      return null;
+    }),
   ]);
 
   let stages = (stagesRes.data ?? []) as PipelineStageRow[];
@@ -300,6 +310,7 @@ export async function loadDashboardData(
       color: colorForCandidateKey(c.key),
     })),
     candidates: candidatesWithColor,
+    responseStats: responseRows ? buildResponseStats(responseRows, stages, timezone) : null,
     userId: user.id,
   };
 }

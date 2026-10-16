@@ -74,7 +74,7 @@
     freshnessWindowHc: '8h',
     /** Hide jobs whose apply link stays on a job board (easy apply) instead of the employer. */
     directLinksOnly: true,
-    /** Keep only the best-scored job of each company in a result. */
+    /** Keep each company's jobs together in the list and export, best first. */
     onePerCompany: true,
     /** Hide jobs the source marks as requiring a security clearance. */
     hideClearanceRequired: true,
@@ -795,7 +795,7 @@
     if (stats.removedForeign) bits.push(`${stats.removedForeign} outside US`);
     if (stats.removedDegree) bits.push(`${stats.removedDegree} higher degree`);
     if (stats.removedLanguage) bits.push(`${stats.removedLanguage} other language`);
-    if (stats.removedSameCompany) bits.push(`${stats.removedSameCompany} same company`);
+
     if (stats.removedRegisteredJobs) bits.push(`${stats.removedRegisteredJobs} reg. jobs`);
     if (stats.removedRegisteredCompanies) {
       bits.push(`${stats.removedRegisteredCompanies} reg. cos`);
@@ -976,23 +976,15 @@
       : degreeOk;
     const removedLanguage = degreeOk.length - languageOk.length;
     let filtered = sortBidJobs(languageOk);
-    // One bid per company: the list is in bid order, so the first job of each
-    // company is its best one. Names are compared the way the duplicate check does.
-    let removedSameCompany = 0;
+    // Several jobs at one company: all stay, side by side under the company's best
+    // one, so the user picks which to bid on.
+    let groupedSameCompany = 0;
+    let companiesWithSeveral = 0;
     if (state.prefs.onePerCompany) {
-      const matcher = window.SmartJobCompanyName?.companiesMatch;
-      const kept = [];
-      const keptCompanies = [];
-      for (const job of filtered) {
-        const company = String(job.company_name || '').trim();
-        if (company && keptCompanies.some((other) => (matcher ? matcher(other, company) : other.toLowerCase() === company.toLowerCase()))) {
-          removedSameCompany += 1;
-          continue;
-        }
-        if (company) keptCompanies.push(company);
-        kept.push(job);
-      }
-      filtered = kept;
+      const grouped = groupJobsByCompany(filtered);
+      filtered = grouped.jobs;
+      groupedSameCompany = grouped.extraJobs;
+      companiesWithSeveral = grouped.companiesWithSeveral;
     }
 
     state.filteredJobs = filtered;
@@ -1015,7 +1007,8 @@
       removedForeign,
       removedDegree,
       removedLanguage,
-      removedSameCompany,
+      groupedSameCompany,
+      companiesWithSeveral,
       remaining: filtered.length,
       registeredJobCount: state.registeredJobs.length,
       registeredCompanyCount: state.registeredCompanies.length,
@@ -1487,6 +1480,32 @@
     });
   }
 
+  /**
+   * Jobs in bid order, with each company's jobs moved up under its best one.
+   * Companies are compared the way the duplicate check compares them; jobs with
+   * no company name stay where they are.
+   * @returns {{ jobs: object[], position: Map<object, {index:number,count:number}>, extraJobs:number, companiesWithSeveral:number }}
+   */
+  function groupJobsByCompany(sortedJobs) {
+    const matcher = window.SmartJobCompanyName?.companiesMatch;
+    const same = (a, b) => (matcher ? matcher(a, b) : a.toLowerCase() === b.toLowerCase());
+    const groups = [];
+    for (const job of sortedJobs || []) {
+      const company = String(job?.company_name || '').trim();
+      const group = company ? groups.find((g) => g.company && same(g.company, company)) : null;
+      if (group) group.jobs.push(job);
+      else groups.push({ company, jobs: [job] });
+    }
+    const position = new Map();
+    let companiesWithSeveral = 0;
+    for (const group of groups) {
+      if (group.jobs.length > 1) companiesWithSeveral += 1;
+      group.jobs.forEach((job, i) => position.set(job, { index: i + 1, count: group.jobs.length }));
+    }
+    const jobs = groups.flatMap((group) => group.jobs);
+    return { jobs, position, extraJobs: jobs.length - groups.length, companiesWithSeveral };
+  }
+
   function dedupeBidJobs(jobs) {
     const seen = new Set();
     const out = [];
@@ -1520,8 +1539,12 @@
       'Score',
       'Listed On',
       'Repost',
+      // "1 of 3": this company's jobs sit together, best first; pick which to bid on.
+      'Same Company',
     ];
-    const sorted = sortBidJobs(jobs);
+    const byScore = sortBidJobs(jobs);
+    const grouping = state.prefs.onePerCompany ? groupJobsByCompany(byScore) : null;
+    const sorted = grouping ? grouping.jobs : byScore;
     const exportedAt = Date.now();
     const typical = typicalApplicantsByAge(state.rawJobs, exportedAt);
     const ageOf = (job) => {
@@ -1555,6 +1578,10 @@
           // Where the job was first listed, when its link was swapped for the employer's.
           job?.listed_url || '',
           priority.repost ? 'repost' : '',
+          (() => {
+            const at = grouping?.position.get(job);
+            return at && at.count > 1 ? `${at.index} of ${at.count}` : '';
+          })(),
         ];
         return `<Row>${values
           .map((v) =>
@@ -1569,8 +1596,8 @@
     const colXml = headers
       .map((_, i) => {
         const widths = includeOrigin
-          ? [280, 110, 220, 120, 80, 120, 100, 70, 50, 60, 220, 60]
-          : [280, 110, 220, 120, 80, 120, 70, 50, 60, 220, 60];
+          ? [280, 110, 220, 120, 80, 120, 100, 70, 50, 60, 220, 60, 90]
+          : [280, 110, 220, 120, 80, 120, 70, 50, 60, 220, 60, 90];
         return `<Column ss:Width="${widths[i] || 100}"/>`;
       })
       .join('');
@@ -2154,7 +2181,11 @@
       if (state.stats?.removedForeign) bits.push(`${state.stats.removedForeign} outside US`);
       if (state.stats?.removedDegree) bits.push(`${state.stats.removedDegree} Master's/PhD required`);
       if (state.stats?.removedLanguage) bits.push(`${state.stats.removedLanguage} other language required`);
-      if (state.stats?.removedSameCompany) bits.push(`${state.stats.removedSameCompany} more from the same company`);
+      if (state.stats?.companiesWithSeveral) {
+        bits.push(
+          `${state.stats.companiesWithSeveral} compan${state.stats.companiesWithSeveral === 1 ? 'y has' : 'ies have'} several jobs (grouped)`
+        );
+      }
       if (state.stats?.removedRegisteredJobs) {
         bits.push(`${state.stats.removedRegisteredJobs} reg. jobs`);
       }
@@ -4647,9 +4678,13 @@
             outsideUS: stats.removedForeign || 0,
             higherDegreeRequired: stats.removedDegree || 0,
             otherLanguageRequired: stats.removedLanguage || 0,
-            sameCompany: stats.removedSameCompany || 0,
             registeredJobs: stats.removedRegisteredJobs || 0,
             registeredCompanies: stats.removedRegisteredCompanies || 0,
+          },
+          // Not hidden: kept together in the list and the export.
+          sameCompanyGrouped: {
+            companies: stats.companiesWithSeveral || 0,
+            extraJobs: stats.groupedSameCompany || 0,
           },
           // What the hide rules worked from: a list that is empty, stale, or
           // exactly 1,000 long is the first thing to check when a job slips through.

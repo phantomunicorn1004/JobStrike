@@ -22,6 +22,7 @@ import { colorForCandidateKey } from "@/lib/dashboard/candidate-colors";
 import type { DashboardData as ServerDashboardData } from "@/lib/dashboard/load-dashboard";
 import { DEFAULT_TIMEZONE, formatYmdInTimeZone, todayInTimeZone } from "@/lib/timezone";
 import { toast } from "sonner";
+import { ResponseStatsCards } from "@/components/dashboard/ResponseStatsCards";
 
 type CandidateCount = { key: string; label: string; count: number; color?: string };
 type CandidateOption = { key: string; label: string; color?: string };
@@ -717,6 +718,8 @@ export function DashboardPageClient({
                 </Card>
               </div>
             </div>
+
+            <ResponseStatsCards stats={data?.responseStats} />
           </>
         )}
       </div>

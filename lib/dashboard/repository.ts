@@ -8,6 +8,7 @@ import type {
   ResumeApplicationRow,
 } from "@/lib/dashboard/stats";
 import { endOfDayUtcIso, startOfDayUtcIso } from "@/lib/timezone";
+import type { ResponseApplicationRow } from "@/lib/dashboard/response-stats";
 
 /**
  * Thin all-time rows for candidate breakdowns (no applied_at needed beyond optional id).
@@ -77,6 +78,36 @@ export async function listTechnicalJobsForDashboard(
       .order("id", { ascending: true })
       .range(from, to),
   );
+}
+
+/**
+ * Every application with its link and current pipeline column, for the response
+ * statistics. Older databases without pipeline_stage_id count every bid as unanswered.
+ */
+export async function listApplicationsForResponseStats(
+  userId: string,
+): Promise<ResponseApplicationRow[]> {
+  const supabase = getSupabaseAdminClient();
+  try {
+    return await fetchAllByRange<ResponseApplicationRow>((from, to) =>
+      supabase
+        .from("resume_db_applications")
+        .select("id, job_link, applied_at, pipeline_stage_id")
+        .eq("user_id", userId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+  } catch (error) {
+    if (!/pipeline_stage_id/i.test(String((error as Error)?.message || ""))) throw error;
+    return fetchAllByRange<ResponseApplicationRow>((from, to) =>
+      supabase
+        .from("resume_db_applications")
+        .select("id, job_link, applied_at")
+        .eq("user_id", userId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+  }
 }
 
 /** @deprecated Prefer range-scoped helpers above. */
