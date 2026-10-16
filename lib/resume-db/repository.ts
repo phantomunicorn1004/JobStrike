@@ -8,6 +8,7 @@ import { DEFAULT_TIMEZONE, endOfDayUtcIso, normalizeTimeZone, startOfDayUtcIso }
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 import type { ProfileAutofill } from "@/lib/resume-db/profile-autofill";
 import { atsPlatformFromLink, atsPlatformLinkPatterns, countAtsPlatforms } from "@/lib/ats-platform";
+import { jobLinksMatch } from "@/lib/job-url";
 
 type DbRow = {
   id: number;
@@ -219,6 +220,29 @@ export async function listApplications(userId: string): Promise<ResumeDbApplicat
       .range(from, to),
   );
   return data.map(mapRow);
+}
+
+/**
+ * An earlier application of this profile with the same job (links compared the
+ * way the extension and scraper compare them), or null.
+ */
+export async function findApplicationByJobLink(
+  userId: string,
+  profileId: number,
+  jobLink: string,
+): Promise<{ id: number; jobLink: string } | null> {
+  const supabase = getSupabaseAdminClient();
+  const rows = await fetchAllByRange<{ id: number; job_link: string | null }>((from, to) =>
+    supabase
+      .from("resume_db_applications")
+      .select("id, job_link")
+      .eq("user_id", userId)
+      .eq("profile_id", profileId)
+      .order("id", { ascending: false })
+      .range(from, to),
+  );
+  const hit = rows.find((row) => jobLinksMatch(row.job_link, jobLink));
+  return hit ? { id: hit.id, jobLink: hit.job_link || "" } : null;
 }
 
 /** The user's registered bids per ATS platform, most used first. */

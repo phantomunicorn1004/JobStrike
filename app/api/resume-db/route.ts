@@ -156,8 +156,9 @@ export async function GET(request: NextRequest) {
     // needs the rows only: no total, pipeline stages or filter options.
     if (searchParams.get("lite") === "1") {
       const entries = await listApplicationsWithFilters(userId, { page, pageSize });
+      // Notes hold whole job descriptions; the duplicate check never reads them.
       return corsJson({
-        resumes: entries.map((entry) => mapForList(entry, timeZone)),
+        resumes: entries.map((entry) => ({ ...mapForList(entry, timeZone), note: "" })),
         page,
         pageSize,
       });

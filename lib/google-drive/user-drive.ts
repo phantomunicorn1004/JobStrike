@@ -45,6 +45,18 @@ async function driveFromRefreshToken(
   return google.drive({ version: "v3", auth });
 }
 
+/** Google refused the saved sign-in: revoked, or expired (weekly while the OAuth app is in Testing). */
+export const DRIVE_RECONNECT_MESSAGE =
+  "Google Drive sign-in has expired. Reconnect Google Drive on the website (Settings → Google Drive), then register again.";
+
+function isExpiredGrant(error: unknown): boolean {
+  const e = error as { message?: string; response?: { data?: { error?: string } } } | null;
+  return (
+    e?.response?.data?.error === "invalid_grant" ||
+    /invalid_grant|token has been expired or revoked/i.test(String(e?.message || ""))
+  );
+}
+
 export async function uploadBufferToUserGoogleDrive(
   userId: string,
   origin: string,
@@ -52,54 +64,59 @@ export async function uploadBufferToUserGoogleDrive(
   fileName: string,
   mimeType: string,
 ): Promise<DriveUploadResult> {
-  const settings = await getConnectedUserDriveSettings(userId);
-  if (!settings) {
-    throw new Error(
-      "Google Drive is not connected. Open Settings on the website and connect your Google account.",
+  try {
+    const settings = await getConnectedUserDriveSettings(userId);
+    if (!settings) {
+      throw new Error(
+        "Google Drive is not connected. Open Settings on the website and connect your Google account.",
+      );
+    }
+
+    const drive = await driveFromRefreshToken(
+      userId,
+      origin,
+      settings.refreshToken,
     );
+    const folderId = normalizeGoogleDriveFolderId(settings.folderId || "");
+    const parents = folderId ? [folderId] : undefined;
+
+    const created = await drive.files.create({
+      requestBody: {
+        name: fileName,
+        parents,
+      },
+      media: {
+        mimeType,
+        body: Readable.from(buffer),
+      },
+      fields: "id, name, webViewLink",
+    });
+
+    const fileId = created.data.id;
+    if (!fileId) {
+      throw new Error("Google Drive upload did not return a file id.");
+    }
+
+    await drive.permissions.create({
+      fileId,
+      requestBody: {
+        role: "reader",
+        type: "anyone",
+      },
+    });
+
+    const webViewLink =
+      created.data.webViewLink || googleDriveViewUrl(fileId);
+
+    return {
+      fileId,
+      webViewLink,
+      name: created.data.name || fileName,
+    };
+  } catch (error) {
+    if (isExpiredGrant(error)) throw new Error(DRIVE_RECONNECT_MESSAGE);
+    throw error;
   }
-
-  const drive = await driveFromRefreshToken(
-    userId,
-    origin,
-    settings.refreshToken,
-  );
-  const folderId = normalizeGoogleDriveFolderId(settings.folderId || "");
-  const parents = folderId ? [folderId] : undefined;
-
-  const created = await drive.files.create({
-    requestBody: {
-      name: fileName,
-      parents,
-    },
-    media: {
-      mimeType,
-      body: Readable.from(buffer),
-    },
-    fields: "id, name, webViewLink",
-  });
-
-  const fileId = created.data.id;
-  if (!fileId) {
-    throw new Error("Google Drive upload did not return a file id.");
-  }
-
-  await drive.permissions.create({
-    fileId,
-    requestBody: {
-      role: "reader",
-      type: "anyone",
-    },
-  });
-
-  const webViewLink =
-    created.data.webViewLink || googleDriveViewUrl(fileId);
-
-  return {
-    fileId,
-    webViewLink,
-    name: created.data.name || fileName,
-  };
 }
 
 export async function deleteUserGoogleDriveFile(

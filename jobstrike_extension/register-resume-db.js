@@ -1131,6 +1131,36 @@
     input.addEventListener('blur', persist);
   }
 
+  /**
+   * fetch() for the website, with a time limit. Reads (GET) are tried once more
+   * after a dropped connection; a POST is not, so a registration is never sent twice.
+   */
+  async function backendFetch(url, init = {}, timeoutMs = 20000) {
+    const method = String(init.method || 'GET').toUpperCase();
+    const attempts = method === 'GET' ? 2 : 1;
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      } catch (error) {
+        lastError = error;
+        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+          throw new Error(
+            `The website did not answer within ${Math.round(timeoutMs / 1000)} seconds. Check your connection and try again.`
+          );
+        }
+        // "Failed to fetch": the connection dropped (ERR_CONNECTION_CLOSED / RESET).
+        if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+    throw new Error(
+      `Could not reach the website (${lastError?.message || 'connection failed'}). Check your connection and try again.`
+    );
+  }
+
+  /** The download in progress, shared by every check that needs the list meanwhile. */
+  let applicationsInFlight = null;
+
   async function fetchResumeDbApplications(options = {}) {
     const { force = false } = options;
     const now = Date.now();
@@ -1142,16 +1172,26 @@
     ) {
       return applicationsCache.resumes;
     }
+    // A download already running is as fresh as a new one would be.
+    if (applicationsInFlight) return applicationsInFlight;
+    applicationsInFlight = downloadResumeDbApplications().finally(() => {
+      applicationsInFlight = null;
+    });
+    return applicationsInFlight;
+  }
 
+  async function downloadResumeDbApplications() {
+    const now = Date.now();
     // The list endpoint pages at 25 by default. Reading only the first page
     // meant a job registered 26+ applications ago was no longer seen as a
     // duplicate. Read every page, at the largest size the endpoint allows.
     const config = await getBackendConfig();
     const resumes = [];
     for (let page = 1; page <= APPLICATIONS_MAX_PAGES; page += 1) {
-      const res = await fetch(
+      const res = await backendFetch(
         `${config.baseUrl}/api/resume-db?page=${page}&pageSize=${APPLICATIONS_PAGE_SIZE}&lite=1`,
-        { headers: apiHeaders(config), cache: 'no-store' }
+        { headers: apiHeaders(config), cache: 'no-store' },
+        30000
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1163,6 +1203,15 @@
     }
     applicationsCache = { at: now, resumes };
     return resumes;
+  }
+
+  /** True when the list already in memory holds this job for the selected profile. */
+  function cachedJobLinkDuplicate(jobLink) {
+    const profileId = document.getElementById('regProfileId')?.value?.trim();
+    if (!profileId || !String(jobLink || '').trim() || !Array.isArray(applicationsCache.resumes)) return false;
+    return applicationsCache.resumes.some(
+      (app) => String(app.profileId) === String(profileId) && applicationSameJobLink(app, jobLink)
+    );
   }
 
   function invalidateApplicationsCache() {
@@ -1454,7 +1503,7 @@
     const jobTitle = document.getElementById('regJobTitle')?.value?.trim() || '';
     const companyName = document.getElementById('regCompany')?.value?.trim() || '';
     const config = await getBackendConfig();
-    const res = await fetch(`${config.baseUrl}/api/job-scraper/blocked-jobs`, {
+    const res = await backendFetch(`${config.baseUrl}/api/job-scraper/blocked-jobs`, {
       method: 'POST',
       headers: { ...apiHeaders(config), 'Content-Type': 'application/json' },
       body: JSON.stringify({ jobLink, jobTitle, companyName })
@@ -1625,7 +1674,7 @@
   }
 
   async function loginWithCredentials(baseUrl, username, password) {
-    const res = await fetch(`${normalizeBackendUrl(baseUrl)}/api/auth/login`, {
+    const res = await backendFetch(`${normalizeBackendUrl(baseUrl)}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -1647,7 +1696,30 @@
     return data;
   }
 
+  /** The sign-in check in progress; a failure is not re-asked for a few seconds. */
+  let authCheckInFlight = null;
+  const AUTH_RETRY_AFTER_FAILURE_MS = 10 * 1000;
+
   async function checkBackendConnection(options = {}) {
+    const { skipDriveBadge = false } = options;
+    if (authCheckInFlight) {
+      const ok = await authCheckInFlight;
+      if (ok && !skipDriveBadge) void updateRegisterDriveBadge();
+      return ok;
+    }
+    const failedRecently =
+      !options.force &&
+      authCache.checkedAt &&
+      !authCache.ok &&
+      Date.now() - authCache.checkedAt < AUTH_RETRY_AFTER_FAILURE_MS;
+    if (failedRecently) return false;
+    authCheckInFlight = checkBackendConnectionNow(options).finally(() => {
+      authCheckInFlight = null;
+    });
+    return authCheckInFlight;
+  }
+
+  async function checkBackendConnectionNow(options = {}) {
     const { force = false, skipDriveBadge = false } = options;
     const now = Date.now();
     if (
@@ -1680,7 +1752,7 @@
     }
 
     try {
-      const res = await fetch(`${config.baseUrl}/api/auth/me`, {
+      const res = await backendFetch(`${config.baseUrl}/api/auth/me`, {
         headers: apiHeaders(config),
         credentials: 'include',
         cache: 'no-store'
@@ -1726,7 +1798,7 @@
       return null;
     }
     try {
-      const res = await fetch(`${config.baseUrl}/api/integrations/google-drive/status`, {
+      const res = await backendFetch(`${config.baseUrl}/api/integrations/google-drive/status`, {
         headers: apiHeaders(config),
         cache: 'no-store'
       });
@@ -1894,7 +1966,7 @@
     select.disabled = true;
 
     try {
-      const res = await fetch(`${config.baseUrl}/api/profiles`, {
+      const res = await backendFetch(`${config.baseUrl}/api/profiles`, {
         headers: apiHeaders(config),
         cache: 'no-store'
       });
@@ -1939,14 +2011,12 @@
     }
   }
 
-  async function fetchProfileRecord(profileId) {
-    const id = String(profileId || '').trim();
-    if (!id) return null;
-    const config = await getBackendConfig();
-    if (!isAuthenticated(config)) {
-      throw new Error('Not signed in. Open Settings and sign in first.');
-    }
-    const res = await fetch(`${config.baseUrl}/api/profiles?full=1`, {
+  /** Full profiles, read at most once per two minutes: every job check asks for them. */
+  const PROFILE_RECORDS_TTL_MS = 2 * 60 * 1000;
+  let profileRecordsCache = { at: 0, key: '', list: null, pending: null };
+
+  async function readProfileRecords(config, cacheKey) {
+    const res = await backendFetch(`${config.baseUrl}/api/profiles?full=1`, {
       headers: apiHeaders(config),
       cache: 'no-store'
     });
@@ -1955,7 +2025,36 @@
       throw new Error(data.error || `Failed to load profile (${res.status}).`);
     }
     const list = Array.isArray(data.profiles) ? data.profiles : [];
-    return list.find((profile) => String(profile.id) === id) || null;
+    profileRecordsCache = { at: Date.now(), key: cacheKey, list, pending: null };
+    return list;
+  }
+
+  async function fetchProfileRecord(profileId) {
+    const id = String(profileId || '').trim();
+    if (!id) return null;
+    const config = await getBackendConfig();
+    if (!isAuthenticated(config)) {
+      throw new Error('Not signed in. Open Settings and sign in first.');
+    }
+    const cacheKey = `${config.baseUrl}|${config.username || ''}`;
+    const cache = profileRecordsCache;
+    let list = null;
+    if (cache.key === cacheKey && cache.list && Date.now() - cache.at < PROFILE_RECORDS_TTL_MS) {
+      list = cache.list;
+    } else if (cache.key === cacheKey && cache.pending) {
+      // Checks for several open tabs share one request.
+      list = await cache.pending;
+    } else {
+      const pending = readProfileRecords(config, cacheKey);
+      profileRecordsCache = { at: 0, key: cacheKey, list: null, pending };
+      try {
+        list = await pending;
+      } catch (error) {
+        profileRecordsCache = { at: 0, key: '', list: null, pending: null };
+        throw error;
+      }
+    }
+    return (list || []).find((profile) => String(profile.id) === id) || null;
   }
 
   function escapeHtml(text) {
@@ -2425,11 +2524,15 @@
       formData.append('coverLetter', coverFile, coverFile.name);
     }
 
-    const res = await fetch(`${config.baseUrl}/api/resume-db/register`, {
-      method: 'POST',
-      headers: apiHeaders(config),
-      body: formData
-    });
+    const res = await backendFetch(
+      `${config.baseUrl}/api/resume-db/register`,
+      {
+        method: 'POST',
+        headers: apiHeaders(config),
+        body: formData
+      },
+      120000
+    );
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -4633,8 +4736,9 @@
             );
           }
 
-          const linkDup = await checkFieldDuplicate('link', showStatus, { quietIfNone: true });
-          if (linkDup.level === 'duplicate') {
+          // Only the list already loaded is consulted: the website checks the link
+          // itself before saving, so Register never waits for a full download.
+          if (cachedJobLinkDuplicate(document.getElementById('regJobLink')?.value || '')) {
             throw new Error(
               'Duplicate job link — already in Resume DB for this profile. Change the job link or select a different profile.'
             );

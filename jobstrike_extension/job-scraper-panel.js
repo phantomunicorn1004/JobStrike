@@ -74,8 +74,12 @@
     freshnessWindowHc: '8h',
     /** Hide jobs whose apply link stays on a job board (easy apply) instead of the employer. */
     directLinksOnly: true,
+    /** Keep only the best-scored job of each company in a result. */
+    onePerCompany: true,
     /** Hide jobs the source marks as requiring a security clearance. */
     hideClearanceRequired: true,
+    /** Hide jobs the source marks as reposted: older openings put up again, already seen by many. */
+    hideReposts: true,
     /** Hide jobs the source places in another country (authorised to work in the US only). */
     usOnly: true,
     /** Hide jobs the source marks as requiring a Master's or doctorate. */
@@ -190,7 +194,8 @@
   // Five full reads of the feed (a full read is about 30 requests).
   const JR_DAILY_REQUESTS = 150;
   // What one full read needs; a run with less than this left is asked about first.
-  const JR_FULL_READ_REQUESTS = 30;
+  // A full read of the unordered feed: 50 pages of 20 rows, one request each.
+  const JR_FULL_READ_REQUESTS = 52;
   const JR_MIN_GAP_MS = 3 * 60 * 60 * 1000;
   const JR_COOLDOWN_MS = 4 * 60 * 60 * 1000;
 
@@ -388,7 +393,10 @@
     return isAggregatorLink(job?.apply_url);
   }
 
-  const EMPLOYER_LOOKUP_MAX = 150;
+  // The employer-board lookup found 1 posting in 306 tries over three runs (the
+  // job-board listings are mostly agency posts) and cost minutes per scrape, so it
+  // no longer runs. Raise this to switch it back on.
+  const EMPLOYER_LOOKUP_MAX = 0;
 
   /**
    * Staffing and recruiting firms. Their postings are for someone else's job,
@@ -782,10 +790,12 @@
     }
     if (stats.removedAts) bits.push(`${stats.removedAts} blocked ATS`);
     if (stats.removedAggregator) bits.push(`${stats.removedAggregator} easy-apply`);
+    if (stats.removedRepost) bits.push(`${stats.removedRepost} reposts`);
     if (stats.removedClearance) bits.push(`${stats.removedClearance} clearance`);
     if (stats.removedForeign) bits.push(`${stats.removedForeign} outside US`);
     if (stats.removedDegree) bits.push(`${stats.removedDegree} higher degree`);
     if (stats.removedLanguage) bits.push(`${stats.removedLanguage} other language`);
+    if (stats.removedSameCompany) bits.push(`${stats.removedSameCompany} same company`);
     if (stats.removedRegisteredJobs) bits.push(`${stats.removedRegisteredJobs} reg. jobs`);
     if (stats.removedRegisteredCompanies) {
       bits.push(`${stats.removedRegisteredCompanies} reg. cos`);
@@ -946,10 +956,12 @@
       ? (afterBlocks || []).filter((job) => !hiddenByDirectLinks(job))
       : afterBlocks || [];
     const removedAggregator = (afterBlocks || []).length - direct.length;
+    const fresh = state.prefs.hideReposts ? direct.filter((job) => job.repost !== true) : direct;
+    const removedRepost = direct.length - fresh.length;
     const cleared = state.prefs.hideClearanceRequired
-      ? direct.filter((job) => job.clearance_required !== true)
-      : direct;
-    const removedClearance = direct.length - cleared.length;
+      ? fresh.filter((job) => job.clearance_required !== true)
+      : fresh;
+    const removedClearance = fresh.length - cleared.length;
     // Only a stated, different country excludes; an unknown one does not.
     const domestic = state.prefs.usOnly
       ? cleared.filter((job) => !job.country_code || /^(us|usa)$/i.test(String(job.country_code).trim()))
@@ -964,6 +976,24 @@
       : degreeOk;
     const removedLanguage = degreeOk.length - languageOk.length;
     let filtered = sortBidJobs(languageOk);
+    // One bid per company: the list is in bid order, so the first job of each
+    // company is its best one. Names are compared the way the duplicate check does.
+    let removedSameCompany = 0;
+    if (state.prefs.onePerCompany) {
+      const matcher = window.SmartJobCompanyName?.companiesMatch;
+      const kept = [];
+      const keptCompanies = [];
+      for (const job of filtered) {
+        const company = String(job.company_name || '').trim();
+        if (company && keptCompanies.some((other) => (matcher ? matcher(other, company) : other.toLowerCase() === company.toLowerCase()))) {
+          removedSameCompany += 1;
+          continue;
+        }
+        if (company) keptCompanies.push(company);
+        kept.push(job);
+      }
+      filtered = kept;
+    }
 
     state.filteredJobs = filtered;
     state.stats = {
@@ -980,10 +1010,12 @@
       removedRegisteredJobs: stats.removedRegisteredJobs,
       removedRegisteredCompanies: stats.removedRegisteredCompanies,
       removedAggregator,
+      removedRepost,
       removedClearance,
       removedForeign,
       removedDegree,
       removedLanguage,
+      removedSameCompany,
       remaining: filtered.length,
       registeredJobCount: state.registeredJobs.length,
       registeredCompanyCount: state.registeredCompanies.length,
@@ -1619,9 +1651,11 @@
       ['jsFilterRegisteredCompanies', 'excludeRegisteredCompanies'],
       ['jsDirectLinksOnly', 'directLinksOnly'],
       ['jsHideClearance', 'hideClearanceRequired'],
+      ['jsHideReposts', 'hideReposts'],
       ['jsUsOnly', 'usOnly'],
       ['jsHideDegree', 'hideAdvancedDegree'],
       ['jsHideLanguage', 'hideForeignLanguage'],
+      ['jsOnePerCompany', 'onePerCompany'],
       ['jsUseJobright', 'useJobright'],
       ['jsUseHiringCafe', 'useHiringCafe'],
     ];
@@ -2115,10 +2149,12 @@
         bits.push(`${state.stats.employerLinks.found} moved to employer link`);
       }
       if (state.stats?.removedAggregator) bits.push(`${state.stats.removedAggregator} easy-apply hidden`);
+      if (state.stats?.removedRepost) bits.push(`${state.stats.removedRepost} reposts`);
       if (state.stats?.removedClearance) bits.push(`${state.stats.removedClearance} clearance required`);
       if (state.stats?.removedForeign) bits.push(`${state.stats.removedForeign} outside US`);
       if (state.stats?.removedDegree) bits.push(`${state.stats.removedDegree} Master's/PhD required`);
       if (state.stats?.removedLanguage) bits.push(`${state.stats.removedLanguage} other language required`);
+      if (state.stats?.removedSameCompany) bits.push(`${state.stats.removedSameCompany} more from the same company`);
       if (state.stats?.removedRegisteredJobs) {
         bits.push(`${state.stats.removedRegisteredJobs} reg. jobs`);
       }
@@ -4428,9 +4464,11 @@
       ['jsFilterRegisteredCompanies', 'excludeRegisteredCompanies'],
       ['jsDirectLinksOnly', 'directLinksOnly'],
       ['jsHideClearance', 'hideClearanceRequired'],
+      ['jsHideReposts', 'hideReposts'],
       ['jsUsOnly', 'usOnly'],
       ['jsHideDegree', 'hideAdvancedDegree'],
       ['jsHideLanguage', 'hideForeignLanguage'],
+      ['jsOnePerCompany', 'onePerCompany'],
     ].forEach(([id, key]) => {
       document.getElementById(id)?.addEventListener('change', async (event) => {
         state.prefs[key] = Boolean(event.target.checked);
@@ -4604,10 +4642,12 @@
             blockedCompanies: stats.removedBlockedCompanies || 0,
             blockedAts: stats.removedAts || 0,
             easyApplyOrAggregator: stats.removedAggregator || 0,
+            repost: stats.removedRepost || 0,
             clearanceRequired: stats.removedClearance || 0,
             outsideUS: stats.removedForeign || 0,
             higherDegreeRequired: stats.removedDegree || 0,
             otherLanguageRequired: stats.removedLanguage || 0,
+            sameCompany: stats.removedSameCompany || 0,
             registeredJobs: stats.removedRegisteredJobs || 0,
             registeredCompanies: stats.removedRegisteredCompanies || 0,
           },

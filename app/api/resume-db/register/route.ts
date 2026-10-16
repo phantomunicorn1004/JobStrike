@@ -6,6 +6,7 @@ import { isGoogleOAuthWebConfigured } from "@/lib/google-drive/oauth-web";
 import { isUserGoogleDriveConnected } from "@/lib/google-drive/user-drive";
 import {
   createApplication,
+  findApplicationByJobLink,
   getProfileById,
 } from "@/lib/resume-db/repository";
 import { resolveRegisterFiles } from "@/lib/resume-db/resolve-register-files";
@@ -19,6 +20,7 @@ function errorStatus(message: string): number {
   const lower = message.toLowerCase();
   if (lower.includes("unauthorized")) return 401;
   if (lower.includes("required") || lower.includes("invalid")) return 400;
+  if (lower.includes("reconnect google drive")) return 400;
   return 500;
 }
 
@@ -70,9 +72,23 @@ export async function POST(request: NextRequest) {
       return corsJson({ error: "profileId is required." }, { status: 400 });
     }
 
-    const profile = await getProfileById(user.id, profileId);
+    const [profile, duplicate] = await Promise.all([
+      getProfileById(user.id, profileId),
+      findApplicationByJobLink(user.id, profileId, jobLink),
+    ]);
     if (!profile) {
       return corsJson({ error: "Selected profile not found." }, { status: 400 });
+    }
+    // Checked here, before any upload: the extension no longer downloads every
+    // application to find out, and two panels cannot both register one job.
+    if (duplicate) {
+      return corsJson(
+        {
+          error: `Duplicate job link — already in Resume DB for this profile (#${duplicate.id}).`,
+          duplicateId: duplicate.id,
+        },
+        { status: 409 },
+      );
     }
 
     const entryId = newEntryId();
