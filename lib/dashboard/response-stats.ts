@@ -1,14 +1,19 @@
-import { atsPlatformFromLink } from "@/lib/ats-platform";
-import { getDayKeyInTimeZone, getHourInTimeZone } from "@/lib/timezone";
 import type { PipelineStageRow } from "@/lib/dashboard/stats";
+import {
+  REJECTION_STAGE_RE,
+  responseStageIds,
+  type StageStatRow,
+} from "@/lib/dashboard/stage-stats";
 
-/** One registered application, as much as the response statistics need. */
+/** One registered application, as loaded for the statistics. */
 export type ResponseApplicationRow = {
   id?: number;
   job_link?: string | null;
   applied_at: string;
   /** Current pipeline column; null while the bid is only registered. */
   pipeline_stage_id?: string | null;
+  profile_id?: number | null;
+  candidate_name?: string | null;
 };
 
 export type ResponseStage = { id: string; name: string };
@@ -17,9 +22,9 @@ export type ResponseRow = {
   key: string;
   label: string;
   applied: number;
-  /** Moved past the first pipeline column: any answer, a rejection included. */
+  /** Has been in any board column, a rejection included. */
   heardBack: number;
-  /** For each later, non-rejection column: applications that got at least that far. */
+  /** For each later, non-rejection column: applications that have been in it. */
   reached: Record<string, number>;
   responseRate: number;
 };
@@ -32,9 +37,6 @@ export type ResponseStats = {
   byWeekday: ResponseRow[];
   totals: ResponseRow;
 };
-
-/** A column that records a "no": an answer, but not progress. */
-const REJECTION_STAGE_RE = /reject|declin|decline|closed|not selected|no offer|ghost|withdraw/i;
 
 /** Blocks of the day matching the bidding schedule (hours in the user's time zone). */
 const TIME_BLOCKS: Array<{ key: string; label: string; from: number; to: number }> = [
@@ -65,56 +67,33 @@ function finish(row: ResponseRow): ResponseRow {
   };
 }
 
-/** Hours and minutes of the day, in the user's time zone, as a decimal hour (13.5 = 1:30 PM). */
-function decimalHour(iso: string, timeZone: string): number {
-  const hour = getHourInTimeZone(iso, timeZone);
-  if (hour < 0) return -1;
-  const minute = Number(
-    new Intl.DateTimeFormat("en-US", { timeZone, minute: "2-digit" }).format(new Date(iso)),
-  );
-  return hour + (Number.isFinite(minute) ? minute / 60 : 0);
-}
-
-function timeBlockOf(iso: string, timeZone: string) {
-  let hour = decimalHour(iso, timeZone);
-  if (hour < 0) return null;
-  if (hour < 1) hour += 24;
-  return TIME_BLOCKS.find((block) => hour >= block.from && hour < block.to) ?? null;
-}
-
-function weekdayOf(iso: string, timeZone: string): string {
-  const day = getDayKeyInTimeZone(iso, timeZone);
-  if (!day) return "";
-  // Noon UTC on that calendar day: the weekday does not depend on the zone any more.
-  const index = (new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7;
-  return WEEKDAYS[index];
-}
-
-/** Platform names; employers' own careers sites are counted together. */
-function platformOf(link: string | null | undefined): string {
-  const name = atsPlatformFromLink(link);
-  if (!name) return "No link";
-  return name.includes(".") ? "Company sites" : name;
-}
-
 /**
  * How many applications got an answer, by platform and by when they were sent.
- * "Heard back" means the card moved past the first pipeline column (a rejection
- * column counts as an answer); each later column counts applications that got
- * at least that far.
+ * Works from each application's pipeline history (the same rows as the stage
+ * statistics), so a job rejected after an interview still counts as reaching
+ * the interview, and both cards agree.
  */
 export function buildResponseStats(
-  rows: ResponseApplicationRow[],
+  rows: StageStatRow[],
   stageRows: PipelineStageRow[],
   timeZone: string,
 ): ResponseStats {
   const ordered = [...stageRows].sort((a, b) => a.sort_order - b.sort_order);
-  const first = ordered[0];
-  const orderOf = new Map(ordered.map((stage, index) => [stage.id, index]));
-  const later = ordered.slice(1);
-  const progressStages = later
-    .filter((stage) => !REJECTION_STAGE_RE.test(stage.name))
+  const known = new Set(ordered.map((stage) => stage.id));
+  const responseIds = responseStageIds(ordered);
+  const rejection = new Set(ordered.filter((stage) => REJECTION_STAGE_RE.test(stage.name)).map((stage) => stage.id));
+  const progressStages = ordered
+    .filter((stage) => !rejection.has(stage.id))
     .map((stage) => ({ id: stage.id, name: stage.name }));
+
+  // One formatter for the whole run: building one per row is slow.
+  const clock = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    weekday: "long",
+    hourCycle: "h23",
+  });
 
   const platforms = new Map<string, ResponseRow>();
   const blocks = new Map(TIME_BLOCKS.map((block) => [block.key, emptyRow(block.key, block.label, progressStages)]));
@@ -122,27 +101,28 @@ export function buildResponseStats(
   const totals = emptyRow("all", "All platforms", progressStages);
 
   for (const row of rows) {
-    const stageIndex = row.pipeline_stage_id != null ? orderOf.get(row.pipeline_stage_id) : undefined;
-    const stage = stageIndex != null ? ordered[stageIndex] : undefined;
-    const heardBack = stage != null && first != null && stage.id !== first.id;
-    const progressed = stage != null && !REJECTION_STAGE_RE.test(stage.name);
+    const visited = row.v.filter((id) => known.has(id));
+    const heardBack = visited.some((id) => responseIds.has(id));
 
     const targets: ResponseRow[] = [totals];
-    const platform = platformOf(row.job_link);
-    if (!platforms.has(platform)) platforms.set(platform, emptyRow(platform, platform, progressStages));
-    targets.push(platforms.get(platform)!);
-    const block = timeBlockOf(row.applied_at, timeZone);
-    if (block) targets.push(blocks.get(block.key)!);
-    const weekday = weekdayOf(row.applied_at, timeZone);
-    if (weekday) targets.push(weekdays.get(weekday)!);
+    if (!platforms.has(row.ats)) platforms.set(row.ats, emptyRow(row.ats, row.ats, progressStages));
+    targets.push(platforms.get(row.ats)!);
+
+    const date = new Date(row.at);
+    if (!Number.isNaN(date.getTime())) {
+      const parts = Object.fromEntries(clock.formatToParts(date).map((part) => [part.type, part.value]));
+      let hour = Number(parts.hour) + Number(parts.minute) / 60;
+      if (hour < 1) hour += 24;
+      const block = TIME_BLOCKS.find((item) => hour >= item.from && hour < item.to);
+      if (block) targets.push(blocks.get(block.key)!);
+      if (weekdays.has(parts.weekday)) targets.push(weekdays.get(parts.weekday)!);
+    }
 
     for (const target of targets) {
       target.applied += 1;
       if (heardBack) target.heardBack += 1;
-      if (progressed && stageIndex != null) {
-        for (const column of progressStages) {
-          if ((orderOf.get(column.id) ?? Infinity) <= stageIndex) target.reached[column.id] += 1;
-        }
+      for (const column of progressStages) {
+        if (visited.includes(column.id)) target.reached[column.id] += 1;
       }
     }
   }

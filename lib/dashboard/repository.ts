@@ -92,7 +92,7 @@ export async function listApplicationsForResponseStats(
     return await fetchAllByRange<ResponseApplicationRow>((from, to) =>
       supabase
         .from("resume_db_applications")
-        .select("id, job_link, applied_at, pipeline_stage_id")
+        .select("id, job_link, applied_at, pipeline_stage_id, profile_id, candidate_name")
         .eq("user_id", userId)
         .order("id", { ascending: true })
         .range(from, to),
@@ -102,7 +102,7 @@ export async function listApplicationsForResponseStats(
     return fetchAllByRange<ResponseApplicationRow>((from, to) =>
       supabase
         .from("resume_db_applications")
-        .select("id, job_link, applied_at")
+        .select("id, job_link, applied_at, profile_id, candidate_name")
         .eq("user_id", userId)
         .order("id", { ascending: true })
         .range(from, to),

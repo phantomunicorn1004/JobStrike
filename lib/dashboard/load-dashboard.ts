@@ -6,6 +6,7 @@ import { countApplicationsWithFilters } from "@/lib/resume-db/repository";
 import { listJobScraperCandidates } from "@/lib/job-scraper-repository";
 import { colorForCandidateKey } from "@/lib/dashboard/candidate-colors";
 import { buildResponseStats, type ResponseStats } from "@/lib/dashboard/response-stats";
+import { buildStageStatRows, type StageStatRow } from "@/lib/dashboard/stage-stats";
 import {
   listApplicationsForResponseStats,
   listApplicationCandidateKeysForDashboard,
@@ -74,6 +75,10 @@ export type DashboardData = {
   candidates: Array<{ key: string; label: string; color?: string }>;
   /** Answers by platform and by when the bid was sent, all time. */
   responseStats: ResponseStats | null;
+  /** Pipeline columns in board order. */
+  pipelineStages: Array<{ id: string; name: string }>;
+  /** Every application with the pipeline columns it has been in (any period is computed in the browser). */
+  stageStatRows: StageStatRow[];
   userId: string;
 };
 
@@ -139,8 +144,6 @@ export async function loadDashboardData(
   const supabase = getSupabaseAdminClient();
   const [
     applicationsInRange,
-    allCandidateRows,
-    totalApplicationsAll,
     jobs,
     techJobs,
     stagesRes,
@@ -148,8 +151,6 @@ export async function loadDashboardData(
     responseRows,
   ] = await Promise.all([
     listApplicationsForDashboardRange(user.id, bidFrom, bidTo, timezone),
-    listApplicationCandidateKeysForDashboard(user.id),
-    countApplicationsWithFilters(user.id, {}),
     listPipelineJobsForDashboard(user.id),
     listTechnicalJobsForDashboard(user.id),
     supabase
@@ -163,6 +164,15 @@ export async function loadDashboardData(
       return null;
     }),
   ]);
+
+  // Every application is read once (with its link and stage) and serves the
+  // profile counts, the total and the statistics; the profile columns alone are
+  // read only if that read failed.
+  const allCandidateRows: ResumeApplicationRow[] =
+    responseRows ?? (await listApplicationCandidateKeysForDashboard(user.id));
+  const totalApplicationsAll = responseRows
+    ? responseRows.length
+    : await countApplicationsWithFilters(user.id, {});
 
   let stages = (stagesRes.data ?? []) as PipelineStageRow[];
   if (stagesRes.error || stages.length === 0) {
@@ -247,6 +257,24 @@ export async function loadDashboardData(
     profileLabels,
   );
 
+  // Each application with every pipeline column it has been in; both statistics
+  // cards are computed from these rows, so they always agree.
+  const stageStatRows = responseRows
+    ? buildStageStatRows(
+        responseRows,
+        [
+          ...jobs.map((row) => ({ text: row.note, stageId: "applied", stageDates: row.stage_dates })),
+          ...techJobs.map((row) => ({
+            text: row.job_description,
+            stageId: row.stage_id ?? "technical",
+            stageDates: row.stage_dates,
+          })),
+        ],
+        profileLabels,
+        timezone,
+      )
+    : null;
+
   const candidatesWithColor = candidates.map((candidate) => ({
     ...candidate,
     color: colorForCandidateKey(candidate.key),
@@ -310,7 +338,11 @@ export async function loadDashboardData(
       color: colorForCandidateKey(c.key),
     })),
     candidates: candidatesWithColor,
-    responseStats: responseRows ? buildResponseStats(responseRows, stages, timezone) : null,
+    responseStats: stageStatRows ? buildResponseStats(stageStatRows, stages, timezone) : null,
+    pipelineStages: [...stages]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((stage) => ({ id: stage.id, name: stage.name })),
+    stageStatRows: stageStatRows ?? [],
     userId: user.id,
   };
 }

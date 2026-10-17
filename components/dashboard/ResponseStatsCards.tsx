@@ -33,7 +33,11 @@ function ResponseTable({
   showEmpty?: boolean;
 }) {
   const shown = showEmpty ? rows : rows.filter((row) => row.applied > 0);
-  const best = Math.max(0, ...shown.filter((r) => r.applied >= MIN_BIDS_FOR_RATE).map((r) => r.responseRate));
+  const comparable = shown.filter((r) => r.applied >= MIN_BIDS_FOR_RATE);
+  const best = Math.max(0, ...comparable.map((r) => r.responseRate));
+  // Only name a winner when there is something to compare it with.
+  const bestKey =
+    comparable.length >= 2 && best > 0 ? comparable.find((r) => r.responseRate === best)?.key : undefined;
   if (shown.length === 0) {
     return <p className="py-6 text-center text-sm text-muted-foreground">No registered applications yet.</p>;
   }
@@ -44,7 +48,7 @@ function ResponseTable({
           <tr className="border-b text-[11px] uppercase tracking-wide text-muted-foreground">
             <th className="py-2 pr-3 text-left font-medium">{firstColumn}</th>
             <th className="px-3 py-2 text-right font-medium">Applied</th>
-            <th className="px-3 py-2 text-right font-medium">Heard back</th>
+            <th className="px-3 py-2 text-right font-medium">Responded</th>
             {stages.map((stage) => (
               <th key={stage.id} className="px-3 py-2 text-right font-medium">
                 {stage.name}
@@ -58,7 +62,16 @@ function ResponseTable({
             const thin = row.applied < MIN_BIDS_FOR_RATE;
             return (
               <tr key={row.key} className="border-b last:border-0">
-                <td className="py-2 pr-3">{row.label}</td>
+                <td className="py-2 pr-3">
+                  <span className="inline-flex items-center gap-1.5">
+                    {row.label}
+                    {row.key === bestKey ? (
+                      <span className="rounded bg-emerald-500/15 px-1.5 py-px text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                        Best
+                      </span>
+                    ) : null}
+                  </span>
+                </td>
                 <td className="px-3 py-2 text-right tabular-nums">{row.applied}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{row.heardBack}</td>
                 {stages.map((stage) => (
@@ -92,19 +105,20 @@ export function ResponseStatsCards({ stats }: { stats: ResponseStats | null | un
   if (!stats) return null;
   const { totals } = stats;
   return (
-    <div className="grid min-w-0 gap-4">
+    <div className="grid min-w-0 gap-4 2xl:grid-cols-2">
       <Card className="min-w-0 border-border/70 shadow-none">
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-medium">By platform</CardTitle>
           <CardDescription className="text-xs">
-            Which boards answer · all time · {totals.applied} applied, {totals.heardBack} heard back (
-            {totals.responseRate.toFixed(1)}%)
+            Which boards answer · all time, selected profiles · {totals.applied} applied, {totals.heardBack}{" "}
+            responded ({totals.responseRate.toFixed(1)}%)
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-1">
           <ResponseTable rows={stats.byPlatform} stages={stats.stages} firstColumn="Platform" />
           <p className="mt-2 text-[11px] text-muted-foreground">
-            Heard back = the card moved past the first pipeline column (a rejection column counts as an answer).
+            Responded = the job has been moved onto the pipeline board, to any column (a rejection counts as an
+            answer); response rate = responded ÷ applied.
             Later columns count applications that got at least that far. Rates from fewer than {MIN_BIDS_FOR_RATE}{" "}
             applications are dimmed.
           </p>
@@ -115,7 +129,9 @@ export function ResponseStatsCards({ stats }: { stats: ResponseStats | null | un
         <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-2">
           <div>
             <CardTitle className="text-base font-medium">By when you applied</CardTitle>
-            <CardDescription className="text-xs">Response rate by the time each application was registered</CardDescription>
+            <CardDescription className="text-xs">
+              Response rate by the time each bid was registered · all time, selected profiles
+            </CardDescription>
           </div>
           <ToggleGroup
             type="single"
