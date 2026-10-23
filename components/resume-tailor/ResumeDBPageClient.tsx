@@ -1767,7 +1767,11 @@ export function ResumeDBPageClient() {
                           className="text-xs tabular-nums text-muted-foreground whitespace-nowrap"
                         >
                           {formatApplied(row.appliedAt, row.date, timezone)}
-                          <MailStatusLine status={mailStatus[row.rowIndex]} />
+                          <MailStatusLine
+                            status={mailStatus[row.rowIndex]}
+                            appliedAt={row.appliedAt}
+                            registered={!row.pipelineStageId && !row.inPipeline}
+                          />
                         </ResizableTableCell>
                         <ResizableTableCell
                           widthPercent={percents.actions}
@@ -1877,8 +1881,22 @@ export function ResumeDBPageClient() {
   );
 }
 
-/** "✓ Confirmed", or the latest email when it says more (interview, rejection…). */
-function MailStatusLine({ status }: { status: MailStatus | undefined }) {
+/** After this many days without any answer, a confirmed application shows "No reply". */
+const NO_REPLY_DAYS = 30;
+
+/**
+ * "✓ Confirmed", the latest email when it says more (interview, rejection…), or "No reply" for a
+ * confirmed application still waiting after NO_REPLY_DAYS (shown only; nothing is changed).
+ */
+function MailStatusLine({
+  status,
+  appliedAt,
+  registered,
+}: {
+  status: MailStatus | undefined;
+  appliedAt: string;
+  registered: boolean;
+}) {
   if (!status) return null;
   const latest = status.latest;
   if (latest && latest.category !== "confirmation" && MAIL_STATUS_STYLE[latest.category]) {
@@ -1893,6 +1911,18 @@ function MailStatusLine({ status }: { status: MailStatus | undefined }) {
     );
   }
   if (!status.confirmedAt) return null;
+  const waitedDays = Math.floor((Date.now() - new Date(appliedAt || status.confirmedAt).getTime()) / 86_400_000);
+  if (registered && waitedDays >= NO_REPLY_DAYS && latest?.category === "confirmation") {
+    return (
+      <span
+        className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-muted-foreground"
+        title={`Confirmed ${new Date(status.confirmedAt).toLocaleDateString()}; no answer since`}
+      >
+        <MailCheck className="h-3 w-3" />
+        No reply · {waitedDays} d
+      </span>
+    );
+  }
   return (
     <span
       className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { serverOpenAI } from "@/lib/ai/server-openai";
+import { applyPendingActions } from "@/lib/mail/actions";
 import { APPLICATION_CATEGORIES } from "@/lib/mail/categories";
 import { classifyMessages, MailAiUnavailableError } from "@/lib/mail/classify";
 import {
@@ -20,7 +21,15 @@ const PARALLEL_BATCHES = 4;
 /** One round takes this many emails from the queue. */
 const ROUND_SIZE = BATCH_SIZE * PARALLEL_BATCHES;
 
-export type ProcessResult = { sorted: number; matched: number; failed: number; aiUnavailable?: boolean };
+export type ProcessResult = {
+  sorted: number;
+  matched: number;
+  failed: number;
+  aiUnavailable?: boolean;
+  /** Board updates made from sorted emails, and suggestions saved. */
+  moved?: number;
+  suggested?: number;
+};
 
 type UserContext = {
   candidates: MatchCandidate[];
@@ -81,7 +90,7 @@ async function sortBatch(batch: PendingMessage[], context: UserContext, result: 
         category: verdict.category,
         confidence: verdict.confidence,
         summary: verdict.summary,
-        extracted: { company: verdict.company, jobTitle: verdict.jobTitle },
+        extracted: { company: verdict.company, jobTitle: verdict.jobTitle, interviewStage: verdict.interviewStage },
         application_id: match?.applicationId ?? null,
         match_score: match?.score ?? null,
         match_reason: match?.reason ?? null,
@@ -97,6 +106,17 @@ async function sortBatch(batch: PendingMessage[], context: UserContext, result: 
  * `userId` limits it to one user (the Inbox page); null takes everyone's (the timer).
  */
 export async function processPendingMessages(userId: string | null, deadline: number): Promise<ProcessResult> {
+  const result = await sortPendingMessages(userId, deadline);
+  // Then the board: sorted emails that were not checked for a move yet.
+  try {
+    Object.assign(result, await applyPendingActions(userId, deadline));
+  } catch (error) {
+    console.error("Board updates from email failed:", error instanceof Error ? error.message : error);
+  }
+  return result;
+}
+
+async function sortPendingMessages(userId: string | null, deadline: number): Promise<ProcessResult> {
   const result: ProcessResult = { sorted: 0, matched: 0, failed: 0 };
   // Checked before any email is taken, so a missing key never uses up their retries.
   if (!serverOpenAI()) return { ...result, aiUnavailable: true };

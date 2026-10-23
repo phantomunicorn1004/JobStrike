@@ -7,7 +7,9 @@ import {
   countInboxViews,
   countPendingMessages,
   listInboxItems,
+  suggestionSummary,
 } from "@/lib/mail/inbox-repository";
+import { listPipelineStages } from "@/lib/resume-db/pipeline-stages";
 import { listProfiles } from "@/lib/resume-db/repository";
 
 const PAGE_SIZE = 40;
@@ -27,12 +29,14 @@ export async function GET(request: NextRequest) {
     };
     const before = params.get("before");
 
-    const [accounts, profiles, page, counts, pending] = await Promise.all([
+    const [accounts, profiles, page, counts, pending, stages, suggestions] = await Promise.all([
       listMailAccounts(user.id),
       listProfiles(user.id),
       listInboxItems(user.id, view, filters, { before: before && !Number.isNaN(Date.parse(before)) ? before : null, limit: PAGE_SIZE }),
       countInboxViews(user.id, INBOX_VIEWS, filters),
       countPendingMessages(user.id),
+      listPipelineStages(),
+      suggestionSummary(user.id),
     ]);
 
     const body: InboxResponse = {
@@ -42,6 +46,8 @@ export async function GET(request: NextRequest) {
       pending,
       hasMailbox: accounts.length > 0,
       profiles: profiles.map((p) => ({ id: p.id, fullName: p.full_name })),
+      stages: stages.map((s) => ({ id: s.id, name: s.name })),
+      suggestions,
     };
     return NextResponse.json(body);
   } catch (error) {

@@ -96,5 +96,36 @@ CREATE TABLE IF NOT EXISTS public.mail_rules (
 
 ALTER TABLE public.mail_rules ENABLE ROW LEVEL SECURITY;
 
+-- Step 5: board updates from emails. Mail received before automation_since only gives suggestions
+-- (the first scan's backlog is reviewed once); later mail moves cards by itself in 'auto' mode.
+ALTER TABLE public.mail_accounts
+  ADD COLUMN IF NOT EXISTS automation_since timestamptz NOT NULL DEFAULT now();
+
+ALTER TABLE public.mail_messages
+  ADD COLUMN IF NOT EXISTS action_checked_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS mail_messages_action_unchecked_idx ON public.mail_messages (received_at) WHERE action_checked_at IS NULL;
+CREATE INDEX IF NOT EXISTS mail_messages_action_status_idx ON public.mail_messages (user_id, action_status);
+
+-- Every board move, from an email, by hand or undone (also feeds the dashboard later).
+CREATE TABLE IF NOT EXISTS public.pipeline_events (
+  id             bigserial PRIMARY KEY,
+  user_id        uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+  application_id bigint NOT NULL REFERENCES public.resume_db_applications(id) ON DELETE CASCADE,
+  type           text NOT NULL DEFAULT 'stage_changed',
+  from_stage     text,                 -- null = Registered (not on the board)
+  to_stage       text,
+  source         text NOT NULL,        -- email / manual
+  ref_id         text,                 -- mail_messages.id for email moves
+  reason         text,
+  at             timestamptz NOT NULL DEFAULT now(),
+  undone_at      timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS pipeline_events_user_idx ON public.pipeline_events (user_id, at DESC);
+CREATE INDEX IF NOT EXISTS pipeline_events_application_idx ON public.pipeline_events (application_id);
+
+ALTER TABLE public.pipeline_events ENABLE ROW LEVEL SECURITY;
+
 -- Ask PostgREST to see the new table right away.
 NOTIFY pgrst, 'reload schema';

@@ -489,7 +489,20 @@ About 2.5–3 weeks in total. Each phase ships on its own, and the first useful 
     Resume DB · All, candidate filter, search, change type, link / unlink, not job-related (and
     ignore sender, which the sync then skips), Add to Resume DB, J/K/Enter/O/X keys.
   - Resume DB: "Confirmed" or the latest email type under the applied date.
-- **Next: Phase 4**, verification codes in the extension.
+- **Phase 5 done** (board updates from email; done before Phase 4):
+  - SQL: `mail_accounts.automation_since`, `mail_messages.action_checked_at`, `pipeline_events`.
+  - `lib/mail/board-rules.ts`: column roles found by id and name (Screening, HR, Technical, Final,
+    Reject); rejection → Reject from anywhere, interview → HR / Technical / Final by round (AI
+    `interview_stage`, else wording), assessment → at least Screening, offer → Final; forward only,
+    nothing leaves Reject by itself, unknown custom columns are left alone.
+  - `lib/mail/actions.ts`: every sorted email is checked once (claimed by `action_checked_at`),
+    oldest first. "auto" moves the card when the match and type are sure and the email came after
+    `automation_since`; otherwise a suggestion. Cards are dated by the email. Every move is logged
+    in `pipeline_events` (also manual stage changes in Resume DB) and can be undone while the card
+    is still where the move put it.
+  - Inbox: Suggestions tab and banner with Apply all, Apply / Dismiss / Undo per email, Activity tab.
+  - Resume DB: "No reply · N d" for confirmed applications without any answer after 30 days.
+- **Next: Phase 4**, verification codes in the extension; then Phase 6, interviews and calendar.
 
 ---
 

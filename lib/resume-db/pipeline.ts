@@ -62,6 +62,8 @@ export async function deleteApplicationWithPipeline(
 export async function addApplicationToPipeline(
   applicationId: number,
   userId: string,
+  /** When the card entered the column; an email's date for moves made from email. */
+  enteredAt: string = new Date().toISOString(),
 ): Promise<{ pipelineJobId: number }> {
   const app = await getApplicationById(applicationId, userId);
   if (!app) throw new Error("Application not found.");
@@ -77,7 +79,6 @@ export async function addApplicationToPipeline(
   }
   noteParts.push(resumeDbMarker(app.id));
 
-  const enteredAt = new Date().toISOString();
   const { data, error } = await supabase
     .from("jobs")
     .insert({

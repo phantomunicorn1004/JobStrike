@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   AlertTriangle,
+  ArrowRight,
   Ban,
   CheckCircle2,
   ChevronDown,
@@ -16,6 +17,7 @@ import {
   Mail,
   MoreHorizontal,
   Plus,
+  RotateCcw,
   Search,
   Sparkles,
   Unlink,
@@ -54,11 +56,13 @@ import {
   type InboxResponse,
   type InboxView,
   type MailCategory,
+  type ActivityEntry,
 } from "@/lib/mail/categories";
 import { cn } from "@/lib/utils";
 
 const VIEWS: { id: InboxView; label: string; hint: string }[] = [
   { id: "inbox", label: "Inbox", hint: "Interviews, assessments, offers, rejections, updates and recruiters" },
+  { id: "suggested", label: "Suggestions", hint: "Board moves waiting for your OK" },
   { id: "review", label: "Needs review", hint: "Emails JobStrike could not link to an application with confidence" },
   { id: "interviews", label: "Interviews", hint: "Interviews and assessments" },
   { id: "rejections", label: "Rejections", hint: "Applications that will not move forward" },
@@ -113,6 +117,8 @@ function fitsView(item: InboxItem, view: InboxView): boolean {
       return c === "confirmation";
     case "unmatched":
       return c === "confirmation" && !item.application;
+    case "suggested":
+      return item.actionStatus === "suggested";
     default:
       return true;
   }
@@ -139,6 +145,9 @@ export function InboxPageClient() {
   const [focused, setFocused] = useState(0);
   const [linkFor, setLinkFor] = useState<InboxItem | null>(null);
   const [addFor, setAddFor] = useState<InboxItem | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [confirmApplyAll, setConfirmApplyAll] = useState(false);
+  const [applyingAll, setApplyingAll] = useState(false);
   const mounted = useRef(true);
   const requestId = useRef(0);
 
@@ -248,6 +257,61 @@ export function InboxPageClient() {
     },
     [view, load],
   );
+
+  const stageName = useCallback(
+    (id: string | null) => (id === null ? "Registered" : data?.stages.find((st) => st.id === id)?.name ?? id),
+    [data],
+  );
+
+  const act = useCallback(
+    async (item: InboxItem, what: "apply" | "dismiss" | "undo") => {
+      try {
+        const res = await fetch(`/api/inbox/${item.id}/action`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ do: what }),
+        });
+        const body = await res.json();
+        if (body.item) replaceItem(body.item as InboxItem);
+        if (!res.ok) throw new Error(body.message || body.error || "Could not update the board.");
+        if (what === "apply") toast.success(`Moved to ${stageName(item.action?.toStage ?? null)}.`);
+        if (what === "undo") toast.success("Move undone.");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Could not update the board.");
+      }
+    },
+    [replaceItem, stageName],
+  );
+
+  const applyAll = async () => {
+    setConfirmApplyAll(false);
+    setApplyingAll(true);
+    const progress = toast.loading("Updating the board…");
+    let applied = 0;
+    try {
+      // Each call works for up to ~45 s; repeat while suggestions remain and progress is made.
+      for (let round = 0; round < 20; round++) {
+        const res = await fetch("/api/inbox/actions", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ do: "apply-all" }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || "Could not apply the suggestions.");
+        applied += body.applied ?? 0;
+        toast.loading(`Updating the board… ${applied} moved`, { id: progress });
+        if (body.remaining === 0 || (body.applied ?? 0) + (body.skipped ?? 0) === 0) break;
+      }
+      toast.success(`${applied} ${applied === 1 ? "card" : "cards"} moved. Undo any of them under Activity.`, { id: progress });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not apply the suggestions.", { id: progress });
+    } finally {
+      setApplyingAll(false);
+      void load(true);
+    }
+  };
 
   const patch = useCallback(
     async (item: InboxItem, body: Record<string, unknown>, done?: string) => {
@@ -384,18 +448,53 @@ export function InboxPageClient() {
         </div>
       ) : null}
 
+      {data && data.suggestions.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
+          <ArrowRight className="h-4 w-4 shrink-0 text-amber-600" />
+          <span>
+            <strong>{data.counts.suggested.toLocaleString()}</strong> suggested board{" "}
+            {data.counts.suggested === 1 ? "update" : "updates"}:{" "}
+            {data.suggestions.map((sg, i) => (
+              <span key={sg.toStage}>
+                {i > 0 ? ", " : ""}
+                {sg.count} → {stageName(sg.toStage)}
+              </span>
+            ))}
+          </span>
+          <div className="ml-auto flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setActivityOpen(false);
+                setView("suggested");
+              }}
+            >
+              Review
+            </Button>
+            <Button size="sm" disabled={applyingAll} onClick={() => setConfirmApplyAll(true)}>
+              {applyingAll ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+              Apply all
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Inbox views">
         {VIEWS.map((v) => (
           <button
             key={v.id}
             type="button"
             role="tab"
-            aria-selected={view === v.id}
+            aria-selected={!activityOpen && view === v.id}
             title={v.hint}
-            onClick={() => setView(v.id)}
+            onClick={() => {
+              setActivityOpen(false);
+              setView(v.id);
+            }}
             className={cn(
               "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
-              view === v.id
+              !activityOpen && view === v.id
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
@@ -405,8 +504,11 @@ export function InboxPageClient() {
               <span
                 className={cn(
                   "rounded-full px-1.5 text-xs tabular-nums",
-                  view === v.id ? "bg-primary-foreground/20" : "bg-muted",
-                  v.id === "review" && counts.review > 0 && view !== v.id && "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+                  !activityOpen && view === v.id ? "bg-primary-foreground/20" : "bg-muted",
+                  (v.id === "review" || v.id === "suggested") &&
+                    counts[v.id] > 0 &&
+                    (activityOpen || view !== v.id) &&
+                    "bg-amber-500/15 text-amber-700 dark:text-amber-300",
                 )}
               >
                 {counts[v.id].toLocaleString()}
@@ -414,8 +516,27 @@ export function InboxPageClient() {
             ) : null}
           </button>
         ))}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activityOpen}
+          title="Board moves made from emails and by hand, with Undo"
+          onClick={() => setActivityOpen(true)}
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
+            activityOpen
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+        >
+          Activity
+        </button>
       </div>
 
+      {activityOpen ? (
+        <ActivityPanel stageName={stageName} onChanged={() => void load(true)} />
+      ) : (
+      <>
       <div className="overflow-hidden rounded-xl border bg-card">
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
@@ -425,7 +546,11 @@ export function InboxPageClient() {
         ) : items.length === 0 ? (
           <div className="p-10 text-center text-sm text-muted-foreground">
             <InboxIcon className="mx-auto mb-2 h-6 w-6" />
-            {search ? "No emails match your search." : view === "review" ? "All caught up — nothing to review." : `Nothing in ${currentView.label} yet.`}
+            {search
+              ? "No emails match your search."
+              : view === "review" || view === "suggested"
+                ? "All caught up — nothing to review."
+                : `Nothing in ${currentView.label} yet.`}
           </div>
         ) : (
           <ul className={cn("divide-y", loading && "opacity-60")}>
@@ -441,6 +566,8 @@ export function InboxPageClient() {
                 onPatch={patch}
                 onLink={() => setLinkFor(item)}
                 onAdd={() => setAddFor(item)}
+                onAct={act}
+                stageName={stageName}
               />
             ))}
           </ul>
@@ -455,6 +582,8 @@ export function InboxPageClient() {
           </Button>
         </div>
       ) : null}
+      </>
+      )}
 
       <p className="text-center text-xs text-muted-foreground">
         Keys: <kbd className="rounded border px-1">J</kbd>/<kbd className="rounded border px-1">K</kbd> move ·{" "}
@@ -471,6 +600,23 @@ export function InboxPageClient() {
           if (item) void patch(item, { applicationId: app.id }, `Linked to ${app.company}`);
         }}
       />
+      <Dialog open={confirmApplyAll} onOpenChange={setConfirmApplyAll}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Apply all suggestions?</DialogTitle>
+            <DialogDescription>
+              {data?.counts.suggested.toLocaleString()} cards move on the board, each dated by its email. Cards that are
+              already further along are skipped. Every move can be undone under Activity.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmApplyAll(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void applyAll()}>Apply all</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <AddDialog
         item={addFor}
         onClose={() => setAddFor(null)}
@@ -541,6 +687,8 @@ function InboxRow(props: {
   onPatch: (item: InboxItem, body: Record<string, unknown>, done?: string) => Promise<void>;
   onLink: () => void;
   onAdd: () => void;
+  onAct: (item: InboxItem, what: "apply" | "dismiss" | "undo") => Promise<void>;
+  stageName: (id: string | null) => string;
 }) {
   const { item, focused, expanded } = props;
   const { company, title } = headline(item);
@@ -642,6 +790,8 @@ function InboxRow(props: {
         <span className="truncate">{item.fromName || item.fromEmail}</span>
         <MatchChip item={item} onLink={props.onLink} onAdd={props.onAdd} />
       </div>
+
+      <ActionLine item={item} onAct={props.onAct} stageName={props.stageName} />
 
       {expanded ? (
         <div className="mx-4 mb-3 space-y-2 rounded-lg border bg-background p-3 text-sm">
@@ -830,5 +980,173 @@ function AddDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The board move an email suggests (Apply / Dismiss) or made (Undo). */
+function ActionLine({
+  item,
+  onAct,
+  stageName,
+}: {
+  item: InboxItem;
+  onAct: (item: InboxItem, what: "apply" | "dismiss" | "undo") => Promise<void>;
+  stageName: (id: string | null) => string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const action = item.action;
+  if (!action || (item.actionStatus !== "suggested" && item.actionStatus !== "applied")) return null;
+  const run = async (what: "apply" | "dismiss" | "undo") => {
+    setBusy(true);
+    try {
+      await onAct(item, what);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (item.actionStatus === "suggested") {
+    return (
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-3 text-xs">
+        <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-amber-700 dark:text-amber-300" title={action.reason}>
+          <ArrowRight className="h-3 w-3" />
+          Suggested: {stageName(action.fromStage)} → <strong>{stageName(action.toStage)}</strong>
+        </span>
+        <Button size="sm" className="h-7 px-2.5 text-xs" disabled={busy} onClick={() => void run("apply")}>
+          {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+          Apply
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void run("dismiss")}>
+          Dismiss
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-4 pb-3 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1" title={action.reason}>
+        <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+        Moved {stageName(action.fromStage)} → {stageName(action.toStage)}
+      </span>
+      {action.eventId ? (
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void run("undo")}>
+          <RotateCcw className="mr-1 h-3 w-3" />
+          Undo
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/** Board moves, newest first, with Undo. */
+function ActivityPanel({ stageName, onChanged }: { stageName: (id: string | null) => string; onChanged: () => void }) {
+  const [entries, setEntries] = useState<ActivityEntry[] | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const fetchPage = useCallback(async (before?: string) => {
+    const res = await fetch(`/api/inbox/activity${before ? `?before=${encodeURIComponent(before)}` : ""}`, {
+      credentials: "same-origin",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not load the activity.");
+    return body as { entries: ActivityEntry[]; hasMore: boolean };
+  }, []);
+
+  useEffect(() => {
+    fetchPage()
+      .then((page) => {
+        setEntries(page.entries);
+        setHasMore(page.hasMore);
+      })
+      .catch((e) => {
+        setEntries([]);
+        toast.error(e instanceof Error ? e.message : "Could not load the activity.");
+      });
+  }, [fetchPage]);
+
+  const undo = async (entry: ActivityEntry) => {
+    setBusyId(entry.id);
+    try {
+      const res = await fetch(`/api/inbox/activity/${entry.id}`, { method: "POST", credentials: "same-origin" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || body.error || "Could not undo.");
+      setEntries((prev) => prev?.map((e) => (e.id === entry.id ? { ...e, undone: true } : e)) ?? prev);
+      toast.success("Move undone.");
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not undo.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (entries === null) {
+    return (
+      <div className="flex items-center justify-center gap-2 rounded-xl border bg-card p-10 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading…
+      </div>
+    );
+  }
+  if (entries.length === 0) {
+    return (
+      <div className="rounded-xl border bg-card p-10 text-center text-sm text-muted-foreground">
+        No board moves yet. Moves made from emails (and by hand in Resume DB) appear here.
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+        {entries.map((entry) => (
+          <li key={entry.id} className={cn("flex items-start gap-3 px-4 py-3", entry.undone && "opacity-60")}>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 text-sm">
+                <span className="font-medium">{entry.application?.company || "Application"}</span>
+                {entry.application?.jobTitle ? (
+                  <span className="text-muted-foreground">· {entry.application.jobTitle}</span>
+                ) : null}
+                {entry.application?.candidateName ? (
+                  <span className="text-muted-foreground">· {entry.application.candidateName}</span>
+                ) : null}
+              </div>
+              <p className="mt-0.5 text-sm">
+                <span className={cn(entry.undone && "line-through")}>
+                  {stageName(entry.fromStage)} → <strong>{stageName(entry.toStage)}</strong>
+                </span>
+                {entry.undone ? <span className="ml-2 text-xs text-muted-foreground">Undone</span> : null}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {entry.source === "email" ? entry.reason || "From an email" : "Moved by hand"} ·{" "}
+                {new Date(entry.at).toLocaleString()}
+              </p>
+            </div>
+            {!entry.undone ? (
+              <Button size="sm" variant="ghost" disabled={busyId === entry.id} onClick={() => void undo(entry)}>
+                {busyId === entry.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-1 h-3.5 w-3.5" />}
+                Undo
+              </Button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {hasMore ? (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            onClick={() =>
+              void fetchPage(entries[entries.length - 1]?.at).then((page) => {
+                setEntries((prev) => [...(prev ?? []), ...page.entries]);
+                setHasMore(page.hasMore);
+              })
+            }
+          >
+            <ChevronDown className="mr-2 h-4 w-4" />
+            Load more
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }

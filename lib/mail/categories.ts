@@ -41,7 +41,7 @@ export const APPLICATION_CATEGORIES: MailCategory[] = [
 ];
 
 /** Inbox tabs. */
-export const INBOX_VIEWS = ["inbox", "review", "interviews", "rejections", "applied", "unmatched", "all"] as const;
+export const INBOX_VIEWS = ["inbox", "suggested", "review", "interviews", "rejections", "applied", "unmatched", "all"] as const;
 export type InboxView = (typeof INBOX_VIEWS)[number];
 
 export type InboxApplication = {
@@ -73,6 +73,23 @@ export type InboxItem = {
   linkSource: "auto" | "user";
   accountEmail: string;
   profileId: number | null;
+  /** A board move this email suggests or made. */
+  action: InboxAction | null;
+  actionStatus: "none" | "suggested" | "applied" | "dismissed";
+};
+
+export type InboxAction = { kind: "move"; toStage: string; fromStage: string | null; reason: string; eventId?: number | null };
+
+/** One logged board move, for the Activity tab. */
+export type ActivityEntry = {
+  id: number;
+  at: string;
+  fromStage: string | null;
+  toStage: string | null;
+  source: "email" | "manual";
+  reason: string | null;
+  undone: boolean;
+  application: { id: number; company: string; jobTitle: string; candidateName: string } | null;
 };
 
 export type InboxResponse = {
@@ -84,4 +101,8 @@ export type InboxResponse = {
   hasMore: boolean;
   hasMailbox: boolean;
   profiles: { id: number; fullName: string }[];
+  /** Board columns, for naming moves. */
+  stages: { id: string; name: string }[];
+  /** Waiting suggestions per target column. */
+  suggestions: { toStage: string; count: number }[];
 };

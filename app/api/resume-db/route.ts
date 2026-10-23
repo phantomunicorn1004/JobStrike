@@ -24,6 +24,7 @@ import {
   listPipelineStages,
   setApplicationPipelineStage,
 } from "@/lib/resume-db/pipeline-stages";
+import { recordPipelineEvent } from "@/lib/pipeline-events/repository";
 import type { ResumeDbApplicationInput } from "@/lib/resume-db/types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
@@ -480,7 +481,11 @@ export async function PATCH(request: NextRequest) {
         rawStage === null || rawStage === ""
           ? null
           : String(rawStage).trim();
+      const fromStage = existing.pipelineStageId ?? (existing.pipelineJobId ? "applied" : null);
       await setApplicationPipelineStage(id, user.id, stageId);
+      if (fromStage !== stageId) {
+        await recordPipelineEvent(user.id, { applicationId: id, fromStage, toStage: stageId, source: "manual" });
+      }
       const updated = await getApplicationById(id, user.id);
       if (!updated) {
         return corsJson({ ok: true });

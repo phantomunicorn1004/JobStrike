@@ -23,7 +23,12 @@ export type Classification = {
   company: string | null;
   jobTitle: string | null;
   summary: string;
+  /** Interviews only: which round, for the board column. */
+  interviewStage: InterviewStage | null;
 };
+
+export const INTERVIEW_STAGES = ["screen", "technical", "final"] as const;
+export type InterviewStage = (typeof INTERVIEW_STAGES)[number];
 
 /** A user's earlier correction, shown to the model as an example. */
 export type CorrectionExample = { fromEmail: string; subject: string; category: MailCategory };
@@ -48,6 +53,7 @@ Fields:
 - job_title: the role exactly as named ("Senior Data Engineer"), without the requisition id or location. null when unknown.
 - summary: at most 90 characters, plain and specific, e.g. "Invites to a 30-min phone screen; asks for availability this week".
 - confidence: 0.0–1.0, how sure the category is.
+- interview_stage (interview only, otherwise null): "screen" for a recruiter, HR or hiring-manager call or a first introduction; "technical" for technical, coding, system design or skills interviews; "final" for final rounds, onsites, panels or executive interviews. null when the email does not say.
 
 Return one result per email id, in the same order.`;
 
@@ -66,7 +72,7 @@ const RESPONSE_FORMAT = {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["id", "category", "confidence", "company", "job_title", "summary"],
+            required: ["id", "category", "confidence", "company", "job_title", "summary", "interview_stage"],
             properties: {
               id: { type: "string" },
               category: { type: "string", enum: [...MAIL_CATEGORIES] },
@@ -74,6 +80,7 @@ const RESPONSE_FORMAT = {
               company: { type: ["string", "null"] },
               job_title: { type: ["string", "null"] },
               summary: { type: "string" },
+              interview_stage: { type: ["string", "null"], enum: [...INTERVIEW_STAGES, null] },
             },
           },
         },
@@ -125,7 +132,15 @@ export async function classifyMessages(
 
   const content = completion.choices[0]?.message?.content ?? "";
   const parsed = JSON.parse(content) as {
-    results: { id: string; category: MailCategory; confidence: number; company: string | null; job_title: string | null; summary: string }[];
+    results: {
+      id: string;
+      category: MailCategory;
+      confidence: number;
+      company: string | null;
+      job_title: string | null;
+      summary: string;
+      interview_stage: InterviewStage | null;
+    }[];
   };
 
   const out = new Map<string, Classification>();
@@ -138,6 +153,7 @@ export async function classifyMessages(
       company: r.company?.trim() || null,
       jobTitle: r.job_title?.trim() || null,
       summary: (r.summary ?? "").trim().slice(0, 140),
+      interviewStage: r.category === "interview" && INTERVIEW_STAGES.includes(r.interview_stage as InterviewStage) ? r.interview_stage : null,
     });
   }
   return out;

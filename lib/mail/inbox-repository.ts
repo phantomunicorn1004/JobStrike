@@ -81,7 +81,7 @@ export type ClassificationPatch = {
   category: MailCategory;
   confidence: number;
   summary: string;
-  extracted: { company: string | null; jobTitle: string | null };
+  extracted: { company: string | null; jobTitle: string | null; interviewStage?: string | null };
   application_id: number | null;
   match_score: number | null;
   match_reason: string | null;
@@ -181,7 +181,7 @@ export async function ignoreSender(userId: string, fromEmail: string): Promise<n
 // --- Inbox ----------------------------------------------------------------------------------------
 
 const ITEM_COLUMNS =
-  "id, received_at, from_name, from_email, subject, snippet, web_link, category, category_source, confidence, summary, extracted, match_score, match_reason, link_source, account_id, " +
+  "id, received_at, from_name, from_email, subject, snippet, web_link, category, category_source, confidence, summary, extracted, match_score, match_reason, link_source, account_id, action, action_status, " +
   "application:resume_db_applications(id, company, job_title, candidate_name, job_link, applied_at), " +
   "account:mail_accounts(email, profile_id)";
 
@@ -201,6 +201,8 @@ type ItemRow = {
   match_score: number | null;
   match_reason: string | null;
   link_source: "auto" | "user";
+  action: InboxItem["action"];
+  action_status: InboxItem["actionStatus"];
   application: {
     id: number;
     company: string | null;
@@ -242,6 +244,8 @@ function toItem(row: ItemRow): InboxItem {
     linkSource: row.link_source,
     accountEmail: row.account?.email ?? "",
     profileId: row.account?.profile_id ?? null,
+    action: row.action?.kind === "move" ? row.action : null,
+    actionStatus: row.action_status,
   };
 }
 
@@ -250,6 +254,7 @@ export const SURE_MATCH = 0.6;
 
 const VIEW_CATEGORIES: Record<InboxView, MailCategory[] | null> = {
   inbox: ["interview", "assessment", "offer", "rejection", "update", "outreach", "other"],
+  suggested: null,
   review: ["interview", "assessment", "offer", "rejection", "update", "other"],
   interviews: ["interview", "assessment"],
   rejections: ["rejection"],
@@ -267,6 +272,7 @@ function applyView(query: any, userId: string, view: InboxView, filters: Filters
   if (categories) q = q.in("category", categories);
   if (view === "review") q = q.eq("link_source", "auto");
   if (view === "unmatched") q = q.is("application_id", null);
+  if (view === "suggested") q = q.eq("action_status", "suggested");
   if (filters.accountIds) {
     q = q.in("account_id", filters.accountIds.length ? filters.accountIds : ["00000000-0000-0000-0000-000000000000"]);
   }
@@ -359,4 +365,17 @@ export async function applicationEmailStatus(
     entry.latest = { category: row.category, receivedAt: row.received_at, summary: row.summary };
   }
   return out;
+}
+
+/** Waiting suggestions per target column (the Inbox banner). */
+export async function suggestionSummary(userId: string): Promise<{ toStage: string; count: number }[]> {
+  const rows = await fetchAllByRange<{ action: { toStage?: string } | null }>((from, to) =>
+    db().from("mail_messages").select("action").eq("user_id", userId).eq("action_status", "suggested").range(from, to),
+  );
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const stage = row.action?.toStage;
+    if (stage) counts.set(stage, (counts.get(stage) ?? 0) + 1);
+  }
+  return [...counts].map(([toStage, count]) => ({ toStage, count })).sort((a, b) => b.count - a.count);
 }

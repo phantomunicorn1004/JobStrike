@@ -239,6 +239,8 @@ export async function setApplicationPipelineStage(
   applicationId: number,
   userId: string,
   targetStageId: string | null,
+  /** enteredAt: when the card entered the column (an email's date for moves made from email). */
+  options: { enteredAt?: string } = {},
 ): Promise<void> {
   const app = await getApplicationById(applicationId, userId);
   if (!app) throw new Error("Application not found.");
@@ -280,12 +282,12 @@ export async function setApplicationPipelineStage(
   }
 
   const supabase = getSupabaseAdminClient();
-  const enteredAt = new Date().toISOString();
+  const enteredAt = options.enteredAt ?? new Date().toISOString();
   const notes = buildCardNotes(app);
 
   if (!current.source) {
     if (target === "applied") {
-      await addApplicationToPipeline(applicationId, userId);
+      await addApplicationToPipeline(applicationId, userId, enteredAt);
       return;
     }
 
