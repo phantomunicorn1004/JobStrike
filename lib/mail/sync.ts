@@ -10,6 +10,7 @@ import {
   renewMicrosoftSubscription,
 } from "@/lib/integrations/microsoft/mail";
 import { getMailOAuthProvider, MailAuthError, MailThrottledError } from "@/lib/integrations/providers";
+import { listIgnoreRules } from "@/lib/mail/inbox-repository";
 import { buildCompanyIndex, prefilterMessage, type PrefilterContext } from "@/lib/mail/prefilter";
 import {
   claimSync,
@@ -89,10 +90,11 @@ export async function syncAccount(accountId: string, deadline: number): Promise<
     if (!account || account.status !== "active") return { ...result, outcome: "skipped" };
 
     const accessToken = await accessTokenFor(account);
-    const context: PrefilterContext = {
-      accountEmail: account.email,
-      companies: buildCompanyIndex(await listAppliedCompanies(account.user_id)),
-    };
+    const [companies, ignored] = await Promise.all([
+      listAppliedCompanies(account.user_id),
+      listIgnoreRules(account.user_id),
+    ]);
+    const context: PrefilterContext = { accountEmail: account.email, companies: buildCompanyIndex(companies), ignored };
     const fetchPage = fetchPageFor(account);
 
     let cursor = account.mail_cursor;

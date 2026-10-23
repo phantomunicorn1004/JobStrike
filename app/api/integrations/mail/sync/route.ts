@@ -2,6 +2,7 @@ import { after, NextRequest, NextResponse } from "next/server";
 import { requireRequestUser, unauthorizedJson } from "@/lib/auth/resolve-request-user";
 import { isMailAccountId, MailSetupRequiredError } from "@/lib/integrations/accounts-repository";
 import { listActiveSyncAccounts } from "@/lib/mail/sync-repository";
+import { processPendingMessages } from "@/lib/mail/process";
 import { ensureLiveUpdates, syncAccount, type SyncResult } from "@/lib/mail/sync";
 import type { SyncAccount } from "@/lib/mail/sync-repository";
 
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest) {
             await keepLive(account);
             await syncAccount(account.id, deadline);
           }
+          await processPendingMessages(user.id, deadline);
         });
       }
       return NextResponse.json({ started: stale.length });
@@ -63,7 +65,8 @@ export async function POST(request: NextRequest) {
       await keepLive(account);
       results.push(await syncAccount(account.id, deadline));
     }
-    return NextResponse.json({ results });
+    const sorted = await processPendingMessages(user.id, deadline);
+    return NextResponse.json({ results, sorted });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
       return NextResponse.json(unauthorizedJson(), { status: 401 });

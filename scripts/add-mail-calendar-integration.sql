@@ -76,5 +76,25 @@ CREATE INDEX IF NOT EXISTS mail_messages_unclassified_idx ON public.mail_message
 
 ALTER TABLE public.mail_messages ENABLE ROW LEVEL SECURITY;
 
+-- Step 3: sorting and matching. Who decided (the AI or the user), and retries of failed sorting.
+ALTER TABLE public.mail_messages
+  ADD COLUMN IF NOT EXISTS category_source   text NOT NULL DEFAULT 'ai',    -- 'ai' / 'user'
+  ADD COLUMN IF NOT EXISTS link_source       text NOT NULL DEFAULT 'auto',  -- 'auto' / 'user'
+  ADD COLUMN IF NOT EXISTS classify_attempts smallint NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS mail_messages_user_category_idx ON public.mail_messages (user_id, category, received_at DESC);
+
+-- Senders and domains the user marked as not job-related; the sync skips their mail.
+CREATE TABLE IF NOT EXISTS public.mail_rules (
+  id         bigserial PRIMARY KEY,
+  user_id    uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+  kind       text NOT NULL CHECK (kind IN ('ignore_sender', 'ignore_domain')),
+  value      text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, kind, value)
+);
+
+ALTER TABLE public.mail_rules ENABLE ROW LEVEL SECURITY;
+
 -- Ask PostgREST to see the new table right away.
 NOTIFY pgrst, 'reload schema';

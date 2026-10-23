@@ -68,6 +68,7 @@ import {
   Eye,
   FileJson,
   Loader2,
+  MailCheck,
   Pencil,
   RefreshCw,
   Search,
@@ -79,6 +80,21 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { DEFAULT_TIMEZONE, formatIsoInTimeZone } from "@/lib/timezone";
+import { MAIL_CATEGORY_LABELS, type MailCategory } from "@/lib/mail/categories";
+
+/** From connected mailboxes: when the confirmation came, and the latest email about it. */
+type MailStatus = {
+  confirmedAt: string | null;
+  latest: { category: MailCategory; receivedAt: string; summary: string | null } | null;
+};
+
+const MAIL_STATUS_STYLE: Partial<Record<MailCategory, string>> = {
+  interview: "text-violet-600 dark:text-violet-400",
+  assessment: "text-indigo-600 dark:text-indigo-400",
+  offer: "text-emerald-600 dark:text-emerald-400",
+  rejection: "text-rose-600 dark:text-rose-400",
+  update: "text-sky-600 dark:text-sky-400",
+};
 
 export type ResumeDbRow = {
   rowIndex: number;
@@ -1011,6 +1027,22 @@ export function ResumeDBPageClient() {
   const safePage = Math.min(page, totalPages);
   const pageRows = rows;
 
+  const [mailStatus, setMailStatus] = useState<Record<number, MailStatus>>({});
+  const pageIdsKey = pageRows.map((r) => r.rowIndex).join(",");
+  useEffect(() => {
+    if (!pageIdsKey) return;
+    let cancelled = false;
+    fetch(`/api/inbox/applications?statusFor=${pageIdsKey}`, { credentials: "same-origin" })
+      .then((res) => (res.ok ? res.json() : { statuses: {} }))
+      .then((body: { statuses?: Record<number, MailStatus> }) => {
+        if (!cancelled) setMailStatus(body.statuses ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pageIdsKey]);
+
   const rangeStart = totalCount === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const rangeEnd = totalCount === 0 ? 0 : Math.min(safePage * pageSize, totalCount);
 
@@ -1735,6 +1767,7 @@ export function ResumeDBPageClient() {
                           className="text-xs tabular-nums text-muted-foreground whitespace-nowrap"
                         >
                           {formatApplied(row.appliedAt, row.date, timezone)}
+                          <MailStatusLine status={mailStatus[row.rowIndex]} />
                         </ResizableTableCell>
                         <ResizableTableCell
                           widthPercent={percents.actions}
@@ -1841,5 +1874,32 @@ export function ResumeDBPageClient() {
           </DialogContent>
         </Dialog>
       </div>
+  );
+}
+
+/** "✓ Confirmed", or the latest email when it says more (interview, rejection…). */
+function MailStatusLine({ status }: { status: MailStatus | undefined }) {
+  if (!status) return null;
+  const latest = status.latest;
+  if (latest && latest.category !== "confirmation" && MAIL_STATUS_STYLE[latest.category]) {
+    return (
+      <span
+        className={cn("mt-0.5 flex items-center gap-1 text-[11px] font-medium", MAIL_STATUS_STYLE[latest.category])}
+        title={`${latest.summary ?? ""} (${new Date(latest.receivedAt).toLocaleDateString()})`.trim()}
+      >
+        <MailCheck className="h-3 w-3" />
+        {MAIL_CATEGORY_LABELS[latest.category]} email
+      </span>
+    );
+  }
+  if (!status.confirmedAt) return null;
+  return (
+    <span
+      className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
+      title={`Confirmation email ${new Date(status.confirmedAt).toLocaleDateString()}`}
+    >
+      <MailCheck className="h-3 w-3" />
+      Confirmed
+    </span>
   );
 }

@@ -7,6 +7,7 @@ import {
   Columns3,
   FileEdit,
   Database,
+  Inbox,
   LayoutDashboard,
   LogOut,
   NotebookPen,
@@ -63,6 +64,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Job Pipeline",
     icon: Columns3,
     isActive: (pathname) => pathname === "/jobs",
+  },
+  {
+    href: "/inbox",
+    label: "Inbox",
+    icon: Inbox,
+    isActive: (pathname) => pathname.startsWith("/inbox"),
   },
   {
     href: "/resume-tailor",
@@ -156,11 +163,12 @@ export default function JobsLayout({
                 <SidebarSeparator className="my-2 group-data-[collapsible=icon]:hidden" />
                 <NavLink item={NAV_ITEMS[1]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[2]} pathname={pathname} />
-                <SidebarSeparator className="my-2 group-data-[collapsible=icon]:hidden" />
                 <NavLink item={NAV_ITEMS[3]} pathname={pathname} />
+                <SidebarSeparator className="my-2 group-data-[collapsible=icon]:hidden" />
                 <NavLink item={NAV_ITEMS[4]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[5]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[6]} pathname={pathname} />
+                <NavLink item={NAV_ITEMS[7]} pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

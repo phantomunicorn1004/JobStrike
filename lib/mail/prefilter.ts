@@ -12,6 +12,8 @@ export type PrefilterContext = {
   accountEmail: string;
   /** Companies the user applied to, from Resume DB. */
   companies: CompanyIndex;
+  /** Senders and domains the user marked as not job-related. */
+  ignored?: { senders: Set<string>; domains: Set<string> };
 };
 
 export type PrefilterResult = { keep: boolean; reason: string };
@@ -96,6 +98,31 @@ function organisationLabel(domain: string): string {
   return second;
 }
 
+/**
+ * The organisation a sender's domain names ("aflac" for careers.aflac.com), or null for free mail,
+ * account/marketing subdomains and recruiting software.
+ */
+export function senderOrganisation(fromEmail: string): string | null {
+  const domain = domainOf(fromEmail);
+  const label = organisationLabel(domain);
+  if (!label || label.length < 4 || FREEMAIL.has(label) || SYSTEM_SUBDOMAINS.test(domain) || isAtsDomain(domain)) {
+    return null;
+  }
+  return label;
+}
+
+/** "Ten Mile Square Technologies" → "tenmilesquaretechnologies". */
+export function compactCompany(name: string | null | undefined): string {
+  return normalizeCompanyName(name).replace(/\band\b/g, "").replace(/[^a-z0-9]/g, "");
+}
+
+/** A sender organisation label names this company ("tenmilesquare" ~ "Ten Mile Square Technologies"). */
+export function organisationMatchesCompany(label: string, company: string | null | undefined): boolean {
+  const key = compactCompany(company);
+  if (key.length < 3) return false;
+  return key === label || (label.length >= 6 && key.startsWith(label)) || (key.length >= 6 && label.startsWith(key));
+}
+
 function isAtsDomain(domain: string): string | null {
   return ATS_DOMAINS.find((ats) => domain === ats || domain.endsWith(`.${ats}`)) ?? null;
 }
@@ -124,6 +151,9 @@ function matchCompany(message: FetchedMessage, companies: CompanyIndex): string 
 export function prefilterMessage(message: FetchedMessage, context: PrefilterContext): PrefilterResult {
   const from = message.fromEmail.toLowerCase();
   if (!from || from === context.accountEmail.toLowerCase()) return { keep: false, reason: "own message" };
+  if (context.ignored?.senders.has(from) || context.ignored?.domains.has(domainOf(from))) {
+    return { keep: false, reason: "ignored by you" };
+  }
 
   const subject = message.subject ?? "";
   const preview = message.preview ?? "";

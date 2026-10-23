@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { MailSetupRequiredError } from "@/lib/integrations/accounts-repository";
 import { deleteMailMessagesOlderThan, listActiveSyncAccounts } from "@/lib/mail/sync-repository";
+import { processPendingMessages } from "@/lib/mail/process";
 import { ensureLiveUpdates, syncAccount, type SyncResult } from "@/lib/mail/sync";
 
 export const maxDuration = 60;
@@ -54,8 +55,10 @@ export async function GET(request: NextRequest) {
       if (due) results.push(await syncAccount(account.id, deadline));
     }
 
+    // Sort and match what the syncs kept (and any backlog), with the time left.
+    const sorted = await processPendingMessages(null, deadline);
     const removed = await deleteMailMessagesOlderThan(RETENTION_DAYS);
-    return NextResponse.json({ ok: true, accounts: accounts.length, liveUpdates, synced: results, removed });
+    return NextResponse.json({ ok: true, accounts: accounts.length, liveUpdates, synced: results, sorted, removed });
   } catch (error) {
     if (error instanceof MailSetupRequiredError) return NextResponse.json({ ok: true, setupRequired: true });
     console.error("Mail cron failed:", error instanceof Error ? error.message : error);

@@ -5,6 +5,7 @@ import { mailOAuthResultResponse, readMailOAuthFlow } from "@/lib/integrations/o
 import { getMailOAuthProvider, MailConnectError } from "@/lib/integrations/providers";
 import { MAIL_PROVIDER_LABELS, parseMailProvider } from "@/lib/integrations/types";
 import { getSyncAccount } from "@/lib/mail/sync-repository";
+import { processPendingMessages } from "@/lib/mail/process";
 import { ensureLiveUpdates, syncAccount } from "@/lib/mail/sync";
 
 export const maxDuration = 60;
@@ -57,6 +58,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         console.warn(`Live updates for account ${account.id} failed:`, error instanceof Error ? error.message : error);
       }
       await syncAccount(account.id, deadline);
+      await processPendingMessages(flow.userId, deadline);
     });
     return mailOAuthResultResponse(request, { ok: true, email: account.email });
   } catch (error) {

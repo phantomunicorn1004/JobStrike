@@ -473,7 +473,23 @@ About 2.5–3 weeks in total. Each phase ships on its own, and the first useful 
     renews subscriptions and deletes job emails after 180 days), Sync now, sync on opening any
     member page (`MailAutoSync`, at most every 5 minutes), and right after connecting.
   - Settings card: scan progress, job email count, Live marker, Sync now.
-- **Next: Phase 3**, classification, matching and the Inbox page.
+- **Phase 3 done** (Inbox):
+  - SQL: `category_source`, `link_source`, `classify_attempts` on `mail_messages`; `mail_rules`.
+  - `lib/mail/classify.ts`: gpt-4o-mini (`MAIL_AI_MODEL`), 20 emails per request with a strict
+    JSON schema, from sender, subject, date and excerpt only; the user's latest corrections are
+    given as examples. Categories: interview, assessment, offer, rejection, update, confirmation,
+    outreach, other, not_job.
+  - `lib/mail/match.ts`: company (name, or sender domain), then job title, then the latest
+    application before the email; applications sent after the email never match; a mailbox
+    linked to a candidate matches only that candidate.
+  - `lib/mail/process.ts`: newest first, 4 requests at a time, emails claimed by counting the
+    attempt (two runs never sort the same email; 3 attempts at most). Runs after every sync
+    (timer, Sync now, sync on open, live updates, connect) and from the Inbox page.
+  - Inbox page (`/inbox`): tabs Inbox · Needs review · Interviews · Rejections · Applied · Not in
+    Resume DB · All, candidate filter, search, change type, link / unlink, not job-related (and
+    ignore sender, which the sync then skips), Add to Resume DB, J/K/Enter/O/X keys.
+  - Resume DB: "Confirmed" or the latest email type under the applied date.
+- **Next: Phase 4**, verification codes in the extension.
 
 ---
 

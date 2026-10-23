@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { after, NextRequest, NextResponse } from "next/server";
 import { findAccountBySubscription, saveSubscription, type SyncAccount } from "@/lib/mail/sync-repository";
+import { processPendingMessages } from "@/lib/mail/process";
 import { ensureLiveUpdates, hashClientState, syncAccount } from "@/lib/mail/sync";
 
 export const maxDuration = 60;
@@ -35,6 +36,7 @@ export async function POST(request: NextRequest) {
   const notifications = Array.isArray(body?.value) ? body.value : [];
 
   const toSync = new Set<string>();
+  const ownerOf = new Map<string, string>();
   /** Lifecycle events: the subscription must be renewed ("reauthorizationRequired") or replaced. */
   const toRenew = new Map<string, { account: SyncAccount; removed: boolean }>();
   for (const n of notifications) {
@@ -48,6 +50,7 @@ export async function POST(request: NextRequest) {
     }
     // New mail, or "missed" (notifications were dropped): read the mailbox.
     toSync.add(account.id);
+    ownerOf.set(account.id, account.user_id);
   }
 
   if (toSync.size > 0) {
@@ -66,10 +69,14 @@ export async function POST(request: NextRequest) {
           console.warn(`Renewing live updates for account ${id} failed:`, error instanceof Error ? error.message : error);
         }
       }
+      const owners = new Set<string>();
       for (const id of toSync) {
         if (Date.now() > deadline - 10_000) break;
         await syncAccount(id, deadline);
+        owners.add(ownerOf.get(id)!);
       }
+      // New mail is sorted and matched within seconds, not at the next timer run.
+      for (const owner of owners) await processPendingMessages(owner, deadline);
     });
   }
   return new NextResponse(null, { status: 202 });

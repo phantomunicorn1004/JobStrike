@@ -44,7 +44,7 @@ export function failOn(error: { code?: string; message?: string } | null): void 
   if (
     error.code === "42P01" ||
     error.code === "PGRST205" ||
-    (/mail_accounts/.test(message) && /does not exist|schema cache/i.test(message))
+    (/mail_(accounts|messages|rules)/.test(message) && /does not exist|schema cache/i.test(message))
   ) {
     throw new MailSetupRequiredError();
   }
