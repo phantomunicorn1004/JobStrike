@@ -480,7 +480,8 @@ export function InboxPageClient() {
         </div>
       ) : null}
 
-      <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Inbox views">
+      {/* w-0 min-w-full: the tabs scroll sideways instead of widening the page. */}
+      <div className="-mx-1 flex w-0 min-w-full gap-1 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Inbox views">
         {VIEWS.map((v) => (
           <button
             key={v.id}
