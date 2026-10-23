@@ -15,18 +15,20 @@ function getSupabaseUrl(): string {
   return url;
 }
 
-/** Server-side client with service role for storage uploads (falls back to anon key). */
+/**
+ * Server-side client with the service role. The anon key is never used on the server: row-level
+ * security denies it everything (scripts/lock-down-row-level-security.sql), and all data access
+ * goes through API routes that check the user.
+ */
 export function getSupabaseAdminClient() {
   if (adminClient) return adminClient;
 
   const url = getSupabaseUrl();
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  const key = serviceKey || anonKey;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
   if (!key) {
     throw new Error(
-      "Missing Supabase env: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or anon key).",
+      "Missing Supabase env: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
     );
   }
 

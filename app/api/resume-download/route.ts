@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { rejectIfSignedOut } from "@/lib/auth/reject-if-signed-out";
 
 /**
  * Secure download endpoint for resume files
  * Generates temporary download URLs for resume files
  */
 export async function GET(request: NextRequest) {
+  const denied = await rejectIfSignedOut(request);
+  if (denied) return denied;
+
   try {
     const searchParams = request.nextUrl.searchParams;
     const fileData = searchParams.get("data");

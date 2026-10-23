@@ -17,12 +17,22 @@ function sign(payload: string): string {
   return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-export function createGoogleOAuthState(userId: string, popup = false): string {
+/** Cookie holding the nonce of the connect flow this browser started (checked in the callback). */
+export const GOOGLE_OAUTH_NONCE_COOKIE = "g_oauth_nonce";
+/** How long a connect flow may take, from leaving JobStrike to coming back from Google. */
+export const OAUTH_STATE_MAX_AGE_SEC = 10 * 60;
+
+/**
+ * Signed state for the Google consent screen: user, nonce, popup flag and issue time. The nonce
+ * also goes into an httpOnly cookie, so the callback only accepts the flow this browser started,
+ * within OAUTH_STATE_MAX_AGE_SEC, once.
+ */
+export function createGoogleOAuthState(userId: string, popup = false): { state: string; nonce: string } {
   const nonce = crypto.randomUUID();
   const popupFlag = popup ? "1" : "0";
-  const payload = `${userId}.${nonce}.${popupFlag}`;
+  const payload = `${userId}.${nonce}.${popupFlag}.${Date.now()}`;
   const signature = sign(payload);
-  return Buffer.from(`${payload}.${signature}`).toString("base64url");
+  return { state: Buffer.from(`${payload}.${signature}`).toString("base64url"), nonce };
 }
 
 export type VerifiedGoogleOAuthState = {
@@ -30,7 +40,16 @@ export type VerifiedGoogleOAuthState = {
   popup: boolean;
 };
 
-export function verifyGoogleOAuthState(state: string): VerifiedGoogleOAuthState {
+/** Reads the popup flag without trusting the state (to answer errors in the right way). */
+export function peekGoogleOAuthPopup(state: string | null): boolean {
+  try {
+    return Buffer.from(state ?? "", "base64url").toString("utf8").split(".")[2] === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function verifyGoogleOAuthState(state: string, expectedNonce: string | null | undefined): VerifiedGoogleOAuthState {
   let decoded: string;
   try {
     decoded = Buffer.from(state, "base64url").toString("utf8");
@@ -51,12 +70,19 @@ export function verifyGoogleOAuthState(state: string): VerifiedGoogleOAuthState 
     throw new Error("Invalid OAuth state signature.");
   }
 
-  const parts = payload.split(".");
-  const userId = parts[0];
+  const [userId, nonce, popupFlag, issuedAt] = payload.split(".");
   if (!userId) throw new Error("Invalid OAuth state user.");
+  const age = Date.now() - Number(issuedAt);
+  if (!Number.isFinite(age) || age < 0 || age > OAUTH_STATE_MAX_AGE_SEC * 1000) {
+    throw new Error("OAuth state expired.");
+  }
+  const n1 = Buffer.from(nonce ?? "");
+  const n2 = Buffer.from(expectedNonce ?? "");
+  if (!expectedNonce || n1.length !== n2.length || !timingSafeEqual(n1, n2)) {
+    throw new Error("OAuth state was not started in this browser.");
+  }
 
-  const popup = parts.length >= 3 && parts[2] === "1";
-  return { userId, popup };
+  return { userId, popup: popupFlag === "1" };
 }
 
 export async function fetchGoogleEmailFromRefreshToken(

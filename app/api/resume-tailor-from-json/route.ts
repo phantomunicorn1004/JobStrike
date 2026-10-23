@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { tailorResumeFromContent } from "@/lib/resume/pipeline";
 import type { ResumeContent } from "@/lib/resumeTemplates/types";
 import type { ResumeStructure } from "@/lib/resume/structure/types";
+import { rejectIfSignedOut } from "@/lib/auth/reject-if-signed-out";
 
 /**
  * Tailor a resume from already-parsed content + structure (e.g. from ResumeDB).
  * Use when the workflow uses a resume selected from ResumeDB instead of an uploaded file.
  */
 export async function POST(request: NextRequest) {
+  const denied = await rejectIfSignedOut(request);
+  if (denied) return denied;
+
   try {
     const body = await request.json();
     const {

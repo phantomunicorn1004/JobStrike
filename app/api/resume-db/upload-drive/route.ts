@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { corsJson, corsOptions, verifyExtensionKey } from "@/lib/api/extensionCors";
+import { corsJson, corsOptions } from "@/lib/api/extensionCors";
+import { resolveRequestUser, unauthorizedJson } from "@/lib/auth/resolve-request-user";
 import { isGoogleDriveConfigured } from "@/lib/google-drive/config";
 import { uploadBufferToGoogleDrive } from "@/lib/google-drive/upload";
 import { guessContentType } from "@/lib/resume-db/storage";
@@ -17,9 +18,10 @@ function errorStatus(message: string): number {
 }
 
 export async function POST(request: NextRequest) {
-  const authError = verifyExtensionKey(request);
-  if (authError) {
-    return corsJson({ error: authError }, { status: 401 });
+  // A signed-in user or a valid personal extension key (the old shared-key check let everyone in
+  // when EXTENSION_API_KEY was not set).
+  if (!(await resolveRequestUser(request))) {
+    return corsJson(unauthorizedJson(), { status: 401 });
   }
 
   if (!isGoogleDriveConfigured()) {

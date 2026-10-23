@@ -27,6 +27,14 @@ function toSessionUser(user: {
   };
 }
 
+/** Local development only: ALLOW_ANONYMOUS_DEFAULT_OWNER=true and not a production build. */
+function allowAnonymousDefaultOwner(): boolean {
+  return (
+    process.env.NODE_ENV !== "production" &&
+    process.env.ALLOW_ANONYMOUS_DEFAULT_OWNER?.trim().toLowerCase() === "true"
+  );
+}
+
 async function defaultExtensionOwner(): Promise<SessionUser | null> {
   const row = await findUserByUsername(DEFAULT_RESUME_DB_OWNER_USERNAME);
   return row ? toSessionUser(row) : null;
@@ -54,7 +62,9 @@ export async function resolveRequestUser(
     return null;
   }
 
-  if (!envKey) {
+  // No session and no key: anonymous. Acting as the default owner here used to hand that user's
+  // data to anyone who called the API; it is now only possible on a developer's own machine.
+  if (!envKey && allowAnonymousDefaultOwner()) {
     return defaultExtensionOwner();
   }
 

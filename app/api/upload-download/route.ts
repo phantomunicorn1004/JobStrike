@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { rejectIfSignedOut } from "@/lib/auth/reject-if-signed-out";
 
 /**
  * Main API route for Step 7: Upload & Download
  * Handles resume download.
  */
 export async function POST(request: NextRequest) {
+  const denied = await rejectIfSignedOut(request);
+  if (denied) return denied;
+
   try {
     const body = await request.json();
     const { downloadUrl, fileName, fileType } = body;

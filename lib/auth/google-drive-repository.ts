@@ -2,6 +2,19 @@ import "server-only";
 
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/admin";
 import { normalizeGoogleDriveFolderId } from "@/lib/google-drive/urls";
+import { decryptSecret, encryptSecretIfConfigured } from "@/lib/crypto/secret-box";
+
+/** Stored secrets are encrypted once TOKEN_ENCRYPTION_KEY is set; older plain values still read. */
+function readSecret(stored: string | null | undefined): string | null {
+  const value = stored?.trim();
+  if (!value) return null;
+  try {
+    return decryptSecret(value);
+  } catch (error) {
+    console.error("Google secret could not be decrypted (key changed or missing):", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
 
 export type UserGoogleDriveSettings = {
   refreshToken: string;
@@ -44,7 +57,7 @@ export async function getUserGoogleOAuthCredentials(
 
   return {
     clientId: row?.google_oauth_client_id?.trim() || "",
-    clientSecret: row?.google_oauth_client_secret?.trim() || "",
+    clientSecret: readSecret(row?.google_oauth_client_secret) ?? "",
   };
 }
 
@@ -60,7 +73,7 @@ export async function updateUserGoogleOAuthCredentials(
     patch.google_oauth_client_id = input.clientId.trim() || null;
   }
   if (input.clientSecret !== undefined) {
-    patch.google_oauth_client_secret = input.clientSecret.trim() || null;
+    patch.google_oauth_client_secret = input.clientSecret.trim() ? encryptSecretIfConfigured(input.clientSecret.trim()) : null;
   }
 
   const { error } = await supabase
@@ -94,7 +107,7 @@ export async function getUserGoogleDriveConnection(
 
   const row = data as GoogleRow;
   return {
-    refreshToken: row.google_refresh_token?.trim() || null,
+    refreshToken: readSecret(row.google_refresh_token),
     googleEmail: row.google_email,
     folderId: row.google_drive_folder_id?.trim() || null,
     defaultResumeUrl: row.default_resume_url?.trim() || "",
@@ -128,7 +141,7 @@ export async function saveUserGoogleDriveConnection(
   const { error } = await supabase
     .from("app_users")
     .update({
-      google_refresh_token: input.refreshToken,
+      google_refresh_token: encryptSecretIfConfigured(input.refreshToken),
       google_email: input.googleEmail ?? null,
       google_token_updated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

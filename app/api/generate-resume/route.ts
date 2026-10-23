@@ -5,6 +5,7 @@ import { generatePDFDocument } from "@/lib/fileGenerators/pdfGenerator";
 import { generateDOCXDocument } from "@/lib/fileGenerators/docxGenerator";
 import { parseResumeText } from "@/lib/fileGenerators/resumeParser";
 import { TEMPLATE_CONFIGS, type TemplateId } from "@/lib/resumeTemplates/types";
+import { rejectIfSignedOut } from "@/lib/auth/reject-if-signed-out";
 
 type GenerateResumeRequest = {
   tailoredResumeText: string;
@@ -13,6 +14,9 @@ type GenerateResumeRequest = {
 };
 
 export async function POST(request: NextRequest) {
+  const denied = await rejectIfSignedOut(request);
+  if (denied) return denied;
+
   try {
     const body: GenerateResumeRequest = await request.json();
 

@@ -16,8 +16,6 @@ import { Download, ExternalLink } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 
 type JobEntry = {
   id: number;
@@ -30,6 +28,18 @@ type JobEntry = {
   created_at: string;
 };
 
+// The old tables read and write through /api/jobs/legacy (the database is not reachable from the browser).
+async function legacyJobsRequest<T>(init?: RequestInit, query = ""): Promise<T> {
+  const res = await fetch(`/api/jobs/legacy${query}`, {
+    credentials: "same-origin",
+    headers: init?.body ? { "Content-Type": "application/json" } : undefined,
+    ...init,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error || "Request failed.");
+  return data as T;
+}
+
 export function JobTable() {
   const [searchTerm, setSearchTerm] = useState("");
   const [jobs, setJobs] = useState<JobEntry[]>([]);
@@ -37,22 +47,14 @@ export function JobTable() {
   const [noteValue, setNoteValue] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  const supabase = getSupabaseBrowserClient();
-
   useEffect(() => {
     fetchJobs();
   }, []);
 
   const fetchJobs = async () => {
     try {
-      const data = await fetchAllByRange<JobEntry>((from, to) =>
-        supabase
-          .from("jobs")
-          .select("*")
-          .order("id", { ascending: false })
-          .range(from, to),
-      );
-      setJobs(data);
+      const { rows } = await legacyJobsRequest<{ rows: JobEntry[] }>(undefined, "?table=jobs");
+      setJobs(rows);
     } catch (error) {
       console.error("Error fetching jobs:", error);
     } finally {
@@ -65,12 +67,10 @@ export function JobTable() {
       e.preventDefault();
 
       try {
-        const { error } = await supabase
-          .from("jobs")
-          .update({ note: noteValue })
-          .eq("id", jobId);
-
-        if (error) throw error;
+        await legacyJobsRequest({
+          method: "PATCH",
+          body: JSON.stringify({ table: "jobs", id: jobId, column: "note", value: noteValue }),
+        });
 
         // Update local state
         setJobs(

@@ -4,12 +4,16 @@ import { parseDOCXStructure } from "@/lib/resume/structure/docxParser";
 import { inferStructureFromText, structureToContent } from "@/lib/resume/structure/infer";
 import type { ResumeStructure } from "@/lib/resume/structure/types";
 import type { ResumeContent } from "@/lib/resumeTemplates/types";
+import { rejectIfSignedOut } from "@/lib/auth/reject-if-signed-out";
 
 /**
  * Parse resume file and return structured content + structure (no tailoring).
  * Used by workflow Resume Selection node.
  */
 export async function POST(request: NextRequest) {
+  const denied = await rejectIfSignedOut(request);
+  if (denied) return denied;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File;

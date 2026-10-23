@@ -38,7 +38,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   Eye,
   EyeOff,
@@ -80,13 +79,6 @@ type DragPayload = {
   stageId: string;
   stage_id?: string | null;
 };
-
-function slug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-}
 
 function reorderList<T>(list: T[], fromIndex: number, toIndex: number): T[] {
   const next = [...list];
@@ -200,31 +192,43 @@ export function JobsPipelineBoard() {
     stageId: string;
     stageName: string;
   } | null>(null);
-  const supabase = getSupabaseBrowserClient();
   const moveInFlightRef = useRef<string | null>(null);
 
+  // Columns are read and changed through /api/pipeline/stages (the database is not reachable
+  // from the browser).
+  const stagesRequest = useCallback(async (init?: RequestInit, query = "") => {
+    const res = await fetch(`/api/pipeline/stages${query}`, {
+      credentials: "same-origin",
+      headers: init?.body ? { "Content-Type": "application/json" } : undefined,
+      ...init,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data as { error?: string }).error || "Stage request failed.");
+    }
+    return data as { stages?: StageConfig[] };
+  }, []);
+
   const fetchStages = useCallback(async (): Promise<StageConfig[]> => {
-    const { data, error } = await supabase
-      .from("pipeline_stages")
-      .select("id, name, sort_order, is_visible")
-      .order("sort_order", { ascending: true });
-    if (error) {
+    let data: StageConfig[] | undefined;
+    try {
+      data = (await stagesRequest()).stages;
+    } catch (error) {
       console.error("Fetch stages error:", error);
       setStages(DEFAULT_STAGES);
       return DEFAULT_STAGES;
     }
     if (!data || data.length === 0) {
-      await supabase.from("pipeline_stages").insert(DEFAULT_STAGES);
       setStages(DEFAULT_STAGES);
       return DEFAULT_STAGES;
     }
-    const list = (data as StageConfig[]).map((stage) => ({
+    const list = data.map((stage) => ({
       ...stage,
       is_visible: stage.is_visible !== false,
     }));
     setStages(list);
     return list;
-  }, [supabase]);
+  }, [stagesRequest]);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -653,25 +657,16 @@ export function JobsPipelineBoard() {
   const addStage = useCallback(async () => {
     const name = newStageName.trim();
     if (!name) return;
-    let id = slug(name) || `stage-${Date.now()}`;
-    const displayStages = stages.length ? stages : DEFAULT_STAGES;
-    const maxOrder = displayStages.length ? Math.max(...displayStages.map((s) => s.sort_order)) : 0;
-    let { error } = await supabase
-      .from("pipeline_stages")
-      .insert({ id, name, sort_order: maxOrder + 1, is_visible: true });
-    if (error?.code === "23505") {
-      id = `${id}-${Date.now()}`;
-      const res = await supabase
-        .from("pipeline_stages")
-        .insert({ id, name, sort_order: maxOrder + 1, is_visible: true });
-      error = res.error;
-    }
-    if (!error) {
+    try {
+      await stagesRequest({ method: "POST", body: JSON.stringify({ name }) });
       setNewStageName("");
       await fetchStages();
       await fetchAll();
+    } catch (error) {
+      console.error("Add stage error:", error);
+      toast.error(error instanceof Error ? error.message : "Could not add the stage.");
     }
-  }, [newStageName, stages, supabase, fetchStages, fetchAll]);
+  }, [newStageName, stagesRequest, fetchStages, fetchAll]);
 
   const removeStage = useCallback(
     async (stageId: string) => {
@@ -686,22 +681,26 @@ export function JobsPipelineBoard() {
           toStageId: fallback,
         }),
       });
-      await supabase.from("pipeline_stages").delete().eq("id", stageId);
+      await stagesRequest({ method: "DELETE" }, `?id=${encodeURIComponent(stageId)}`);
       await fetchStages();
       await fetchAll();
     },
-    [stages, supabase, fetchStages, fetchAll, pipelineFetch],
+    [stages, stagesRequest, fetchStages, fetchAll, pipelineFetch],
   );
 
   const renameStage = useCallback(
     async (stageId: string, name: string) => {
       if (!name.trim()) return;
-      await supabase.from("pipeline_stages").update({ name: name.trim() }).eq("id", stageId);
+      try {
+        await stagesRequest({ method: "PATCH", body: JSON.stringify({ id: stageId, name: name.trim() }) });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not rename the stage.");
+      }
       setEditingStageId(null);
       setEditingName("");
       await fetchStages();
     },
-    [supabase, fetchStages]
+    [stagesRequest, fetchStages]
   );
 
   const toggleStageVisibility = useCallback(
@@ -713,18 +712,16 @@ export function JobsPipelineBoard() {
         return;
       }
 
-      const { error } = await supabase
-        .from("pipeline_stages")
-        .update({ is_visible: visible })
-        .eq("id", stageId);
-      if (error) {
+      try {
+        await stagesRequest({ method: "PATCH", body: JSON.stringify({ id: stageId, isVisible: visible }) });
+      } catch (error) {
         console.error("Toggle stage visibility error:", error);
         toast.error("Could not update stage visibility.");
         return;
       }
       await fetchStages();
     },
-    [stages, supabase, fetchStages],
+    [stages, stagesRequest, fetchStages],
   );
 
   const persistStageOrder = useCallback(
@@ -734,18 +731,9 @@ export function JobsPipelineBoard() {
         sort_order: index,
       }));
       setStages(withOrder);
-      const results = await Promise.all(
-        withOrder.map((stage) =>
-          supabase
-            .from("pipeline_stages")
-            .update({ sort_order: stage.sort_order })
-            .eq("id", stage.id),
-        ),
-      );
-      const failed = results.find((r) => r.error);
-      if (failed?.error) throw failed.error;
+      await stagesRequest({ method: "PATCH", body: JSON.stringify({ order: withOrder.map((stage) => stage.id) }) });
     },
-    [supabase],
+    [stagesRequest],
   );
 
   const handleStageDragStart = (e: React.DragEvent, stageId: string) => {

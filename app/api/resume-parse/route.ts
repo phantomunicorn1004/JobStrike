@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseResume } from "@/lib/resume/parseResume";
+import { rejectIfSignedOut } from "@/lib/auth/reject-if-signed-out";
 
 export async function POST(request: NextRequest) {
+  const denied = await rejectIfSignedOut(request);
+  if (denied) return denied;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File;

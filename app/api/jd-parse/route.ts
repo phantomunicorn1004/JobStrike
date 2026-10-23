@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseJobDescriptionWithOpenAI, type JdParseInput } from "@/lib/jdParse";
+import { rejectIfSignedOut } from "@/lib/auth/reject-if-signed-out";
 
 export async function POST(request: NextRequest) {
+  const denied = await rejectIfSignedOut(request);
+  if (denied) return denied;
+
   try {
     const body = await request.json();
     const jobDescription = typeof body.jobDescription === "string" ? body.jobDescription : "";

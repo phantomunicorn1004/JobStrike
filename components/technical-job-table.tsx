@@ -24,8 +24,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Download, CheckCircle2, XCircle, Clock } from "lucide-react";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 
 // Status icons
 const StatusIcon = ({ result }: { result?: string }) => {
@@ -75,10 +73,21 @@ const ROUND_DATE_KEYS: (keyof TechnicalJobEntry)[] = [
   "third_round_date",
 ];
 
+// The old tables read and write through /api/jobs/legacy (the database is not reachable from the browser).
+async function legacyJobsRequest<T>(init?: RequestInit, query = ""): Promise<T> {
+  const res = await fetch(`/api/jobs/legacy${query}`, {
+    credentials: "same-origin",
+    headers: init?.body ? { "Content-Type": "application/json" } : undefined,
+    ...init,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error || "Request failed.");
+  return data as T;
+}
+
 export function TechnicalJobTable() {
   const [jobs, setJobs] = useState<TechnicalJobEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const supabase = getSupabaseBrowserClient();
 
   useEffect(() => {
     fetchJobs();
@@ -86,14 +95,8 @@ export function TechnicalJobTable() {
 
   const fetchJobs = async () => {
     try {
-      const data = await fetchAllByRange<TechnicalJobEntry>((from, to) =>
-        supabase
-          .from("technical_jobs")
-          .select("*")
-          .order("id", { ascending: false })
-          .range(from, to),
-      );
-      setJobs(data);
+      const { rows } = await legacyJobsRequest<{ rows: TechnicalJobEntry[] }>(undefined, "?table=technical_jobs");
+      setJobs(rows);
     } catch (e) {
       console.error("Error fetching technical jobs:", e);
     } finally {
@@ -109,11 +112,10 @@ export function TechnicalJobTable() {
   ) => {
     const column = `${["first", "second", "third"][round - 1]}_round_${field}`;
     try {
-      const { error } = await supabase
-        .from("technical_jobs")
-        .update({ [column]: value })
-        .eq("id", id);
-      if (error) throw error;
+      await legacyJobsRequest({
+        method: "PATCH",
+        body: JSON.stringify({ table: "technical_jobs", id, column, value }),
+      });
       setJobs((jobs) =>
         jobs.map((j) => (j.id === id ? { ...j, [column]: value } : j))
       );
@@ -169,11 +171,10 @@ export function TechnicalJobTable() {
         setIsCreating(false);
         return;
       }
-      const { data, error } = await supabase
-        .from("technical_jobs")
-        .insert([insertData])
-        .select();
-      if (error) throw error;
+      const { rows: data } = await legacyJobsRequest<{ rows: TechnicalJobEntry[] }>({
+        method: "POST",
+        body: JSON.stringify({ table: "technical_jobs", job: insertData }),
+      });
       setJobs((j) => (data ? [...j, ...data] : j));
       setShowModal(false);
       setNewJob({});

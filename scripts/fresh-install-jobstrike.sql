@@ -319,3 +319,23 @@ CREATE POLICY "Allow upload resume-db bucket" ON storage.objects
 DROP POLICY IF EXISTS "Allow delete resume-db bucket" ON storage.objects;
 CREATE POLICY "Allow delete resume-db bucket" ON storage.objects
   FOR DELETE USING (bucket_id = 'resume-db');
+
+-- =============================================================================
+-- Lock down: the policies above allowed everyone (the anon key is public). Only the server's
+-- service-role key may access data; see scripts/lock-down-row-level-security.sql.
+-- =============================================================================
+DO $$
+DECLARE
+  t record;
+  p record;
+BEGIN
+  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+    FOR p IN SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = t.tablename LOOP
+      EXECUTE format('DROP POLICY %I ON public.%I', p.policyname, t.tablename);
+    END LOOP;
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t.tablename);
+  END LOOP;
+END $$;
+DROP POLICY IF EXISTS "Public read resume-db bucket" ON storage.objects;
+DROP POLICY IF EXISTS "Allow upload resume-db bucket" ON storage.objects;
+DROP POLICY IF EXISTS "Allow delete resume-db bucket" ON storage.objects;

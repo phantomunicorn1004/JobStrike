@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tailorResumeWithOpenAI, type TailorResumeInput } from "@/lib/resumeTailor";
+import { rejectIfSignedOut } from "@/lib/auth/reject-if-signed-out";
 
 export async function POST(request: NextRequest) {
+  const denied = await rejectIfSignedOut(request);
+  if (denied) return denied;
+
   try {
     const body: TailorResumeInput = await request.json();
 

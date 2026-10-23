@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   fetchGoogleEmailFromRefreshToken,
+  GOOGLE_OAUTH_NONCE_COOKIE,
   oauthPopupResultHtml,
+  peekGoogleOAuthPopup,
   verifyGoogleOAuthState,
 } from "@/lib/auth/google-oauth-state";
+import { getSessionUser } from "@/lib/auth/session";
 import { saveUserGoogleDriveConnection } from "@/lib/auth/google-drive-repository";
 import {
   exchangeCodeForTokens,
@@ -16,18 +19,22 @@ function callbackResponse(
   result: { ok: boolean; reason?: string },
 ) {
   const origin = new URL(request.url).origin;
+  let response: NextResponse;
   if (popup) {
-    return new NextResponse(oauthPopupResultHtml(origin, result), {
+    response = new NextResponse(oauthPopupResultHtml(origin, result), {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
+  } else {
+    const settingsUrl = new URL("/settings", request.url);
+    settingsUrl.searchParams.set("google", result.ok ? "connected" : "error");
+    if (!result.ok && result.reason) {
+      settingsUrl.searchParams.set("reason", result.reason);
+    }
+    response = NextResponse.redirect(settingsUrl);
   }
-
-  const settingsUrl = new URL("/settings", request.url);
-  settingsUrl.searchParams.set("google", result.ok ? "connected" : "error");
-  if (!result.ok && result.reason) {
-    settingsUrl.searchParams.set("reason", result.reason);
-  }
-  return NextResponse.redirect(settingsUrl);
+  // A connect flow can be completed once.
+  response.cookies.set(GOOGLE_OAUTH_NONCE_COOKIE, "", { path: "/api/integrations", maxAge: 0 });
+  return response;
 }
 
 export async function GET(request: NextRequest) {
@@ -36,15 +43,21 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get("state");
   const error = searchParams.get("error");
 
-  let popup = false;
+  let popup = peekGoogleOAuthPopup(state);
   let userId: string | null = null;
 
   if (state) {
     try {
-      const verified = verifyGoogleOAuthState(state);
+      const verified = verifyGoogleOAuthState(state, request.cookies.get(GOOGLE_OAUTH_NONCE_COOKIE)?.value);
+      // The account is linked to whoever is signed in here, and only if that is who started it.
+      const session = await getSessionUser();
+      if (!session || session.id !== verified.userId) {
+        throw new Error("Signed-in user does not match the connect request.");
+      }
       userId = verified.userId;
       popup = verified.popup;
-    } catch {
+    } catch (stateError) {
+      console.warn("Google OAuth state rejected:", stateError instanceof Error ? stateError.message : stateError);
       return callbackResponse(request, popup, {
         ok: false,
         reason: "invalid_state",
