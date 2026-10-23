@@ -119,22 +119,34 @@ export function CalendarPageClient() {
     void load();
   }, [load]);
 
-  // Countdowns stay current.
+  // Countdowns stay current; the list follows new interviews (every minute, and on return to the tab).
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(t);
-  }, []);
+    const tick = window.setInterval(() => setNow(Date.now()), 30_000);
+    const reload = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(tick);
+      window.clearInterval(reload);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [load]);
 
   const refresh = async () => {
     setRefreshing(true);
     try {
       const res = await fetch("/api/interviews/refresh", { method: "POST", credentials: "same-origin" });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not refresh.");
-      await load();
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Still checking; the list updates on its own.");
       toast.success("Calendar and interview emails checked.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not refresh.");
+      toast.message(e instanceof Error ? e.message : "Still checking; the list updates on its own.");
     } finally {
+      // Whatever the server finished (even when the request ran out of time) shows now.
+      await load();
       setRefreshing(false);
     }
   };
