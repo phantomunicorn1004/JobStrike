@@ -246,8 +246,10 @@ export function MailCalendarSettingsCard() {
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Database setup needed</AlertTitle>
                 <AlertDescription>
-                  Run <code className="text-xs">scripts/add-mail-calendar-integration.sql</code> in the Supabase SQL
-                  editor, then reload this page.
+                  <p>
+                    Run <code className="text-xs">scripts/add-mail-calendar-integration.sql</code> in the Supabase SQL
+                    editor, then reload this page.
+                  </p>
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -256,8 +258,10 @@ export function MailCalendarSettingsCard() {
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Server key missing</AlertTitle>
                 <AlertDescription>
-                  Set <code className="text-xs">TOKEN_ENCRYPTION_KEY</code> on the server; mailbox sign-ins are only
-                  stored encrypted.
+                  <p>
+                    Set <code className="text-xs">TOKEN_ENCRYPTION_KEY</code> on the server (the same key as on
+                    Vercel); mailbox sign-ins are only stored encrypted.
+                  </p>
                 </AlertDescription>
               </Alert>
             ) : null}
