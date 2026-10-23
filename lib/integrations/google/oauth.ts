@@ -9,6 +9,7 @@ import {
 import {
   CALENDAR_WRITE_SCOPE,
   MAIL_READ_SCOPE,
+  MailAuthError,
   MailConnectError,
   mailRedirectUri,
   type MailOAuthProvider,
@@ -75,6 +76,28 @@ export const googleMailOAuth: MailOAuthProvider = {
       accessExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
       scopes: [MAIL_READ_SCOPE, ...(granted.has(CALENDAR_EVENTS) ? [CALENDAR_WRITE_SCOPE] : [])],
     };
+  },
+
+  async refreshAccess(refreshToken, userId) {
+    // The redirect address plays no part in a refresh.
+    const client = createOAuth2Client(await credentials(userId, process.env.NEXT_PUBLIC_APP_URL?.trim() || ""));
+    client.setCredentials({ refresh_token: refreshToken });
+    try {
+      const { credentials: tokens } = await client.refreshAccessToken();
+      if (!tokens.access_token) throw new Error("Google returned no access token.");
+      return {
+        accessToken: tokens.access_token,
+        accessExpiresAt: new Date(tokens.expiry_date ?? Date.now() + 3600_000).toISOString(),
+        refreshToken: tokens.refresh_token && tokens.refresh_token !== refreshToken ? tokens.refresh_token : null,
+      };
+    } catch (error) {
+      // invalid_grant: revoked, or the weekly expiry while the Google app is in testing.
+      const message = error instanceof Error ? error.message : String(error);
+      if (/invalid_grant/i.test(message)) {
+        throw new MailAuthError("Google asked to sign in again. Click Reconnect.");
+      }
+      throw error;
+    }
   },
 
   async revoke(refreshToken) {

@@ -1,9 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { MailSetupRequiredError, saveConnectedMailAccount } from "@/lib/integrations/accounts-repository";
 import { mailOAuthResultResponse, readMailOAuthFlow } from "@/lib/integrations/oauth-state";
 import { getMailOAuthProvider, MailConnectError } from "@/lib/integrations/providers";
 import { MAIL_PROVIDER_LABELS, parseMailProvider } from "@/lib/integrations/types";
+import { getSyncAccount } from "@/lib/mail/sync-repository";
+import { ensureLiveUpdates, syncAccount } from "@/lib/mail/sync";
+
+export const maxDuration = 60;
 
 type RouteContext = { params: Promise<{ provider: string }> };
 
@@ -43,6 +47,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const impl = await getMailOAuthProvider(provider);
     const mailbox = await impl.exchangeCode({ userId: flow.userId, origin, code, codeVerifier: flow.codeVerifier });
     const account = await saveConnectedMailAccount(flow.userId, provider, flow.profileId, mailbox);
+    // First scan and live updates start right away, after the popup has its answer.
+    after(async () => {
+      const deadline = Date.now() + 50_000;
+      try {
+        const stored = await getSyncAccount(account.id);
+        if (stored) await ensureLiveUpdates(stored);
+      } catch (error) {
+        console.warn(`Live updates for account ${account.id} failed:`, error instanceof Error ? error.message : error);
+      }
+      await syncAccount(account.id, deadline);
+    });
     return mailOAuthResultResponse(request, { ok: true, email: account.email });
   } catch (error) {
     if (error instanceof MailConnectError || error instanceof MailSetupRequiredError) {

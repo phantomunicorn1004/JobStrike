@@ -1,4 +1,5 @@
 import JobsLayout from "@/app/jobs-layout";
+import { MailAutoSync } from "@/components/settings/MailAutoSync";
 
 /**
  * Shared member chrome. Keeps the sidebar mounted across member routes
@@ -9,5 +10,10 @@ export default function MemberLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <JobsLayout>{children}</JobsLayout>;
+  return (
+    <JobsLayout>
+      <MailAutoSync />
+      {children}
+    </JobsLayout>
+  );
 }

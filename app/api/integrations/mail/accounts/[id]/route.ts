@@ -9,6 +9,8 @@ import {
 } from "@/lib/integrations/accounts-repository";
 import { getMailOAuthProvider } from "@/lib/integrations/providers";
 import { parseMailAutomation, type MailAutomation } from "@/lib/integrations/types";
+import { getSyncAccount } from "@/lib/mail/sync-repository";
+import { stopLiveUpdates } from "@/lib/mail/sync";
 import { getProfileById } from "@/lib/resume-db/repository";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -65,6 +67,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const user = await requireRequestUser(request);
     const { id } = await context.params;
     if (!isMailAccountId(id)) return notFound();
+
+    // Stop Microsoft's change notifications while the sign-in is still stored.
+    const stored = await getSyncAccount(id);
+    if (stored?.user_id === user.id) await stopLiveUpdates(stored);
 
     const removed = await deleteMailAccount(user.id, id);
     if (!removed) return notFound();

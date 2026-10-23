@@ -8,6 +8,7 @@ import type {
   MailAutomation,
   MailProvider,
 } from "@/lib/integrations/types";
+import type { MailSyncProgress } from "@/lib/mail/types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type MailAccountRow = {
@@ -21,11 +22,13 @@ type MailAccountRow = {
   last_sync_at: string | null;
   last_error: string | null;
   created_at: string;
+  sync_progress: MailSyncProgress | null;
+  subscription_expires_at: string | null;
 };
 
 /** Everything except tokens and cursors. */
 const VIEW_COLUMNS =
-  "id, provider, email, profile_id, scopes, status, automation, last_sync_at, last_error, created_at";
+  "id, provider, email, profile_id, scopes, status, automation, last_sync_at, last_error, created_at, sync_progress, subscription_expires_at";
 
 /** Thrown while scripts/add-mail-calendar-integration.sql has not been run. */
 export class MailSetupRequiredError extends Error {
@@ -34,7 +37,7 @@ export class MailSetupRequiredError extends Error {
   }
 }
 
-function failOn(error: { code?: string; message?: string } | null): void {
+export function failOn(error: { code?: string; message?: string } | null): void {
   if (!error) return;
   // 42P01: no such table; PGRST205: PostgREST does not know the table.
   const message = error.message ?? "";
@@ -68,17 +71,34 @@ function toView(row: MailAccountRow): MailAccountView {
     lastSyncAt: row.last_sync_at,
     lastError: row.last_error,
     createdAt: row.created_at,
+    syncPhase: row.sync_progress?.phase ?? null,
+    scanned: row.sync_progress?.scanned ?? 0,
+    jobEmails: 0,
+    liveUpdates: Boolean(row.subscription_expires_at && new Date(row.subscription_expires_at) > new Date()),
   };
 }
 
 export async function listMailAccounts(userId: string): Promise<MailAccountView[]> {
-  const { data, error } = await getSupabaseAdminClient()
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
     .from("mail_accounts")
     .select(VIEW_COLUMNS)
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
   failOn(error);
-  return ((data ?? []) as MailAccountRow[]).map(toView);
+  const accounts = ((data ?? []) as MailAccountRow[]).map(toView);
+
+  // Job emails kept per mailbox (a count, not the rows).
+  await Promise.all(
+    accounts.map(async (account) => {
+      const { count } = await supabase
+        .from("mail_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("account_id", account.id);
+      account.jobEmails = count ?? 0;
+    }),
+  );
+  return accounts;
 }
 
 /**

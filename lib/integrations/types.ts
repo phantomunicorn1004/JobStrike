@@ -34,6 +34,14 @@ export type MailAccountView = {
   lastSyncAt: string | null;
   lastError: string | null;
   createdAt: string;
+  /** "initial" while the first scan runs, "ready" afterwards, null before the first sync. */
+  syncPhase: "initial" | "ready" | null;
+  /** Messages checked by the current or last scan. */
+  scanned: number;
+  /** Job-related messages kept from this mailbox. */
+  jobEmails: number;
+  /** New mail arrives within seconds (Microsoft change notifications), not only every 10 minutes. */
+  liveUpdates: boolean;
 };
 
 export type MailAccountsResponse = {

@@ -48,13 +48,22 @@ const PROVIDER_STYLE: Record<MailProvider, string> = {
 };
 
 function lastSyncText(account: MailAccountView): string {
-  if (!account.lastSyncAt) return "Not synced yet";
+  if (!account.lastSyncAt) return "Waiting for the first sync";
   const minutes = Math.round((Date.now() - new Date(account.lastSyncAt).getTime()) / 60000);
   if (minutes < 1) return "Synced just now";
   if (minutes < 60) return `Synced ${minutes} min ago`;
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `Synced ${hours} h ago`;
   return `Synced ${new Date(account.lastSyncAt).toLocaleDateString()}`;
+}
+
+function jobEmailsText(count: number): string {
+  return count === 1 ? "1 job email" : `${count.toLocaleString()} job emails`;
+}
+
+/** The first scan runs in short steps; the card keeps it going while it is open. */
+function isScanning(account: MailAccountView): boolean {
+  return account.status === "active" && account.syncPhase !== "ready";
 }
 
 function StatusBadge({ account }: { account: MailAccountView }) {
@@ -82,7 +91,9 @@ export function MailCalendarSettingsCard() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState<MailAccountView | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
   const popupWatch = useRef<number | null>(null);
+  const mounted = useRef(true);
 
   const load = useCallback(async () => {
     try {
@@ -105,8 +116,58 @@ export function MailCalendarSettingsCard() {
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     void load();
+    return () => {
+      mounted.current = false;
+    };
   }, [load]);
+
+  /** The automatic continuation of a scan waits until then (after a failure or a busy mailbox). */
+  const autoPausedUntil = useRef(0);
+  const [autoTick, setAutoTick] = useState(0);
+
+  const syncNow = useCallback(
+    async (account: MailAccountView, quiet = false) => {
+      setSyncingId(account.id);
+      let outcome: string | undefined;
+      try {
+        const res = await fetch("/api/integrations/mail/sync", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountId: account.id }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || "Sync failed.");
+        outcome = body.results?.[0]?.outcome as string | undefined;
+        if (!quiet && outcome === "done") toast.success(`${account.email} is up to date.`);
+        if (!quiet && outcome === "busy") toast.message("A sync is already running for this mailbox.");
+      } catch (error) {
+        if (!quiet) toast.error(error instanceof Error ? error.message : "Sync failed.");
+      } finally {
+        if (outcome !== "partial" && outcome !== "done") {
+          // Another run holds the mailbox (often the first scan right after connecting): look
+          // again shortly. After a failure, leave it to the timer and Sync now.
+          const wait = outcome === "busy" || outcome === "throttled" ? 15_000 : 10 * 60_000;
+          autoPausedUntil.current = Date.now() + wait;
+          window.setTimeout(() => mounted.current && setAutoTick((t) => t + 1), wait);
+        }
+        if (mounted.current) {
+          await load();
+          setSyncingId(null);
+        }
+      }
+    },
+    [load],
+  );
+
+  // Keep the first scan going while the card is open (each request reads for up to ~45 s).
+  useEffect(() => {
+    if (syncingId || !data || Date.now() < autoPausedUntil.current) return;
+    const scanning = data.accounts.find(isScanning);
+    if (scanning) void syncNow(scanning, true);
+  }, [data, syncingId, syncNow, autoTick]);
 
   const stopPopupWatch = useCallback(() => {
     if (popupWatch.current !== null) window.clearInterval(popupWatch.current);
@@ -183,7 +244,13 @@ export function MailCalendarSettingsCard() {
       if (!res.ok) throw new Error(body.error || "Could not save.");
       const updated = body.account as MailAccountView;
       setData((prev) =>
-        prev ? { ...prev, accounts: prev.accounts.map((a) => (a.id === updated.id ? updated : a)) } : prev,
+        prev
+          ? {
+              ...prev,
+              // The count is not part of a settings change.
+              accounts: prev.accounts.map((a) => (a.id === updated.id ? { ...updated, jobEmails: a.jobEmails } : a)),
+            }
+          : prev,
       );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save.");
@@ -285,12 +352,33 @@ export function MailCalendarSettingsCard() {
                         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                           <span>{MAIL_PROVIDER_LABELS[account.provider]}</span>
                           <span aria-hidden>·</span>
-                          <span>{lastSyncText(account)}</span>
+                          {isScanning(account) ? (
+                            <span className="inline-flex items-center gap-1 text-foreground">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              Reading the last 30 days… {account.scanned.toLocaleString()} checked
+                            </span>
+                          ) : (
+                            <span>{lastSyncText(account)}</span>
+                          )}
+                          <span aria-hidden>·</span>
+                          <span>{jobEmailsText(account.jobEmails)}</span>
                           <span aria-hidden>·</span>
                           <span className="inline-flex items-center gap-1">
                             <CalendarDays className="h-3 w-3" />
                             {account.canUseCalendar ? "Calendar on" : "No calendar access"}
                           </span>
+                          {account.liveUpdates ? (
+                            <>
+                              <span aria-hidden>·</span>
+                              <span
+                                className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400"
+                                title="New mail arrives within seconds"
+                              >
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+                                Live
+                              </span>
+                            </>
+                          ) : null}
                         </p>
                         {account.lastError ? (
                           <p className="mt-1 text-xs text-destructive">{account.lastError}</p>
@@ -304,6 +392,18 @@ export function MailCalendarSettingsCard() {
                             onClick={() => connect(account.provider, account.profileId)}
                           >
                             Reconnect
+                          </Button>
+                        ) : null}
+                        {account.status === "active" ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-muted-foreground"
+                            disabled={syncingId !== null}
+                            onClick={() => void syncNow(account)}
+                          >
+                            <RefreshCw className={`mr-1.5 h-4 w-4 ${syncingId === account.id ? "animate-spin" : ""}`} />
+                            {syncingId === account.id ? "Syncing…" : "Sync now"}
                           </Button>
                         ) : null}
                         <Button

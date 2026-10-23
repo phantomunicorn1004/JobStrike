@@ -457,7 +457,23 @@ About 2.5–3 weeks in total. Each phase ships on its own, and the first useful 
     redirect URI `<app>/api/integrations/mail/microsoft/callback`, delegated permissions
     `offline_access openid email profile User.Read Mail.Read Calendars.ReadWrite`, a client secret;
     env `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` (optional `MICROSOFT_TENANT`).
-- **Next: Phase 2**, the sync engine.
+- **Phase 2 done** (sync):
+  - SQL: `mail_messages`, and sync and subscription columns on `mail_accounts` (same script).
+  - `lib/mail/sync.ts`: one run per mailbox at a time (`sync_lock_until`), position saved after
+    every page, a fresh scan from a day before the last sync when the provider forgets the
+    position, an extra pass when new mail is announced during a run, `reauth_required` on a
+    refused sign-in. Microsoft refresh tokens are replaced on every refresh.
+  - Outlook: Inbox delta (`lib/integrations/microsoft/mail.ts`), 30 days on the first scan, and
+    change notifications to `/api/integrations/mail/webhook/microsoft` (clientState checked by
+    hash, sync after the answer). Gmail: scan plus `history.list` (`lib/integrations/google/gmail.ts`).
+  - `lib/mail/prefilter.ts`: keeps ATS and scheduling senders, companies from Resume DB (sender
+    domain or name), LinkedIn application updates and application wording; drops own mail,
+    verification codes, job alerts and marketing.
+  - Triggers: `/api/cron/mail-sync` (Supabase pg_cron, `scripts/schedule-mail-sync.sql`, also
+    renews subscriptions and deletes job emails after 180 days), Sync now, sync on opening any
+    member page (`MailAutoSync`, at most every 5 minutes), and right after connecting.
+  - Settings card: scan progress, job email count, Live marker, Sync now.
+- **Next: Phase 3**, classification, matching and the Inbox page.
 
 ---
 

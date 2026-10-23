@@ -3,6 +3,7 @@ import "server-only";
 import {
   CALENDAR_WRITE_SCOPE,
   MAIL_READ_SCOPE,
+  MailAuthError,
   MailConnectError,
   mailRedirectUri,
   type MailOAuthProvider,
@@ -116,6 +117,35 @@ export const microsoftMailOAuth: MailOAuthProvider = {
       accessToken: tokens.access_token,
       accessExpiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null,
       scopes: [MAIL_READ_SCOPE, ...(granted.has("calendars.readwrite") ? [CALENDAR_WRITE_SCOPE] : [])],
+    };
+  },
+
+  async refreshAccess(refreshToken) {
+    const { clientId, clientSecret, authority } = requireConfig();
+    const res = await fetch(`${authority}/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        scope: SCOPES.join(" "),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const tokens = (await res.json().catch(() => ({}))) as TokenResponse;
+    if (!res.ok || !tokens.access_token) {
+      // invalid_grant: expired, revoked, or the password changed. Anything else may pass.
+      if (tokens.error === "invalid_grant" || tokens.error === "interaction_required") {
+        throw new MailAuthError("Microsoft asked to sign in again. Click Reconnect.");
+      }
+      throw new Error(`Microsoft token refresh failed: ${tokens.error || `HTTP ${res.status}`}`);
+    }
+    return {
+      accessToken: tokens.access_token,
+      accessExpiresAt: new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000).toISOString(),
+      refreshToken: tokens.refresh_token ?? null,
     };
   },
 
