@@ -49,13 +49,67 @@
     await storageSet({ [STORAGE.scrapedNames]: names });
   }
 
-  /** The scraped company and title for a job link, or null when it was not scraped. */
-  async function lookupScrapedJob(url) {
+  /**
+   * The job ids in a link: a UUID (Lever, Ashby), a long number (Greenhouse,
+   * SmartRecruiters), or a short number / requisition (iCIMS, Workday "_R-12345")
+   * that only counts on the same site. Redirects change the address but keep the id.
+   */
+  function scrapedJobIds(key) {
+    const text = String(key || '').toLowerCase();
+    // Short ids are only unique within one employer's site: they carry the host.
+    const host = text.split('/')[0];
+    const ids = new Set();
+    for (const m of text.matchAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g)) ids.add(m[0]);
+    for (const m of text.matchAll(/\d{5,}/g)) ids.add(m[0].length >= 7 ? m[0] : `${host}#${m[0]}`);
+    for (const m of text.matchAll(/(?:^|[^a-z0-9])(?:r|jr|req)[-_]?(\d{4,})(?![0-9])/g)) ids.add(`${host}#r${m[1]}`);
+    return ids;
+  }
+
+  /** Two titles name the same role: most words of the shorter one appear in the other. */
+  function titlesAgree(a, b) {
+    const words = (t) =>
+      new Set(
+        String(t || '')
+          .toLowerCase()
+          .replace(/[^a-z0-9+#]+/g, ' ')
+          .split(' ')
+          .filter((w) => w.length > 1 && !/^(and|the|of|for|to|in|at|remote|us|usa|hybrid|onsite)$/.test(w))
+      );
+    const left = words(a);
+    const right = words(b);
+    if (!left.size || !right.size) return false;
+    let common = 0;
+    left.forEach((w) => {
+      if (right.has(w)) common += 1;
+    });
+    return common / Math.min(left.size, right.size) >= 0.6;
+  }
+
+  /**
+   * The scraped company and title for a job link, or null when it was not scraped.
+   * The exact link first; failing that (the page redirected to another address),
+   * the one scraped job with the same job id and a matching title.
+   */
+  async function lookupScrapedJob(url, { title = '' } = {}) {
     const key = scrapedNameKey(url);
     if (!key) return null;
     const stored = (await storageGet([STORAGE.scrapedNames]))[STORAGE.scrapedNames];
-    const hit = stored && typeof stored === 'object' ? stored[key] : null;
-    return hit && hit.c ? { company: hit.c, title: hit.t || '' } : null;
+    if (!stored || typeof stored !== 'object') return null;
+    const hit = stored[key];
+    if (hit && hit.c) return { company: hit.c, title: hit.t || '', matchedBy: 'link' };
+
+    const ids = scrapedJobIds(key);
+    if (!ids.size || !String(title || '').trim()) return null;
+    let found = null;
+    for (const [storedKey, entry] of Object.entries(stored)) {
+      if (!entry?.c) continue;
+      const shared = [...scrapedJobIds(storedKey)].some((id) => ids.has(id));
+      if (!shared || !titlesAgree(entry.t, title)) continue;
+      // Two different companies behind one id: not sure enough to pick either.
+      if (found && found.c.toLowerCase() !== entry.c.toLowerCase()) return null;
+      found = entry;
+    }
+    return found ? { company: found.c, title: found.t || '', matchedBy: 'job id' } : null;
   }
 
   window.SmartJobScrapedNames = { lookup: lookupScrapedJob };
@@ -86,6 +140,12 @@
     hideAdvancedDegree: true,
     /** Hide jobs the source marks as requiring a language other than English. */
     hideForeignLanguage: true,
+    /** Job types to show; a job whose type the source does not state is always shown. */
+    showFullTime: true,
+    showContract: true,
+    showPartTime: true,
+    showTemporary: true,
+    showInternship: true,
     /** Which sources a scrape reads. HiringCafe needs no account; Jobright uses yours. */
     useJobright: true,
     useHiringCafe: true,
@@ -795,6 +855,7 @@
     if (stats.removedForeign) bits.push(`${stats.removedForeign} outside US`);
     if (stats.removedDegree) bits.push(`${stats.removedDegree} higher degree`);
     if (stats.removedLanguage) bits.push(`${stats.removedLanguage} other language`);
+    if (stats.removedJobType) bits.push(`${stats.removedJobType} job type`);
 
     if (stats.removedRegisteredJobs) bits.push(`${stats.removedRegisteredJobs} reg. jobs`);
     if (stats.removedRegisteredCompanies) {
@@ -963,8 +1024,14 @@
       : fresh;
     const removedClearance = fresh.length - cleared.length;
     // Only a stated, different country excludes; an unknown one does not.
+    // A stated other country excludes; so does a title that limits the job to
+    // another region. An unknown country alone does not.
     const domestic = state.prefs.usOnly
-      ? cleared.filter((job) => !job.country_code || /^(us|usa)$/i.test(String(job.country_code).trim()))
+      ? cleared.filter(
+          (job) =>
+            (!job.country_code || /^(us|usa)$/i.test(String(job.country_code).trim())) &&
+            !titleLimitsToOutsideUs(job.title)
+        )
       : cleared;
     const removedForeign = cleared.length - domestic.length;
     const degreeOk = state.prefs.hideAdvancedDegree
@@ -975,7 +1042,9 @@
       ? degreeOk.filter((job) => job.foreign_language_required !== true)
       : degreeOk;
     const removedLanguage = degreeOk.length - languageOk.length;
-    let filtered = sortBidJobs(languageOk);
+    const typeOk = languageOk.filter(jobTypeShown);
+    const removedJobType = languageOk.length - typeOk.length;
+    let filtered = sortBidJobs(typeOk);
     // Several jobs at one company: all stay, side by side under the company's best
     // one, so the user picks which to bid on.
     let groupedSameCompany = 0;
@@ -1007,6 +1076,9 @@
       removedForeign,
       removedDegree,
       removedLanguage,
+      removedJobType,
+      // Jobs both sources listed, and how often the other source's posting time was earlier.
+      crossSourceDates: deduped.dateMerge || null,
       groupedSameCompany,
       companiesWithSeveral,
       remaining: filtered.length,
@@ -1271,6 +1343,7 @@
       applicants_text: job?.applicants_text || null,
       ...sourceStatedFacts(job),
       work_model: job?.work_model || null,
+      job_type: jobTypeLabel(job?.job_type || job?.employment_type) || null,
       repost: job?.repost === true,
       easy_apply: job?.easy_apply === true,
       first_seen_at: job?.first_seen_at || null,
@@ -1424,6 +1497,35 @@
   }
 
   /**
+   * Job types in one vocabulary for both sources (Jobright "Full-time",
+   * HiringCafe "Full Time", "Contract to hire", …), each with its show setting.
+   */
+  const JOB_TYPES = [
+    { label: 'Full-time', pref: 'showFullTime', re: /full[\s_-]*time|permanent/i },
+    { label: 'Contract', pref: 'showContract', re: /contract|freelance|\b1099\b|\bc2c\b|corp[\s_-]*to[\s_-]*corp/i },
+    { label: 'Part-time', pref: 'showPartTime', re: /part[\s_-]*time/i },
+    { label: 'Temporary', pref: 'showTemporary', re: /\btemp(orary)?\b|seasonal/i },
+    { label: 'Internship', pref: 'showInternship', re: /\bintern(ship)?s?\b/i },
+  ];
+
+  /** "Full-time", "Contract, Part-time", or '' when the source states no known type. */
+  function jobTypeLabel(value) {
+    const text = String(value ?? '');
+    if (!text.trim()) return '';
+    return JOB_TYPES.filter((type) => type.re.test(text)).map((type) => type.label).join(', ');
+  }
+
+  /** Shown while any of the job's types is ticked; an unstated type never hides a job. */
+  function jobTypeShown(job) {
+    const labels = String(job?.job_type || '').split(/,\s*/).filter(Boolean);
+    if (!labels.length) return true;
+    return labels.some((label) => {
+      const type = JOB_TYPES.find((item) => item.label === label);
+      return !type || state.prefs[type.pref] !== false;
+    });
+  }
+
+  /**
    * Hard facts the source states about a job, in one shape for both sources.
    * Jobright gives flags; HiringCafe gives its own reading of the posting.
    * Anything not stated stays false / null: unknown never excludes a job.
@@ -1459,6 +1561,37 @@
       advanced_degree_required: advancedDegree,
       country_code: country,
     };
+  }
+
+  /**
+   * Title wording that limits a job to somewhere other than the US: European
+   * gender tags such as "(m/w/d)", "remote within Germany", "Remote (Europe)",
+   * "UK - Remote", or CET working hours. A title that names the US as well
+   * ("Remote - US or Canada") is not excluded.
+   */
+  const NON_US_GENDER_TAG_RE = /\((?:(?:[mwfdhx]\s*\/\s*){1,3}[mwfdhx]|gn|all genders?)\)/i;
+  const NON_US_REGION_RE = new RegExp(
+    [
+      // "remote within Germany", "remote in the EU", "Remote (Europe)", "Remote - UK"
+      String.raw`remote\s*(?:[-–—:,(|/]\s*)?(?:only\s+)?(?:within|in|across|from)?\s*(?:the\s+)?(?:germany|deutschland|deutschlandweit|austria|switzerland|dach|europe|european union|eu|emea|uk|united kingdom|england|ireland|france|spain|portugal|italy|netherlands|belgium|poland|romania|bulgaria|czechia|czech republic|hungary|greece|sweden|norway|denmark|finland|baltics|estonia|latvia|lithuania|ukraine|serbia|croatia|turkey|israel|canada|mexico|latam|latin america|south america|brazil|argentina|colombia|chile|costa rica|india|apac|asia|philippines|singapore|vietnam|pakistan|sri lanka|indonesia|malaysia|australia|new zealand|africa|south africa|nigeria|kenya|egypt|armenia)\b`,
+      // "UK - Remote", "Germany (Remote)", "Europe / remote"
+      String.raw`\b(?:germany|deutschland|deutschlandweit|austria|switzerland|dach|europe|european union|eu|emea|uk|united kingdom|england|ireland|france|spain|portugal|italy|netherlands|belgium|poland|romania|bulgaria|czechia|czech republic|hungary|greece|sweden|norway|denmark|finland|baltics|estonia|latvia|lithuania|ukraine|serbia|croatia|turkey|israel|canada|mexico|latam|latin america|south america|brazil|argentina|colombia|chile|costa rica|india|apac|asia|philippines|singapore|vietnam|pakistan|sri lanka|indonesia|malaysia|australia|new zealand|africa|south africa|nigeria|kenya|egypt|armenia)\s*(?:[-–—:,(|/]\s*)?(?:fully\s+)?remote`,
+      // working hours tied to a European or Asian time zone
+      String.raw`\b(?:cet|cest|gmt\+?[1-9]|ist|eet|eest|bst)\b`,
+    ].join('|'),
+    'i'
+  );
+  const MENTIONS_US_RE = /\b(?:us|u\.s\.?|usa|united states|north america|americas|us-based|est|pst|cst)\b/i;
+
+  // German job-title words ("Entwickler", "Berater", "Produktmanager:in", "Werkstudent").
+  const GERMAN_TITLE_RE =
+    /\b(?:\w*entwickler|berater|ingenieur|\w*leiter|mitarbeiter|werkstudent|praktik|ausbildung|sachbearbeiter|referent|fachkraft|\w*deutschland)\w*|\w(?::|\*)in(?:nen)?\b/i;
+
+  function titleLimitsToOutsideUs(title) {
+    const text = String(title || '');
+    if (!text) return false;
+    if (MENTIONS_US_RE.test(text)) return false;
+    return NON_US_GENDER_TAG_RE.test(text) || NON_US_REGION_RE.test(text) || GERMAN_TITLE_RE.test(text);
   }
 
   /** Highest points first; newer first when points are equal. */
@@ -1500,7 +1633,11 @@
     let companiesWithSeveral = 0;
     for (const group of groups) {
       if (group.jobs.length > 1) companiesWithSeveral += 1;
-      group.jobs.forEach((job, i) => position.set(job, { index: i + 1, count: group.jobs.length }));
+      // group: 1, 2, 3… for companies with several jobs; 0 for a company with one.
+      const number = group.jobs.length > 1 ? companiesWithSeveral : 0;
+      group.jobs.forEach((job, i) =>
+        position.set(job, { index: i + 1, count: group.jobs.length, group: number })
+      );
     }
     const jobs = groups.flatMap((group) => group.jobs);
     return { jobs, position, extraJobs: jobs.length - groups.length, companiesWithSeveral };
@@ -1523,28 +1660,88 @@
     return out;
   }
 
+  /** The choices in the sheet's Status column. */
+  const SHEET_STATUSES = ['Applied', 'Blocked'];
+
+  /** Excel keeps at most this many characters of a hyperlink's address. */
+  const SHEET_LINK_MAX = 255;
+  /** Query parameters that only track where a click came from. */
+  const TRACKING_PARAM_RE = /^(utm_.*|gh_src|lever-(source|origin)|iis|iisn|ref|referrer)$/i;
+
+  /**
+   * The link as scraped; only one too long for an Excel hyperlink loses its
+   * tracking parameters (the job's own parameters always stay).
+   */
+  function sheetLink(url) {
+    const raw = String(url || '').trim();
+    if (raw.length <= SHEET_LINK_MAX) return raw;
+    try {
+      const parsed = new URL(raw);
+      [...parsed.searchParams.keys()].forEach((name) => {
+        if (TRACKING_PARAM_RE.test(name)) parsed.searchParams.delete(name);
+      });
+      return parsed.toString();
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  /** Row tints for companies with several jobs; neighbouring companies alternate. */
+  const SHEET_GROUP_TINTS = { GA: '#E6F0FA', GB: '#F0E8FA' };
+
+  /** Styles for tinted rows: plain, company (bold), link, number; F adds a line above. */
+  function groupSheetStyles() {
+    const out = [];
+    for (const [tint, color] of Object.entries(SHEET_GROUP_TINTS)) {
+      for (const first of [false, true]) {
+        const id = `${tint}${first ? 'F' : ''}`;
+        const fill = `<Interior ss:Color="${color}" ss:Pattern="Solid"/>`;
+        const line = first
+          ? '<Borders><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#7A94B8"/></Borders>'
+          : '';
+        const style = (suffix, inner) => `  <Style ss:ID="${id}${suffix}">${inner}${fill}${line}</Style>`;
+        out.push(
+          style('', '<Alignment ss:Vertical="Center"/>'),
+          style('Co', '<Alignment ss:Vertical="Center"/><Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1"/>'),
+          style('Link', '<Font ss:FontName="Calibri" ss:Size="11" ss:Color="#0563C1" ss:Underline="Single"/>'),
+          style('Num', '<Alignment ss:Horizontal="Center" ss:Vertical="Center"/>')
+        );
+      }
+    }
+    return out.join('\n');
+  }
+
+  /**
+   * The scrape result as an Excel sheet: links on the left, and on the right a
+   * Status dropdown to mark each job
+   * Applied or Blocked while bidding (the row turns green or grey), clickable
+   * links, a frozen header with filters, and each company with several jobs
+   * marked (tinted rows, "1 of 3" on the company name) and kept together.
+   */
   function jobsToBidExcelXml(jobs, { includeOrigin = false } = {}) {
-    const headers = [
-      'Application Link',
-      'Date Posted',
-      'Job Title',
-      'Company',
-      'Applicants',
-      'Source Platform',
-      ...(includeOrigin ? ['Origin'] : []),
-      // Appended last so existing column positions do not move.
-      'Age',
-      'New',
+    // Open the link at the left, read across, mark the outcome at the right.
+    const columns = [
+      { header: 'Application Link', width: 240 },
+      { header: 'Job Title', width: 220 },
+      { header: 'Company', width: 140 },
+      { header: 'Job Type', width: 90 },
       // A real number, so the sheet can sort and filter on it.
-      'Score',
-      'Listed On',
-      'Repost',
-      // "1 of 3": this company's jobs sit together, best first; pick which to bid on.
-      'Same Company',
+      { header: 'Score', width: 55 },
+      { header: 'Applicants', width: 75 },
+      { header: 'Age', width: 60 },
+      { header: 'Date Posted', width: 110 },
+      { header: 'Source Platform', width: 115 },
+      ...(includeOrigin ? [{ header: 'Origin', width: 90 }] : []),
+      { header: 'New', width: 45 },
+      { header: 'Status', width: 80 },
     ];
     const byScore = sortBidJobs(jobs);
-    const grouping = state.prefs.onePerCompany ? groupJobsByCompany(byScore) : null;
-    const sorted = grouping ? grouping.jobs : byScore;
+    // Companies compared the same way as the list's grouping and the Bid tab's
+    // duplicate-company check. With grouping on, each company's jobs sit side
+    // by side, best first, so you choose which to bid on.
+    const grouping = groupJobsByCompany(byScore);
+    const adjacent = Boolean(state.prefs.onePerCompany);
+    const sorted = adjacent ? grouping.jobs : byScore;
     const exportedAt = Date.now();
     const typical = typicalApplicantsByAge(state.rawJobs, exportedAt);
     const ageOf = (job) => {
@@ -1554,53 +1751,79 @@
       // "~" marks a job the source dated by day only.
       return posted.approximate ? `~${age}` : age;
     };
-    const headerCells = headers
-      .map(
-        (h) =>
-          `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeXml(h)}</Data></Cell>`
-      )
+
+    // `group` is '' for a company with one job, else its tint (GA / GB), with
+    // F for the group's first row (a line above it when the rows are together).
+    const styleAttr = (id) => (id ? ` ss:StyleID="${id}"` : '');
+    const cellXml = (value, group = '') => {
+      if (value && typeof value === 'object') {
+        if (value.status) return `<Cell${styleAttr(group.endsWith('F') ? 'StatusTop' : 'Status')}/>`;
+        if ('link' in value) {
+          const url = sheetLink(value.link);
+          if (!url) return `<Cell${styleAttr(group)}/>`;
+          // Excel would cut a longer address and open a broken page: text only.
+          if (url.length > SHEET_LINK_MAX) {
+            return `<Cell${styleAttr(group)}><Data ss:Type="String">${escapeXml(url)}</Data></Cell>`;
+          }
+          return `<Cell${styleAttr(group ? `${group}Link` : 'Link')} ss:HRef="${escapeXml(url)}"><Data ss:Type="String">${escapeXml(url)}</Data></Cell>`;
+        }
+        if (Number.isFinite(value.number)) {
+          return `<Cell${styleAttr(group ? `${group}Num` : 'Number')}><Data ss:Type="Number">${value.number}</Data></Cell>`;
+        }
+        if ('company' in value) {
+          const note = value.note
+            ? `<Comment ss:Author="JobStrike"><ss:Data xmlns="http://www.w3.org/TR/REC-html40">${escapeXml(value.note)}</ss:Data></Comment>`
+            : '';
+          return `<Cell${styleAttr(group ? `${group}Co` : '')}><Data ss:Type="String">${escapeXml(value.company)}</Data>${note}</Cell>`;
+        }
+      }
+      return `<Cell${styleAttr(group)}><Data ss:Type="String">${escapeXml(value ?? '')}</Data></Cell>`;
+    };
+
+    const COMPANY_HEADER_NOTE =
+      'Tinted rows: one company with several jobs (the tint alternates between companies). ' +
+      'Hover a company name to see "1 of 3", then choose which of its jobs to bid on.';
+    const headerCells = columns
+      .map((c) => {
+        const note =
+          c.header === 'Company'
+            ? `<Comment ss:Author="JobStrike"><ss:Data xmlns="http://www.w3.org/TR/REC-html40">${escapeXml(COMPANY_HEADER_NOTE)}</ss:Data></Comment>`
+            : '';
+        return `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeXml(c.header)}</Data>${note}</Cell>`;
+      })
       .join('');
     const dataRows = sorted
       .map((job) => {
         const priority = jobPriority(job, exportedAt, typical);
+        const at = grouping.position.get(job);
+        const several = at && at.count > 1;
+        const group = several ? `${at.group % 2 ? 'GA' : 'GB'}${adjacent && at.index === 1 ? 'F' : ''}` : '';
         const values = [
-          job?.apply_url ?? '',
-          formatBidPostedAt(job?.posted_at || job?.estimated_publish_date || ''),
+          { link: job?.apply_url || '' },
           job?.title ?? '',
-          job?.company_name ?? '',
+          {
+            company: job?.company_name ?? '',
+            note: several ? `${at.index} of ${at.count} jobs at this company` : '',
+          },
+          job?.job_type || '',
+          { number: priority.score },
           // "~" marks a count the source did not give, taken from jobs of the same age.
           priority.estimated ? `~${priority.applicants}` : applicantsLabel(job),
+          ageOf(job),
+          formatBidPostedAt(job?.posted_at || job?.estimated_publish_date || ''),
           job?.application_site ?? '',
           ...(includeOrigin ? [job?.origin || ''] : []),
-          ageOf(job),
           isNewJob(job) ? 'new' : '',
-          { number: priority.score },
-          // Where the job was first listed, when its link was swapped for the employer's.
-          job?.listed_url || '',
-          priority.repost ? 'repost' : '',
-          (() => {
-            const at = grouping?.position.get(job);
-            return at && at.count > 1 ? `${at.index} of ${at.count}` : '';
-          })(),
+          { status: true },
         ];
-        return `<Row>${values
-          .map((v) =>
-            v && typeof v === 'object' && Number.isFinite(v.number)
-              ? `<Cell><Data ss:Type="Number">${v.number}</Data></Cell>`
-              : `<Cell><Data ss:Type="String">${escapeXml(v)}</Data></Cell>`
-          )
-          .join('')}</Row>`;
+        return `<Row>${values.map((value) => cellXml(value, group)).join('')}</Row>`;
       })
-      .join('');
+      .join('\n   ');
 
-    const colXml = headers
-      .map((_, i) => {
-        const widths = includeOrigin
-          ? [280, 110, 220, 120, 80, 120, 100, 70, 50, 60, 220, 60, 90]
-          : [280, 110, 220, 120, 80, 120, 70, 50, 60, 220, 60, 90];
-        return `<Column ss:Width="${widths[i] || 100}"/>`;
-      })
-      .join('');
+    const colXml = columns.map((c) => `<Column ss:Width="${c.width}"/>`).join('');
+    const lastRow = Math.max(sorted.length + 1, 2);
+    const lastCol = columns.length;
+    const statusList = SHEET_STATUSES.join(',');
 
     return `<?xml version="1.0"?>
 <?mso-application progid="Excel.Sheet"?>
@@ -1610,18 +1833,77 @@
  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
  xmlns:html="http://www.w3.org/TR/REC-html40">
  <Styles>
+  <Style ss:ID="Default" ss:Name="Normal">
+   <Alignment ss:Vertical="Center"/>
+   <Font ss:FontName="Calibri" ss:Size="11"/>
+  </Style>
   <Style ss:ID="Header">
-   <Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="14" ss:FontName="Calibri"/>
+   <Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="12" ss:FontName="Calibri"/>
    <Interior ss:Color="#1B4F72" ss:Pattern="Solid"/>
    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
   </Style>
+  <Style ss:ID="Status">
+   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+   <Borders>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+   </Borders>
+   <Interior ss:Color="#FFF8DC" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Link">
+   <Font ss:FontName="Calibri" ss:Size="11" ss:Color="#0563C1" ss:Underline="Single"/>
+  </Style>
+  <Style ss:ID="Number">
+   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+  </Style>
+  <Style ss:ID="StatusTop">
+   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+   <Borders>
+    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#7A94B8"/>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+   </Borders>
+   <Interior ss:Color="#FFF8DC" ss:Pattern="Solid"/>
+  </Style>
+${groupSheetStyles()}
  </Styles>
  <Worksheet ss:Name="Jobs">
+  <Names>
+   <NamedRange ss:Name="_FilterDatabase" ss:RefersTo="=Jobs!R1C1:R${lastRow}C${lastCol}" ss:Hidden="1"/>
+  </Names>
   <Table>
    ${colXml}
-   <Row ss:StyleID="Header">${headerCells}</Row>
+   <Row ss:Height="20" ss:StyleID="Header">${headerCells}</Row>
    ${dataRows}
   </Table>
+  <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+   <FreezePanes/>
+   <FrozenNoSplit/>
+   <SplitHorizontal>1</SplitHorizontal>
+   <TopRowBottomPane>1</TopRowBottomPane>
+   <ActivePane>2</ActivePane>
+   <Panes>
+    <Pane><Number>3</Number></Pane>
+    <Pane><Number>2</Number><ActiveRow>1</ActiveRow><ActiveCol>0</ActiveCol></Pane>
+   </Panes>
+  </WorksheetOptions>
+  <AutoFilter x:Range="R1C1:R${lastRow}C${lastCol}" xmlns="urn:schemas-microsoft-com:office:excel"/>
+  <DataValidation xmlns="urn:schemas-microsoft-com:office:excel">
+   <Range>R2C${lastCol}:R${lastRow}C${lastCol}</Range>
+   <Type>List</Type>
+   <Value>&quot;${statusList}&quot;</Value>
+  </DataValidation>
+  <ConditionalFormatting xmlns="urn:schemas-microsoft-com:office:excel">
+   <Range>R2C1:R${lastRow}C${lastCol}</Range>
+   <Condition>
+    <Value1>RC${lastCol}=&quot;Applied&quot;</Value1>
+    <Format Style='color:#1E6B3A;background:#D9F2E3'/>
+   </Condition>
+   <Condition>
+    <Value1>RC${lastCol}=&quot;Blocked&quot;</Value1>
+    <Format Style='color:#8A8F98;background:#ECEDEF;text-line-through:single'/>
+   </Condition>
+  </ConditionalFormatting>
  </Worksheet>
 </Workbook>`;
   }
@@ -1682,6 +1964,11 @@
       ['jsUsOnly', 'usOnly'],
       ['jsHideDegree', 'hideAdvancedDegree'],
       ['jsHideLanguage', 'hideForeignLanguage'],
+      ['jsTypeFullTime', 'showFullTime'],
+      ['jsTypeContract', 'showContract'],
+      ['jsTypePartTime', 'showPartTime'],
+      ['jsTypeTemporary', 'showTemporary'],
+      ['jsTypeInternship', 'showInternship'],
       ['jsOnePerCompany', 'onePerCompany'],
       ['jsUseJobright', 'useJobright'],
       ['jsUseHiringCafe', 'useHiringCafe'],
@@ -2181,6 +2468,7 @@
       if (state.stats?.removedForeign) bits.push(`${state.stats.removedForeign} outside US`);
       if (state.stats?.removedDegree) bits.push(`${state.stats.removedDegree} Master's/PhD required`);
       if (state.stats?.removedLanguage) bits.push(`${state.stats.removedLanguage} other language required`);
+      if (state.stats?.removedJobType) bits.push(`${state.stats.removedJobType} other job types`);
       if (state.stats?.companiesWithSeveral) {
         bits.push(
           `${state.stats.companiesWithSeveral} compan${state.stats.companiesWithSeveral === 1 ? 'y has' : 'ies have'} several jobs (grouped)`
@@ -2216,7 +2504,7 @@
         if (done) return;
         done = true;
         chrome.tabs.onUpdated.removeListener(listener);
-        reject(new Error(`Timed out waiting for ${sourceLabel()} tab to load.`));
+        reject(new Error(`Timed out waiting for the ${sourceLabel(scrapePhaseSource())} tab to load.`));
       }, timeoutMs);
 
       function finish(ok, value) {
@@ -2239,7 +2527,7 @@
       function onRemoved(removedTabId) {
         if (removedTabId !== tabId) return;
         chrome.tabs.onRemoved.removeListener(onRemoved);
-        finish(false, new Error(`The ${sourceLabel()} tab was closed.`));
+        finish(false, new Error(`The ${sourceLabel(scrapePhaseSource())} tab was closed.`));
       }
       chrome.tabs.onRemoved?.addListener(onRemoved);
       setTimeout(() => chrome.tabs.onRemoved?.removeListener(onRemoved), timeoutMs + 1000);
@@ -2253,6 +2541,21 @@
         if (tab?.status === 'complete') finish(true);
       });
     });
+  }
+
+  /**
+   * Wait for the tab to finish loading, but do not fail on a page that keeps
+   * "loading" (ads, trackers) long after its job list is there: the reader
+   * (waitUntilPageReady) checks for the list itself and reports if it is missing.
+   */
+  async function waitForTabLoaded(tabId) {
+    try {
+      await waitForTabComplete(tabId, 45000);
+    } catch (err) {
+      if (/was closed/i.test(err?.message || '')) throw err;
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!tab) throw err;
+    }
   }
 
   async function ensureScrapeTab(url) {
@@ -2273,7 +2576,7 @@
         /hiringcafe\.com|hiring\.cafe|jobright\.ai/i.test(href);
       if (tab?.id && ours) {
         await chrome.tabs.update(tab.id, { url, active: false });
-        await waitForTabComplete(tab.id);
+        await waitForTabLoaded(tab.id);
         await sleep(400);
         return tab.id;
       }
@@ -2283,7 +2586,7 @@
     const created = await chrome.tabs.create({ url, active: true });
     if (!created?.id) throw new Error(`Could not open ${sourceLabel()} tab.`);
     await setStoredScrapeTabId(created.id);
-    await waitForTabComplete(created.id);
+    await waitForTabLoaded(created.id);
     await sleep(500);
     return created.id;
   }
@@ -2720,7 +3023,9 @@
     let runError = '';
     let hitPageCap = false;
     let hcDateSample = null;
-    const hcPagesLog = [];
+    // Kept across a pause for a site check, so the report still starts at page 1.
+    const hcPagesLog =
+      resume && Array.isArray(state.scrapeCursor?.pagesLog) ? [...state.scrapeCursor.pagesLog] : [];
     let hcHitFields = null;
     let hcExpired = 0;
     // What HiringCafe's requirement fields actually contain, so filters can be
@@ -2790,6 +3095,7 @@
             pagesFetched,
             hcKnown,
             knownPages,
+            pagesLog: hcPagesLog,
             combined: combined || undefined,
             phase: combined ? 'hiringcafe' : undefined,
           };
@@ -2949,6 +3255,7 @@
             maxPages,
             expiredSkipped: hcExpired,
             pages: hcPagesLog,
+            resumedAfterPause: Boolean(resume),
             fieldValues: hcValueStats,
           },
         },
@@ -3199,6 +3506,7 @@
       applyLinkOnJobBoard: 0,
       originalUrlIsEmployer: 0,
       workModel: {},
+      employmentType: {},
       country: {},
       applicantsText: [],
       // For "N+" rows: how often the numeric field is above N, with examples.
@@ -3265,6 +3573,10 @@
           }
         }
         bump(jrFieldStats.workModel, row.workModel);
+        bump(
+          jrFieldStats.employmentType,
+          Array.isArray(row.employmentType) ? row.employmentType.join(', ') : row.employmentType
+        );
         bump(jrFieldStats.country, row.countryCode);
         const text = String(row.applicantsDisplayText || '').trim();
         if (text && jrFieldStats.applicantsText.length < 6 && !jrFieldStats.applicantsText.includes(text)) {
@@ -3823,11 +4135,11 @@
       }
       if (limitNote) jrWarnings.push(limitNote);
       const hitCap = batch >= maxScrollBatches && lastBatchAdded > 0 && !state.stopRequested;
-      if (!feedSorted) {
+      // The order only matters when the run stopped before the end of the feed:
+      // a feed read to its last row has every job, whatever the order.
+      if (!feedSorted && hitCap) {
         jrWarnings.push(
-          hitCap
-            ? `Jobright returned its jobs in its own order, not newest-first, and one run reads ${rawOffset} rows. Some jobs inside ${dateWindow} were not reached; narrow the filters on Jobright Recommend to see all of them.`
-            : 'Jobright returned its jobs in its own order, not newest-first.'
+          `Jobright returned its jobs in its own order, not newest-first, and one run reads ${rawOffset} rows. Some jobs inside ${dateWindow} were not reached; narrow the filters on Jobright Recommend to see all of them.`
         );
       } else if (hitCap) {
         jrWarnings.push(
@@ -4499,6 +4811,11 @@
       ['jsUsOnly', 'usOnly'],
       ['jsHideDegree', 'hideAdvancedDegree'],
       ['jsHideLanguage', 'hideForeignLanguage'],
+      ['jsTypeFullTime', 'showFullTime'],
+      ['jsTypeContract', 'showContract'],
+      ['jsTypePartTime', 'showPartTime'],
+      ['jsTypeTemporary', 'showTemporary'],
+      ['jsTypeInternship', 'showInternship'],
       ['jsOnePerCompany', 'onePerCompany'],
     ].forEach(([id, key]) => {
       document.getElementById(id)?.addEventListener('change', async (event) => {
@@ -4678,9 +4995,19 @@
             outsideUS: stats.removedForeign || 0,
             higherDegreeRequired: stats.removedDegree || 0,
             otherLanguageRequired: stats.removedLanguage || 0,
+            jobType: stats.removedJobType || 0,
             registeredJobs: stats.removedRegisteredJobs || 0,
             registeredCompanies: stats.removedRegisteredCompanies || 0,
           },
+          // Jobs listed by both sources: how often one source's posting time was
+          // surely earlier (it is the one kept), and by how many hours.
+          crossSourceDates: stats.crossSourceDates || null,
+          // Types among the ready jobs ("not stated" when the source gives none).
+          jobTypesReady: state.filteredJobs.reduce((bag, job) => {
+            const name = job?.job_type || 'not stated';
+            bag[name] = (bag[name] || 0) + 1;
+            return bag;
+          }, {}),
           // Not hidden: kept together in the list and the export.
           sameCompanyGrouped: {
             companies: stats.companiesWithSeveral || 0,

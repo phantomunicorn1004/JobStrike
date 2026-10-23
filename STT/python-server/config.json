@@ -1,0 +1,7 @@
+{
+  "server_host": "127.0.0.1",
+  "server_port": 8000,
+  "websocket_path": "/ws",
+  "poll_interval_ms": 200,
+  "default_hotkey": "Ctrl+Shift+Space"
+}

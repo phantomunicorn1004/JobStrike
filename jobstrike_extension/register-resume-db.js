@@ -373,9 +373,7 @@
     const hasFiles = Boolean(inputs.resume?.files?.[0] || inputs.cover?.files?.[0]);
     // Pasting a different job link into the same tab is a new job.
     const currentLinkKey = canonicalJobLinkKey(document.getElementById('regJobLink')?.value || '');
-    const registered =
-      Boolean(registeredRecord.id) &&
-      (!registeredRecord.jobLinkKey || !currentLinkKey || registeredRecord.jobLinkKey === currentLinkKey);
+    const registered = registeredForCurrentJob(currentLinkKey);
     const profileId = document.getElementById('regProfileId')?.value?.trim();
 
     const done = {
@@ -1160,6 +1158,9 @@
 
   /** The download in progress, shared by every check that needs the list meanwhile. */
   let applicationsInFlight = null;
+  /** Registered by this panel lately: a download started before the save would not list them. */
+  const recentlyRegistered = [];
+  const RECENTLY_REGISTERED_MS = 10 * 60 * 1000;
 
   async function fetchResumeDbApplications(options = {}) {
     const { force = false } = options;
@@ -1201,6 +1202,12 @@
       resumes.push(...rows);
       if (rows.length < APPLICATIONS_PAGE_SIZE) break;
     }
+    // Saved while this download ran (or just before): keep them in the list.
+    const listed = new Set(resumes.map((app) => String(app.id)));
+    const fresh = recentlyRegistered.filter(
+      (entry) => Date.now() - entry.savedAt < RECENTLY_REGISTERED_MS && !listed.has(String(entry.app.id))
+    );
+    resumes.unshift(...fresh.map((entry) => entry.app));
     applicationsCache = { at: now, resumes };
     return resumes;
   }
@@ -1223,12 +1230,12 @@
    * knows it without reading every application again.
    */
   function rememberRegisteredApplication(result) {
-    if (!Array.isArray(applicationsCache.resumes) || !result?.id) {
+    if (!result?.id) {
       invalidateApplicationsCache();
       return;
     }
     const appliedAt = new Date().toISOString();
-    applicationsCache.resumes.unshift({
+    const app = {
       id: result.id,
       rowIndex: result.id,
       entryId: result.entryId || '',
@@ -1242,7 +1249,10 @@
       apply: 'Registered',
       appliedAt,
       date: appliedAt,
-    });
+    };
+    recentlyRegistered.unshift({ app, savedAt: Date.now() });
+    recentlyRegistered.length = Math.min(recentlyRegistered.length, 50);
+    if (Array.isArray(applicationsCache.resumes)) applicationsCache.resumes.unshift(app);
   }
 
   async function checkFieldDuplicate(field, showStatus, { quietIfNone = false } = {}) {
@@ -1615,7 +1625,17 @@
   }
 
   function updateBackendDependentUi(connected) {
+    const cameBack = connected && !backendConnected;
     backendConnected = connected;
+    // Checks skipped while offline (a short network drop) would never run again.
+    if (cameBack) {
+      lastAutoCheckedJobLinkKey = '';
+      lastAutoCheckedCompanyKey = '';
+      setTimeout(() => {
+        scheduleJobLinkDuplicateCheck(null, { force: true });
+        scheduleCompanyDuplicateCheck(null, { force: true });
+      }, 0);
+    }
 
     const profileSelect = document.getElementById('regProfileId');
     const offlineBanner = document.getElementById('registerOfflineBanner');
@@ -1961,9 +1981,14 @@
 
     const loadSeq = ++profilesLoadSeq;
     const preservedId = select.value?.trim() || (await getSelectedProfileId());
+    // Already loaded once: keep the list (and the chosen profile) while it
+    // refreshes, so Register is not blocked by "Loading profiles…".
+    const hadProfiles = [...select.options].some((option) => option.value);
 
-    select.innerHTML = '<option value="">Loading profiles…</option>';
-    select.disabled = true;
+    if (!hadProfiles) {
+      select.innerHTML = '<option value="">Loading profiles…</option>';
+      select.disabled = true;
+    }
 
     try {
       const res = await backendFetch(`${config.baseUrl}/api/profiles`, {
@@ -1999,9 +2024,20 @@
       scheduleJobLinkDuplicateCheck(null, { force: true });
       scheduleCompanyDuplicateCheck(null, { force: true });
       syncResumeBuilderActionButtons();
+      // AI checks wait for the profile (its location decides the verdict).
+      if (getSelectedRegisterProfileId()) {
+        notifyJobLoadedForBidFit();
+        rescanAheadTabs();
+      }
     } catch (err) {
       if (loadSeq !== profilesLoadSeq) return;
       const msg = err.message || 'Failed to load profiles';
+      // A failed refresh keeps the list that was already there.
+      if (hadProfiles) {
+        select.disabled = !backendConnected;
+        syncResumeBuilderActionButtons();
+        return;
+      }
       select.innerHTML = `<option value="">${escapeHtml(msg)}</option>`;
       if (/fetch|network|failed/i.test(msg)) {
         select.innerHTML = '<option value="">Not connected — sign in under Settings</option>';
@@ -2451,14 +2487,18 @@
     const userEdited = (id) => document.getElementById(id)?.dataset.fillSource === 'user';
     if (merged.fromJson) {
       if (userEdited('regJobTitle')) merged.fields.jobTitle = formFields.jobTitle;
-      if (userEdited('regCompany')) merged.fields.companyName = formFields.companyName;
+      if ((userEdited('regCompany') || companyFromScrape()) && formFields.companyName) {
+        merged.fields.companyName = formFields.companyName;
+      }
       if (userEdited('regNote')) merged.fields.note = formFields.note;
     }
 
     // Keep the visible form in sync with JSON before submit (link unchanged).
     if (merged.fromJson) {
       if (merged.fields.jobTitle && !userEdited('regJobTitle')) setRegisterFieldValue('regJobTitle', merged.fields.jobTitle, 'resume-json');
-      if (merged.fields.companyName && !userEdited('regCompany')) setRegisterFieldValue('regCompany', merged.fields.companyName, 'resume-json');
+      if (merged.fields.companyName && !userEdited('regCompany') && !companyFromScrape()) {
+        setRegisterFieldValue('regCompany', merged.fields.companyName, 'resume-json');
+      }
       if (merged.fields.note && !userEdited('regNote')) setRegisterFieldValue('regNote', merged.fields.note, 'resume-json');
       resumeJsonOverrideActive = true;
     }
@@ -2535,6 +2575,10 @@
     );
 
     const data = await res.json().catch(() => ({}));
+    // Already saved (a retry after a timeout, or another panel): mark it, do not fail.
+    if (res.status === 409 && data.duplicateId) {
+      return { id: data.duplicateId, alreadyRegistered: true, _draftWarnings: draft.warnings || [] };
+    }
     if (!res.ok) {
       throw new Error(data.error || `Registration failed (${res.status})`);
     }
@@ -2758,6 +2802,7 @@
       registeredRecord = {
         id: String(state.registeredRecord?.id || ''),
         jobLinkKey: String(state.registeredRecord?.jobLinkKey || ''),
+        profileId: String(state.registeredRecord?.profileId || ''),
         at: Number(state.registeredRecord?.at || 0)
       };
       generateActivity = null;
@@ -2862,6 +2907,12 @@
       toPersist: registerSessionToPersist,
       hasWork: registerSessionHasWork
     });
+  }
+
+  /** The Register company came from the Job Scraper's result for this job. */
+  function companyFromScrape() {
+    const el = document.getElementById('regCompany');
+    return Boolean(el && el.dataset.fillSource === 'scraped' && el.value.trim());
   }
 
   function setRegisterFieldValue(id, value, source) {
@@ -3028,9 +3079,14 @@
     }
 
     if (fields.jobTitle && !keepsUserEdit('regJobTitle')) setRegisterFieldValue('regJobTitle', fields.jobTitle, 'resume-json');
-    if (fields.companyName && !keepsUserEdit('regCompany')) setRegisterFieldValue('regCompany', fields.companyName, 'resume-json');
+    // The scraper's company is the one the applied and blocked lists were checked
+    // against; the name the AI wrote into the resume JSON does not replace it.
+    if (fields.companyName && !keepsUserEdit('regCompany') && !companyFromScrape()) {
+      setRegisterFieldValue('regCompany', fields.companyName, 'resume-json');
+    }
     if (fields.jobDescription && !keepsUserEdit('regNote')) setRegisterFieldValue('regNote', fields.jobDescription, 'resume-json');
-    if (fields.companyName && !isRestoringSession) {
+    // When the scraped company is kept, it was already checked when the job loaded.
+    if (fields.companyName && !isRestoringSession && !companyFromScrape()) {
       scheduleCompanyDuplicateCheckFromResumeJson(fields.companyName, showStatus);
     }
 
@@ -3254,10 +3310,13 @@
       throw new Error('Local json2docx server is offline. Start it or check Settings.');
     }
 
-    if (generateInFlight) return null;
+    if (generateInFlight) {
+      throw new Error('Files are still being generated for another job. Wait for it to finish, then click Generate again.');
+    }
     generateInFlight = true;
-    const originToken = tabSession()?.getGeneration();
-    const originTabId = tabSession()?.getBoundTabId?.();
+    // The draft these files are for: a tab switch, or Refresh to a new job in
+    // the same tab, must not attach them to a different job.
+    const originSid = tabSession()?.currentSid?.() || 0;
 
     // Keep Register draft in sync before generate, without undoing a title or
     // company the user corrected by hand after pasting the JSON.
@@ -3286,9 +3345,10 @@
         },
       });
 
-      // Switched tabs while json2docx ran: these files are for the other job.
-      if (tabSession() && !tabSession().isCurrentGeneration(originToken)) {
-        const saved = saveGeneratedFilesToTab(originTabId, result.preferred);
+      // Left that job while json2docx ran: these files belong to its draft.
+      if (originSid && tabSession()?.currentSid?.() !== originSid) {
+        const originTabId = tabSession()?.tabOfSid?.(originSid);
+        const saved = originTabId ? saveGeneratedFilesToTab(originTabId, result.preferred) : false;
         const note = saved
           ? 'Files finished generating for the tab you started on. Switch back to it to see them.'
           : 'Files finished generating after you switched tabs. Generate again on that tab.';
@@ -3323,6 +3383,7 @@
       setRegisterStatus(message, 'error');
       updateResumeJsonHint(message, 'error');
       if (showStatus) showStatus(message, 'error');
+      if (err && typeof err === 'object') err.surfaced = true;
       throw err;
     } finally {
       generateInFlight = false;
@@ -3341,14 +3402,34 @@
     const btn = document.getElementById('regGenerateFilesBtn');
     if (!btn) return;
     btn.addEventListener('click', () => {
-      generateFilesFromResumeJson(showStatus).catch(() => {
-        // errors already surfaced in UI
+      generateFilesFromResumeJson(showStatus).catch((err) => {
+        // Errors inside the run are shown there; the checks before it (no JSON,
+        // json2docx offline, another Generate running) are shown here.
+        if (err?.surfaced) return;
+        const message = err?.message || String(err);
+        setRegisterStatus(message, 'error');
+        if (showStatus) showStatus(message, 'error');
       });
     });
   }
 
   function getSelectedRegisterProfileId() {
     return document.getElementById('regProfileId')?.value?.trim() || '';
+  }
+
+  /**
+   * This tab registered the job now in the form, for the profile now selected.
+   * Another profile may register the same job; a different link is a new job.
+   */
+  function registeredForCurrentJob(linkKey) {
+    if (!registeredRecord.id) return false;
+    const currentLinkKey =
+      linkKey ?? canonicalJobLinkKey(document.getElementById('regJobLink')?.value || '');
+    const profileId = getSelectedRegisterProfileId();
+    const sameLink =
+      !registeredRecord.jobLinkKey || !currentLinkKey || registeredRecord.jobLinkKey === currentLinkKey;
+    const sameProfile = !registeredRecord.profileId || !profileId || registeredRecord.profileId === profileId;
+    return sameLink && sameProfile;
   }
 
   function updatePromptKitStatus(message, type) {
@@ -3596,7 +3677,11 @@
     if (jd.length < AHEAD_MIN_JD_CHARS) return false;
     if (!String(posting?.jobTitle || '').trim()) return false;
     const warnings = Array.isArray(posting?.meta?.warnings) ? posting.meta.warnings : [];
-    if (warnings.some((w) => w === 'apply_only' || w === 'empty_jd' || w === 'short_jd' || w === 'missing_body')) {
+    if (
+      warnings.some(
+        (w) => w === 'apply_only' || w === 'empty_jd' || w === 'short_jd' || w === 'missing_body' || w === 'closed_posting'
+      )
+    ) {
       return false;
     }
     const source = String(posting?.meta?.source || '');
@@ -3665,6 +3750,8 @@
 
     const settings = await readAiAutofillSettings();
     if (!settings.apiKey || !global.SmartJobAiFill?.evaluateJobCompatibility) return;
+    // Rescanned once the profiles load; until then a verdict would ignore the location.
+    if (!getSelectedRegisterProfileId()) return;
 
     const previous = aheadTabs.get(tabId);
     const entry = {
@@ -3887,7 +3974,20 @@
       return null;
     }
 
+    // Without the profile the check runs with no location, is paid for, and is
+    // wrong for "must live in WA" jobs. It runs once the profiles have loaded.
+    if (!manual && !getSelectedRegisterProfileId()) {
+      await releasePendingWithoutResult();
+      return null;
+    }
+
+    // The tab this check is for. The awaits below can take a while (a profile
+    // fetch); a check that resumes after a tab switch belongs to the old tab.
+    const startToken = tabSession()?.getGeneration?.();
+    const switchedAway = () => Boolean(tabSession()) && !tabSession().isCurrentGeneration(startToken);
+
     const inputs = await collectBidFitInputs();
+    if (switchedAway()) return null;
     const jd = String(inputs.jobDescription || '').trim();
     if (!jd || jd.length < engine?.MIN_JD_CHARS) {
       if (showStatus) showStatus('Add a full job description in Note first.', 'warn');
@@ -3896,6 +3996,7 @@
     }
 
     const settings = await readAiAutofillSettings();
+    if (switchedAway()) return null;
     aiCompatKeyMissing = !settings.apiKey;
     if (!settings.apiKey) {
       if (manual) {
@@ -4709,8 +4810,17 @@
         if (registerInFlight) return;
         registerInFlight = true;
         setRegisterBusy(true);
+        // The draft this click is for. Every check below reads the form, and the
+        // form follows the tab on screen, so a switch mid-way must stop Register.
+        const startSid = tabSession()?.currentSid?.() || 0;
+        const onStartJob = () => !startSid || tabSession()?.currentSid?.() === startSid;
+        const SWITCHED = 'You switched tabs, so Register stopped. Click Register again on the job you want to save.';
         try {
+          if (generateInFlight) {
+            throw new Error('Files are still being generated. Wait until they are attached, then click Register.');
+          }
           const connected = await checkBackendConnection({ skipDriveBadge: true });
+          if (!onStartJob()) throw new Error(SWITCHED);
           if (!connected) {
             throw new Error(
               'Not signed in. Open Settings → Website connection, enter your username and password, and click Sign in.'
@@ -4726,7 +4836,7 @@
           // This tab already registered this job. The server-side list is the
           // usual guard, but it is cached and can lag a just-saved record.
           const currentLinkKey = canonicalJobLinkKey(document.getElementById('regJobLink')?.value || '');
-          if (registeredRecord.id && registeredRecord.jobLinkKey && registeredRecord.jobLinkKey === currentLinkKey) {
+          if (registeredRecord.jobLinkKey && registeredForCurrentJob(currentLinkKey)) {
             throw new Error(`This job is already registered (#${registeredRecord.id}).`);
           }
 
@@ -4777,8 +4887,7 @@
               throw new Error('Not registered: no cover letter attached.');
             }
           }
-          const registerToken = tabSession()?.getGeneration();
-          const registerTabId = tabSession()?.getBoundTabId?.();
+          if (!onStartJob()) throw new Error(SWITCHED);
           if (draft.warnings?.length) {
             setRegisterStatus(draft.warnings.join(' '), 'warn');
           }
@@ -4795,20 +4904,44 @@
           );
           const submittedLinkKey = canonicalJobLinkKey(draft.fields?.jobLink || '');
           const result = await registerJobToBackend();
-          rememberRegisteredApplication(result);
-          const record = { id: String(result.id || ''), at: Date.now(), jobLinkKey: submittedLinkKey };
-          // Switched tabs during the upload: the record belongs to the tab it
-          // was sent from. Mark that one, and leave this one untouched.
-          if (tabSession() && !tabSession().isCurrentGeneration(registerToken)) {
-            tabSession().mutateSlice?.(registerTabId, 'register', (slice) => ({
-              ...(slice || {}),
-              registeredRecord: record,
-              files: { resume: null, cover: null },
-            }));
-            if (showStatus) showStatus(`Job registered (#${record.id}) for the tab you started on.`, 'success');
+          if (!result.alreadyRegistered) rememberRegisteredApplication(result);
+          const record = {
+            id: String(result.id || ''),
+            at: Date.now(),
+            jobLinkKey: submittedLinkKey,
+            profileId: String(draft.fields?.profileId || ''),
+          };
+          // Left that job during the upload (another tab, or Refresh to a new
+          // page): the record belongs to the draft it was sent from. Back on the
+          // same draft (A → B → A), it is shown here as usual.
+          if (!onStartJob()) {
+            const originTabId = tabSession()?.tabOfSid?.(startSid);
+            if (originTabId) {
+              tabSession().mutateSlice?.(originTabId, 'register', (slice) => ({
+                ...(slice || {}),
+                registeredRecord: record,
+                files: { resume: null, cover: null },
+                fileMeta: { resumeName: '', coverName: '', generatedAt: 0 },
+                autoAttachedFromJson2docx: { resume: false, cover: false },
+              }));
+            }
+            if (showStatus) {
+              showStatus(
+                originTabId
+                  ? `Job registered (#${record.id}) for the tab you started on.`
+                  : `Job registered (#${record.id}). The tab you started on was closed or moved to another job.`,
+                'success'
+              );
+            }
             return;
           }
           registeredRecord = record;
+          if (result.alreadyRegistered) {
+            setRegisterStatus(`Already in Resume DB (#${record.id}) for this profile — marked as registered.`, 'success');
+            if (showStatus) showStatus(`This job was already registered (#${record.id}).`, 'info');
+            refreshApplyProgress();
+            return;
+          }
           const sourceNote = result._draftFromJson ? ' (from resume JSON draft)' : '';
           const fileNote =
             result.resumeUrl || result.coverLetterUrl ? ' Files saved.' : '';
@@ -4819,7 +4952,11 @@
           if (showStatus) showStatus('Job registered in Resume DB.', 'success');
           clearAllRegisterFiles();
         } catch (err) {
-          const msg = err.message || String(err);
+          let msg = err.message || String(err);
+          // A failure for the job you left must not read as this job's.
+          if (!onStartJob() && !msg.startsWith('You switched tabs')) {
+            msg = `Register for the tab you started on failed: ${msg}`;
+          }
           setRegisterStatus(msg, 'error');
           if (showStatus) showStatus(msg, 'error');
         } finally {

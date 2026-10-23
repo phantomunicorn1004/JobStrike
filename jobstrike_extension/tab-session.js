@@ -12,7 +12,13 @@
  */
 (function (global) {
   const STORE_KEY = 'rwh_tab_sessions_v1';
-  const MAX_SESSIONS = 20;
+  // Blank sessions (a tab only looked at) are trimmed past MAX_SESSIONS; a
+  // draft holding work (resume JSON, files, a registered mark) only past
+  // MAX_WORK_SESSIONS, so a busy day with many tabs open does not lose one.
+  const MAX_SESSIONS = 40;
+  const MAX_WORK_SESSIONS = 120;
+  /** Each session object gets its own id: a reset (Refresh to a new job) is a new sid. */
+  let nextSid = 1;
   const PERSIST_DEBOUNCE_MS = 300;
   const SYNC_DEBOUNCE_MS = 250;
 
@@ -44,6 +50,9 @@
     try {
       const parsed = new URL(raw);
       const path = parsed.pathname.replace(/\/+$/, '');
+      // Career sites that route jobs in the hash ("#/job/123") are one page per
+      // job, the same as content.js and job-url.js treat them.
+      const route = /^#!?\//.test(parsed.hash) ? parsed.hash.replace(/\/+$/, '') : '';
       // Many career sites keep one path and name the job in the query
       // (?gh_jid=123). Without it a second job looked like the same page, so
       // Refresh kept the first job's resume JSON and files for the new one.
@@ -52,7 +61,7 @@
         if (!TRACKING_PARAM_RE.test(key)) params.push(`${key.toLowerCase()}=${value}`);
       });
       const query = params.length ? `?${params.sort().join('&')}` : '';
-      return `${parsed.origin}${path}${query}`.toLowerCase();
+      return `${parsed.origin}${path}${query}${route}`.toLowerCase();
     } catch (_) {
       return raw.toLowerCase();
     }
@@ -65,6 +74,9 @@
   function blankSession(tabId) {
     return {
       tabId: Number(tabId),
+      sid: nextSid++,
+      // True from binding until the page's job has been read into the form.
+      needsLoad: false,
       boundUrl: '',
       boundUrlKey: '',
       boundAt: 0,
@@ -126,11 +138,15 @@
     // Empty sessions go first: every visited tab gets one, and a draft with
     // resume JSON or files must not be dropped to make room for a blank.
     const age = (s) => s.lastActiveAt || s.updatedAt || 0;
-    const candidates = Array.from(sessions.values())
-      .filter((s) => s.tabId !== boundTabId)
-      .sort((a, b) => Number(hasWork(a.tabId)) - Number(hasWork(b.tabId)) || age(a) - age(b));
-    while (sessions.size > MAX_SESSIONS && candidates.length) {
-      sessions.delete(candidates.shift().tabId);
+    const others = Array.from(sessions.values()).filter((s) => s.tabId !== boundTabId);
+    const blank = others.filter((s) => !hasWork(s.tabId)).sort((a, b) => age(a) - age(b));
+    while (sessions.size > MAX_SESSIONS && blank.length) {
+      sessions.delete(blank.shift().tabId);
+    }
+    if (sessions.size <= MAX_WORK_SESSIONS) return;
+    const working = others.filter((s) => sessions.has(s.tabId)).sort((a, b) => age(a) - age(b));
+    while (sessions.size > MAX_WORK_SESSIONS && working.length) {
+      sessions.delete(working.shift().tabId);
     }
   }
 
@@ -166,6 +182,7 @@
         boundUrl: session.boundUrl,
         boundUrlKey: session.boundUrlKey,
         boundAt: session.boundAt,
+        needsLoad: Boolean(session.needsLoad),
         updatedAt: session.updatedAt,
         lastActiveAt: session.lastActiveAt,
         slices: data
@@ -229,11 +246,10 @@
               if (!Number.isFinite(id) || id <= 0) return;
               // Live in-memory state always wins over the persisted copy.
               if (sessions.has(id)) return;
-              sessions.set(id, {
-                ...blankSession(id),
-                ...entry,
-                slices: entry.slices || {}
-              });
+              const restored = { ...blankSession(id), ...entry, slices: entry.slices || {} };
+              // A sid only means something within this panel's life.
+              restored.sid = nextSid++;
+              sessions.set(id, restored);
             });
             pruneClosedTabs();
           }
@@ -309,6 +325,7 @@
     session.boundUrl = String(url || '');
     session.boundUrlKey = normalizeUrlKey(url);
     session.boundAt = Date.now();
+    session.needsLoad = true;
     session.updatedAt = Date.now();
     schedulePersist();
     return session;
@@ -377,6 +394,31 @@
     return session;
   }
 
+  /** The page's job has been read into the form for this tab. */
+  function markLoaded(tabId) {
+    const session = getSession(tabId);
+    if (!session || !session.needsLoad) return;
+    session.needsLoad = false;
+    schedulePersist();
+  }
+
+  /** Bound to a page whose job was never read (the first read was cut short). */
+  function needsLoad(tabId) {
+    return Boolean(getSession(tabId)?.needsLoad);
+  }
+
+  /** The session on screen now; a result started on it compares against this. */
+  function currentSid() {
+    return getSession(boundTabId)?.sid || 0;
+  }
+
+  /** The tab whose session is `sid`, while that session still exists (not reset or closed). */
+  function tabOfSid(sid) {
+    if (!sid) return null;
+    for (const session of sessions.values()) if (session.sid === sid) return session.tabId;
+    return null;
+  }
+
   function dropSession(tabId) {
     const id = Number(tabId);
     if (!sessions.delete(id)) return;
@@ -415,6 +457,10 @@
     hasWork,
     resetSession,
     dropSession,
+    markLoaded,
+    needsLoad,
+    currentSid,
+    tabOfSid,
     IS_DIALOG_CONTEXT
   };
 })(typeof window !== 'undefined' ? window : self);

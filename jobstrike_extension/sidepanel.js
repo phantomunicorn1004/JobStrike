@@ -69,28 +69,51 @@ let lastObservedTabId = null;
 let lastObservedTabUrl = '';
 let tabSwitchScrapeSeq = 0;
 let tabSwitchScrapeTimer = null;
-/** Last scored job posting from fetchJobPosting (full + resume-trimmed JD). */
-let lastPostingDocument = null;
+/**
+ * The scored job posting from fetchJobPosting (full + resume-trimmed JD), per
+ * tab: one shared copy showed one tab's warnings on another, and an empty Note
+ * fell back to another tab's description for the AI check and Copy Prompt.
+ */
+const postingByTab = new Map();
+const POSTINGS_KEPT = 60;
+
+function postingTabKey(tabId) {
+  const id = tabId ?? window.SmartJobTabSession?.getBoundTabId?.();
+  return id == null ? 'panel' : id;
+}
+
+function getTabPosting(tabId) {
+  return postingByTab.get(postingTabKey(tabId)) || null;
+}
+
+function setTabPosting(doc, tabId) {
+  const key = postingTabKey(tabId);
+  postingByTab.delete(key);
+  if (!doc) return;
+  postingByTab.set(key, doc);
+  while (postingByTab.size > POSTINGS_KEPT) postingByTab.delete(postingByTab.keys().next().value);
+}
 
 function clearPostingDerivedSlices() {
-  if (!lastPostingDocument) return;
-  lastPostingDocument = {
-    ...lastPostingDocument,
+  const current = getTabPosting();
+  if (!current) return;
+  setTabPosting({
+    ...current,
     resumePromptText: '',
     compatExcerptText: '',
     meta: {
-      ...(lastPostingDocument.meta || {}),
+      ...(current.meta || {}),
       userNoteOverrides: true
     }
-  };
+  });
 }
 
 globalThis.SmartJobPostingContext = {
   getLastPosting() {
-    return lastPostingDocument;
+    return getTabPosting();
   },
   setLastPosting(doc) {
-    lastPostingDocument = doc || null;
+    setTabPosting(doc || null);
   },
   clearPostingDerivedSlices
 };
@@ -857,7 +880,7 @@ function bindEvents() {
   if (globalRefreshBtn) globalRefreshBtn.addEventListener('click', () => globalRefreshCurrentTab());
   // Rewinding to step 1 clears the scraped job description, so re-read the page.
   document.addEventListener('rwh-request-rescrape', () => {
-    void scrapeCurrentJob(false);
+    void rescrapePinnedJob();
   });
   const fillBtn = document.getElementById('regAutofillBtn') || document.getElementById('fillSelectedBtn');
   if (fillBtn) fillBtn.addEventListener('click', () => autofillThisPage({ useAi: false }));
@@ -1707,11 +1730,19 @@ function scheduleFirstBindScrape(tabId, url) {
     tabSwitchScrapeTimer = null;
     if (TS && !TS.isCurrentGeneration(token)) return;
     try {
-      showStatus('Loading job info…', 'info', 0);
-      await scrapeJobInfoToAllForms({ showSuccess: false });
+      // Not an endless toast: a tab switch abandons this read without replacing it.
+      showStatus('Loading job info…', 'info', 15000);
+      const loaded = await scrapeJobInfoToAllForms({ showSuccess: false });
       if (seq !== tabSwitchScrapeSeq) return;
       if (TS && !TS.isCurrentGeneration(token)) return;
-      showStatus('Job info loaded from this tab.', 'success', 3200);
+      const found = Boolean(loaded && (loaded.jobTitle || loaded.posting?.rawFullText));
+      showStatus(
+        found
+          ? 'Job info loaded from this tab.'
+          : 'No job posting found on this page. Open the posting, then press Refresh.',
+        found ? 'success' : 'info',
+        found ? 3200 : 5000
+      );
     } catch (error) {
       if (seq !== tabSwitchScrapeSeq) return;
       if (TS && !TS.isCurrentGeneration(token)) return;
@@ -1740,7 +1771,8 @@ async function notifyActiveTabChange(source = 'switch') {
       lastObservedTabUrl = url;
       renderPinnedJobBar(tab.id, url);
       const unbound = !String(TS?.getBoundUrl?.(tab.id) || '').trim();
-      if (unbound && /^https?:\/\//i.test(url)) {
+      // Also a tab bound before its job was ever read (that read was cut short).
+      if ((unbound || TS?.needsLoad?.(tab.id)) && /^https?:\/\//i.test(url)) {
         if (lastObservedTabId !== tab.id) {
           const previousTabId = TS?.getBoundTabId() ?? lastObservedTabId;
           lastObservedTabId = tab.id;
@@ -1764,8 +1796,9 @@ async function notifyActiveTabChange(source = 'switch') {
     TS?.switchTo(previousTabId, tab.id);
     renderPinnedJobBar(tab.id, url);
 
-    // Known tab: restore only. Re-scraping would overwrite its pinned draft.
-    if (hadSession) return;
+    // Known tab: restore only. Re-scraping would overwrite its pinned draft —
+    // unless its first read was cut short (a quick switch), which left it empty.
+    if (hadSession && !TS?.needsLoad?.(tab.id)) return;
 
     if (!/^https?:\/\//i.test(url)) {
       // New tabs often report about:blank before navigation finishes — wait for
@@ -2886,7 +2919,7 @@ function renderPostingMeta(posting) {
   const titleEl = document.getElementById('regPostingMetaTitle');
   const detailEl = document.getElementById('regPostingMetaDetail');
   const noteEl = document.getElementById('regNote');
-  const p = posting || lastPostingDocument;
+  const p = posting || getTabPosting();
   const noteChars = (noteEl?.value || '').trim().length;
   // Once the user edits the Note, scrape warnings no longer describe its text.
   const userEdited = noteEl?.dataset.fillSource === 'user';
@@ -2911,7 +2944,11 @@ function renderPostingMeta(posting) {
   let title = 'Job description loaded';
   let detail = `${size} · ${describePostingSource(p, noteEl)}`;
 
-  if (!noteChars) {
+  if (warnings.includes('closed_posting')) {
+    state = 'warn';
+    title = 'This job is no longer online';
+    detail = 'The page says the posting was taken down or filled. Skip it, or mark it Blocked in your sheet.';
+  } else if (!noteChars) {
     state = 'empty';
     title = 'No job description found';
     detail = 'Paste the posting into the box above, or open the job page and press Refresh.';
@@ -2961,20 +2998,19 @@ async function scrapeJobInfoToAllForms({ showSuccess = true, forceOverwrite = fa
   }
 
   const posting = response.posting || null;
-  if (posting) {
-    lastPostingDocument = posting;
-    globalThis.SmartJobPostingContext?.setLastPosting?.(posting);
-  }
+  // This tab's page now: an earlier posting of this tab no longer applies.
+  setTabPosting(posting, tab.id);
 
   const jobTitle = response.job_title || posting?.jobTitle || '';
   const jobLink = response.job_link || posting?.jobLink || tab.url || '';
   // A job that came from a scrape keeps the scraper's company name: that is the
   // name the applied and blocked lists were compared against, and some boards
   // (ADP) do not state the employer on the page at all.
+  // Matched by link, or by job id + title when the page redirected elsewhere.
   const scraped =
-    (await window.SmartJobScrapedNames?.lookup?.(jobLink).catch(() => null)) ||
+    (await window.SmartJobScrapedNames?.lookup?.(jobLink, { title: jobTitle }).catch(() => null)) ||
     (tab.url && tab.url !== jobLink
-      ? await window.SmartJobScrapedNames?.lookup?.(tab.url).catch(() => null)
+      ? await window.SmartJobScrapedNames?.lookup?.(tab.url, { title: jobTitle }).catch(() => null)
       : null);
   if (scrapeSession && !scrapeSession.isCurrentGeneration(scrapeToken)) return null;
   const company = scraped?.company || response.company_name || posting?.companyName || '';
@@ -2993,12 +3029,15 @@ async function scrapeJobInfoToAllForms({ showSuccess = true, forceOverwrite = fa
       'Replace your edits with this page’s data?\n\nYou edited the job title, company, or description. The job link updates either way.',
       { confirmLabel: 'Replace', cancelLabel: 'Keep my edits' }
     );
+    // Switched tabs while the dialog was open: this page's data is not that tab's job.
+    if (scrapeSession && !scrapeSession.isCurrentGeneration(scrapeToken)) return null;
     if (!proceed) {
       const setLink = window.SmartJobRegisterResumeDb?.setRegisterFieldValue;
       if (setLink) setLink('regJobLink', jobLink, 'page-scrape');
       else setValue('regJobLink', jobLink);
       setValue('jobLink', jobLink);
       renderPostingMeta(posting);
+      window.SmartJobTabSession?.markLoaded?.(tab.id);
       if (showSuccess) showStatus('Job link updated. Title, company, and note kept.', 'info', 4000);
       return { jobTitle, company, jobLink };
     }
@@ -3016,7 +3055,8 @@ async function scrapeJobInfoToAllForms({ showSuccess = true, forceOverwrite = fa
   if (!preferResumeJson) {
     if (setReg) {
       setReg('regJobTitle', jobTitle, 'page-scrape');
-      setReg('regCompany', company, 'page-scrape');
+      // "scraped": the resume JSON does not replace it (see register-resume-db.js).
+      setReg('regCompany', company, scraped?.company ? 'scraped' : 'page-scrape');
       setReg('regNote', jobDescription, 'page-scrape');
     } else {
       setValue('regJobTitle', jobTitle);
@@ -3031,6 +3071,7 @@ async function scrapeJobInfoToAllForms({ showSuccess = true, forceOverwrite = fa
   renderPostingMeta(posting);
 
   window.SmartJobTabSession?.sync();
+  window.SmartJobTabSession?.markLoaded?.(tab.id);
 
   window.SmartJobRegisterResumeDb?.notifyRegisterJobLinkFilled?.(showStatus, { force: true });
   if (!preferResumeJson) {
@@ -3053,6 +3094,35 @@ async function scrapeJobInfoToAllForms({ showSuccess = true, forceOverwrite = fa
     );
   }
   return { jobTitle, company, jobLink, posting };
+}
+
+/**
+ * Read the job again after a rewind or reset — only from the page this tab is
+ * pinned to. After Apply the tab often shows the application form, whose text
+ * and address are not the job's.
+ */
+async function rescrapePinnedJob() {
+  try {
+    const tab = await getActiveTab();
+    const TS = window.SmartJobTabSession;
+    if (tab?.id && TS?.isPinnedElsewhere?.(tab.id, tab.url || '')) {
+      showStatus(
+        'This tab has moved to another page, so the job description was not reloaded. Go back to the posting, or press Refresh to load this page as the job.',
+        'warn',
+        7000
+      );
+      return;
+    }
+    await scrapeJobInfoToAllForms({ showSuccess: false });
+  } catch (error) {
+    const msg = error.message || String(error);
+    showStatus(
+      /receiving end does not exist/i.test(msg)
+        ? 'Could not reload the job description. Reload the job page, then press Refresh.'
+        : msg,
+      'error'
+    );
+  }
 }
 
 async function scrapeCurrentJob(showSuccess = true) {
@@ -3104,7 +3174,11 @@ async function globalRefreshCurrentTab() {
     TS?.bindUrl(tab.id, tab.url);
     renderPinnedJobBar(tab.id, tab.url);
 
-    await scrapeJobInfoToAllForms({ showSuccess: false, forceOverwrite: true });
+    const refreshed = await scrapeJobInfoToAllForms({ showSuccess: false, forceOverwrite: true });
+    if (refreshed === null) {
+      showStatus('Refresh stopped: you switched tabs. Press Refresh again on the tab you want.', 'info', 4000);
+      return;
+    }
     await scanCurrentPage({ silent: true });
 
     const fieldCount = currentFields.length;
@@ -3282,6 +3356,7 @@ async function restoreDismissedForHost() {
 }
 
 async function scanCurrentPage({ silent = false } = {}) {
+  const scanToken = window.SmartJobTabSession?.getGeneration?.();
   try {
     if (!silent) showStatus('Scanning current page...', 'info', 0);
     // Every scan path (Refresh as well as Autofill) must see this job's files.
@@ -3301,6 +3376,8 @@ async function scanCurrentPage({ silent = false } = {}) {
       }
     }
 
+    // Switched tabs during the scan: these fields belong to the other tab.
+    if (window.SmartJobTabSession && !window.SmartJobTabSession.isCurrentGeneration(scanToken)) return;
     currentScanUrl = response.url || tab.url || '';
     lastSkippedCount = Number.isFinite(response.skipped) ? response.skipped : 0;
 
@@ -4123,7 +4200,7 @@ async function resolveJobInfoForAi() {
     String(fromJson.job_description || '').trim() ||
     note;
 
-  const posting = lastPostingDocument;
+  const posting = getTabPosting();
   const kitApi = window.SmartJobPromptKit;
   let job_description = rawJd;
   if (kitApi?.resolveJobDescriptionForResume) {
@@ -5796,6 +5873,12 @@ async function applyResumeJsonText(text) {
   const api = window.SmartJobRegisterResumeDb;
   if (api?.applyResumeJsonToRegisterForm) {
     api.applyResumeJsonToRegisterForm(raw, { silent: false, showStatus });
+  }
+  // The tab may now show the application form: its address is not the job link.
+  const activeTab = await getActiveTab().catch(() => null);
+  if (activeTab?.id && window.SmartJobTabSession?.isPinnedElsewhere?.(activeTab.id, activeTab.url || '')) {
+    showStatus('Resume JSON applied. The job link was kept: this tab has moved off the posting.', 'success');
+    return;
   }
   try {
     await scrapeJobInfoToAllForms({ showSuccess: false });

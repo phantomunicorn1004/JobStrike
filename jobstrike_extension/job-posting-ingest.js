@@ -17,6 +17,9 @@
 
   const NOISE_RE =
     /\b(cookie|consent|sign in|log in|subscribe|newsletter|similar jobs|you may also|apply now)\b/i;
+  // What a careers site shows instead of a posting that was taken down
+  // (Personio "This URL does not exist", "no longer accepting applications"…).
+  const CLOSED_POSTING_RE = /\b(?:this url does not exist|(?:job|position|posting|opening|role|vacancy)(?: you(?:'|\u2019| a)re looking for)? (?:is |has been )?(?:no longer (?:open|available|active|accepting applications)|not (?:available|found)|(?:filled|closed|removed|expired))|no longer accepting applications|(?:page|job|position)(?: you(?:'|\u2019| a)re looking for)? (?:does not|doesn['\u2019]t|could not|couldn['\u2019]t|cannot|can['\u2019]t) (?:exist|be found)|(?:this|the) job(?: posting)? (?:has expired|is closed))\b/i;
   const APPLY_URL_RE = /\/apply\b|application\/|candidate\/apply/i;
 
   const RESUME_SECTION_RE =
@@ -437,6 +440,12 @@
 
     const split = splitJobDescription(rawFullText);
     const warnings = [];
+    // Checked on the title, and on the text only when the page has almost none:
+    // a real posting can say "sponsorship for this position is not available".
+    const closedTitle = CLOSED_POSTING_RE.test(titlePick.value || '');
+    if (closedTitle || (rawFullText.length < MIN_JD_QUALITY_CHARS && CLOSED_POSTING_RE.test(rawFullText))) {
+      warnings.push('closed_posting');
+    }
     if (!rawFullText) warnings.push('empty_jd');
     else if (rawFullText.length < MIN_JD_CHARS) warnings.push('short_jd');
     else if (bodyText.length < MIN_JD_QUALITY_CHARS && rawFullText.length < MIN_JD_QUALITY_CHARS) {
@@ -462,7 +471,8 @@
     return {
       jobLink: urlPick.value || tabUrl,
       tabUrl,
-      jobTitle: titlePick.value,
+      // "This URL does not exist" is the page's message, not the job's title.
+      jobTitle: closedTitle ? '' : titlePick.value,
       companyName: companyPick.value,
       rawFullText,
       resumePromptText: split.resumePromptText,

@@ -368,6 +368,10 @@
         ? processed.boundless_workplace_countries.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean)
         : [],
       role_activities: serializeField(processed.role_activities),
+      // "Full Time", "Contract", "Part Time"…; a job can have several.
+      employment_type: Array.isArray(processed.commitment)
+        ? processed.commitment.map((x) => String(x || '').trim()).filter(Boolean).join(', ') || null
+        : serializeField(processed.commitment),
       company_name:
         serializeField(company.name) ||
         serializeField(processed.company_name) ||
@@ -527,6 +531,43 @@
       ((v) => String(v ?? '').trim().toLowerCase());
 
     const identifies = global.SmartJobJobUrl?.urlIdentifiesJob;
+
+    // One posting seen by two sources keeps the earlier posting time: a source
+    // that re-lists a job (Jobright) can show it as just posted.
+    const DAY_MS = 24 * 3600 * 1000;
+    const dateMerge = { pairs: 0, movedEarlier: 0, hoursMoved: [] };
+    const postedAt = (job) => {
+      const raw = String(job?.estimated_publish_date || '').trim();
+      const ms = Date.parse(raw);
+      if (!raw || Number.isNaN(ms)) return null;
+      const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw) || /T00:00:00(\.0+)?(Z|[+-]00:?00)$/.test(raw);
+      // A date without a time could be any moment of that day.
+      return { ms, latest: dateOnly ? ms + DAY_MS - 1 : ms, dateOnly };
+    };
+    const withEarlierDate = (kept, other) => {
+      if (originOf(kept) === originOf(other)) return kept;
+      const mine = postedAt(kept);
+      const theirs = postedAt(other);
+      if (!theirs) return kept;
+      dateMerge.pairs += 1;
+      // Only a time surely before ours replaces it.
+      if (mine && theirs.latest >= mine.ms) return kept;
+      if (mine) {
+        dateMerge.movedEarlier += 1;
+        dateMerge.hoursMoved.push((mine.ms - theirs.ms) / 3600000);
+      }
+      return {
+        ...kept,
+        // A date-only time reads as the middle of that day.
+        estimated_publish_date: theirs.dateOnly
+          ? new Date(theirs.ms + DAY_MS / 2).toISOString()
+          : other.estimated_publish_date,
+        posted_at: other.posted_at || kept.posted_at,
+        posted_by: originOf(other),
+      };
+    };
+    const urlIndex = new Map();
+
     for (const job of jobs) {
       // Only a link that names one posting may merge two rows; otherwise compare
       // the full link, so two jobs on one careers page stay two jobs.
@@ -534,7 +575,11 @@
         !identifies || identifies(job.apply_url)
           ? canonical(job.apply_url)
           : String(job.apply_url ?? '').trim().toLowerCase();
-      if (urlKey && seenUrls.has(urlKey)) continue;
+      if (urlKey && seenUrls.has(urlKey)) {
+        const at = urlIndex.get(urlKey);
+        if (at != null) unique[at] = withEarlierDate(unique[at], job);
+        continue;
+      }
 
       const companyKey = normalizeCompany(job.company_name);
       const titleKey = String(job.title ?? '')
@@ -553,20 +598,39 @@
         if (!separateOpenings) {
           // Keep the copy that links straight to the employer's form.
           if (viaAggregator(kept.apply_url) && !viaAggregator(job.apply_url)) {
-            unique[at] = job;
-            if (urlKey) seenUrls.add(urlKey);
+            unique[at] = withEarlierDate(job, kept);
+            if (urlKey) {
+              seenUrls.add(urlKey);
+              urlIndex.set(urlKey, at);
+            }
+          } else {
+            unique[at] = withEarlierDate(kept, job);
           }
           continue;
         }
       }
 
-      if (urlKey) seenUrls.add(urlKey);
+      if (urlKey) {
+        seenUrls.add(urlKey);
+        urlIndex.set(urlKey, unique.length);
+      }
       if (companyTitleKey && !titleIndex.has(companyTitleKey)) {
         titleIndex.set(companyTitleKey, unique.length);
       }
       unique.push(job);
     }
 
+    const moved = [...dateMerge.hoursMoved].sort((a, b) => a - b);
+    // For the run report; not part of the list.
+    Object.defineProperty(unique, 'dateMerge', {
+      value: {
+        pairs: dateMerge.pairs,
+        movedEarlier: dateMerge.movedEarlier,
+        medianHoursMoved: moved.length ? Math.round(moved[Math.floor(moved.length / 2)] * 10) / 10 : null,
+        maxHoursMoved: moved.length ? Math.round(moved[moved.length - 1] * 10) / 10 : null,
+      },
+      enumerable: false,
+    });
     return unique;
   }
 

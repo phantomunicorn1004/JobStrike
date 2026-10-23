@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Caption-STT</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="header">
+        <h1>Caption-STT</h1>
+        <p class="subtitle">Live Captions → ChatGPT / DeepSeek</p>
+      </header>
+
+      <section class="status-block" aria-live="polite">
+        <div class="row">
+          <span class="label">Connection</span>
+          <span id="connection" class="value badge disconnected">Disconnected</span>
+        </div>
+        <div class="row">
+          <span class="label">Server</span>
+          <span id="server" class="value mono">localhost:8000</span>
+        </div>
+        <div class="row">
+          <span class="label">State</span>
+          <span id="state" class="value badge stopped">STOPPED</span>
+        </div>
+        <p id="error" class="error hidden"></p>
+      </section>
+
+      <section class="actions">
+        <button id="btn-start" type="button" class="btn primary">Start</button>
+        <button id="btn-stop" type="button" class="btn">Stop</button>
+      </section>
+
+      <section class="hotkey-block">
+        <div class="row">
+          <span class="label">Page toggle</span>
+          <span id="hotkey-display" class="value mono">CTRL + SHIFT + SPACE</span>
+        </div>
+        <div class="row">
+          <span class="label">Chrome toggle</span>
+          <span id="chrome-hotkey-display" class="value mono">CTRL + SHIFT + SPACE</span>
+        </div>
+        <button id="btn-hotkey" type="button" class="btn full">Change Page Toggle</button>
+        <button id="btn-chrome-shortcuts" type="button" class="btn full">Open Chrome shortcut settings</button>
+        <p id="hotkey-hint" class="hint hidden">Press a new key combination…</p>
+        <p id="hotkey-note" class="note">
+          Page toggle can lose to the site or Windows IME (Ctrl+Space). Chrome toggle still works even when the page steals keys.
+        </p>
+      </section>
+
+      <section class="hotkey-block">
+        <div class="row">
+          <span class="label">Clear hotkey</span>
+          <span id="clear-hotkey-display" class="value mono">CTRL + SHIFT + BACKSPACE</span>
+        </div>
+        <button id="btn-clear-hotkey" type="button" class="btn full">Change Clear Hotkey</button>
+        <p id="clear-hotkey-hint" class="hint hidden">Press a new key combination…</p>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

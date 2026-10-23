@@ -1732,6 +1732,10 @@
       // Facts Jobright states outright, so no reading of the posting is needed.
       clearance_required: jr.isClearanceRequired === true,
       work_model: serializeField(jr.workModel),
+      // "Full-time", "Contract", …: the panel reads it into one shape for both sources.
+      employment_type: Array.isArray(jr.employmentType)
+        ? jr.employmentType.map((x) => String(x || '').trim()).filter(Boolean).join(', ') || null
+        : serializeField(jr.employmentType),
       country_code: serializeField(jr.countryCode),
       repost: jr.repost === true,
       // Jobright's own flag for a listing whose apply flow stays on the job board.

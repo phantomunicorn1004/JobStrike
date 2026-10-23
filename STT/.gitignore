@@ -1,0 +1,12 @@
+# .NET build output
+bin/
+obj/
+publish/
+
+# Python
+.venv/
+__pycache__/
+
+# Logs and OS files
+@AutomationLog.txt
+Thumbs.db

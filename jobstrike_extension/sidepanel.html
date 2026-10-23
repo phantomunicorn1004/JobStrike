@@ -561,7 +561,7 @@
                 </label>
                 <label class="js-filter-row">
                   <input type="checkbox" id="jsUsOnly" checked>
-                  <span class="js-filter-name" title="Hides jobs the source places in another country. A job with no stated country is kept.">US jobs only</span>
+                  <span class="js-filter-name" title="Hides jobs the source places in another country, and jobs whose title limits them to another region: &quot;remote within Germany&quot;, &quot;Remote (Europe)&quot;, &quot;UK - Remote&quot;, European tags like (m/w/d), or CET working hours. A title that also names the US is kept, and so is a job with no stated country.">US jobs only</span>
                 </label>
                 <label class="js-filter-row">
                   <input type="checkbox" id="jsHideDegree" checked>
@@ -573,12 +573,24 @@
                 </label>
                 <label class="js-filter-row">
                   <input type="checkbox" id="jsOnePerCompany" checked>
-                  <span class="js-filter-name" title="Keeps every job, but puts each company's jobs together, best-scored first, so you can choose which to bid on. The spreadsheet's Same Company column shows 1 of 3, 2 of 3… Companies are compared the same way as the Bid tab's duplicate-company check.">Group jobs from the same company</span>
+                  <span class="js-filter-name" title="Keeps every job, but puts each company's jobs together, best-scored first, so you can choose which to bid on. Companies are compared the same way as the Bid tab's duplicate-company check.">Group jobs from the same company</span>
                 </label>
                 <label class="js-filter-row">
                   <input type="checkbox" id="jsDirectLinksOnly" checked>
                   <span class="js-filter-name" title="Hides easy-apply listings and jobs whose link stays on a job board (LinkedIn, Dice, Indeed, ZipRecruiter, Jobright apply). Where the scraper finds the same job on the employer's own board, it uses that link and keeps the job. Uncheck to see the job-board listings too.">Direct employer links only</span>
                 </label>
+              </div>
+
+              <div class="js-modal-section">
+                <h3 class="js-section-title">Job types</h3>
+                <p class="js-type-hint">Show jobs of the ticked types. A job whose type the site does not state is always shown.</p>
+                <div class="js-type-options">
+                  <label class="js-type-chip"><input type="checkbox" id="jsTypeFullTime" checked><span>Full-time</span></label>
+                  <label class="js-type-chip"><input type="checkbox" id="jsTypeContract" checked><span>Contract</span></label>
+                  <label class="js-type-chip"><input type="checkbox" id="jsTypePartTime" checked><span>Part-time</span></label>
+                  <label class="js-type-chip"><input type="checkbox" id="jsTypeTemporary" checked><span>Temporary</span></label>
+                  <label class="js-type-chip"><input type="checkbox" id="jsTypeInternship" checked><span>Internship</span></label>
+                </div>
               </div>
 
               <div class="js-modal-section">

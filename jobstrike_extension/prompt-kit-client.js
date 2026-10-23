@@ -355,9 +355,9 @@ Return valid JSON only. No markdown fences, no commentary.`;
     if (note) return note;
     const fromPosting = trim(posting?.rawFullText);
     if (fromPosting) return fromPosting;
-    const excerpt = trim(posting?.compatExcerptText);
-    if (excerpt) return excerpt;
-    return trim(kit?.jobDescription);
+    // Not the kit's saved description: it is whatever Note was there when the
+    // kit was last saved, i.e. another job.
+    return trim(posting?.compatExcerptText);
   }
 
   /**
@@ -370,9 +370,9 @@ Return valid JSON only. No markdown fences, no commentary.`;
   function resolveJobDescriptionForResume({ noteText, kit, posting }) {
     const note = trim(noteText);
     if (note) return note;
-    const rawPosting = trim(posting?.rawFullText);
-    if (rawPosting) return rawPosting;
-    return trim(kit?.jobDescription);
+    // An empty Note and no posting for this tab means no description: the
+    // prompt must not be built from the kit's saved one (another job).
+    return trim(posting?.rawFullText);
   }
 
   global.SmartJobPromptKit = {

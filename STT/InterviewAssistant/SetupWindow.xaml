@@ -1,0 +1,364 @@
+<Window x:Class="InterviewAssistant.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings" Height="820" Width="1000" MinWidth="760" MinHeight="520"
+        Background="{DynamicResource WindowBg}" Foreground="{DynamicResource Text}"
+        FontFamily="{StaticResource UiFont}" FontSize="13" UseLayoutRounding="True"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <Window.Resources>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource PanelBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="20,16,20,18" />
+            <Setter Property="Margin" Value="0,0,0,14" />
+        </Style>
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource Strong}" />
+        </Style>
+        <Style x:Key="CardSubtitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Muted}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,3,0,10" />
+        </Style>
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Text}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Margin" Value="0,12,0,6" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Muted}" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="LineHeight" Value="17" />
+            <Setter Property="Margin" Value="0,6,0,0" />
+        </Style>
+        <Style x:Key="ChoiceTitle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource Strong}" />
+        </Style>
+        <Style x:Key="ChoiceText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Muted}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,3,0,0" />
+        </Style>
+        <Style x:Key="MultiLine" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="AcceptsReturn" Value="True" />
+            <Setter Property="AcceptsTab" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+        <Style x:Key="HotkeyLabel" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource Text}" />
+        </Style>
+        <Style x:Key="HotkeyBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="Margin" Value="0,4,24,4" />
+            <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="10,6" />
+        </Style>
+        <Style x:Key="Page" TargetType="StackPanel">
+            <Setter Property="Margin" Value="24,4,24,10" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- Footer -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource Border}"
+                BorderThickness="0,1,0,0" Padding="20,12">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Cancel" IsCancel="True" Padding="16,7" />
+                    <Button Content="Save" Style="{StaticResource PrimaryButton}" IsDefault="False" Margin="0"
+                            Click="OnSaveClick" Padding="22,7" />
+                </StackPanel>
+                <TextBlock Text="Saved on this PC only." Foreground="{DynamicResource Faint}" FontSize="11.5"
+                           VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
+        <!-- Navigation rail, as in Windows Settings -->
+        <Border DockPanel.Dock="Left" Width="216" Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource Border}"
+                BorderThickness="0,0,1,0" Padding="12,18,12,12">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="10,0,0,20">
+                    <Image Source="/Assets/AppIcon.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality"
+                           VerticalAlignment="Center" />
+                    <TextBlock Text="Settings" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Strong}" Margin="10,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+                <RadioButton x:Name="TabInterview" Content="Interview" Tag="&#xE77B;" GroupName="Tabs" IsChecked="True"
+                             Style="{StaticResource NavItem}" Checked="OnTabChecked" />
+                <RadioButton x:Name="TabSending" Content="Sending" Tag="&#xE724;" GroupName="Tabs"
+                             Style="{StaticResource NavItem}" Checked="OnTabChecked" />
+                <RadioButton x:Name="TabDisplay" Content="Display" Tag="&#xE7F4;" GroupName="Tabs"
+                             Style="{StaticResource NavItem}" Checked="OnTabChecked" />
+                <RadioButton x:Name="TabHotkeys" Content="Hotkeys" Tag="&#xE765;" GroupName="Tabs"
+                             Style="{StaticResource NavItem}" Checked="OnTabChecked" />
+            </StackPanel>
+        </Border>
+
+        <!-- The chosen page, with its title -->
+        <DockPanel>
+            <StackPanel DockPanel.Dock="Top" Margin="24,20,24,12">
+                <TextBlock x:Name="PageTitle" Text="Interview" FontFamily="{StaticResource DisplayFont}" FontSize="22"
+                           FontWeight="SemiBold" Foreground="{DynamicResource Strong}" />
+                <TextBlock x:Name="PageSubtitle" Foreground="{DynamicResource Muted}" FontSize="12.5" Margin="0,3,0,0"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+
+        <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto">
+            <Grid>
+                <!-- INTERVIEW: what the AI should know -->
+                <StackPanel x:Name="PageInterview" Style="{StaticResource Page}">
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="Load from JobStrike…" VerticalAlignment="Top"
+                                        Click="OnLoadFromJobStrikeClick"
+                                        ToolTip="Fill the company, job description and resume from one of your JobStrike applications" />
+                                <StackPanel>
+                                    <TextBlock Text="About you and the role" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Text="Sent to the AI at the start of each chat (New chat + call prompt)."
+                                               Style="{StaticResource CardSubtitle}" />
+                                </StackPanel>
+                            </DockPanel>
+                            <Border x:Name="JobStrikeNote" Visibility="Collapsed" Margin="0,2,0,4" Padding="12,8" CornerRadius="8"
+                                    Background="{DynamicResource PendingBg}" BorderBrush="{DynamicResource AccentBorder}" BorderThickness="1">
+                                <TextBlock x:Name="JobStrikeNoteText" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource Text}" />
+                            </Border>
+
+                            <TextBlock Text="My profile" Style="{StaticResource Label}" Margin="0,4,0,6" />
+                            <TextBox x:Name="ProfileBox" Style="{StaticResource MultiLine}" Height="100" />
+                            <TextBlock Style="{StaticResource Hint}"
+                                       Text="Name, current title, years of experience, core skills, things you want to highlight." />
+
+                            <TextBlock Text="Client company" Style="{StaticResource Label}" />
+                            <TextBox x:Name="CompanyBox" Style="{StaticResource MultiLine}" Height="56" />
+
+                            <TextBlock Text="Job description" Style="{StaticResource Label}" />
+                            <TextBox x:Name="JobDescriptionBox" Style="{StaticResource MultiLine}" Height="150" />
+
+                            <DockPanel Margin="0,12,0,6">
+                                <Button DockPanel.Dock="Right" Content="Load resume (PDF / Word)…" Style="{StaticResource SmallButton}"
+                                        Margin="0" Padding="10,3" Click="OnLoadResumeClick" />
+                                <TextBlock VerticalAlignment="Center">
+                                    <Run Text="My resume" FontWeight="SemiBold" FontSize="12.5" />
+                                    <Run Text="  optional" Foreground="{DynamicResource Faint}" FontSize="11.5" />
+                                </TextBlock>
+                            </DockPanel>
+                            <TextBox x:Name="ResumeBox" Style="{StaticResource MultiLine}" Height="150" AllowDrop="True"
+                                     PreviewDragOver="OnResumeDragOver" PreviewDrop="OnResumeDrop" />
+                            <TextBlock x:Name="ResumeHint" Style="{StaticResource Hint}"
+                                       Text="Paste the text, click Load, or drop a .pdf, .docx, .txt or .md file here. You can edit the extracted text." />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="Reset to default" Style="{StaticResource SmallButton}"
+                                        Margin="0" Padding="10,3" Click="OnResetPromptClick" VerticalAlignment="Top" />
+                                <StackPanel>
+                                    <TextBlock Text="Call prompt" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Style="{StaticResource CardSubtitle}"
+                                               Text="The instructions sent with your details. The default works well; edit it only if you want different answers. {profile} {company} {job_description} {resume} are filled in for you." />
+                                </StackPanel>
+                            </DockPanel>
+                            <TextBox x:Name="CallPromptBox" Style="{StaticResource MultiLine}" Height="220"
+                                     FontFamily="{StaticResource MonoFont}" FontSize="12" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- SENDING: one choice for what the Send key does -->
+                <StackPanel x:Name="PageSending" Style="{StaticResource Page}" Visibility="Collapsed">
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="When you press Send" Style="{StaticResource CardTitle}" />
+                            <TextBlock Style="{StaticResource CardSubtitle}"
+                                       Text="Send takes what the interviewer just said (the highlighted captions) and gives it to the AI." />
+
+                            <RadioButton x:Name="SendModeManual" GroupName="SendMode" Style="{StaticResource ChoiceCard}"
+                                         Checked="OnSendModeChecked">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource ChoiceTitle}">
+                                        <Run Text="Put it in the chat box, then you press Enter" />
+                                        <Run Text="  recommended" Foreground="{DynamicResource Accent}" FontWeight="Normal" FontSize="11.5" />
+                                    </TextBlock>
+                                    <TextBlock Style="{StaticResource ChoiceText}"
+                                               Text="Check or fix the text first, then submit with Enter in the chat or the Submit hotkey." />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton x:Name="SendModeSubmit" GroupName="SendMode" Style="{StaticResource ChoiceCard}"
+                                         Checked="OnSendModeChecked">
+                                <StackPanel>
+                                    <TextBlock Text="Send it to the AI right away" Style="{StaticResource ChoiceTitle}" />
+                                    <TextBlock Style="{StaticResource ChoiceText}"
+                                               Text="One key press: the question goes to the AI immediately." />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton x:Name="SendModeAuto" GroupName="SendMode" Style="{StaticResource ChoiceCard}"
+                                         Checked="OnSendModeChecked">
+                                <StackPanel>
+                                    <TextBlock Text="Automatic" Style="{StaticResource ChoiceTitle}" />
+                                    <TextBlock Style="{StaticResource ChoiceText}"
+                                               Text="No key press: the question is sent as soon as the interviewer pauses." />
+                                    <StackPanel x:Name="AutoOptions" Margin="0,10,0,0" Visibility="Collapsed">
+                                        <WrapPanel>
+                                            <TextBlock Text="Send after a pause of" VerticalAlignment="Center" />
+                                            <TextBox x:Name="PauseBox" Width="60" Margin="10,0" HorizontalContentAlignment="Center" />
+                                            <TextBlock Text="seconds, once there are at least" VerticalAlignment="Center" />
+                                            <TextBox x:Name="MinWordsBox" Width="52" Margin="10,0" HorizontalContentAlignment="Center" />
+                                            <TextBlock Text="words." VerticalAlignment="Center" />
+                                        </WrapPanel>
+                                        <TextBlock Style="{StaticResource Hint}"
+                                                   Text="1.5–2.5 s suits most interviewers. Shorter answers faster but may split a question in two; the word minimum keeps “okay” or “great” from being sent alone." />
+                                    </StackPanel>
+                                </StackPanel>
+                            </RadioButton>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- DISPLAY -->
+                <StackPanel x:Name="PageDisplay" Style="{StaticResource Page}" Visibility="Collapsed">
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Interview view" Style="{StaticResource CardTitle}" />
+                            <TextBlock Style="{StaticResource CardSubtitle}"
+                                       Text="The small window you use during the interview: live captions and the AI answer." />
+                            <RadioButton x:Name="StyleOverlay" GroupName="ViewStyle" Style="{StaticResource ChoiceCard}"
+                                         Checked="OnViewStyleChecked">
+                                <StackPanel>
+                                    <TextBlock Text="See-through overlay" Style="{StaticResource ChoiceTitle}" />
+                                    <TextBlock Style="{StaticResource ChoiceText}"
+                                               Text="Floats above every window. Place it over the meeting and set how see-through it is with the slider in its top bar; the text stays solid." />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton x:Name="StyleWindow" GroupName="ViewStyle" Style="{StaticResource ChoiceCard}"
+                                         Checked="OnViewStyleChecked">
+                                <StackPanel>
+                                    <TextBlock Text="Normal window" Style="{StaticResource ChoiceTitle}" />
+                                    <TextBlock Style="{StaticResource ChoiceText}"
+                                               Text="A small regular window you can move and resize." />
+                                    <StackPanel x:Name="DockOptions" Margin="0,10,0,0" Visibility="Collapsed">
+                                        <TextBlock Text="Captions" FontSize="12" Foreground="{DynamicResource Muted}" Margin="0,0,0,6" />
+                                        <Border Style="{StaticResource SegmentHost}" HorizontalAlignment="Left">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="DockTop" Content="Above" GroupName="Dock" Style="{StaticResource ProviderTab}" />
+                                                <RadioButton x:Name="DockBottom" Content="Below" GroupName="Dock" Style="{StaticResource ProviderTab}" />
+                                                <RadioButton x:Name="DockLeft" Content="Left" GroupName="Dock" Style="{StaticResource ProviderTab}" />
+                                                <RadioButton x:Name="DockRight" Content="Right" GroupName="Dock" Style="{StaticResource ProviderTab}" />
+                                                <RadioButton x:Name="DockFloating" Content="Own window" GroupName="Dock" Style="{StaticResource ProviderTab}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </StackPanel>
+                            </RadioButton>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Theme" Style="{StaticResource CardTitle}" />
+                            <TextBlock Style="{StaticResource CardSubtitle}"
+                                       Text="Dark is easiest on the eyes in a dim room; light reads faster in a bright one." />
+                            <Border Style="{StaticResource SegmentHost}" HorizontalAlignment="Left">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton x:Name="ThemeDark" Content="Dark" GroupName="Theme" Style="{StaticResource ProviderTab}" />
+                                    <RadioButton x:Name="ThemeLight" Content="Light" GroupName="Theme" Style="{StaticResource ProviderTab}" />
+                                    <RadioButton x:Name="ThemeSystem" Content="Match Windows" GroupName="Theme" Style="{StaticResource ProviderTab}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Window" Style="{StaticResource CardTitle}" Margin="0,0,0,10" />
+                            <CheckBox x:Name="TopmostToggle" Style="{StaticResource ToggleSwitch}" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Keep the full window above other windows" Style="{StaticResource ChoiceTitle}" />
+                                    <TextBlock Text="The overlay always stays on top." Style="{StaticResource ChoiceText}" />
+                                </StackPanel>
+                            </CheckBox>
+                            <CheckBox x:Name="HideLcToggle" Style="{StaticResource ToggleSwitch}">
+                                <StackPanel>
+                                    <TextBlock Text="Hide the Windows Live Captions window" Style="{StaticResource ChoiceTitle}" />
+                                    <TextBlock Text="Moves it off-screen; it keeps captioning. It comes back when you turn this off or close the app."
+                                               Style="{StaticResource ChoiceText}" />
+                                </StackPanel>
+                            </CheckBox>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- HOTKEYS -->
+                <StackPanel x:Name="PageHotkeys" Style="{StaticResource Page}" Visibility="Collapsed">
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CardSubtitle}"
+                                       Text="Click a box and press the combination: Ctrl, Alt or Win with a key, or a function key on its own. Backspace removes one." Margin="0,0,0,10" />
+                            <Grid x:Name="HotkeyGrid" Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" MinWidth="160" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" MinWidth="160" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Send" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeySendBox" Grid.Row="0" Grid.Column="1" Style="{StaticResource HotkeyBox}" />
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="Discard" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeyDiscardBox" Grid.Row="0" Grid.Column="3" Style="{StaticResource HotkeyBox}" Margin="0,4" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Submit (Enter)" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeySubmitBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource HotkeyBox}" />
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="Clear chat box" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeyClearBox" Grid.Row="1" Grid.Column="3" Style="{StaticResource HotkeyBox}" Margin="0,4" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Scroll answer down" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeyScrollDownBox" Grid.Row="2" Grid.Column="1" Style="{StaticResource HotkeyBox}" />
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="Scroll answer up" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeyScrollUpBox" Grid.Row="2" Grid.Column="3" Style="{StaticResource HotkeyBox}" Margin="0,4" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Interview / full view" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeyCompactBox" Grid.Row="3" Grid.Column="1" Style="{StaticResource HotkeyBox}" />
+                                <TextBlock Grid.Row="3" Grid.Column="2" Text="Automatic on / off" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeyAutoBox" Grid.Row="3" Grid.Column="3" Style="{StaticResource HotkeyBox}" Margin="0,4" />
+
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="Overlay more solid" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeyLessSeeThroughBox" Grid.Row="4" Grid.Column="1" Style="{StaticResource HotkeyBox}" />
+                                <TextBlock Grid.Row="4" Grid.Column="2" Text="Overlay more see-through" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeyMoreSeeThroughBox" Grid.Row="4" Grid.Column="3" Style="{StaticResource HotkeyBox}" Margin="0,4" />
+                            </Grid>
+                            <!-- Shown when a chosen combination is a common shortcut in other programs -->
+                            <Border x:Name="HotkeyWarning" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,9"
+                                    CornerRadius="8" Background="{DynamicResource PendingBg}"
+                                    BorderBrush="{DynamicResource AccentBorder}" BorderThickness="1">
+                                <TextBlock x:Name="HotkeyWarningText" TextWrapping="Wrap" FontSize="12" LineHeight="18"
+                                           Foreground="{DynamicResource Text}" />
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+        </DockPanel>
+    </DockPanel>
+</Window>

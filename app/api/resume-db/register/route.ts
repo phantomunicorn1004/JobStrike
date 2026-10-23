@@ -104,6 +104,17 @@ export async function POST(request: NextRequest) {
       coverIsDefault,
     });
 
+    const savedMeanwhile = await findApplicationByJobLink(user.id, profileId, jobLink);
+    if (savedMeanwhile) {
+      return corsJson(
+        {
+          error: `Duplicate job link — already in Resume DB for this profile (#${savedMeanwhile.id}).`,
+          duplicateId: savedMeanwhile.id,
+        },
+        { status: 409 },
+      );
+    }
+
     const application = await createApplication(user.id, {
       entryId,
       profileId,
