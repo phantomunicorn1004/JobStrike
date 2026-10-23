@@ -169,3 +169,15 @@ export function endOfDayUtcIso(ymd: string, timeZone: string): string {
   return zonedDateTimeToUtcIso(ymd, timeZone, 23, 59, 59, 999);
 }
 
+
+/**
+ * "2026-10-28T14:00" as wall-clock time in `timeZone` → UTC ISO. Null when the text is not a
+ * date and time. Used for interview times written in the recruiter's or the user's timezone.
+ */
+export function zonedLocalToUtcIso(local: string, timeZone: string): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{1,2}):(\d{2})/.exec(local.trim());
+  if (!match) return null;
+  const [, ymd, hour, minute] = match;
+  if (Number(hour) > 23 || Number(minute) > 59) return null;
+  return zonedDateTimeToUtcIso(ymd, normalizeTimeZone(timeZone), Number(hour), Number(minute), 0, 0);
+}

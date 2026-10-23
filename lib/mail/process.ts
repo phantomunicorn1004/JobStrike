@@ -1,6 +1,7 @@
 import "server-only";
 
 import { serverOpenAI } from "@/lib/ai/server-openai";
+import { extractInterviewsFromEmails, type InterviewExtractResult } from "@/lib/interviews/process";
 import { applyPendingActions } from "@/lib/mail/actions";
 import { APPLICATION_CATEGORIES } from "@/lib/mail/categories";
 import { classifyMessages, MailAiUnavailableError } from "@/lib/mail/classify";
@@ -29,6 +30,8 @@ export type ProcessResult = {
   /** Board updates made from sorted emails, and suggestions saved. */
   moved?: number;
   suggested?: number;
+  /** Interview emails read for date, time and link. */
+  interviews?: InterviewExtractResult;
 };
 
 type UserContext = {
@@ -112,6 +115,12 @@ export async function processPendingMessages(userId: string | null, deadline: nu
     Object.assign(result, await applyPendingActions(userId, deadline));
   } catch (error) {
     console.error("Board updates from email failed:", error instanceof Error ? error.message : error);
+  }
+  // Then interview emails: date, time and link into the Calendar.
+  try {
+    result.interviews = await extractInterviewsFromEmails(userId, deadline);
+  } catch (error) {
+    console.error("Reading interview emails failed:", error instanceof Error ? error.message : error);
   }
   return result;
 }

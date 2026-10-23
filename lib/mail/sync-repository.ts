@@ -25,10 +25,13 @@ export type SyncAccount = {
   subscription_id: string | null;
   subscription_expires_at: string | null;
   subscription_secret_hash: string | null;
+  scopes: string[] | null;
+  /** When the calendar was last read (ISO). */
+  calendar_cursor: string | null;
 };
 
 const SYNC_COLUMNS =
-  "id, user_id, profile_id, provider, email, status, refresh_token_enc, access_token_enc, access_expires_at, mail_cursor, sync_progress, last_sync_at, sync_requested_at, subscription_id, subscription_expires_at, subscription_secret_hash";
+  "id, user_id, profile_id, provider, email, status, refresh_token_enc, access_token_enc, access_expires_at, mail_cursor, sync_progress, last_sync_at, sync_requested_at, subscription_id, subscription_expires_at, subscription_secret_hash, scopes, calendar_cursor";
 
 const accounts = () => getSupabaseAdminClient().from("mail_accounts");
 
@@ -186,4 +189,9 @@ export async function deleteMailMessagesOlderThan(days: number): Promise<number>
     .select("id");
   failOn(error);
   return (data ?? []).length;
+}
+
+export async function saveCalendarReadAt(id: string, at: string): Promise<void> {
+  const { error } = await accounts().update({ calendar_cursor: at } as never).eq("id", id);
+  failOn(error);
 }

@@ -21,6 +21,7 @@ import {
   type PipelineCardJob,
 } from "./JobPipelineCard";
 import { JobPipelineDetailDialog, type PipelineCardDetailsUpdate } from "./JobPipelineDetailDialog";
+import { applicationIdOfCard, type NextInterview } from "./JobPipelineCard";
 import {
   mergeStageDate,
   cardNotes,
@@ -176,6 +177,20 @@ export function JobsPipelineBoard() {
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [movingId, setMovingId] = useState<{ source: string; id: number } | null>(null);
+  // Next interview per Resume DB application (from emails, the calendar or added by hand).
+  const [nextInterviews, setNextInterviews] = useState<Record<number, NextInterview>>({});
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/interviews?next=1", { credentials: "same-origin" })
+      .then((res) => (res.ok ? res.json() : { next: {} }))
+      .then((body: { next?: Record<number, NextInterview> }) => {
+        if (!cancelled) setNextInterviews(body.next ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [manageStagesOpen, setManageStagesOpen] = useState(false);
   const [newStageName, setNewStageName] = useState("");
@@ -1101,6 +1116,7 @@ export function JobsPipelineBoard() {
                     onDetail={() =>
                       setDetailTarget({ job, stageId, stageName: stage.name })
                     }
+                    nextInterview={nextInterviews[applicationIdOfCard(job) ?? -1]}
                   />
                 ))}
                 {jobs.length === 0 && !hasActiveFilters && stageId === "applied" && (

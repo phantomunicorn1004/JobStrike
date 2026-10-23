@@ -127,5 +127,41 @@ CREATE INDEX IF NOT EXISTS pipeline_events_application_idx ON public.pipeline_ev
 
 ALTER TABLE public.pipeline_events ENABLE ROW LEVEL SECURITY;
 
+-- Step 6: interviews with real date and time (the round columns on technical_jobs are DATE only).
+CREATE TABLE IF NOT EXISTS public.interviews (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+  application_id    bigint REFERENCES public.resume_db_applications(id) ON DELETE CASCADE,
+  account_id        uuid REFERENCES public.mail_accounts(id) ON DELETE SET NULL,
+  company           text,                 -- from the email or event when no application matched
+  job_title         text,
+  starts_at         timestamptz NOT NULL,
+  ends_at           timestamptz,
+  timezone          text,                 -- the timezone the recruiter wrote the time in
+  round             text,                 -- screen / technical / final / other
+  title             text,
+  meeting_url       text,
+  location          text,
+  interviewers      text,
+  source            text NOT NULL CHECK (source IN ('email', 'calendar', 'manual')),
+  source_ref        text,                 -- mail_messages.id or calendar event id
+  calendar_event_id text,                 -- the event in the user's calendar (found or added)
+  status            text NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'done', 'cancelled')),
+  result            text CHECK (result IN ('passed', 'waiting', 'rejected')),
+  notes             text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS interviews_user_start_idx ON public.interviews (user_id, starts_at);
+CREATE INDEX IF NOT EXISTS interviews_application_idx ON public.interviews (application_id);
+CREATE UNIQUE INDEX IF NOT EXISTS interviews_calendar_event_idx ON public.interviews (user_id, calendar_event_id) WHERE calendar_event_id IS NOT NULL;
+
+ALTER TABLE public.interviews ENABLE ROW LEVEL SECURITY;
+
+-- Interview emails whose date, time and link were read.
+ALTER TABLE public.mail_messages
+  ADD COLUMN IF NOT EXISTS interview_checked_at timestamptz;
+
 -- Ask PostgREST to see the new table right away.
 NOTIFY pgrst, 'reload schema';

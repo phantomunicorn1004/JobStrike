@@ -21,6 +21,7 @@ export const MEMBER_ROUTE_PREFIXES = [
   "/jobs-technical",
   "/jobs-final",
   "/inbox",
+  "/calendar",
   "/profile",
   "/settings",
 ] as const;

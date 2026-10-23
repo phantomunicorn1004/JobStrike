@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  CalendarDays,
   Columns3,
   FileEdit,
   Database,
@@ -70,6 +71,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Inbox",
     icon: Inbox,
     isActive: (pathname) => pathname.startsWith("/inbox"),
+  },
+  {
+    href: "/calendar",
+    label: "Calendar",
+    icon: CalendarDays,
+    isActive: (pathname) => pathname.startsWith("/calendar"),
   },
   {
     href: "/resume-tailor",
@@ -164,11 +171,12 @@ export default function JobsLayout({
                 <NavLink item={NAV_ITEMS[1]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[2]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[3]} pathname={pathname} />
-                <SidebarSeparator className="my-2 group-data-[collapsible=icon]:hidden" />
                 <NavLink item={NAV_ITEMS[4]} pathname={pathname} />
+                <SidebarSeparator className="my-2 group-data-[collapsible=icon]:hidden" />
                 <NavLink item={NAV_ITEMS[5]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[6]} pathname={pathname} />
                 <NavLink item={NAV_ITEMS[7]} pathname={pathname} />
+                <NavLink item={NAV_ITEMS[8]} pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

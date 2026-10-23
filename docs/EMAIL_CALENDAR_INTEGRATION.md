@@ -502,7 +502,27 @@ About 2.5–3 weeks in total. Each phase ships on its own, and the first useful 
     is still where the move put it.
   - Inbox: Suggestions tab and banner with Apply all, Apply / Dismiss / Undo per email, Activity tab.
   - Resume DB: "No reply · N d" for confirmed applications without any answer after 30 days.
-- **Next: Phase 4**, verification codes in the extension; then Phase 6, interviews and calendar.
+- **Phase 6 done** (interviews and calendar):
+  - SQL: `interviews` (also `company` / `job_title` for interviews without a matched application),
+    `mail_messages.interview_checked_at`.
+  - Interview emails: the text is fetched on demand (Graph `body` as text / Gmail parts), read by
+    the AI (`lib/interviews/extract.ts`: scheduled, rescheduled, cancelled, availability request;
+    time as written plus IANA timezone, link, place, interviewers, round) and never stored. Times
+    are converted with `zonedLocalToUtcIso`; times before the email or a year out are dropped. The
+    same interview (same application within 3 h) is updated, a reschedule moves the next one, a
+    cancellation cancels it. Backlog interviews more than a day old are stored as done.
+  - Calendar: read every 10 minutes per mailbox (2 weeks back, 2 months ahead; Graph calendarView
+    in UTC / Google events.list). Events count when a participant wrote about an application,
+    comes from an applied company's domain, or an interview-like title names such a company.
+    Linked to the email's interview when both exist; moves and cancellations follow the calendar.
+  - Add to calendar: Graph `POST /me/events` / Google `events.insert`, reminder 60 min, the
+    interview id stored on the event; written to the candidate's own mailbox.
+  - "How did it go?" for interviews that ended in the last 14 days; "Rejected" moves the card to
+    Reject (logged, with Undo).
+  - Calendar page (`/calendar`): next interview with countdown and Join, outcome prompts, Today /
+    Tomorrow / This week / Later / Past, month view, add and edit in the user's timezone.
+  - Board cards: chip with the next interview.
+- **Next: Phase 4**, verification codes in the extension; then Phase 7, Today panel and notifications.
 
 ---
 

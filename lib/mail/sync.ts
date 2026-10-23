@@ -151,6 +151,17 @@ export async function syncAccount(accountId: string, deadline: number): Promise<
       const latest = await getSyncAccount(account.id);
       if (!latest?.sync_requested_at || latest.sync_requested_at < passStarted) break;
     }
+
+    // The calendar too (at most every 10 minutes), with the time left. Loaded here to keep
+    // the interview code out of the sync's imports.
+    if (result.outcome === "done" && Date.now() < deadline - 15_000) {
+      try {
+        const { syncCalendar } = await import("@/lib/interviews/process");
+        await syncCalendar(account);
+      } catch (error) {
+        console.error(`Calendar read for account ${accountId} failed:`, error instanceof Error ? error.message : error);
+      }
+    }
     return result;
   } catch (error) {
     if (error instanceof MailAuthError) {

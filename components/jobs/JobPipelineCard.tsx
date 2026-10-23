@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Card } from "@/components/ui/card";
-import { ExternalLink, Download, GripVertical, Info } from "lucide-react";
+import { CalendarClock, ExternalLink, Download, GripVertical, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { statusDot } from "@/lib/ui/semanticColors";
@@ -74,9 +74,32 @@ type JobPipelineCardProps = {
   isDragging?: boolean;
   isMoving?: boolean;
   onDetail?: () => void;
+  /** The application's next interview, shown as a chip. */
+  nextInterview?: NextInterview;
 };
 
-export function JobPipelineCard({ job, stageId, isDragging, isMoving, onDetail }: JobPipelineCardProps) {
+export type NextInterview = { startsAt: string; round: string };
+
+/** The Resume DB application a card belongs to ("Resume DB #123" in its notes). */
+export function applicationIdOfCard(job: PipelineCardJob): number | null {
+  const text = ("note" in job ? job.note : (job as TechnicalJob).job_description) ?? "";
+  const match = /Resume DB #(\d+)/.exec(text);
+  return match ? Number(match[1]) : null;
+}
+
+const ROUND_NAMES: Record<string, string> = { screen: "Screen", technical: "Technical", final: "Final" };
+
+function interviewChipText(next: NextInterview): string {
+  const date = new Date(next.startsAt);
+  const days = (date.getTime() - Date.now()) / 86_400_000;
+  const when =
+    days < 6
+      ? date.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })
+      : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return `${ROUND_NAMES[next.round] ?? "Interview"} ${when}`;
+}
+
+export function JobPipelineCard({ job, stageId, isDragging, isMoving, onDetail, nextInterview }: JobPipelineCardProps) {
   const technical = isTechnicalJob(job) ? job : null;
 
   return (
@@ -119,6 +142,17 @@ export function JobPipelineCard({ job, stageId, isDragging, isMoving, onDetail }
               {job.name}
             </p>
           )}
+          {nextInterview ? (
+            <a
+              href="/calendar"
+              className="inline-flex max-w-full items-center gap-1 rounded-md bg-violet-500/10 px-1.5 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-500/15 dark:text-violet-300"
+              title="Next interview: open the Calendar"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <CalendarClock className="h-3 w-3 shrink-0" />
+              <span className="truncate">{interviewChipText(nextInterview)}</span>
+            </a>
+          ) : null}
           {technical?.recruiter_name && (
             <p className="text-xs text-muted-foreground truncate">
               {technical.recruiter_name}

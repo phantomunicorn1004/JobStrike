@@ -21,7 +21,7 @@ type GraphMessage = {
 };
 
 /** Graph request with the errors the sync cares about turned into typed ones. */
-async function graph<T>(accessToken: string, url: string, init: RequestInit = {}): Promise<T | null> {
+export async function graph<T>(accessToken: string, url: string, init: RequestInit = {}): Promise<T | null> {
   const res = await fetch(url.startsWith("http") ? url : `${GRAPH}${url}`, {
     ...init,
     headers: {
