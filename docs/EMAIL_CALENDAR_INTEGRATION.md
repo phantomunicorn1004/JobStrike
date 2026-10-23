@@ -458,3 +458,72 @@ About 2.5–3 weeks in total. Each phase ships on its own, and the first useful 
     `offline_access openid email profile User.Read Mail.Read Calendars.ReadWrite`, a client secret;
     env `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` (optional `MICROSOFT_TENANT`).
 - **Next: Phase 2**, the sync engine.
+
+---
+
+## 15. Full feature set, designed for convenience
+
+### 15.1 Principles
+1. **Connect once, then nothing to do.** Every feature works with the defaults; settings exist only to turn things off.
+2. **Show it where the user already is.** Board cards, Resume DB rows, the extension side panel, Interview Assistant and one **Today** panel. The Inbox page is for review, not a place the user must visit.
+3. **Everything automatic can be seen and undone.** Every change gets an activity entry with the reason ("Rejection email from Aflac, 14 Oct") and **Undo**, kept for 30 days.
+4. **Fast enough to matter.** Microsoft change notifications bring new mail in seconds; the 10-minute timer is only the safety net. Verification codes are read live, never from the sync.
+5. **Teach by correcting.** "Not job-related", "Wrong application" and "Wrong type" are one click each, and the corrections steer later decisions for that user.
+6. **Drafts, never sending.** JobStrike prepares replies; the user sends them.
+
+### 15.2 Features
+
+| # | Feature | What the user sees | How it works | Needs |
+|---|---|---|---|---|
+| A | **Live sync** | Settings: "Scanning 30 days… 23 job emails found"; then "Synced 1 min ago" | First run reads 30 days. Then Graph **change notifications** (`/subscriptions` on `me/messages`, renewed every 2 days by the timer) call `POST /api/integrations/mail/webhook`, which syncs that account through the delta link. pg_cron every 10 min, Sync now, and sync on opening the site cover gaps. | `pg_cron`, `pg_net`, `CRON_SECRET` |
+| B | **Inbox (review)** | Tabs: Needs review · Interviews · Rejections · All. Each row: type badge, candidate, matched application, one-line AI summary, buttons (Apply / Change application / Not job-related), **Open in Outlook**. Keys: J/K move, A apply, D dismiss. | Prefilter → match → classify (sections 4.3, 5). Unmatched rows get a search box prefilled with the company, and **Add to Resume DB**. | — |
+| C | **Applications confirmed** | Resume DB: a ✓ "Confirmed 14 Oct" badge. A list "Applied, but not in Resume DB" with one-click Add. | Category `application_received` sets `apply` to Confirmed and fills `confirmed_at`. | Resume DB column |
+| D | **Automatic pipeline** | Cards move by themselves; a toast and the activity feed say why, with Undo. | Section 6; confidence ≥ 0.85 applies in `auto`, the rest is suggested. Rejections also mute later emails in that thread. `pipeline_events` records each move. | — |
+| E | **Verification codes** (extension) | On an "Enter the code we emailed you" or "Verify your email" page, a chip **Get code from email**. One click: the code is filled in (never submitted), or an **Open confirmation link** button appears. | The extension calls `GET /api/mail/verification?profileId=&host=&since=`. The server reads that candidate's mailbox **live** through Graph (messages since the page opened, newest 15), extracts the code or link in memory (patterns first, AI only if needed), and waits up to 60 s for a slow email. Nothing is stored or logged. Only mail from the last 15 minutes counts. | Existing `Mail.Read` |
+| F | **Interviews** | Calendar page: Today / This week / Month. Each interview: time in the user's timezone (and the recruiter's, if different), company, role, round, interviewers, **Join** button, **Prep**, **Open in Outlook**. Board card chip "Interview Tue 2 PM". | From emails (invite text, `.ics` attachments, Calendly, Greenhouse, GoodTime) and calendar events (attendee domain = company, meeting links). Email and event for the same interview are merged. Reschedule and cancel emails update the same interview. **Add to Outlook calendar** creates the event with reminders 1 day and 1 hour before, marked so it is never added twice. After the end time: "How did it go?" (Passed / Waiting / Rejected + notes), which moves the card. | `Calendars.ReadWrite` (granted) |
+| G | **Today panel + notifications** | Dashboard top: today's interviews, items to review, deadlines, follow-ups due. A bell in the sidebar with a count. Browser notifications: new interview invite, interview in 1 h and 10 min, offer, deadline in 24 h; rejections batched once a day. The extension icon shows the count. | `notifications` table; Web Push with a service worker (`web-push`, VAPID keys). Settings: which events, quiet hours (user's timezone). | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` |
+| H | **Interview prep pack** | On each interview: one page with what the company does, the role's must-haves vs. this candidate's resume, 10 likely questions with answer points from the resume, questions to ask, and logistics. **Load in Interview Assistant**. | Generated once, 24 h before (or on click), from the pipeline card's job description (or the job link), the candidate's resume, and the invite (round, interviewers). Stored in `interview_prep`. | OpenAI (existing) |
+| I | **Interview Assistant** | "Next interview: Aflac · Technical · in 2 h". At start time it offers to load that candidate and prep pack. | `GET /api/interviews?upcoming=1`, `GET /api/interviews/[id]/prep` through `JobStrikeClient.cs`. | — |
+| J | **Reply helper** | On a "share your availability" email: 3–5 free slots from the calendar (working hours, user's timezone, converted to the recruiter's if mentioned) and a ready reply: **Copy**, or **Save as Outlook draft**. The same for thank-you notes (2 h after an interview) and follow-ups (7 business days without an answer, shown in Today). | Graph `calendarView` for free time; reply text by AI; drafts through `createReply`. | Copy: nothing. Drafts: `Mail.ReadWrite` (optional; reconnect once) |
+| K | **Deadlines** | Today panel and card chips: "HackerRank due in 2 days", "Offer answer by Fri". Reminder 24 h before; done automatically when the completion email arrives. | Assessment invites (HackerRank, CodeSignal, Codility, HireVue…) and offers give a `tasks` row with the deadline and link. | — |
+| L | **Job alerts → leads** | Job Scraper: a **From email alerts** list (LinkedIn, Indeed, Dice, Glassdoor, ZipRecruiter), duplicates with Resume DB hidden. | Alert emails are parsed by sender-specific readers instead of being dropped; one setting per mailbox. Uses the existing duplicate check. | — |
+| M | **Insights** | Dashboard: real response rate, time to first answer, interview rate by platform, resume, title and weekday; ghosting rate. Applications without any answer after 30 days (setting) become "No response", reversibly. | From `pipeline_events` and `mail_messages`. | — |
+| N | **Recruiter contacts** | Application page: the people involved, last contact, all emails in order. | `contacts` from senders, linked to applications. | — |
+
+### 15.3 Controls (Settings → Email & Calendar, per mailbox)
+- **Pipeline updates:** Automatic / Suggest only / Off (exists).
+- **Features:** Calendar events · Add interviews to calendar · Verification codes · Job alerts as leads · Reply drafts. All on, except Reply drafts (needs the extra permission).
+- **Ignore senders or domains:** filled from "Not job-related" clicks.
+- **Activity:** everything JobStrike changed, with Undo.
+- **Data:** keep job emails 180 days (setting), export, delete all.
+
+### 15.4 New tables
+`mail_messages`, `interviews`, `pipeline_events` (section 3), plus:
+- `tasks` (user_id, application_id, kind deadline/follow_up/thank_you, due_at, link, status, source_ref)
+- `notifications` (user_id, kind, title, body, link, read_at, created_at) and `push_subscriptions` (user_id, endpoint, keys)
+- `interview_prep` (interview_id, content jsonb, model, created_at)
+- `mail_rules` (user_id, kind ignore_sender/ignore_domain/correction, value, created_at)
+- `mail_subscriptions` (account_id, subscription_id, expires_at, client_state)
+- `contacts` (user_id, email, name, company, last_contact_at)
+- `resume_db_applications`: `confirmed_at timestamptz`
+
+### 15.5 Order (each step usable on its own)
+
+| Step | Content | Estimate |
+|---|---|---|
+| 2 | Live sync (A): delta, change notifications, timer, prefilter, `mail_messages` | 2–3 days |
+| 3 | Inbox (B), matching, AI types, applications confirmed (C), corrections | 3 days |
+| 4 | Verification codes in the extension (E) | 1–1.5 days |
+| 5 | Automatic pipeline (D), activity + Undo, `pipeline_events`, no-response rule | 2 days |
+| 6 | Interviews + Calendar page + Add to calendar (F), board chips | 3 days |
+| 7 | Today panel, bell, browser and extension notifications (G), deadlines (K) | 2 days |
+| 8 | Prep pack (H) + Interview Assistant (I) | 2 days |
+| 9 | Reply helper (J) | 1.5 days |
+| 10 | Job alerts as leads (L), insights (M), contacts (N) | 3 days |
+
+About 4 weeks in total; steps 2–4 (about 1.5 weeks) already remove most of the manual work.
+
+### 15.6 Cost and limits
+- **AI:** the prefilter passes about 5–10 % of mail; gpt-4o-mini costs well under a cent per email, so roughly $1–3 per busy mailbox per month. Prep packs are about 2 cents each. A daily cap per user stops runaway costs.
+- **Microsoft:** change-notification subscriptions on messages last at most about 3 days and are renewed by the timer; Graph `429` answers are retried after `Retry-After`.
+- **Hobby plan:** functions run at most 60 s, so each sync run handles one account's batch and continues on the next call.
