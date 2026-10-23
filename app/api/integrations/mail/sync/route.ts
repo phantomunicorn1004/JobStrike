@@ -2,9 +2,19 @@ import { after, NextRequest, NextResponse } from "next/server";
 import { requireRequestUser, unauthorizedJson } from "@/lib/auth/resolve-request-user";
 import { isMailAccountId, MailSetupRequiredError } from "@/lib/integrations/accounts-repository";
 import { listActiveSyncAccounts } from "@/lib/mail/sync-repository";
-import { syncAccount, type SyncResult } from "@/lib/mail/sync";
+import { ensureLiveUpdates, syncAccount, type SyncResult } from "@/lib/mail/sync";
+import type { SyncAccount } from "@/lib/mail/sync-repository";
 
 export const maxDuration = 60;
+
+/** Live updates renew here too, so they do not depend on the timer alone (no-op until due). */
+async function keepLive(account: SyncAccount) {
+  try {
+    await ensureLiveUpdates(account);
+  } catch (error) {
+    console.warn(`Live updates for account ${account.id} failed:`, error instanceof Error ? error.message : error);
+  }
+}
 
 /** "Sync on open" skips mailboxes synced more recently than this. */
 const AUTO_AFTER_MS = 3 * 60_000;
@@ -38,6 +48,7 @@ export async function POST(request: NextRequest) {
           const deadline = Date.now() + 50_000;
           for (const account of stale) {
             if (Date.now() > deadline - 10_000) break;
+            await keepLive(account);
             await syncAccount(account.id, deadline);
           }
         });
@@ -49,6 +60,7 @@ export async function POST(request: NextRequest) {
     const results: SyncResult[] = [];
     for (const account of accounts) {
       if (Date.now() > deadline - 10_000) break;
+      await keepLive(account);
       results.push(await syncAccount(account.id, deadline));
     }
     return NextResponse.json({ results });
