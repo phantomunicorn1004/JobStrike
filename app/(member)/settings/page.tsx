@@ -2,6 +2,7 @@
 
 import { GoogleDriveSettingsCard } from "@/components/settings/GoogleDriveSettingsCard";
 import { Json2DocxSettingsCard } from "@/components/settings/Json2DocxSettingsCard";
+import { MailCalendarSettingsCard } from "@/components/settings/MailCalendarSettingsCard";
 import { TimezoneSettingsCard } from "@/components/settings/TimezoneSettingsCard";
 import { Suspense } from "react";
 
@@ -16,6 +17,9 @@ export default function SettingsPage() {
       </div>
       <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
         <TimezoneSettingsCard />
+      </Suspense>
+      <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
+        <MailCalendarSettingsCard />
       </Suspense>
       <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
         <GoogleDriveSettingsCard />

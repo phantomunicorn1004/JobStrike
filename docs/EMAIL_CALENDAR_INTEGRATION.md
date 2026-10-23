@@ -427,15 +427,34 @@ About 2.5–3 weeks in total. Each phase ships on its own, and the first useful 
 
 ## 14. Status
 
-- **Phase 0 done** (not deployed yet):
+- **Phase 0 done and deployed** (`146af51`):
   - Default-owner fallback removed: only possible with `ALLOW_ANONYMOUS_DEFAULT_OWNER=true` in development.
   - Sign-in required on the AI and file routes.
   - Browser database access replaced by `/api/pipeline/stages` and `/api/jobs/legacy`.
-  - `scripts/lock-down-row-level-security.sql` written.
+  - `scripts/lock-down-row-level-security.sql` run; the public key reads nothing.
   - `lib/crypto/secret-box.ts` added; the Drive token and client secret are now encrypted.
   - Google OAuth state now expires, is bound to a cookie and to the signed-in user, and is single-use.
-- **Deployment order:**
-  1. Set `AUTH_SECRET` and `TOKEN_ENCRYPTION_KEY` in Vercel.
-  2. Deploy.
-  3. Run the lock-down SQL in Supabase.
-  4. Check the public key reads nothing.
+- **Phase 1 done** (connect mailboxes):
+  - `scripts/add-mail-calendar-integration.sql`: `mail_accounts` (re-runnable; later phases add to it).
+    New mailboxes default to `automation = 'auto'` (section 13).
+  - `lib/integrations/oauth-state.ts`: one signed httpOnly cookie per flow (state, PKCE verifier,
+    user, provider, profile), 10 minutes, cleared on use.
+  - `lib/integrations/{google,microsoft}/oauth.ts`: PKCE, `login_hint` from the profile, the
+    account's address from the ID token (Google) or Graph `/me` (Microsoft), and a refusal when
+    mail reading was unticked. Google uses the same OAuth client as Drive but never asks for Drive
+    (no `include_granted_scopes`).
+  - Routes: `/api/integrations/mail/[provider]/{connect,callback}`,
+    `/api/integrations/mail/accounts` (GET) and `/accounts/[id]` (PATCH, DELETE).
+  - Disconnect revokes the Google grant, except when Drive is connected to the same Google
+    account (Google would end Drive too). Microsoft has no single-app revoke, so it only deletes.
+  - Settings → **Email & Calendar** card.
+- **Setup per environment:**
+  - Run `scripts/add-mail-calendar-integration.sql`.
+  - Google: enable the Gmail API and Google Calendar API, add the `gmail.readonly` and
+    `calendar.events` scopes to the consent screen, add test users while in Testing, and add the
+    redirect URI `<app>/api/integrations/mail/google/callback`.
+  - Microsoft: an Entra app registration (any organizational directory and personal accounts), web
+    redirect URI `<app>/api/integrations/mail/microsoft/callback`, delegated permissions
+    `offline_access openid email profile User.Read Mail.Read Calendars.ReadWrite`, a client secret;
+    env `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` (optional `MICROSOFT_TENANT`).
+- **Next: Phase 2**, the sync engine.

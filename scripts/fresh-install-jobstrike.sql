@@ -339,3 +339,5 @@ END $$;
 DROP POLICY IF EXISTS "Public read resume-db bucket" ON storage.objects;
 DROP POLICY IF EXISTS "Allow upload resume-db bucket" ON storage.objects;
 DROP POLICY IF EXISTS "Allow delete resume-db bucket" ON storage.objects;
+
+-- Email & Calendar (optional): run scripts/add-mail-calendar-integration.sql next.
