@@ -491,8 +491,8 @@ function NextUp({
         <Clock className="h-4 w-4 text-primary" />
         <span className="font-medium text-primary">Next interview {countdown(i.startsAt, now)}</span>
       </div>
-      <div className="flex flex-wrap items-start gap-4 p-5">
-        <div className="min-w-0 flex-1 space-y-1.5">
+      <div className="space-y-4 p-5">
+        <div className="min-w-0 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className={ROUND_STYLE[i.round]}>
               {INTERVIEW_ROUND_LABELS[i.round]}
@@ -513,8 +513,8 @@ function NextUp({
             </p>
           ) : null}
           {i.interviewers ? (
-            <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <Users className="h-3.5 w-3.5" />
+            <p className="flex items-start gap-1.5 text-sm text-muted-foreground">
+              <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               {i.interviewers}
             </p>
           ) : null}
