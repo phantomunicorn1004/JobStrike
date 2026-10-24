@@ -515,7 +515,7 @@ export function InboxPageClient() {
                   title={t.hint}
                   onClick={() => pickFolder(t.id)}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm transition-colors",
+                    "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-sm transition-colors",
                     active ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground",
                   )}
                 >
