@@ -11,6 +11,7 @@ import {
   findByCalendarEvent,
   findInterviewNear,
   findNextScheduled,
+  findPendingAt,
   insertInterview,
   updateInterview,
   type InterviewFields,
@@ -83,6 +84,11 @@ async function findThreadInterview(email: InterviewEmail): Promise<InterviewRow 
   return ((data ?? []) as InterviewRow[])[0] ?? null;
 }
 
+/** Two rounds can be the same interview ("other" is unknown, so it fits any). */
+function sameRound(a: string | null | undefined, b: string | null | undefined): boolean {
+  return !a || !b || a === b || a === "other" || b === "other";
+}
+
 const ROUND_FROM_STAGE: Record<string, InterviewDetails["round"]> = { hr: "screen", technical: "technical", final: "final" };
 
 /** Stores, moves or cancels the interview an email describes. */
@@ -98,6 +104,8 @@ async function applyDetails(email: InterviewEmail, details: InterviewDetails, us
     return "cancelled";
   }
   if ((details.kind !== "scheduled" && details.kind !== "rescheduled") || !details.startLocal) return "skipped";
+  // "T00:00" is how a date without a time comes back; nobody interviews at midnight.
+  if (/T00:00/.test(details.startLocal)) return "skipped";
 
   const zone = details.timezone && isValidTimeZone(details.timezone) ? details.timezone : userTimeZone;
   const startsAt = zonedLocalToUtcIso(details.startLocal, zone);
@@ -139,6 +147,28 @@ async function applyDetails(email: InterviewEmail, details: InterviewDetails, us
   if (same) {
     await updateInterview(email.user_id, same.id, merge(fields));
     return "updated";
+  }
+  // Already in the calendar (an invite within two days, same round): the invite's time stands;
+  // the email adds what the invite lacks.
+  if (email.application_id) {
+    const invite = await findInterviewNear(email.user_id, key, startsAt, 48, "calendar");
+    if (invite && sameRound(invite.round, round)) {
+      await updateInterview(email.user_id, invite.id, merge({
+        meeting_url: invite.meeting_url ? null : details.meetingUrl,
+        interviewers: invite.interviewers ? null : details.interviewers,
+        location: invite.location ? null : details.location,
+      }));
+      return "updated";
+    }
+  }
+  // Applicant systems send each new confirmation as its own email: one that arrives while an
+  // interview of the same round is still ahead gives that interview its new time.
+  if (email.application_id) {
+    const pending = await findPendingAt(email.user_id, email.application_id, email.received_at);
+    if (pending && sameRound(pending.round, round)) {
+      await updateInterview(email.user_id, pending.id, { ...merge(fields), status: statusFor(startsAt, endsAt) });
+      return "rescheduled";
+    }
   }
   if (details.kind === "rescheduled" && email.application_id) {
     const previous = await findNextScheduled(email.user_id, email.application_id, new Date(received - 86_400_000).toISOString());
@@ -341,7 +371,14 @@ export async function syncCalendar(account: SyncAccount, force = false): Promise
 
     const match = matchEvent(event, account.email, candidates, senders);
     if (!match) continue;
-    const near = await findInterviewNear(account.user_id, match, event.startsAt);
+    // The same interview from an email: within hours, or within two days when the email's time
+    // was off; the calendar invite's time wins.
+    const role = interviewRole(null, `${event.subject} ${event.preview}`);
+    let near = await findInterviewNear(account.user_id, match, event.startsAt);
+    if (!near) {
+      const candidate = await findInterviewNear(account.user_id, match, event.startsAt, 48, "unlinkedEmail");
+      if (candidate && sameRound(candidate.round, ROUND_FROM_STAGE[role] ?? "other")) near = candidate;
+    }
     if (near) {
       if (!near.calendar_event_id) {
         // The same interview as an email: link the event and fill in what the email lacked.
@@ -354,7 +391,6 @@ export async function syncCalendar(account: SyncAccount, force = false): Promise
       }
       continue;
     }
-    const role = interviewRole(null, `${event.subject} ${event.preview}`);
     await insertInterview(account.user_id, {
       application_id: match.applicationId,
       account_id: account.id,

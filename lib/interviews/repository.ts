@@ -75,6 +75,8 @@ export async function findInterviewNear(
   key: { applicationId: number | null; company: string | null },
   startsAt: string,
   hours = 3,
+  /** "unlinkedEmail": only interviews from emails without a calendar event; "calendar": only from the calendar. */
+  only: "unlinkedEmail" | "calendar" | null = null,
 ): Promise<InterviewRow | null> {
   if (!key.applicationId && !key.company) return null;
   const t = new Date(startsAt).getTime();
@@ -85,6 +87,8 @@ export async function findInterviewNear(
     .gte("starts_at", new Date(t - hours * 3_600_000).toISOString())
     .lte("starts_at", new Date(t + hours * 3_600_000).toISOString());
   query = key.applicationId ? query.eq("application_id", key.applicationId) : query.ilike("company", key.company!);
+  if (only === "unlinkedEmail") query = query.eq("source", "email").is("calendar_event_id", null);
+  if (only === "calendar") query = query.eq("source", "calendar");
   const { data, error } = await query.limit(1);
   failOn(error);
   return ((data ?? []) as InterviewRow[])[0] ?? null;
@@ -98,6 +102,24 @@ export async function findNextScheduled(userId: string, applicationId: number, a
     .eq("application_id", applicationId)
     .eq("status", "scheduled")
     .gte("starts_at", after)
+    .order("starts_at", { ascending: true })
+    .limit(1);
+  failOn(error);
+  return ((data ?? []) as InterviewRow[])[0] ?? null;
+}
+
+/**
+ * The application's earliest interview (from an email or added by hand) that was still ahead
+ * when `at` came: a new confirmation then gives it its new time.
+ */
+export async function findPendingAt(userId: string, applicationId: number, at: string): Promise<InterviewRow | null> {
+  const { data, error } = await interviews()
+    .select(COLUMNS)
+    .eq("user_id", userId)
+    .eq("application_id", applicationId)
+    .in("source", ["email", "manual"])
+    .neq("status", "cancelled")
+    .gt("starts_at", at)
     .order("starts_at", { ascending: true })
     .limit(1);
   failOn(error);
