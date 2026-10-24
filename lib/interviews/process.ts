@@ -14,6 +14,7 @@ import {
   insertInterview,
   updateInterview,
   type InterviewFields,
+  type InterviewRow,
 } from "@/lib/interviews/repository";
 import { interviewRole } from "@/lib/mail/board-rules";
 import { listMatchCandidates } from "@/lib/mail/inbox-repository";
@@ -45,12 +46,42 @@ type InterviewEmail = {
   account_id: string;
   application_id: number | null;
   provider_id: string;
+  thread_id: string | null;
   subject: string | null;
   from_name: string | null;
   from_email: string;
   received_at: string;
   extracted: { company?: string | null; jobTitle?: string | null; interviewStage?: string | null } | null;
 };
+
+/**
+ * The interview an earlier email of the same conversation created (not cancelled). Recruiters
+ * send reminders, updated invitations and new times in the same thread.
+ */
+async function findThreadInterview(email: InterviewEmail): Promise<InterviewRow | null> {
+  if (!email.thread_id) return null;
+  const db = getSupabaseAdminClient();
+  const { data: messages } = await db
+    .from("mail_messages")
+    .select("id")
+    .eq("user_id", email.user_id)
+    .eq("account_id", email.account_id)
+    .eq("thread_id", email.thread_id)
+    .neq("id", email.id);
+  const ids = ((messages ?? []) as { id: string }[]).map((m) => m.id);
+  if (ids.length === 0) return null;
+  let query = db
+    .from("interviews")
+    .select("id, starts_at, application_id")
+    .eq("user_id", email.user_id)
+    .eq("source", "email")
+    .neq("status", "cancelled")
+    .in("source_ref", ids);
+  // A thread about one application never moves another application's interview.
+  if (email.application_id) query = query.eq("application_id", email.application_id);
+  const { data } = await query.order("created_at", { ascending: false }).limit(1);
+  return ((data ?? []) as InterviewRow[])[0] ?? null;
+}
 
 const ROUND_FROM_STAGE: Record<string, InterviewDetails["round"]> = { hr: "screen", technical: "technical", final: "final" };
 
@@ -99,6 +130,11 @@ async function applyDetails(email: InterviewEmail, details: InterviewDetails, us
     interviewers: details.interviewers,
   };
 
+  const inThread = await findThreadInterview(email);
+  if (inThread) {
+    await updateInterview(email.user_id, inThread.id, { ...merge(fields), status: statusFor(startsAt, endsAt) });
+    return inThread.starts_at === startsAt ? "updated" : "rescheduled";
+  }
   const same = await findInterviewNear(email.user_id, key, startsAt);
   if (same) {
     await updateInterview(email.user_id, same.id, merge(fields));
@@ -136,7 +172,7 @@ export async function extractInterviewsFromEmails(userId: string | null, deadlin
   while (Date.now() < deadline - 15_000) {
     let query = db
       .from("mail_messages")
-      .select("id, user_id, account_id, application_id, provider_id, subject, from_name, from_email, received_at, extracted")
+      .select("id, user_id, account_id, application_id, provider_id, thread_id, subject, from_name, from_email, received_at, extracted")
       .eq("category", "interview")
       .is("interview_checked_at", null);
     if (userId) query = query.eq("user_id", userId);
@@ -279,6 +315,8 @@ export async function syncCalendar(account: SyncAccount, force = false): Promise
   const to = new Date(Date.now() + 60 * 86_400_000);
   const events =
     account.provider === "microsoft" ? await listMicrosoftEvents(token, from, to) : await listGoogleEvents(token, from, to);
+  // Both readers stop after 5 pages; a full last page may mean more events exist.
+  const complete = events.length < 500;
 
   const all = await listMatchCandidates(account.user_id);
   const candidates = account.profile_id === null ? all : all.filter((c) => c.profileId === account.profile_id);
@@ -334,6 +372,28 @@ export async function syncCalendar(account: SyncAccount, force = false): Promise
     });
     result.created++;
   }
+  // Events that are gone from the calendar (a cancelled invitation is usually just removed).
+  // Only when the whole window was read: a cut-off list would look like deletions.
+  if (complete) {
+    const seen = new Set(events.map((e) => e.id));
+    const { data: linked } = await getSupabaseAdminClient()
+      .from("interviews")
+      .select("id, source, calendar_event_id")
+      .eq("user_id", account.user_id)
+      .eq("account_id", account.id)
+      .eq("status", "scheduled")
+      .not("calendar_event_id", "is", null)
+      .gte("starts_at", from.toISOString())
+      .lte("starts_at", to.toISOString());
+    for (const row of (linked ?? []) as { id: string; source: string; calendar_event_id: string }[]) {
+      if (seen.has(row.calendar_event_id)) continue;
+      // From the calendar: it was cancelled. Added by JobStrike or from an email: only the
+      // calendar copy was removed, so the interview stays and can be added again.
+      await updateInterview(account.user_id, row.id, row.source === "calendar" ? { status: "cancelled" } : { calendar_event_id: null });
+      result.updated++;
+    }
+  }
+
   await saveCalendarReadAt(account.id, new Date().toISOString());
   return result;
 }

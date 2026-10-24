@@ -6,19 +6,13 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowLeft,
-  ArrowRight,
   Ban,
-  Briefcase,
+  Check,
   CheckCircle2,
   ChevronDown,
-  ClipboardCheck,
   ExternalLink,
-  FileCheck2,
-  FileQuestion,
   HelpCircle,
-  History,
   Inbox as InboxIcon,
-  Layers,
   Link2,
   Loader2,
   Mail,
@@ -27,11 +21,8 @@ import {
   RotateCcw,
   Search,
   Sparkles,
-  Tag,
   Unlink,
   UserX,
-  XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,9 +37,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -69,18 +64,27 @@ import { cn } from "@/lib/utils";
 
 type Folder = InboxView | "activity";
 
-const FOLDERS: { id: Folder; label: string; icon: LucideIcon; hint: string; attention?: boolean }[] = [
-  { id: "inbox", label: "Inbox", icon: InboxIcon, hint: "Interviews, assessments, offers, rejections, updates and recruiters" },
-  { id: "suggested", label: "Suggestions", icon: Sparkles, hint: "Board moves waiting for your OK", attention: true },
-  { id: "review", label: "Needs review", icon: FileQuestion, hint: "Not linked to an application with confidence", attention: true },
-  { id: "interviews", label: "Interviews", icon: Briefcase, hint: "Interviews and assessments" },
-  { id: "rejections", label: "Rejections", icon: XCircle, hint: "Applications that will not move forward" },
-  { id: "applied", label: "Applied", icon: FileCheck2, hint: "Application confirmations" },
-  { id: "unmatched", label: "Not in Resume DB", icon: ClipboardCheck, hint: "Confirmations for applications Resume DB does not have" },
-  { id: "all", label: "All mail", icon: Layers, hint: "Everything kept, including not job-related" },
+/** The four tabs everyone needs; the rest sit under "More". */
+const TABS: { id: InboxView; label: string; hint: string }[] = [
+  { id: "attention", label: "Needs you", hint: "Board moves to confirm and emails without a sure application" },
+  { id: "inbox", label: "All", hint: "Interviews, assessments, offers, rejections, updates and recruiters" },
+  { id: "interviews", label: "Interviews", hint: "Interviews and assessments" },
+  { id: "rejections", label: "Rejections", hint: "Applications that will not move forward" },
 ];
+const MORE: { id: Folder; label: string }[] = [
+  { id: "applied", label: "Applied (confirmations)" },
+  { id: "unmatched", label: "Not in Resume DB" },
+  { id: "all", label: "Everything, incl. not job-related" },
+  { id: "activity", label: "Activity (board moves)" },
+];
+const FOLDER_TITLES: Partial<Record<Folder, string>> = {
+  applied: "Applied",
+  unmatched: "Not in Resume DB",
+  all: "Everything",
+  suggested: "Suggestions",
+  review: "Needs review",
+};
 
-/** Category accents: a dot in the list, a soft label in the reading pane. */
 const CATEGORY_DOT: Record<MailCategory | "unclassified", string> = {
   interview: "bg-violet-500",
   assessment: "bg-indigo-500",
@@ -93,20 +97,8 @@ const CATEGORY_DOT: Record<MailCategory | "unclassified", string> = {
   not_job: "bg-zinc-300 dark:bg-zinc-600",
   unclassified: "bg-zinc-300 dark:bg-zinc-600",
 };
-const CATEGORY_LABEL_STYLE: Record<MailCategory | "unclassified", string> = {
-  interview: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
-  assessment: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300",
-  offer: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  rejection: "bg-rose-500/10 text-rose-700 dark:text-rose-300",
-  update: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
-  confirmation: "bg-slate-500/10 text-slate-700 dark:text-slate-300",
-  outreach: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-  other: "bg-zinc-500/10 text-zinc-700 dark:text-zinc-300",
-  not_job: "bg-muted text-muted-foreground",
-  unclassified: "bg-muted text-muted-foreground",
-};
 
-/** Below this, a match is shown as "check this" (same threshold as the server's review tab). */
+/** Below this, a match is shown as "check this" (same threshold as the server). */
 const SURE_MATCH = 0.6;
 
 const AVATAR_COLORS = ["bg-sky-600", "bg-violet-600", "bg-emerald-600", "bg-amber-600", "bg-rose-600", "bg-indigo-600", "bg-teal-600"];
@@ -130,18 +122,28 @@ function listTime(iso: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function needsApplication(item: InboxItem): boolean {
+  return item.category !== "unclassified" && APPLICATION_CATEGORIES.includes(item.category);
+}
+
+function unsureMatch(item: InboxItem): boolean {
+  return Boolean(item.application) && item.linkSource === "auto" && (item.matchScore ?? 0) < SURE_MATCH;
+}
+
 /** Whether an item still belongs in a folder after a change (mirrors the server's filters). */
 function fitsView(item: InboxItem, view: InboxView): boolean {
   const c = item.category;
+  const reviewable =
+    ["interview", "assessment", "offer", "rejection", "update", "other"].includes(c) &&
+    item.linkSource === "auto" &&
+    (!item.application || (item.matchScore ?? 0) < SURE_MATCH);
   switch (view) {
+    case "attention":
+      return item.actionStatus === "suggested" || reviewable;
     case "inbox":
       return ["interview", "assessment", "offer", "rejection", "update", "outreach", "other"].includes(c);
     case "review":
-      return (
-        ["interview", "assessment", "offer", "rejection", "update", "other"].includes(c) &&
-        item.linkSource === "auto" &&
-        (!item.application || (item.matchScore ?? 0) < SURE_MATCH)
-      );
+      return reviewable;
     case "interviews":
       return c === "interview" || c === "assessment";
     case "rejections":
@@ -168,8 +170,16 @@ function headline(item: InboxItem): { company: string; title: string } {
   };
 }
 
+type Handlers = {
+  stageName: (id: string | null) => string;
+  onPatch: (item: InboxItem, body: Record<string, unknown>, done?: string) => Promise<void>;
+  onAct: (item: InboxItem, what: "apply" | "dismiss" | "undo") => Promise<void>;
+  onLink: (item: InboxItem) => void;
+  onAdd: (item: InboxItem) => void;
+};
+
 export function InboxPageClient() {
-  const [folder, setFolder] = useState<Folder>("inbox");
+  const [folder, setFolder] = useState<Folder>("attention");
   const view: InboxView = folder === "activity" ? "inbox" : folder;
   const [profileId, setProfileId] = useState("all");
   const [searchInput, setSearchInput] = useState("");
@@ -186,6 +196,7 @@ export function InboxPageClient() {
   const [applyingAll, setApplyingAll] = useState(false);
   const mounted = useRef(true);
   const requestId = useRef(0);
+  const choseFolder = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -194,7 +205,6 @@ export function InboxPageClient() {
     };
   }, []);
 
-  // Search waits until typing pauses.
   useEffect(() => {
     const t = window.setTimeout(() => setSearch(searchInput.trim()), 300);
     return () => window.clearTimeout(t);
@@ -219,10 +229,17 @@ export function InboxPageClient() {
         const res = await fetch(query(), { credentials: "same-origin" });
         const body = await res.json();
         if (!res.ok) throw new Error(body.error || "Could not load the inbox.");
-        // A newer request (another folder or filter) wins.
         if (id !== requestId.current || !mounted.current) return;
-        setData(body as InboxResponse);
-        setItems((body as InboxResponse).items);
+        const next = body as InboxResponse;
+        // Nothing needs the user: open on All instead of an empty to-do list.
+        if (!choseFolder.current && view === "attention" && next.counts.attention === 0) {
+          choseFolder.current = true;
+          setFolder("inbox");
+          return;
+        }
+        choseFolder.current = true;
+        setData(next);
+        setItems(next.items);
         setError(null);
       } catch (e) {
         if (id === requestId.current) setError(e instanceof Error ? e.message : "Could not load the inbox.");
@@ -230,7 +247,7 @@ export function InboxPageClient() {
         if (id === requestId.current && mounted.current) setLoading(false);
       }
     },
-    [query],
+    [query, view],
   );
 
   useEffect(() => {
@@ -254,8 +271,7 @@ export function InboxPageClient() {
     }
   };
 
-  // Sort the backlog while the page is open: each call sorts for up to ~45 s, then the list
-  // refreshes and the next round starts. A round that sorted nothing waits 30 s first.
+  // Sort new mail in the background while the page is open.
   const pending = data?.pending ?? 0;
   const sortingRef = useRef(false);
   const [sortTick, setSortTick] = useState(0);
@@ -348,7 +364,6 @@ export function InboxPageClient() {
     const progress = toast.loading("Updating the board…");
     let applied = 0;
     try {
-      // Each call works for up to ~45 s; repeat while suggestions remain and progress is made.
       for (let round = 0; round < 20; round++) {
         const res = await fetch("/api/inbox/actions", {
           method: "POST",
@@ -357,14 +372,14 @@ export function InboxPageClient() {
           body: JSON.stringify({ do: "apply-all" }),
         });
         const body = await res.json();
-        if (!res.ok) throw new Error(body.error || "Could not apply the suggestions.");
+        if (!res.ok) throw new Error(body.error || "Could not apply the moves.");
         applied += body.applied ?? 0;
         toast.loading(`Updating the board… ${applied} moved`, { id: progress });
         if (body.remaining === 0 || (body.applied ?? 0) + (body.skipped ?? 0) === 0) break;
       }
-      toast.success(`${applied} ${applied === 1 ? "card" : "cards"} moved. Undo any of them under Activity.`, { id: progress });
+      toast.success(`${applied} ${applied === 1 ? "card" : "cards"} moved. Undo any of them under More → Activity.`, { id: progress });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not apply the suggestions.", { id: progress });
+      toast.error(e instanceof Error ? e.message : "Could not apply the moves.", { id: progress });
     } finally {
       setApplyingAll(false);
       void load(true);
@@ -402,9 +417,11 @@ export function InboxPageClient() {
 
   const counts = data?.counts;
   const pickFolder = (f: Folder) => {
+    choseFolder.current = true;
     setFolder(f);
     setSelectedId(null);
   };
+  const handlers: Handlers = { stageName, onPatch: patch, onAct: act, onLink: setLinkFor, onAdd: setAddFor };
 
   if (error && !data) {
     return (
@@ -437,123 +454,150 @@ export function InboxPageClient() {
     );
   }
 
-  const suggestionsBar =
-    data && data.suggestions.length > 0 && (folder === "inbox" || folder === "suggested") ? (
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b bg-amber-500/[0.06] px-4 py-2.5 text-xs">
-        <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-        <span className="min-w-0 flex-1">
-          <strong>{data.counts.suggested.toLocaleString()}</strong> board {data.counts.suggested === 1 ? "update" : "updates"} waiting:{" "}
-          {data.suggestions.map((sg, i) => (
-            <span key={sg.toStage} className="text-muted-foreground">
-              {i > 0 ? ", " : ""}
-              {sg.count} → {stageName(sg.toStage)}
-            </span>
-          ))}
-        </span>
-        <div className="flex gap-1.5">
-          {folder !== "suggested" ? (
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => pickFolder("suggested")}>
-              Review
-            </Button>
-          ) : null}
-          <Button size="sm" className="h-7 px-2.5 text-xs" disabled={applyingAll} onClick={() => setConfirmApplyAll(true)}>
-            {applyingAll ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-            Apply all
-          </Button>
-        </div>
-      </div>
-    ) : null;
+  const moreTitle = FOLDER_TITLES[folder];
 
   return (
     <div className="-m-3 flex h-[calc(100dvh-3rem)] min-h-0 sm:-m-4 md:h-dvh">
-      {/* Folders */}
-      <nav className="hidden w-56 shrink-0 flex-col border-r bg-muted/30 lg:flex" aria-label="Mail folders">
-        <div className="space-y-3 px-3 pb-2 pt-4">
-          <h1 className="px-2 text-lg font-semibold tracking-tight">Inbox</h1>
-          {data && data.profiles.length > 1 ? (
-            <Select value={profileId} onValueChange={setProfileId}>
-              <SelectTrigger className="h-8 w-full bg-background text-xs" aria-label="Candidate">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All candidates</SelectItem>
-                {data.profiles.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    {p.fullName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : null}
-        </div>
-        <div className="flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
-          {FOLDERS.map((f) => (
-            <FolderButton
-              key={f.id}
-              icon={f.icon}
-              label={f.label}
-              hint={f.hint}
-              count={counts?.[f.id as InboxView]}
-              attention={f.attention}
-              active={folder === f.id}
-              onClick={() => pickFolder(f.id)}
+      <section
+        className={cn(
+          "flex min-h-0 w-full shrink-0 flex-col border-r",
+          folder === "activity" ? "md:w-full" : "md:w-[400px] xl:w-[440px]",
+          selected && folder !== "activity" && "hidden md:flex",
+        )}
+        aria-label="Emails"
+      >
+        {/* Header: title, candidate, search, tabs */}
+        <div className="space-y-3 border-b px-4 pb-3 pt-4">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold tracking-tight">Inbox</h1>
+            {pending > 0 ? (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title="New emails are being sorted">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Sorting {pending}
+              </span>
+            ) : null}
+            {data && data.profiles.length > 1 ? (
+              <Select value={profileId} onValueChange={setProfileId}>
+                <SelectTrigger className="ml-auto h-8 w-auto max-w-44 border-transparent bg-muted/60 text-xs shadow-none" aria-label="Candidate">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All candidates</SelectItem>
+                  {data.profiles.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.fullName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+          </div>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search"
+              className="h-9 border-transparent bg-muted/60 pl-8 shadow-none focus-visible:bg-background"
+              aria-label="Search emails"
             />
-          ))}
-          <div className="mx-2 my-2 border-t" />
-          <FolderButton icon={History} label="Activity" hint="Board moves, with Undo" active={folder === "activity"} onClick={() => pickFolder("activity")} />
-        </div>
-        {pending > 0 ? (
-          <div className="flex items-center gap-2 border-t px-4 py-3 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            Sorting {pending.toLocaleString()} new {pending === 1 ? "email" : "emails"}…
           </div>
-        ) : null}
-      </nav>
+          <div className="flex items-center gap-1" role="tablist" aria-label="Inbox views">
+            {TABS.map((t) => {
+              const count = counts?.[t.id] ?? 0;
+              const active = folder === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  title={t.hint}
+                  onClick={() => pickFolder(t.id)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm transition-colors",
+                    active ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  {t.label}
+                  {t.id === "attention" && count > 0 ? (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 text-xs font-medium tabular-nums",
+                        active ? "bg-background/20" : "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+                      )}
+                    >
+                      {count}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors",
+                    moreTitle || folder === "activity" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  {folder === "activity" ? "Activity" : moreTitle ?? "More"}
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {MORE.map((m) => (
+                  <DropdownMenuItem key={m.id} onSelect={() => pickFolder(m.id)}>
+                    <span className="flex-1">{m.label}</span>
+                    {m.id !== "activity" && counts?.[m.id as InboxView] ? (
+                      <span className="ml-4 text-xs tabular-nums text-muted-foreground">{counts[m.id as InboxView].toLocaleString()}</span>
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
 
-      {folder === "activity" ? (
-        <div className="min-w-0 flex-1 overflow-y-auto">
-          <MobileFolderBar folder={folder} counts={counts} onPick={pickFolder} />
-          <div className="mx-auto max-w-3xl p-4 sm:p-6">
-            <h2 className="mb-1 text-xl font-semibold tracking-tight">Activity</h2>
-            <p className="mb-4 text-sm text-muted-foreground">Board moves made from emails and by hand. Undo any of them.</p>
-            <ActivityPanel stageName={stageName} onChanged={() => void load(true)} />
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Message list */}
-          <section
-            className={cn(
-              "flex min-h-0 w-full shrink-0 flex-col border-r md:w-[360px] xl:w-[420px]",
-              selected && "hidden md:flex",
-            )}
-            aria-label="Emails"
-          >
-            <MobileFolderBar folder={folder} counts={counts} onPick={pickFolder} />
-            <div className="border-b p-3">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="Search sender, subject…"
-                  className="h-9 border-transparent bg-muted/60 pl-8 shadow-none focus-visible:bg-background"
-                  aria-label="Search emails"
-                />
-              </div>
+        {folder === "activity" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-3xl p-4 sm:p-6">
+              <p className="mb-4 text-sm text-muted-foreground">Every board move, from emails and by hand. Undo any of them.</p>
+              <ActivityPanel stageName={stageName} onChanged={() => void load(true)} />
             </div>
-            {suggestionsBar}
+          </div>
+        ) : (
+          <>
+            {folder === "attention" && counts && counts.suggested > 0 ? (
+              <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2 text-xs">
+                <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                <span className="min-w-0 flex-1 text-muted-foreground">
+                  {counts.suggested.toLocaleString()} board {counts.suggested === 1 ? "move" : "moves"} ready
+                </span>
+                <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" disabled={applyingAll} onClick={() => setConfirmApplyAll(true)}>
+                  {applyingAll ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  Apply all
+                </Button>
+              </div>
+            ) : null}
             <div className="min-h-0 flex-1 overflow-y-auto">
               {loading && items.length === 0 ? (
                 <ListSkeleton />
               ) : items.length === 0 ? (
                 <div className="px-6 py-16 text-center text-sm text-muted-foreground">
-                  <InboxIcon className="mx-auto mb-3 h-8 w-8 opacity-40" />
-                  {search
-                    ? "No emails match your search."
-                    : folder === "review" || folder === "suggested"
-                      ? "All caught up."
-                      : "Nothing here yet."}
+                  {folder === "attention" ? (
+                    <>
+                      <CheckCircle2 className="mx-auto mb-3 h-8 w-8 text-emerald-500/70" />
+                      <p className="font-medium text-foreground">You&apos;re all caught up</p>
+                      <p className="mt-1">New emails that need a decision will show up here.</p>
+                    </>
+                  ) : (
+                    <>
+                      <InboxIcon className="mx-auto mb-3 h-8 w-8 opacity-40" />
+                      {search ? "No emails match your search." : "Nothing here yet."}
+                    </>
+                  )}
                 </div>
               ) : (
                 <ul className={cn(loading && "opacity-60")}>
@@ -561,9 +605,10 @@ export function InboxPageClient() {
                     <MessageRow
                       key={item.id}
                       item={item}
+                      todo={folder === "attention"}
                       selected={item.id === selectedId}
-                      stageName={stageName}
                       onSelect={() => setSelectedId(item.id)}
+                      {...handlers}
                     />
                   ))}
                   {data?.hasMore ? (
@@ -577,34 +622,22 @@ export function InboxPageClient() {
                 </ul>
               )}
             </div>
-          </section>
+          </>
+        )}
+      </section>
 
-          {/* Reading pane */}
-          <section className={cn("min-w-0 flex-1 flex-col", selected ? "flex" : "hidden md:flex")} aria-label="Email">
-            {selected ? (
-              <ReadingPane
-                key={selected.id}
-                item={selected}
-                stageName={stageName}
-                onBack={() => setSelectedId(null)}
-                onPatch={patch}
-                onAct={act}
-                onLink={() => setLinkFor(selected)}
-                onAdd={() => setAddFor(selected)}
-              />
-            ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Mail className="h-10 w-10 opacity-30" />
-                <p>Select an email to read it</p>
-                <p className="text-xs">
-                  <kbd className="rounded border px-1">J</kbd> <kbd className="rounded border px-1">K</kbd> move ·{" "}
-                  <kbd className="rounded border px-1">O</kbd> open in mailbox · <kbd className="rounded border px-1">X</kbd> not job-related
-                </p>
-              </div>
-            )}
-          </section>
-        </>
-      )}
+      {folder !== "activity" ? (
+        <section className={cn("min-w-0 flex-1 flex-col", selected ? "flex" : "hidden md:flex")} aria-label="Email">
+          {selected ? (
+            <ReadingPane key={selected.id} item={selected} onBack={() => setSelectedId(null)} {...handlers} />
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Mail className="h-10 w-10 opacity-30" />
+              <p>Select an email to read it</p>
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <LinkDialog
         item={linkFor}
@@ -627,10 +660,10 @@ export function InboxPageClient() {
       <Dialog open={confirmApplyAll} onOpenChange={setConfirmApplyAll}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Apply all suggestions?</DialogTitle>
+            <DialogTitle>Apply all board moves?</DialogTitle>
             <DialogDescription>
-              {data?.counts.suggested.toLocaleString()} cards move on the board, each dated by its email. Cards that are
-              already further along are skipped. Every move can be undone under Activity.
+              {counts?.suggested.toLocaleString()} cards move on the Job Pipeline board, each dated by its email. Cards that are
+              already further along are skipped. You can undo any move under More → Activity.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -645,136 +678,128 @@ export function InboxPageClient() {
   );
 }
 
-function FolderButton(props: {
-  icon: LucideIcon;
-  label: string;
-  hint: string;
-  count?: number;
-  attention?: boolean;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const Icon = props.icon;
-  return (
-    <button
-      type="button"
-      title={props.hint}
-      onClick={props.onClick}
-      aria-current={props.active ? "page" : undefined}
-      className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors",
-        props.active ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-    >
-      <Icon className="h-4 w-4 shrink-0" />
-      <span className="min-w-0 flex-1 truncate text-left">{props.label}</span>
-      {props.count ? (
-        <span
-          className={cn(
-            "text-xs tabular-nums",
-            props.attention ? "rounded-full bg-amber-500/15 px-1.5 font-medium text-amber-700 dark:text-amber-300" : "text-muted-foreground",
-          )}
-        >
-          {props.count.toLocaleString()}
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-/** Folders as a scrolling strip on screens without the folder pane. */
-function MobileFolderBar({
-  folder,
-  counts,
-  onPick,
-}: {
-  folder: Folder;
-  counts: Record<InboxView, number> | undefined;
-  onPick: (f: Folder) => void;
-}) {
-  return (
-    <div className="flex w-0 min-w-full gap-1 overflow-x-auto border-b px-3 py-2 lg:hidden">
-      {[...FOLDERS, { id: "activity" as Folder, label: "Activity" }].map((f) => (
-        <button
-          key={f.id}
-          type="button"
-          onClick={() => onPick(f.id)}
-          className={cn(
-            "shrink-0 rounded-full px-3 py-1 text-xs transition-colors",
-            folder === f.id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {f.label}
-          {f.id !== "activity" && counts?.[f.id as InboxView] ? ` ${counts[f.id as InboxView].toLocaleString()}` : ""}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function ListSkeleton() {
   return (
     <ul>
       {Array.from({ length: 8 }).map((_, i) => (
         <li key={i} className="space-y-2 border-b px-4 py-3">
-          <div className="h-3 w-1/3 animate-pulse rounded bg-muted" />
-          <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
-          <div className="h-2.5 w-1/2 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+          <div className="h-2.5 w-3/4 animate-pulse rounded bg-muted" />
         </li>
       ))}
     </ul>
   );
 }
 
+/** The one question a "Needs you" email asks, answerable without opening it. */
+function TodoLine({ item, stageName, onAct, onPatch, onLink }: { item: InboxItem } & Handlers) {
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+
+  let question: React.ReactNode = null;
+  let buttons: React.ReactNode = null;
+  if (item.actionStatus === "suggested" && item.action) {
+    question = (
+      <>
+        Move to <strong className="font-medium text-foreground">{stageName(item.action.toStage)}</strong>?
+      </>
+    );
+    buttons = (
+      <>
+        <Button size="sm" className="h-7 px-3 text-xs" disabled={busy} onClick={(e) => (stop(e), void run(() => onAct(item, "apply")))}>
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : "Move"}
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy} onClick={(e) => (stop(e), void run(() => onAct(item, "dismiss")))}>
+          Skip
+        </Button>
+      </>
+    );
+  } else if (item.application && unsureMatch(item)) {
+    question = (
+      <>
+        Is it <strong className="font-medium text-foreground">{item.application.company}</strong>
+        {item.application.jobTitle ? ` · ${item.application.jobTitle}` : ""}?
+      </>
+    );
+    buttons = (
+      <>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-3 text-xs"
+          disabled={busy}
+          onClick={(e) => (stop(e), void run(() => onPatch(item, { applicationId: item.application!.id }, "Confirmed")))}
+        >
+          <Check className="mr-1 h-3 w-3" />
+          Yes
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={(e) => (stop(e), onLink(item))}>
+          Change
+        </Button>
+      </>
+    );
+  } else if (!item.application && needsApplication(item)) {
+    question = "Which application is this?";
+    buttons = (
+      <>
+        <Button size="sm" variant="outline" className="h-7 px-3 text-xs" onClick={(e) => (stop(e), onLink(item))}>
+          <Link2 className="mr-1 h-3 w-3" />
+          Link
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          disabled={busy}
+          onClick={(e) => (stop(e), void run(() => onPatch(item, { category: "not_job" }, "Marked not job-related")))}
+        >
+          Not job-related
+        </Button>
+      </>
+    );
+  }
+  if (!question) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 pl-4">
+      <span className="text-xs text-muted-foreground">{question}</span>
+      <span className="ml-auto flex gap-1">{buttons}</span>
+    </div>
+  );
+}
+
 function MessageRow({
   item,
+  todo,
   selected,
-  stageName,
   onSelect,
-}: {
-  item: InboxItem;
-  selected: boolean;
-  stageName: (id: string | null) => string;
-  onSelect: () => void;
-}) {
+  ...handlers
+}: { item: InboxItem; todo: boolean; selected: boolean; onSelect: () => void } & Handlers) {
   const { company, title } = headline(item);
-  const needsLink = item.category !== "unclassified" && APPLICATION_CATEGORIES.includes(item.category) && !item.application;
   return (
-    <li data-mail-id={item.id}>
-      <button
-        type="button"
-        onClick={onSelect}
-        className={cn(
-          "relative block w-full border-b px-4 py-3 text-left transition-colors",
-          selected ? "bg-primary/[0.07]" : "hover:bg-muted/50",
-        )}
-      >
-        {selected ? <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" aria-hidden /> : null}
-        <div className="flex items-center gap-2">
-          <span className={cn("h-2 w-2 shrink-0 rounded-full", CATEGORY_DOT[item.category])} title={MAIL_CATEGORY_LABELS[item.category]} />
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{senderName(item)}</span>
+    <li data-mail-id={item.id} className={cn("relative border-b transition-colors", selected ? "bg-primary/[0.07]" : "hover:bg-muted/40")}>
+      {selected ? <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" aria-hidden /> : null}
+      <div role="button" tabIndex={0} onClick={onSelect} onKeyDown={(e) => e.key === "Enter" && onSelect()} className="cursor-pointer px-4 py-3 outline-none">
+        <div className="flex items-baseline gap-2">
+          <span className={cn("h-2 w-2 shrink-0 translate-y-[-1px] rounded-full", CATEGORY_DOT[item.category])} title={MAIL_CATEGORY_LABELS[item.category]} />
+          <span className="min-w-0 flex-1 truncate text-sm">
+            <span className="font-semibold">{company}</span>
+            {title ? <span className="text-muted-foreground"> · {title}</span> : null}
+          </span>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{listTime(item.receivedAt)}</span>
         </div>
-        <p className="mt-0.5 truncate pl-4 text-sm">
-          {company}
-          {title ? <span className="text-muted-foreground"> · {title}</span> : null}
+        <p className="mt-0.5 line-clamp-1 pl-4 text-xs text-muted-foreground">
+          <span className="text-foreground/80">{MAIL_CATEGORY_LABELS[item.category]}</span> — {item.summary || item.subject}
         </p>
-        <p className="mt-0.5 line-clamp-1 pl-4 text-xs text-muted-foreground">{item.summary || item.subject}</p>
-        {item.actionStatus === "suggested" && item.action ? (
-          <p className="mt-1.5 pl-4">
-            <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-              <ArrowRight className="h-3 w-3" />
-              {stageName(item.action.toStage)}
-            </span>
-          </p>
-        ) : needsLink ? (
-          <p className="mt-1.5 pl-4">
-            <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-              No application
-            </span>
-          </p>
-        ) : null}
-      </button>
+        {todo ? <TodoLine item={item} {...handlers} /> : null}
+      </div>
     </li>
   );
 }
@@ -799,23 +824,7 @@ function EmailText({ text }: { text: string }) {
   );
 }
 
-function ReadingPane({
-  item,
-  stageName,
-  onBack,
-  onPatch,
-  onAct,
-  onLink,
-  onAdd,
-}: {
-  item: InboxItem;
-  stageName: (id: string | null) => string;
-  onBack: () => void;
-  onPatch: (item: InboxItem, body: Record<string, unknown>, done?: string) => Promise<void>;
-  onAct: (item: InboxItem, what: "apply" | "dismiss" | "undo") => Promise<void>;
-  onLink: () => void;
-  onAdd: () => void;
-}) {
+function ReadingPane({ item, onBack, stageName, onPatch, onAct, onLink, onAdd }: { item: InboxItem; onBack: () => void } & Handlers) {
   const [body, setBody] = useState<{ text?: string; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -843,12 +852,10 @@ function ReadingPane({
   };
 
   const name = senderName(item);
-  const needsApplication = item.category !== "unclassified" && APPLICATION_CATEGORIES.includes(item.category);
-  const sure = item.application && ((item.matchScore ?? 0) >= SURE_MATCH || item.linkSource === "user");
+  const sure = item.application && !unsureMatch(item);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Toolbar */}
       <div className="flex items-center gap-1 border-b px-2 py-1.5 sm:px-4">
         <Button variant="ghost" size="sm" className="md:hidden" onClick={onBack}>
           <ArrowLeft className="mr-1 h-4 w-4" />
@@ -858,39 +865,10 @@ function ReadingPane({
           <Button asChild variant="ghost" size="sm">
             <a href={item.webLink} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="mr-1.5 h-4 w-4" />
-              <span className="hidden sm:inline">Open in mailbox</span>
+              Open in Outlook
             </a>
           </Button>
         ) : null}
-        <Button variant="ghost" size="sm" onClick={onLink}>
-          <Link2 className="mr-1.5 h-4 w-4" />
-          <span className="hidden sm:inline">{item.application ? "Change link" : "Link"}</span>
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm">
-              <Tag className="mr-1.5 h-4 w-4" />
-              <span className="hidden sm:inline">Type</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup
-              value={item.category}
-              onValueChange={(v) => void onPatch(item, { category: v }, `Changed to ${MAIL_CATEGORY_LABELS[v as MailCategory]}`)}
-            >
-              {MAIL_CATEGORIES.map((c) => (
-                <DropdownMenuRadioItem key={c} value={c}>
-                  <span className={cn("mr-2 h-2 w-2 rounded-full", CATEGORY_DOT[c])} />
-                  {MAIL_CATEGORY_LABELS[c]}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Button variant="ghost" size="sm" onClick={() => void onPatch(item, { category: "not_job" }, "Marked not job-related")}>
-          <Ban className="mr-1.5 h-4 w-4" />
-          <span className="hidden sm:inline">Not job-related</span>
-        </Button>
         <div className="ml-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -899,21 +877,43 @@ function ReadingPane({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuItem onSelect={() => onLink(item)}>
+                <Link2 className="mr-2 h-4 w-4" />
+                {item.application ? "Link to another application…" : "Link to an application…"}
+              </DropdownMenuItem>
               {item.application ? (
                 <DropdownMenuItem onSelect={() => void onPatch(item, { applicationId: null }, "Unlinked")}>
                   <Unlink className="mr-2 h-4 w-4" />
-                  Unlink the application
+                  Unlink
                 </DropdownMenuItem>
               ) : item.category === "confirmation" ? (
-                <DropdownMenuItem onSelect={onAdd}>
+                <DropdownMenuItem onSelect={() => onAdd(item)}>
                   <Plus className="mr-2 h-4 w-4" />
                   Add to Resume DB…
                 </DropdownMenuItem>
               ) : null}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Change type</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">What is this email?</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={item.category}
+                    onValueChange={(v) => void onPatch(item, { category: v }, `Changed to ${MAIL_CATEGORY_LABELS[v as MailCategory]}`)}
+                  >
+                    {MAIL_CATEGORIES.map((c) => (
+                      <DropdownMenuRadioItem key={c} value={c}>
+                        {MAIL_CATEGORY_LABELS[c]}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={() => void onPatch(item, { category: "not_job", ignoreSender: true }, `Ignoring ${item.fromEmail}`)}
-              >
+              <DropdownMenuItem onSelect={() => void onPatch(item, { category: "not_job" }, "Marked not job-related")}>
+                <Ban className="mr-2 h-4 w-4" />
+                Not job-related
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void onPatch(item, { category: "not_job", ignoreSender: true }, `Ignoring ${item.fromEmail}`)}>
                 <UserX className="mr-2 h-4 w-4" />
                 Not job-related, ignore sender
               </DropdownMenuItem>
@@ -924,15 +924,9 @@ function ReadingPane({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <article className="mx-auto max-w-3xl px-5 py-6 sm:px-8">
-          {/* Header */}
-          <span className={cn("inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium", CATEGORY_LABEL_STYLE[item.category])}>
-            <span className={cn("h-1.5 w-1.5 rounded-full", CATEGORY_DOT[item.category])} />
-            {MAIL_CATEGORY_LABELS[item.category]}
-          </span>
-          <h2 className="mt-3 text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{item.subject || "(no subject)"}</h2>
-          {item.summary ? <p className="mt-1.5 text-sm text-muted-foreground">{item.summary}</p> : null}
+          <h2 className="text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{item.subject || "(no subject)"}</h2>
 
-          <div className="mt-5 flex items-start gap-3">
+          <div className="mt-4 flex items-center gap-3">
             <div
               className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white", avatarColor(item.fromEmail))}
               aria-hidden
@@ -941,76 +935,53 @@ function ReadingPane({
             </div>
             <div className="min-w-0 flex-1 text-sm">
               <p className="truncate">
-                <span className="font-medium">{name}</span>{" "}
-                <span className="text-muted-foreground">&lt;{item.fromEmail}&gt;</span>
+                <span className="font-medium">{name}</span> <span className="text-muted-foreground">&lt;{item.fromEmail}&gt;</span>
               </p>
               <p className="truncate text-xs text-muted-foreground">
-                To {item.accountEmail} · {new Date(item.receivedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                {new Date(item.receivedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} · to {item.accountEmail}
               </p>
             </div>
           </div>
 
-          {/* What JobStrike made of it */}
-          <div className="mt-6 space-y-2">
-            {item.application ? (
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-                {sure ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" /> : <HelpCircle className="h-4 w-4 shrink-0 text-amber-600" />}
-                <div className="min-w-0 flex-1 text-sm">
-                  <p className="truncate">
-                    <span className="font-medium">{item.application.company}</span>
-                    {item.application.jobTitle ? <span className="text-muted-foreground"> · {item.application.jobTitle}</span> : null}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {[
-                      item.application.candidateName,
-                      `applied ${new Date(item.application.appliedAt).toLocaleDateString()}`,
-                      sure ? item.matchReason : `Check: ${item.matchReason ?? "unsure match"}`,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                </div>
-                <Button asChild size="sm" variant="ghost" className="h-7 text-xs">
-                  <Link href={`/resume-db?q=${encodeURIComponent(item.application.company)}`}>Resume DB</Link>
-                </Button>
-              </div>
-            ) : needsApplication ? (
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-4 py-3">
-                <HelpCircle className="h-4 w-4 shrink-0 text-amber-600" />
-                <p className="min-w-0 flex-1 text-sm">No matching application{item.company ? ` for ${item.company}` : ""}.</p>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onLink}>
-                  Link…
-                </Button>
-                {item.category === "confirmation" ? (
-                  <Button size="sm" className="h-7 text-xs" onClick={onAdd}>
-                    Add to Resume DB
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
+          {/* One line: what this email is about, and what it did on the board. */}
+          <div className="mt-5 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className={cn("h-2 w-2 rounded-full", CATEGORY_DOT[item.category])} />
+              <span className="font-medium">{MAIL_CATEGORY_LABELS[item.category]}</span>
+              {item.application ? (
+                <>
+                  <span className="text-muted-foreground">for</span>
+                  <Link href={`/resume-db?q=${encodeURIComponent(item.application.company)}`} className="font-medium hover:underline">
+                    {item.application.company}
+                    {item.application.jobTitle ? ` · ${item.application.jobTitle}` : ""}
+                  </Link>
+                  {sure ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <HelpCircle className="h-3.5 w-3.5 text-amber-600" />}
+                </>
+              ) : needsApplication(item) ? (
+                <button type="button" onClick={() => onLink(item)} className="text-amber-700 hover:underline dark:text-amber-300">
+                  · link an application
+                </button>
+              ) : null}
+            </div>
+            {item.summary ? <p className="mt-1 text-muted-foreground">{item.summary}</p> : null}
 
             {item.action && item.actionStatus === "suggested" ? (
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-4 py-3">
-                <Sparkles className="h-4 w-4 shrink-0 text-amber-600" />
-                <p className="min-w-0 flex-1 text-sm">
-                  Move the card {stageName(item.action.fromStage)} → <strong>{stageName(item.action.toStage)}</strong>
-                  <span className="block text-xs text-muted-foreground">{item.action.reason}</span>
-                </p>
-                <Button size="sm" className="h-7 text-xs" disabled={busy} onClick={() => void run("apply")}>
-                  {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                  Apply
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+                <span className="min-w-0 flex-1">
+                  Move the card to <strong>{stageName(item.action.toStage)}</strong>?
+                </span>
+                <Button size="sm" className="h-7 px-3 text-xs" disabled={busy} onClick={() => void run("apply")}>
+                  {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : "Move"}
                 </Button>
                 <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => void run("dismiss")}>
-                  Dismiss
+                  Skip
                 </Button>
               </div>
             ) : item.action && item.actionStatus === "applied" ? (
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                <p className="min-w-0 flex-1 text-sm">
-                  Card moved {stageName(item.action.fromStage)} → <strong>{stageName(item.action.toStage)}</strong>
-                  <span className="block text-xs text-muted-foreground">{item.action.reason}</span>
-                </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3 text-muted-foreground">
+                <span className="min-w-0 flex-1">
+                  Card moved to <strong className="text-foreground">{stageName(item.action.toStage)}</strong>
+                </span>
                 {item.action.eventId ? (
                   <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => void run("undo")}>
                     <RotateCcw className="mr-1 h-3 w-3" />
@@ -1021,8 +992,7 @@ function ReadingPane({
             ) : null}
           </div>
 
-          {/* The email */}
-          <div className="mt-6 border-t pt-6">
+          <div className="mt-6">
             {body === null ? (
               <div className="space-y-2">
                 {[90, 75, 85, 60, 70].map((w, i) => (
@@ -1051,9 +1021,7 @@ function ActivityPanel({ stageName, onChanged }: { stageName: (id: string | null
   const [busyId, setBusyId] = useState<number | null>(null);
 
   const fetchPage = useCallback(async (before?: string) => {
-    const res = await fetch(`/api/inbox/activity${before ? `?before=${encodeURIComponent(before)}` : ""}`, {
-      credentials: "same-origin",
-    });
+    const res = await fetch(`/api/inbox/activity${before ? `?before=${encodeURIComponent(before)}` : ""}`, { credentials: "same-origin" });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || "Could not load the activity.");
     return body as { entries: ActivityEntry[]; hasMore: boolean };
@@ -1089,11 +1057,7 @@ function ActivityPanel({ stageName, onChanged }: { stageName: (id: string | null
 
   if (entries === null) return <ListSkeleton />;
   if (entries.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-        No board moves yet. Moves made from emails (and by hand in Resume DB) appear here.
-      </div>
-    );
+    return <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">No board moves yet.</div>;
   }
   return (
     <div className="space-y-3">
@@ -1114,7 +1078,7 @@ function ActivityPanel({ stageName, onChanged }: { stageName: (id: string | null
                 {entry.undone ? <span className="ml-2 text-xs text-muted-foreground">Undone</span> : null}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {entry.source === "email" ? entry.reason || "From an email" : entry.reason || "Moved by hand"} ·{" "}
+                {entry.reason || (entry.source === "email" ? "From an email" : "Moved by hand")} ·{" "}
                 {new Date(entry.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
               </p>
             </div>
@@ -1147,15 +1111,7 @@ function ActivityPanel({ stageName, onChanged }: { stageName: (id: string | null
   );
 }
 
-function LinkDialog({
-  item,
-  onClose,
-  onPick,
-}: {
-  item: InboxItem | null;
-  onClose: () => void;
-  onPick: (app: InboxApplication) => void;
-}) {
+function LinkDialog({ item, onClose, onPick }: { item: InboxItem | null; onClose: () => void; onPick: (app: InboxApplication) => void }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<InboxApplication[]>([]);
   const [busy, setBusy] = useState(false);
@@ -1189,7 +1145,7 @@ function LinkDialog({
     <Dialog open={item !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Link to an application</DialogTitle>
+          <DialogTitle>Which application is this?</DialogTitle>
           <DialogDescription className="line-clamp-2">{item?.subject}</DialogDescription>
         </DialogHeader>
         <div className="relative">
@@ -1217,20 +1173,15 @@ function LinkDialog({
             ))
           )}
         </ul>
+        {item?.category === "confirmation" ? (
+          <p className="text-xs text-muted-foreground">Not in the list? Use ⋯ → Add to Resume DB.</p>
+        ) : null}
       </DialogContent>
     </Dialog>
   );
 }
 
-function AddDialog({
-  item,
-  onClose,
-  onAdded,
-}: {
-  item: InboxItem | null;
-  onClose: () => void;
-  onAdded: (item: InboxItem) => void;
-}) {
+function AddDialog({ item, onClose, onAdded }: { item: InboxItem | null; onClose: () => void; onAdded: (item: InboxItem) => void }) {
   const [company, setCompany] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1268,8 +1219,7 @@ function AddDialog({
         <DialogHeader>
           <DialogTitle>Add to Resume DB</DialogTitle>
           <DialogDescription>
-            Registers this application as applied on {item ? new Date(item.receivedAt).toLocaleDateString() : ""}, linked to this
-            email.
+            Registers this application as applied on {item ? new Date(item.receivedAt).toLocaleDateString() : ""}, linked to this email.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

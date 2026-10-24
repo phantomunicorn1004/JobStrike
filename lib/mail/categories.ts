@@ -41,7 +41,7 @@ export const APPLICATION_CATEGORIES: MailCategory[] = [
 ];
 
 /** Inbox tabs. */
-export const INBOX_VIEWS = ["inbox", "suggested", "review", "interviews", "rejections", "applied", "unmatched", "all"] as const;
+export const INBOX_VIEWS = ["attention", "inbox", "suggested", "review", "interviews", "rejections", "applied", "unmatched", "all"] as const;
 export type InboxView = (typeof INBOX_VIEWS)[number];
 
 export type InboxApplication = {

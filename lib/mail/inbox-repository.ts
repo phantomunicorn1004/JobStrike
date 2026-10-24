@@ -254,6 +254,7 @@ export const SURE_MATCH = 0.6;
 
 const VIEW_CATEGORIES: Record<InboxView, MailCategory[] | null> = {
   inbox: ["interview", "assessment", "offer", "rejection", "update", "outreach", "other"],
+  attention: null,
   suggested: null,
   review: ["interview", "assessment", "offer", "rejection", "update", "other"],
   interviews: ["interview", "assessment"],
@@ -280,6 +281,12 @@ function applyView(query: any, userId: string, view: InboxView, filters: Filters
   // At most one "or" filter per request: both conditions go into one and(...).
   const ors: string[] = [];
   if (view === "review") ors.push(`application_id.is.null,match_score.lt.${SURE_MATCH}`);
+  // "Needs you": a board move to confirm, or a job email without a sure application.
+  if (view === "attention") {
+    ors.push(
+      `action_status.eq.suggested,and(category.in.(${VIEW_CATEGORIES.review!.join(",")}),link_source.eq.auto,or(application_id.is.null,match_score.lt.${SURE_MATCH}))`,
+    );
+  }
   // PostgREST filter syntax: keep the search text plain.
   // (Dots may stay: only the first two of a condition separate column, operator and value.)
   const text = filters.search.replace(/[,()%*\\"]/g, " ").replace(/\s+/g, " ").trim();
