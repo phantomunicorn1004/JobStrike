@@ -1350,6 +1350,8 @@ const STATUS_STYLE: Record<ResponseStatus, string> = {
 
 function statusText(a: ApplicationResponse): string {
   if (a.status === "interviewing") return a.stage ? `Interview · ${INTERVIEW_ROUND_LABELS[a.stage]}` : "Interview";
+  // How far it got before the decision.
+  if (a.status === "rejected" && a.stage) return `Rejected · after ${INTERVIEW_ROUND_LABELS[a.stage]}`;
   if (a.status === "not_responded") {
     const days = Math.floor((Date.now() - new Date(a.appliedAt).getTime()) / 86_400_000);
     return `Not responded · ${days} d`;

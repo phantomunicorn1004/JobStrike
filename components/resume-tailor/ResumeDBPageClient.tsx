@@ -1882,7 +1882,9 @@ function MailStatusLine({ status }: { status: MailStatus | undefined }) {
     status.status === "interviewing"
       ? `Interview${status.stage ? ` · ${INTERVIEW_ROUND_LABELS[status.stage]}` : ""}`
       : status.status === "rejected"
-        ? "Rejected"
+        ? status.stage
+          ? `Rejected · after ${INTERVIEW_ROUND_LABELS[status.stage]}`
+          : "Rejected"
         : status.status === "offer"
           ? "Offer"
           : `Not responded · ${days} d`;
