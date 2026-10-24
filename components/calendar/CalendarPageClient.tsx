@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  CalendarDays,
   CalendarPlus,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   ExternalLink,
   Loader2,
@@ -18,7 +19,6 @@ import {
   Trash2,
   Users,
   Video,
-  X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
   INTERVIEW_ROUNDS,
@@ -93,15 +94,71 @@ function hhmm(iso: string, tz: string): string {
   return new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
 }
 
+type CalView = "day" | "week" | "month" | "agenda";
+const VIEWS: { id: CalView; label: string }[] = [
+  { id: "day", label: "Day" },
+  { id: "week", label: "Week" },
+  { id: "month", label: "Month" },
+  { id: "agenda", label: "Agenda" },
+];
+const HOUR_PX = 52;
+
+/** Event blocks in the time grid, by round. */
+const BLOCK_STYLE: Record<InterviewRound, string> = {
+  screen: "border-sky-500 bg-sky-500/15 text-sky-950 dark:text-sky-100",
+  technical: "border-violet-500 bg-violet-500/15 text-violet-950 dark:text-violet-100",
+  final: "border-emerald-500 bg-emerald-500/15 text-emerald-950 dark:text-emerald-100",
+  other: "border-zinc-400 bg-zinc-500/10 text-zinc-900 dark:text-zinc-100",
+};
+const DOT_STYLE: Record<InterviewRound, string> = {
+  screen: "bg-sky-500",
+  technical: "bg-violet-500",
+  final: "bg-emerald-500",
+  other: "bg-zinc-400",
+};
+
+// Date keys ("2026-10-23") are calendar days in the user's timezone; plain arithmetic on them.
+function ymdAdd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+function ymdWeekday(ymd: string): number {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+function ymdLabel(ymd: string, options: Intl.DateTimeFormatOptions): string {
+  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString(undefined, { ...options, timeZone: "UTC" });
+}
+function ymdToDate(ymd: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function dateToYmd(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function minutesInTz(iso: string, tz: string): number {
+  const [h, m] = hhmm(iso, tz).split(":").map(Number);
+  return h * 60 + m;
+}
+function endOf(i: InterviewView): string {
+  return i.endsAt ?? new Date(new Date(i.startsAt).getTime() + 45 * 60_000).toISOString();
+}
+
 export function CalendarPageClient() {
   const [data, setData] = useState<InterviewsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [profileId, setProfileId] = useState("all");
-  const [day, setDay] = useState<string | null>(null);
+  const [view, setView] = useState<CalView>("week");
+  const [anchor, setAnchor] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [editing, setEditing] = useState<InterviewView | "new" | null>(null);
-  const [showPast, setShowPast] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+
+  // Phones start with the agenda; the week grid needs width.
+  useEffect(() => {
+    if (window.innerWidth < 768) setView("agenda");
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -119,7 +176,7 @@ export function CalendarPageClient() {
     void load();
   }, [load]);
 
-  // Countdowns stay current; the list follows new interviews (every minute, and on return to the tab).
+  // Countdowns and the "now" line stay current; the list follows new interviews.
   useEffect(() => {
     const tick = window.setInterval(() => setNow(Date.now()), 30_000);
     const reload = window.setInterval(() => {
@@ -195,6 +252,7 @@ export function CalendarPageClient() {
       if (!window.confirm(`Delete the ${interview.company} interview?`)) return;
       const res = await fetch(`/api/interviews/${interview.id}`, { method: "DELETE", credentials: "same-origin" });
       if (res.ok) {
+        setOpenId(null);
         toast.success("Deleted.");
         await load();
       } else toast.error("Could not delete.");
@@ -203,44 +261,57 @@ export function CalendarPageClient() {
   );
 
   const tz = data?.timezone ?? "America/New_York";
+  const today = getDayKeyInTimeZone(new Date(now).toISOString(), tz);
+  const focus = anchor ?? today;
+
   const all = useMemo(() => {
     const list = data?.interviews ?? [];
     return profileId === "all" ? list : list.filter((i) => String(i.application?.profileId ?? "") === profileId);
   }, [data, profileId]);
 
-  const groups = useMemo(() => {
-    const today = getDayKeyInTimeZone(new Date(now).toISOString(), tz);
-    const tomorrow = getDayKeyInTimeZone(new Date(now + 86_400_000).toISOString(), tz);
-    const weekEnd = now + 7 * 86_400_000;
-    const scheduled = all.filter((i) => i.status === "scheduled");
-    const upcoming = scheduled.filter((i) => new Date(i.endsAt ?? i.startsAt).getTime() > now - 30 * 60_000);
-    const keyOf = (i: InterviewView) => getDayKeyInTimeZone(i.startsAt, tz);
-    return {
-      next: upcoming[0] ?? null,
-      outcome: scheduled.filter((i) => {
-        const end = new Date(i.endsAt ?? i.startsAt).getTime() + (i.endsAt ? 0 : 45 * 60_000);
-        return end < now && end > now - OUTCOME_PROMPT_DAYS * 86_400_000;
-      }),
-      today: upcoming.filter((i) => keyOf(i) === today),
-      tomorrow: upcoming.filter((i) => keyOf(i) === tomorrow),
-      week: upcoming.filter((i) => keyOf(i) !== today && keyOf(i) !== tomorrow && new Date(i.startsAt).getTime() <= weekEnd),
-      later: upcoming.filter((i) => new Date(i.startsAt).getTime() > weekEnd),
-      past: all
-        .filter((i) => i.status !== "scheduled" || new Date(i.endsAt ?? i.startsAt).getTime() < now - OUTCOME_PROMPT_DAYS * 86_400_000)
-        .reverse(),
-    };
-  }, [all, now, tz]);
-
-  const daysWithInterviews = useMemo(() => {
-    const keys = new Set(all.filter((i) => i.status !== "cancelled").map((i) => getDayKeyInTimeZone(i.startsAt, tz)));
-    return [...keys].map((k) => {
-      const [y, m, d] = k.split("-").map(Number);
-      return new Date(y, m - 1, d);
-    });
+  const byDay = useMemo(() => {
+    const map = new Map<string, InterviewView[]>();
+    for (const i of all) {
+      const key = getDayKeyInTimeZone(i.startsAt, tz);
+      map.set(key, [...(map.get(key) ?? []), i]);
+    }
+    return map;
   }, [all, tz]);
 
-  const onDay = day ? all.filter((i) => getDayKeyInTimeZone(i.startsAt, tz) === day) : null;
-  const rowProps = {
+  const scheduled = all.filter((i) => i.status === "scheduled");
+  const next = scheduled.find((i) => new Date(endOf(i)).getTime() > now - 30 * 60_000) ?? null;
+  const outcome = scheduled.filter((i) => {
+    const end = new Date(endOf(i)).getTime();
+    return end < now && end > now - OUTCOME_PROMPT_DAYS * 86_400_000;
+  });
+
+  // Days shown and the toolbar title.
+  const weekStart = ymdAdd(focus, -ymdWeekday(focus));
+  const monthFirst = `${focus.slice(0, 7)}-01`;
+  const days =
+    view === "day" ? [focus] : view === "week" ? Array.from({ length: 7 }, (_, i) => ymdAdd(weekStart, i)) : [];
+  const monthDays = Array.from({ length: 42 }, (_, i) => ymdAdd(ymdAdd(monthFirst, -ymdWeekday(monthFirst)), i));
+  const title =
+    view === "day"
+      ? ymdLabel(focus, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
+      : view === "week"
+        ? `${ymdLabel(days[0], { month: "short", day: "numeric" })} – ${ymdLabel(days[6], { month: days[0].slice(5, 7) === days[6].slice(5, 7) ? undefined : "short", day: "numeric", year: "numeric" })}`
+        : view === "month"
+          ? ymdLabel(monthFirst, { month: "long", year: "numeric" })
+          : "Upcoming";
+
+  const step = (dir: 1 | -1) => {
+    if (view === "day") setAnchor(ymdAdd(focus, dir));
+    else if (view === "week") setAnchor(ymdAdd(focus, 7 * dir));
+    else if (view === "month") {
+      const [y, m] = focus.split("-").map(Number);
+      const d = new Date(Date.UTC(y, m - 1 + dir, 1));
+      setAnchor(d.toISOString().slice(0, 10));
+    }
+  };
+
+  const opened = openId ? all.find((i) => i.id === openId) ?? null : null;
+  const actions = {
     tz,
     canAddToCalendar: Boolean(data?.canAddToCalendar),
     onCalendar: (i: InterviewView) => void post(i, { do: "calendar" }),
@@ -252,198 +323,217 @@ export function CalendarPageClient() {
 
   if (error && !data) {
     return (
-      <div className="mx-auto max-w-6xl space-y-4">
-        <Header />
-        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-          {error}
-          <div className="mt-3">
-            <Button variant="outline" size="sm" onClick={() => void load()}>
-              Try again
-            </Button>
-          </div>
+      <div className="mx-auto max-w-2xl p-8 text-center text-sm text-muted-foreground">
+        {error}
+        <div className="mt-3">
+          <Button variant="outline" size="sm" onClick={() => void load()}>
+            Try again
+          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <Header />
-        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-          {data && data.profiles.length > 1 ? (
-            <Select value={profileId} onValueChange={setProfileId}>
-              <SelectTrigger className="h-9 w-full sm:w-44" aria-label="Candidate">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All candidates</SelectItem>
-                {data.profiles.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    {p.fullName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : null}
-          <Button variant="outline" onClick={() => void refresh()} disabled={refreshing}>
-            <RefreshCw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
-            Refresh
-          </Button>
-          <Button onClick={() => setEditing("new")}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add interview
-          </Button>
-        </div>
-      </div>
+    <div className="-m-3 flex h-[calc(100dvh-3rem)] min-h-0 sm:-m-4 md:h-dvh">
+      {/* Side pane */}
+      <aside className="hidden w-64 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-muted/30 p-3 lg:flex">
+        <h1 className="px-2 pt-1 text-lg font-semibold tracking-tight">Calendar</h1>
+        <Button className="w-full justify-start" onClick={() => setEditing("new")}>
+          <Plus className="mr-2 h-4 w-4" />
+          New interview
+        </Button>
+        <Calendar
+          mode="single"
+          selected={ymdToDate(focus)}
+          onSelect={(date) => date && setAnchor(dateToYmd(date))}
+          month={ymdToDate(focus)}
+          onMonthChange={(date) => setAnchor(dateToYmd(date))}
+          modifiers={{ interview: [...byDay.keys()].map(ymdToDate) }}
+          modifiersClassNames={{
+            interview:
+              "relative after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary",
+          }}
+          className="mx-auto rounded-lg bg-background p-2 [--cell-size:1.85rem]"
+        />
+        {data && data.profiles.length > 1 ? (
+          <Select value={profileId} onValueChange={setProfileId}>
+            <SelectTrigger className="h-8 bg-background text-xs" aria-label="Candidate">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All candidates</SelectItem>
+              {data.profiles.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.fullName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
 
-      {!data ? (
-        <div className="flex items-center justify-center gap-2 rounded-xl border bg-card p-10 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading…
-        </div>
-      ) : (
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="min-w-0 space-y-5">
-            {onDay ? (
-              <Section
-                title={fmt(`${day}T12:00:00Z`, "UTC", { weekday: "long", month: "long", day: "numeric" })}
-                action={
-                  <Button size="sm" variant="ghost" onClick={() => setDay(null)}>
-                    <X className="mr-1 h-4 w-4" />
-                    Show all
-                  </Button>
-                }
-              >
-                {onDay.length ? onDay.map((i) => <Row key={i.id} interview={i} {...rowProps} />) : <Empty text="No interviews that day." />}
-              </Section>
-            ) : (
-              <>
-                {groups.next ? (
-                  <NextUp interview={groups.next} tz={tz} now={now} canAddToCalendar={rowProps.canAddToCalendar} onCalendar={rowProps.onCalendar} />
-                ) : (
-                  <div className="rounded-xl border bg-card p-8 text-center">
-                    <CalendarDays className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
-                    <p className="font-medium">No upcoming interviews</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Interviews appear here from interview emails and your calendar. Add one by hand anytime.
-                    </p>
-                  </div>
-                )}
-
-                {groups.outcome.length ? (
-                  <Section title="How did it go?">
-                    {groups.outcome.map((i) => (
-                      <div key={i.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">
-                            {i.company}
-                            {i.jobTitle ? <span className="font-normal text-muted-foreground"> · {i.jobTitle}</span> : null}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {INTERVIEW_ROUND_LABELS[i.round]} · {fmt(i.startsAt, tz, { weekday: "short", month: "short", day: "numeric" })}
-                          </p>
-                        </div>
-                        <div className="flex gap-1.5">
-                          <Button size="sm" variant="outline" onClick={() => void post(i, { do: "outcome", result: "passed" })}>
-                            Went well
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => void post(i, { do: "outcome", result: "waiting" })}>
-                            Waiting
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-rose-600 hover:text-rose-700"
-                            onClick={() => void post(i, { do: "outcome", result: "rejected" })}
-                          >
-                            Rejected
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </Section>
-                ) : null}
-
-                {(
-                  [
-                    ["Today", groups.today],
-                    ["Tomorrow", groups.tomorrow],
-                    ["This week", groups.week],
-                    ["Later", groups.later],
-                  ] as const
-                ).map(([title, list]) =>
-                  list.length ? (
-                    <Section key={title} title={title} count={list.length}>
-                      {list.map((i) => (
-                        <Row key={i.id} interview={i} showDate={title !== "Today" && title !== "Tomorrow"} {...rowProps} />
-                      ))}
-                    </Section>
-                  ) : null,
-                )}
-
-                {groups.past.length ? (
-                  <div>
-                    <button
-                      type="button"
-                      className="text-sm text-muted-foreground hover:text-foreground"
-                      onClick={() => setShowPast((v) => !v)}
-                    >
-                      {showPast ? "Hide" : "Show"} past and cancelled ({groups.past.length})
-                    </button>
-                    {showPast ? (
-                      <div className="mt-2">
-                        <Section title="Past">
-                          {groups.past.map((i) => (
-                            <Row key={i.id} interview={i} showDate {...rowProps} />
-                          ))}
-                        </Section>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
-
-          <aside className="space-y-4">
-            <div className="rounded-xl border bg-card p-2">
-              <Calendar
-                mode="single"
-                selected={
-                  day
-                    ? (() => {
-                        const [y, m, d] = day.split("-").map(Number);
-                        return new Date(y, m - 1, d);
-                      })()
-                    : undefined
-                }
-                onSelect={(date) =>
-                  setDay(
-                    date
-                      ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
-                      : null,
-                  )
-                }
-                modifiers={{ interview: daysWithInterviews }}
-                modifiersClassNames={{
-                  interview:
-                    "relative font-semibold after:absolute after:bottom-1 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary",
-                }}
-                className="mx-auto"
-              />
-            </div>
-            <p className="px-1 text-xs text-muted-foreground">
-              Times are in your timezone ({tz}),{" "}
-              <Link href="/settings" className="underline">
-                change it in Settings
-              </Link>
-              . Interviews come from interview emails and the calendars of connected mailboxes.
+        {next ? (
+          <button
+            type="button"
+            onClick={() => setOpenId(next.id)}
+            className="rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted/50"
+          >
+            <p className="flex items-center gap-1.5 text-xs font-medium text-primary">
+              <Clock className="h-3.5 w-3.5" />
+              Next {countdown(next.startsAt, now)}
             </p>
-          </aside>
-        </div>
-      )}
+            <p className="mt-1 truncate text-sm font-semibold">{next.company}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {INTERVIEW_ROUND_LABELS[next.round]} · {fmt(next.startsAt, tz, { weekday: "short", hour: "numeric", minute: "2-digit" })}
+            </p>
+            {next.meetingUrl ? (
+              <a
+                href={next.meetingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                <Video className="h-3.5 w-3.5" />
+                Join
+              </a>
+            ) : null}
+          </button>
+        ) : null}
 
+        {outcome.length ? (
+          <div>
+            <p className="mb-1.5 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">How did it go?</p>
+            <ul className="space-y-1">
+              {outcome.map((i) => (
+                <li key={i.id}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(i.id)}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                  >
+                    <span className={cn("h-2 w-2 shrink-0 rounded-full", DOT_STYLE[i.round])} />
+                    <span className="min-w-0 flex-1 truncate">{i.company}</span>
+                    <span className="text-xs text-muted-foreground">{fmt(i.startsAt, tz, { month: "short", day: "numeric" })}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        <div className="mt-auto space-y-1.5 px-1 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {INTERVIEW_ROUNDS.map((r) => (
+              <span key={r} className="inline-flex items-center gap-1.5">
+                <span className={cn("h-2 w-2 rounded-full", DOT_STYLE[r])} />
+                {INTERVIEW_ROUND_LABELS[r]}
+              </span>
+            ))}
+          </div>
+          <p>
+            Times in {tz} ·{" "}
+            <Link href="/settings" className="underline">
+              change
+            </Link>
+          </p>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <main className="flex min-w-0 flex-1 flex-col">
+        <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4">
+          <Button variant="outline" size="sm" onClick={() => setAnchor(null)}>
+            Today
+          </Button>
+          {view !== "agenda" ? (
+            <div className="flex">
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => step(-1)} aria-label="Previous">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => step(1)} aria-label="Next">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : null}
+          <h2 className="min-w-0 truncate text-base font-semibold sm:text-lg">{title}</h2>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex rounded-lg bg-muted p-0.5" role="tablist" aria-label="Calendar view">
+              {VIEWS.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === v.id}
+                  onClick={() => setView(v.id)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors sm:px-3",
+                    view === v.id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                    v.id === "week" && "hidden sm:block",
+                  )}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void refresh()} disabled={refreshing} aria-label="Refresh">
+              <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+            </Button>
+            <Button size="sm" className="lg:hidden" onClick={() => setEditing("new")}>
+              <Plus className="h-4 w-4 sm:mr-1.5" />
+              <span className="hidden sm:inline">New</span>
+            </Button>
+          </div>
+        </div>
+
+        {!data ? (
+          <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading…
+          </div>
+        ) : view === "day" || view === "week" ? (
+          <TimeGrid days={days} byDay={byDay} tz={tz} now={now} today={today} onOpen={(i) => setOpenId(i.id)} />
+        ) : view === "month" ? (
+          <MonthGrid
+            days={monthDays}
+            month={monthFirst.slice(0, 7)}
+            byDay={byDay}
+            tz={tz}
+            today={today}
+            onOpen={(i) => setOpenId(i.id)}
+            onDay={(ymd) => {
+              setAnchor(ymd);
+              setView("day");
+            }}
+          />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
+              {next ? (
+                <NextUp interview={next} tz={tz} now={now} canAddToCalendar={actions.canAddToCalendar} onCalendar={actions.onCalendar} />
+              ) : (
+                <Empty text="No upcoming interviews. They appear from interview emails and your calendar, or add one." />
+              )}
+              {outcome.length ? (
+                <Section title="How did it go?">
+                  {outcome.map((i) => (
+                    <OutcomeRow key={i.id} interview={i} tz={tz} onOutcome={(result) => void post(i, { do: "outcome", result })} />
+                  ))}
+                </Section>
+              ) : null}
+              <AgendaGroups list={scheduled.filter((i) => new Date(endOf(i)).getTime() > now - 30 * 60_000)} today={today} onOpen={(i) => setOpenId(i.id)} {...actions} />
+            </div>
+          </div>
+        )}
+      </main>
+
+      <DetailsSheet
+        interview={opened}
+        now={now}
+        onClose={() => setOpenId(null)}
+        onOutcome={(i, result) => void post(i, { do: "outcome", result })}
+        {...actions}
+      />
       <EditDialog
         value={editing}
         tz={tz}
@@ -457,12 +547,446 @@ export function CalendarPageClient() {
   );
 }
 
-function Header() {
+/** Week or day: hours down, days across, interviews as blocks (overlaps side by side). */
+function TimeGrid({
+  days,
+  byDay,
+  tz,
+  now,
+  today,
+  onOpen,
+}: {
+  days: string[];
+  byDay: Map<string, InterviewView[]>;
+  tz: string;
+  now: number;
+  today: string;
+  onOpen: (i: InterviewView) => void;
+}) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const shown = days.flatMap((d) => byDay.get(d) ?? []);
+  const startHour = Math.min(7, ...shown.map((i) => Math.floor(minutesInTz(i.startsAt, tz) / 60)));
+  const endHour = Math.max(20, ...shown.map((i) => Math.min(24, Math.ceil(Math.max(minutesInTz(endOf(i), tz), minutesInTz(i.startsAt, tz) + 30) / 60))));
+  const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
+  const nowMinutes = minutesInTz(new Date(now).toISOString(), tz);
+
+  // Open near the current hour (or 8 AM).
+  useEffect(() => {
+    const hour = days.includes(today) ? Math.floor(nowMinutes / 60) - 1 : 8;
+    scroller.current?.scrollTo({ top: Math.max(0, (hour - startHour) * HOUR_PX) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days.join(",")]);
+
   return (
-    <div>
-      <h1 className="text-2xl font-bold tracking-tight">Calendar</h1>
-      <p className="text-sm text-muted-foreground">Your interviews, from emails, your calendar and what you add.</p>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex border-b pr-[var(--scrollbar,0px)]">
+        <div className="w-14 shrink-0" />
+        {days.map((d) => (
+          <div key={d} className="min-w-0 flex-1 border-l px-2 py-2 text-center">
+            <p className="text-xs uppercase text-muted-foreground">{ymdLabel(d, { weekday: "short" })}</p>
+            <p
+              className={cn(
+                "mx-auto mt-0.5 flex h-8 w-8 items-center justify-center rounded-full text-base font-semibold",
+                d === today && "bg-primary text-primary-foreground",
+              )}
+            >
+              {Number(d.slice(8))}
+            </p>
+          </div>
+        ))}
+      </div>
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+        <div className="relative flex" style={{ height: hours.length * HOUR_PX }}>
+          <div className="w-14 shrink-0">
+            {hours.map((h) => (
+              <div key={h} className="relative text-right" style={{ height: HOUR_PX }}>
+                <span className="absolute -top-2 right-2 text-[11px] text-muted-foreground">
+                  {h === 0 ? "" : new Date(Date.UTC(2000, 0, 1, h)).toLocaleTimeString(undefined, { hour: "numeric", timeZone: "UTC" })}
+                </span>
+              </div>
+            ))}
+          </div>
+          {days.map((d) => (
+            <div key={d} className={cn("relative min-w-0 flex-1 border-l", d === today && "bg-primary/[0.03]")}>
+              {hours.map((h) => (
+                <div key={h} className="border-t border-border/60" style={{ height: HOUR_PX }} />
+              ))}
+              {layoutDay(byDay.get(d) ?? [], tz).map(({ interview: i, start, end, column, columns }) => {
+                const top = ((start - startHour * 60) / 60) * HOUR_PX;
+                const height = Math.max(22, ((end - start) / 60) * HOUR_PX - 2);
+                const cancelled = i.status === "cancelled";
+                return (
+                  <button
+                    key={i.id}
+                    type="button"
+                    onClick={() => onOpen(i)}
+                    className={cn(
+                      "absolute overflow-hidden rounded-md border-l-[3px] px-1.5 py-0.5 text-left text-xs shadow-sm transition-[filter] hover:brightness-95",
+                      BLOCK_STYLE[i.round],
+                      cancelled && "opacity-50",
+                    )}
+                    style={{ top, height, left: `calc(${(column / columns) * 100}% + 2px)`, width: `calc(${100 / columns}% - 4px)` }}
+                    title={`${i.company} · ${INTERVIEW_ROUND_LABELS[i.round]}`}
+                  >
+                    <p className={cn("truncate font-semibold", cancelled && "line-through")}>{i.company}</p>
+                    {height > 34 ? (
+                      <p className="truncate opacity-80">
+                        {fmt(i.startsAt, tz, { hour: "numeric", minute: "2-digit" })}
+                        {i.jobTitle ? ` · ${i.jobTitle}` : ""}
+                      </p>
+                    ) : null}
+                  </button>
+                );
+              })}
+              {d === today && nowMinutes >= startHour * 60 && nowMinutes <= endHour * 60 ? (
+                <div className="pointer-events-none absolute inset-x-0 z-10" style={{ top: ((nowMinutes - startHour * 60) / 60) * HOUR_PX }}>
+                  <div className="relative h-0.5 bg-red-500">
+                    <span className="absolute -left-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500" />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
+  );
+}
+
+/** Interviews of one day in columns: overlapping ones share the width. */
+function layoutDay(list: InterviewView[], tz: string) {
+  const items = list
+    .map((interview) => {
+      const start = minutesInTz(interview.startsAt, tz);
+      const end = Math.max(start + 30, Math.min(24 * 60, minutesInTz(endOf(interview), tz) || 24 * 60));
+      return { interview, start, end, column: 0, columns: 1 };
+    })
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+  let cluster: typeof items = [];
+  let clusterEnd = -1;
+  let columnEnds: number[] = [];
+  const close = () => {
+    for (const item of cluster) item.columns = columnEnds.length;
+    cluster = [];
+    columnEnds = [];
+  };
+  for (const item of items) {
+    if (item.start >= clusterEnd) close();
+    let column = columnEnds.findIndex((end) => end <= item.start);
+    if (column < 0) {
+      column = columnEnds.length;
+      columnEnds.push(item.end);
+    } else columnEnds[column] = item.end;
+    item.column = column;
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, item.end);
+  }
+  close();
+  return items;
+}
+
+function MonthGrid({
+  days,
+  month,
+  byDay,
+  tz,
+  today,
+  onOpen,
+  onDay,
+}: {
+  days: string[];
+  month: string;
+  byDay: Map<string, InterviewView[]>;
+  tz: string;
+  today: string;
+  onOpen: (i: InterviewView) => void;
+  onDay: (ymd: string) => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="grid grid-cols-7 border-b">
+        {days.slice(0, 7).map((d) => (
+          <p key={d} className="py-2 text-center text-xs uppercase text-muted-foreground">
+            {ymdLabel(d, { weekday: "short" })}
+          </p>
+        ))}
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 overflow-y-auto">
+        {days.map((d) => {
+          const list = (byDay.get(d) ?? []).slice().sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+          const outside = !d.startsWith(month);
+          return (
+            <div
+              key={d}
+              role="button"
+              tabIndex={0}
+              onClick={() => onDay(d)}
+              onKeyDown={(e) => e.key === "Enter" && onDay(d)}
+              className={cn(
+                "min-h-24 cursor-pointer border-b border-r p-1 transition-colors hover:bg-muted/40",
+                outside && "bg-muted/20 text-muted-foreground",
+              )}
+            >
+              <p
+                className={cn(
+                  "mb-1 flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium",
+                  d === today && "bg-primary text-primary-foreground",
+                )}
+              >
+                {Number(d.slice(8))}
+              </p>
+              <div className="space-y-0.5">
+                {list.slice(0, 3).map((i) => (
+                  <button
+                    key={i.id}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpen(i);
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[11px] hover:bg-muted",
+                      i.status === "cancelled" && "line-through opacity-50",
+                    )}
+                  >
+                    <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", DOT_STYLE[i.round])} />
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{fmt(i.startsAt, tz, { hour: "numeric", minute: "2-digit" })}</span>
+                    <span className="truncate font-medium">{i.company}</span>
+                  </button>
+                ))}
+                {list.length > 3 ? <p className="px-1 text-[11px] text-muted-foreground">+{list.length - 3} more</p> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AgendaGroups({
+  list,
+  tz,
+  today,
+  onOpen,
+  ...actions
+}: {
+  list: InterviewView[];
+  tz: string;
+  today: string;
+  onOpen: (i: InterviewView) => void;
+  canAddToCalendar: boolean;
+  onCalendar: (i: InterviewView) => void;
+  onEdit: (i: InterviewView) => void;
+  onCancel: (i: InterviewView) => void;
+  onRestore: (i: InterviewView) => void;
+  onDelete: (i: InterviewView) => void;
+}) {
+  const groups = new Map<string, InterviewView[]>();
+  for (const i of list) {
+    const d = getDayKeyInTimeZone(i.startsAt, tz);
+    groups.set(d, [...(groups.get(d) ?? []), i]);
+  }
+  if (groups.size === 0) return null;
+  return (
+    <>
+      {[...groups].map(([d, items]) => (
+        <Section
+          key={d}
+          title={d === today ? "Today" : d === ymdAdd(today, 1) ? "Tomorrow" : ymdLabel(d, { weekday: "long", month: "short", day: "numeric" })}
+          count={items.length}
+        >
+          {items.map((i) => (
+            <Row key={i.id} interview={i} tz={tz} onOpen={onOpen} {...actions} />
+          ))}
+        </Section>
+      ))}
+    </>
+  );
+}
+
+function OutcomeRow({
+  interview: i,
+  tz,
+  onOutcome,
+}: {
+  interview: InterviewView;
+  tz: string;
+  onOutcome: (result: "passed" | "waiting" | "rejected") => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium">
+          {i.company}
+          {i.jobTitle ? <span className="font-normal text-muted-foreground"> · {i.jobTitle}</span> : null}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {INTERVIEW_ROUND_LABELS[i.round]} · {fmt(i.startsAt, tz, { weekday: "short", month: "short", day: "numeric" })}
+        </p>
+      </div>
+      <OutcomeButtons onOutcome={onOutcome} />
+    </div>
+  );
+}
+
+function OutcomeButtons({ onOutcome }: { onOutcome: (result: "passed" | "waiting" | "rejected") => void }) {
+  return (
+    <div className="flex gap-1.5">
+      <Button size="sm" variant="outline" onClick={() => onOutcome("passed")}>
+        Went well
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => onOutcome("waiting")}>
+        Waiting
+      </Button>
+      <Button size="sm" variant="outline" className="text-rose-600 hover:text-rose-700" onClick={() => onOutcome("rejected")}>
+        Rejected
+      </Button>
+    </div>
+  );
+}
+
+/** Everything about one interview, at the side (Outlook's event peek). */
+function DetailsSheet({
+  interview: i,
+  now,
+  tz,
+  canAddToCalendar,
+  onClose,
+  onOutcome,
+  onCalendar,
+  onEdit,
+  onCancel,
+  onRestore,
+  onDelete,
+}: {
+  interview: InterviewView | null;
+  now: number;
+  tz: string;
+  canAddToCalendar: boolean;
+  onClose: () => void;
+  onOutcome: (i: InterviewView, result: "passed" | "waiting" | "rejected") => void;
+  onCalendar: (i: InterviewView) => void;
+  onEdit: (i: InterviewView) => void;
+  onCancel: (i: InterviewView) => void;
+  onRestore: (i: InterviewView) => void;
+  onDelete: (i: InterviewView) => void;
+}) {
+  const ended = i ? new Date(endOf(i)).getTime() < now : false;
+  return (
+    <Sheet open={i !== null} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        {i ? (
+          <>
+            <SheetHeader className="space-y-2 text-left">
+              <div className="flex items-center gap-2">
+                <span className={cn("h-2.5 w-2.5 rounded-full", DOT_STYLE[i.round])} />
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {INTERVIEW_ROUND_LABELS[i.round]} interview
+                </span>
+                {i.status === "cancelled" ? <Badge variant="secondary">Cancelled</Badge> : null}
+                {i.result ? (
+                  <Badge variant="secondary">{i.result === "passed" ? "Went well" : i.result === "waiting" ? "Waiting" : "Rejected"}</Badge>
+                ) : null}
+              </div>
+              <SheetTitle className={cn("text-xl", i.status === "cancelled" && "line-through")}>{i.company}</SheetTitle>
+              <SheetDescription>{[i.jobTitle, i.application?.candidateName].filter(Boolean).join(" · ") || i.title || ""}</SheetDescription>
+            </SheetHeader>
+
+            <div className="mt-6 space-y-4 px-4 text-sm">
+              <div className="flex gap-3">
+                <Clock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <div>
+                  <p className="font-medium">{fmt(i.startsAt, tz, { weekday: "long", month: "long", day: "numeric" })}</p>
+                  <p>{timeRange(i, tz)}</p>
+                  {i.timezone ? (
+                    <p className="text-xs text-muted-foreground">
+                      Recruiter&apos;s time: {fmt(i.startsAt, i.timezone, { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}
+                    </p>
+                  ) : null}
+                  {!ended ? <p className="mt-1 text-xs font-medium text-primary">{countdown(i.startsAt, now)}</p> : null}
+                </div>
+              </div>
+              {i.meetingUrl ? (
+                <div className="flex gap-3">
+                  <Video className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <a href={i.meetingUrl} target="_blank" rel="noopener noreferrer" className="min-w-0 break-all text-primary hover:underline">
+                    {i.meetingUrl}
+                  </a>
+                </div>
+              ) : null}
+              {i.location ? (
+                <div className="flex gap-3">
+                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <p>{i.location}</p>
+                </div>
+              ) : null}
+              {i.interviewers ? (
+                <div className="flex gap-3">
+                  <Users className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <p>{i.interviewers}</p>
+                </div>
+              ) : null}
+              {i.notes ? <p className="whitespace-pre-wrap rounded-lg bg-muted/50 p-3">{i.notes}</p> : null}
+              <p className="text-xs text-muted-foreground">
+                From {i.source === "email" ? "an email" : i.source === "calendar" ? "your calendar" : "you"}
+                {i.inCalendar ? " · in your calendar" : ""}
+              </p>
+            </div>
+
+            <div className="mt-6 space-y-3 px-4 pb-6">
+              {i.meetingUrl && i.status !== "cancelled" && !ended ? (
+                <Button asChild className="w-full">
+                  <a href={i.meetingUrl} target="_blank" rel="noopener noreferrer">
+                    <Video className="mr-2 h-4 w-4" />
+                    Join
+                  </a>
+                </Button>
+              ) : null}
+              {ended && i.status === "scheduled" ? (
+                <div className="rounded-lg border p-3">
+                  <p className="mb-2 text-sm font-medium">How did it go?</p>
+                  <OutcomeButtons onOutcome={(result) => onOutcome(i, result)} />
+                </div>
+              ) : null}
+              <div className="grid grid-cols-2 gap-2">
+                {!i.inCalendar && canAddToCalendar && i.status !== "cancelled" ? (
+                  <Button variant="outline" onClick={() => onCalendar(i)}>
+                    <CalendarPlus className="mr-2 h-4 w-4" />
+                    Add to calendar
+                  </Button>
+                ) : null}
+                {i.emailLink ? (
+                  <Button asChild variant="outline">
+                    <a href={i.emailLink} target="_blank" rel="noopener noreferrer">
+                      <Mail className="mr-2 h-4 w-4" />
+                      Open email
+                    </a>
+                  </Button>
+                ) : null}
+                <Button variant="outline" onClick={() => onEdit(i)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
+                </Button>
+                {i.status === "cancelled" ? (
+                  <Button variant="outline" onClick={() => onRestore(i)}>
+                    Not cancelled
+                  </Button>
+                ) : (
+                  <Button variant="outline" onClick={() => onCancel(i)}>
+                    Mark cancelled
+                  </Button>
+                )}
+              </div>
+              <Button variant="ghost" className="w-full text-destructive hover:text-destructive" onClick={() => onDelete(i)}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </Button>
+            </div>
+          </>
+        ) : null}
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -570,6 +1094,7 @@ function Row({
   interview: i,
   tz,
   showDate,
+  onOpen,
   canAddToCalendar,
   onCalendar,
   onEdit,
@@ -580,6 +1105,7 @@ function Row({
   interview: InterviewView;
   tz: string;
   showDate?: boolean;
+  onOpen?: (i: InterviewView) => void;
   canAddToCalendar: boolean;
   onCalendar: (i: InterviewView) => void;
   onEdit: (i: InterviewView) => void;
@@ -598,7 +1124,7 @@ function Row({
         <p className={cn("font-medium", cancelled && "line-through")}>{fmt(i.startsAt, tz, { hour: "numeric", minute: "2-digit" })}</p>
         {minutes ? <p className="text-xs text-muted-foreground">{minutes} min</p> : null}
       </div>
-      <div className="min-w-0 flex-1 space-y-1">
+      <button type="button" className="min-w-0 flex-1 space-y-1 text-left" onClick={() => onOpen?.(i)}>
         <div className="flex flex-wrap items-center gap-2">
           <span className={cn("truncate font-medium", cancelled && "line-through")}>{i.company}</span>
           <Badge variant="outline" className={ROUND_STYLE[i.round]}>
@@ -612,7 +1138,7 @@ function Row({
         <p className="truncate text-sm text-muted-foreground">
           {[i.jobTitle, i.application?.candidateName, i.interviewers].filter(Boolean).join(" · ") || i.title || " "}
         </p>
-      </div>
+      </button>
       <div className="flex shrink-0 items-center gap-1">
         {i.meetingUrl && !cancelled ? (
           <Button asChild size="sm" variant="outline">
