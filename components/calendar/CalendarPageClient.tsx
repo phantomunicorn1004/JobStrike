@@ -295,7 +295,9 @@ export function CalendarPageClient() {
     view === "day"
       ? ymdLabel(focus, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
       : view === "week"
-        ? `${ymdLabel(days[0], { month: "short", day: "numeric" })} – ${ymdLabel(days[6], { month: days[0].slice(5, 7) === days[6].slice(5, 7) ? undefined : "short", day: "numeric", year: "numeric" })}`
+        ? `${ymdLabel(days[0], { month: "short", day: "numeric" })} – ${
+            days[0].slice(5, 7) === days[6].slice(5, 7) ? Number(days[6].slice(8)) : ymdLabel(days[6], { month: "short", day: "numeric" })
+          }, ${days[6].slice(0, 4)}`
         : view === "month"
           ? ymdLabel(monthFirst, { month: "long", year: "numeric" })
           : "Upcoming";
@@ -578,8 +580,8 @@ function TimeGrid({
   }, [days.join(",")]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex border-b pr-[var(--scrollbar,0px)]">
+    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+      <div className="sticky top-0 z-20 flex border-b bg-background">
         <div className="w-14 shrink-0" />
         {days.map((d) => (
           <div key={d} className="min-w-0 flex-1 border-l px-2 py-2 text-center">
@@ -595,8 +597,8 @@ function TimeGrid({
           </div>
         ))}
       </div>
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="relative flex" style={{ height: hours.length * HOUR_PX }}>
+      <div>
+        <div className="relative flex pt-2" style={{ height: hours.length * HOUR_PX + 8 }}>
           <div className="w-14 shrink-0">
             {hours.map((h) => (
               <div key={h} className="relative text-right" style={{ height: HOUR_PX }}>
