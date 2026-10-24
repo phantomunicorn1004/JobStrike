@@ -950,6 +950,10 @@ function ReadingPane({ item, onBack, stageName, onPatch, onAct, onLink, onAdd }:
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Interview stage</DropdownMenuSubTrigger>
+                <StageMenuItems item={item} onPatch={onPatch} sub />
+              </DropdownMenuSub>
+              <DropdownMenuSub>
                 <DropdownMenuSubTrigger>Change type</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
                   <DropdownMenuLabel className="text-xs text-muted-foreground">What is this email?</DropdownMenuLabel>
@@ -1004,7 +1008,19 @@ function ReadingPane({ item, onBack, stageName, onPatch, onAct, onLink, onAdd }:
           <div className="mt-5 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className={cn("h-2 w-2 rounded-full", CATEGORY_DOT[item.category])} />
-              <span className="font-medium">{kindLabel(item)}</span>
+              {item.category === "interview" || item.category === "assessment" ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button type="button" className="inline-flex items-center gap-1 rounded px-1 font-medium hover:bg-muted" title="Change the stage">
+                      {kindLabel(item)}
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <StageMenuItems item={item} onPatch={onPatch} />
+                </DropdownMenu>
+              ) : (
+                <span className="font-medium">{kindLabel(item)}</span>
+              )}
               {item.application ? (
                 <>
                   <span className="text-muted-foreground">for</span>
@@ -1068,6 +1084,28 @@ function ReadingPane({ item, onBack, stageName, onPatch, onAct, onLink, onAdd }:
         </article>
       </div>
     </div>
+  );
+}
+
+/** The interview stages as a menu; picking one also makes the email an interview. */
+function StageMenuItems({ item, onPatch, sub }: { item: InboxItem; onPatch: Handlers["onPatch"]; sub?: boolean }) {
+  const Content = sub ? DropdownMenuSubContent : DropdownMenuContent;
+  return (
+    <Content {...(sub ? {} : { align: "start" as const })}>
+      <DropdownMenuLabel className="text-xs text-muted-foreground">Which interview is this?</DropdownMenuLabel>
+      <DropdownMenuRadioGroup
+        value={item.interviewStage ? normalizeRound(item.interviewStage) : ""}
+        onValueChange={(v) =>
+          void onPatch(item, { interviewStage: v }, `Set to ${INTERVIEW_ROUND_LABELS[v as keyof typeof INTERVIEW_ROUND_LABELS]}`)
+        }
+      >
+        {INTERVIEW_STAGES.map((st) => (
+          <DropdownMenuRadioItem key={st} value={st}>
+            {INTERVIEW_ROUND_LABELS[st]}
+          </DropdownMenuRadioItem>
+        ))}
+      </DropdownMenuRadioGroup>
+    </Content>
   );
 }
 
@@ -1327,6 +1365,24 @@ function ResponsesPanel({ profileId, search }: { profileId: string; search: stri
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<ApplicationResponse | null>(null);
+  const [tick, setTick] = useState(0);
+
+  const saveStatus = async (a: ApplicationResponse, body: Record<string, unknown>) => {
+    try {
+      const res = await fetch("/api/inbox/responses", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicationId: a.applicationId, ...body }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.message || result.error || "Could not save the status.");
+      toast.success(result.message || "Saved.");
+      setTick((t) => t + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the status.");
+    }
+  };
 
   const url = useCallback(
     (offset = 0) => {
@@ -1355,7 +1411,7 @@ function ResponsesPanel({ profileId, search }: { profileId: string; search: stri
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, tick]);
 
   const more = async () => {
     if (!data) return;
@@ -1442,8 +1498,8 @@ function ResponsesPanel({ profileId, search }: { profileId: string; search: stri
           ) : (
             <ul className="divide-y">
               {data.items.map((a) => (
-                <li key={a.applicationId}>
-                  <button type="button" onClick={() => setOpen(a)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/40">
+                <li key={a.applicationId} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40">
+                  <button type="button" onClick={() => setOpen(a)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm">
                         <span className="font-semibold">{a.company || "Unknown company"}</span>
@@ -1455,15 +1511,15 @@ function ResponsesPanel({ profileId, search }: { profileId: string; search: stri
                           .join(" · ")}
                       </p>
                     </div>
-                    <span className={cn("shrink-0 rounded-md px-2 py-0.5 text-xs font-medium", STATUS_STYLE[a.status])}>{statusText(a)}</span>
-                    {a.lastResponseAt ? (
-                      <span className="hidden w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:block">
-                        {listTime(a.lastResponseAt)}
-                      </span>
-                    ) : (
-                      <span className="hidden w-16 shrink-0 sm:block" />
-                    )}
                   </button>
+                  <StatusMenu application={a} onSet={(body) => void saveStatus(a, body)} />
+                  {a.lastResponseAt ? (
+                    <span className="hidden w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:block">
+                      {listTime(a.lastResponseAt)}
+                    </span>
+                  ) : (
+                    <span className="hidden w-16 shrink-0 sm:block" />
+                  )}
                 </li>
               ))}
             </ul>
@@ -1543,5 +1599,55 @@ function TimelineSheet({ application, onClose }: { application: ApplicationRespo
         ) : null}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** An application's status as a menu: set it by hand, or go back to the status from emails. */
+function StatusMenu({ application: a, onSet }: { application: ApplicationResponse; onSet: (body: Record<string, unknown>) => void }) {
+  const is = (status: ResponseStatus, stage: string | null = null) => a.status === status && (stage === null || a.stage === stage);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title={a.manual ? "Set by you; click to change" : "From emails; click to change"}
+          className={cn("inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium", STATUS_STYLE[a.status])}
+        >
+          {statusText(a)}
+          {a.manual ? <span className="opacity-70">· you</span> : null}
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">Status</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={() => onSet({ status: "not_responded" })}>
+          {is("not_responded") ? <Check className="mr-2 h-4 w-4" /> : <span className="mr-2 w-4" />}
+          Not responded
+        </DropdownMenuItem>
+        {INTERVIEW_STAGES.map((st) => (
+          <DropdownMenuItem key={st} onSelect={() => onSet({ status: "interviewing", stage: st })}>
+            {is("interviewing", st) ? <Check className="mr-2 h-4 w-4" /> : <span className="mr-2 w-4" />}
+            Interview · {INTERVIEW_ROUND_LABELS[st]}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuItem onSelect={() => onSet({ status: "rejected" })}>
+          {is("rejected") ? <Check className="mr-2 h-4 w-4" /> : <span className="mr-2 w-4" />}
+          Rejected
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onSet({ status: "offer" })}>
+          {is("offer") ? <Check className="mr-2 h-4 w-4" /> : <span className="mr-2 w-4" />}
+          Offer
+        </DropdownMenuItem>
+        {a.manual ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => onSet({ automatic: true })}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Back to automatic (from emails)
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

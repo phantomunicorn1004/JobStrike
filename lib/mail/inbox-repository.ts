@@ -361,30 +361,6 @@ export async function updateInboxItem(userId: string, id: string, patch: Record<
   return getInboxItem(userId, id);
 }
 
-/** Per application: when its confirmation arrived, and its latest email. For Resume DB rows. */
-export async function applicationEmailStatus(
-  userId: string,
-  applicationIds: number[],
-): Promise<Record<number, { confirmedAt: string | null; latest: { category: MailCategory; receivedAt: string; summary: string | null } | null }>> {
-  if (applicationIds.length === 0) return {};
-  const { data, error } = await db()
-    .from("mail_messages")
-    .select("application_id, category, received_at, summary")
-    .eq("user_id", userId)
-    .in("application_id", applicationIds)
-    .neq("category", "not_job")
-    .neq("category", "unclassified")
-    .order("received_at", { ascending: true });
-  failOn(error);
-  const out: Record<number, { confirmedAt: string | null; latest: { category: MailCategory; receivedAt: string; summary: string | null } | null }> = {};
-  for (const row of (data ?? []) as { application_id: number; category: MailCategory; received_at: string; summary: string | null }[]) {
-    const entry = (out[row.application_id] ??= { confirmedAt: null, latest: null });
-    if (row.category === "confirmation" && !entry.confirmedAt) entry.confirmedAt = row.received_at;
-    entry.latest = { category: row.category, receivedAt: row.received_at, summary: row.summary };
-  }
-  return out;
-}
-
 /** Waiting suggestions per target column (the Inbox banner). */
 export async function suggestionSummary(userId: string): Promise<{ toStage: string; count: number }[]> {
   const rows = await fetchAllByRange<{ action: { toStage?: string } | null }>((from, to) =>

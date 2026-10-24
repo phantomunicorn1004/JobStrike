@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRequestUser, unauthorizedJson } from "@/lib/auth/resolve-request-user";
 import type { InboxApplication } from "@/lib/mail/categories";
-import { applicationEmailStatus } from "@/lib/mail/inbox-repository";
+import { applicationResponsesFor } from "@/lib/mail/application-status";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
         .map(Number)
         .filter((n) => Number.isInteger(n) && n > 0)
         .slice(0, 300);
-      const statuses = await applicationEmailStatus(user.id, ids).catch(() => ({}));
+      const statuses = await applicationResponsesFor(user.id, ids).catch(() => ({}));
       return NextResponse.json({ statuses });
     }
 

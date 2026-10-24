@@ -80,20 +80,17 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { DEFAULT_TIMEZONE, formatIsoInTimeZone } from "@/lib/timezone";
-import { MAIL_CATEGORY_LABELS, type MailCategory } from "@/lib/mail/categories";
+import { INTERVIEW_ROUND_LABELS } from "@/lib/interviews/types";
+import type { ApplicationResponse, ResponseStatus } from "@/lib/mail/response-types";
 
-/** From connected mailboxes: when the confirmation came, and the latest email about it. */
-type MailStatus = {
-  confirmedAt: string | null;
-  latest: { category: MailCategory; receivedAt: string; summary: string | null } | null;
-};
+/** The same status as the Inbox's Responses view (only for candidates with a connected mailbox). */
+type MailStatus = ApplicationResponse;
 
-const MAIL_STATUS_STYLE: Partial<Record<MailCategory, string>> = {
-  interview: "text-violet-600 dark:text-violet-400",
-  assessment: "text-indigo-600 dark:text-indigo-400",
+const MAIL_STATUS_STYLE: Record<ResponseStatus, string> = {
+  not_responded: "text-muted-foreground",
+  interviewing: "text-violet-600 dark:text-violet-400",
+  rejected: "text-rose-600 dark:text-rose-400",
   offer: "text-emerald-600 dark:text-emerald-400",
-  rejection: "text-rose-600 dark:text-rose-400",
-  update: "text-sky-600 dark:text-sky-400",
 };
 
 export type ResumeDbRow = {
@@ -1767,11 +1764,7 @@ export function ResumeDBPageClient() {
                           className="text-xs tabular-nums text-muted-foreground whitespace-nowrap"
                         >
                           {formatApplied(row.appliedAt, row.date, timezone)}
-                          <MailStatusLine
-                            status={mailStatus[row.rowIndex]}
-                            appliedAt={row.appliedAt}
-                            registered={!row.pipelineStageId && !row.inPipeline}
-                          />
+                          <MailStatusLine status={mailStatus[row.rowIndex]} />
                         </ResizableTableCell>
                         <ResizableTableCell
                           widthPercent={percents.actions}
@@ -1881,55 +1874,30 @@ export function ResumeDBPageClient() {
   );
 }
 
-/** After this many days without any answer, a confirmed application shows "No reply". */
-const NO_REPLY_DAYS = 30;
-
-/**
- * "✓ Confirmed", the latest email when it says more (interview, rejection…), or "No reply" for a
- * confirmed application still waiting after NO_REPLY_DAYS (shown only; nothing is changed).
- */
-function MailStatusLine({
-  status,
-  appliedAt,
-  registered,
-}: {
-  status: MailStatus | undefined;
-  appliedAt: string;
-  registered: boolean;
-}) {
+/** "Interview · Screening", "Rejected", "Offer" or "Not responded · 12 d", as in the Inbox. */
+function MailStatusLine({ status }: { status: MailStatus | undefined }) {
   if (!status) return null;
-  const latest = status.latest;
-  if (latest && latest.category !== "confirmation" && MAIL_STATUS_STYLE[latest.category]) {
-    return (
-      <span
-        className={cn("mt-0.5 flex items-center gap-1 text-[11px] font-medium", MAIL_STATUS_STYLE[latest.category])}
-        title={`${latest.summary ?? ""} (${new Date(latest.receivedAt).toLocaleDateString()})`.trim()}
-      >
-        <MailCheck className="h-3 w-3" />
-        {MAIL_CATEGORY_LABELS[latest.category]} email
-      </span>
-    );
-  }
-  if (!status.confirmedAt) return null;
-  const waitedDays = Math.floor((Date.now() - new Date(appliedAt || status.confirmedAt).getTime()) / 86_400_000);
-  if (registered && waitedDays >= NO_REPLY_DAYS && latest?.category === "confirmation") {
-    return (
-      <span
-        className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-muted-foreground"
-        title={`Confirmed ${new Date(status.confirmedAt).toLocaleDateString()}; no answer since`}
-      >
-        <MailCheck className="h-3 w-3" />
-        No reply · {waitedDays} d
-      </span>
-    );
-  }
+  const days = Math.floor((Date.now() - new Date(status.appliedAt).getTime()) / 86_400_000);
+  const text =
+    status.status === "interviewing"
+      ? `Interview${status.stage ? ` · ${INTERVIEW_ROUND_LABELS[status.stage]}` : ""}`
+      : status.status === "rejected"
+        ? "Rejected"
+        : status.status === "offer"
+          ? "Offer"
+          : `Not responded · ${days} d`;
+  const title = [
+    status.received ? "Application received" : null,
+    status.lastSummary,
+    status.lastResponseAt ? new Date(status.lastResponseAt).toLocaleDateString() : null,
+    status.manual ? "set by you" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <span
-      className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
-      title={`Confirmation email ${new Date(status.confirmedAt).toLocaleDateString()}`}
-    >
+    <span className={cn("mt-0.5 flex items-center gap-1 text-[11px] font-medium", MAIL_STATUS_STYLE[status.status])} title={title}>
       <MailCheck className="h-3 w-3" />
-      Confirmed
+      {text}
     </span>
   );
 }

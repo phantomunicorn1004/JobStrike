@@ -165,3 +165,19 @@ ALTER TABLE public.mail_messages
 
 -- Ask PostgREST to see the new table right away.
 NOTIFY pgrst, 'reload schema';
+
+-- Application status set by hand in the Inbox's Responses view. It wins over the emails until a
+-- newer interview, rejection or offer email arrives.
+CREATE TABLE IF NOT EXISTS public.application_status_overrides (
+  application_id bigint PRIMARY KEY REFERENCES public.resume_db_applications(id) ON DELETE CASCADE,
+  user_id        uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+  status         text NOT NULL CHECK (status IN ('not_responded', 'interviewing', 'rejected', 'offer')),
+  stage          text CHECK (stage IN ('ai_screening', 'screening', 'hr', 'technical', 'final')),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS application_status_overrides_user_idx ON public.application_status_overrides (user_id);
+
+ALTER TABLE public.application_status_overrides ENABLE ROW LEVEL SECURITY;
+
+NOTIFY pgrst, 'reload schema';

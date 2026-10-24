@@ -24,6 +24,8 @@ export type ApplicationResponse = {
   appliedAt: string;
   status: ResponseStatus;
   stage: InterviewStage | null;
+  /** Set by the user (wins until a newer reply email). */
+  manual: boolean;
   /** An "application received" email came. */
   received: boolean;
   /** The last interview, rejection or offer. */
