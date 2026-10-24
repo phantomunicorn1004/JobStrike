@@ -1,14 +1,31 @@
 /** Shared by the server and the Calendar page. */
 
-export const INTERVIEW_ROUNDS = ["screen", "technical", "final", "other"] as const;
+/**
+ * Interview stages, in order. AI screening: an AI interviewer, one-way video or automated
+ * screening (HireVue, Spark Hire, chat screening). Screening: the first call with a recruiter.
+ * HR: an HR or hiring-manager interview. Technical: technical interviews and coding tests.
+ * Final: final round, onsite, panel. "other" when the email does not say.
+ */
+export const INTERVIEW_STAGES = ["ai_screening", "screening", "hr", "technical", "final"] as const;
+export type InterviewStage = (typeof INTERVIEW_STAGES)[number];
+
+export const INTERVIEW_ROUNDS = [...INTERVIEW_STAGES, "other"] as const;
 export type InterviewRound = (typeof INTERVIEW_ROUNDS)[number];
 
 export const INTERVIEW_ROUND_LABELS: Record<InterviewRound, string> = {
-  screen: "Screen",
+  ai_screening: "AI screening",
+  screening: "Screening",
+  hr: "HR",
   technical: "Technical",
   final: "Final",
   other: "Interview",
 };
+
+/** A stored stage or round, including the older names ("screen"). */
+export function normalizeRound(value: string | null | undefined): InterviewRound {
+  if (value === "screen") return "screening";
+  return INTERVIEW_ROUNDS.includes(value as InterviewRound) ? (value as InterviewRound) : "other";
+}
 
 export type InterviewStatus = "scheduled" | "done" | "cancelled";
 export type InterviewResult = "passed" | "waiting" | "rejected";

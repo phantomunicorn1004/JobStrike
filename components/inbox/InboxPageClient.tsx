@@ -60,30 +60,64 @@ import {
   type InboxView,
   type MailCategory,
 } from "@/lib/mail/categories";
+import { INTERVIEW_ROUND_LABELS, INTERVIEW_STAGES, normalizeRound } from "@/lib/interviews/types";
+import {
+  RESPONSE_STATUS_LABELS,
+  type ApplicationResponse,
+  type ResponseStatus,
+  type ResponsesResponse,
+} from "@/lib/mail/response-types";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-type Folder = InboxView | "activity";
+/** "responses" and "activity" are full-width views, not email lists. */
+type Folder = InboxView | "activity" | "responses";
+const WIDE: Folder[] = ["activity", "responses"];
 
-/** The four tabs everyone needs; the rest sit under "More". */
-const TABS: { id: InboxView; label: string; hint: string }[] = [
+/** The tabs everyone needs; the rest sit under "More". */
+const TABS: { id: Folder; label: string; hint: string }[] = [
   { id: "attention", label: "Needs you", hint: "Board moves to confirm and emails without a sure application" },
-  { id: "inbox", label: "All", hint: "Interviews, assessments, offers, rejections, updates and recruiters" },
-  { id: "interviews", label: "Interviews", hint: "Interviews and assessments" },
+  { id: "interviews", label: "Interviews", hint: "Interview invitations and assessments, by stage, and offers" },
   { id: "rejections", label: "Rejections", hint: "Applications that will not move forward" },
+  { id: "responses", label: "Responses", hint: "Every application's status: not responded, interview, rejected, offer" },
 ];
 const MORE: { id: Folder; label: string }[] = [
-  { id: "applied", label: "Applied (confirmations)" },
-  { id: "unmatched", label: "Not in Resume DB" },
+  { id: "inbox", label: "All job mail" },
+  { id: "applied", label: "Application received" },
+  { id: "unmatched", label: "Received, not in Resume DB" },
   { id: "all", label: "Everything, incl. not job-related" },
   { id: "activity", label: "Activity (board moves)" },
 ];
 const FOLDER_TITLES: Partial<Record<Folder, string>> = {
-  applied: "Applied",
+  inbox: "All job mail",
+  applied: "Application received",
   unmatched: "Not in Resume DB",
   all: "Everything",
   suggested: "Suggestions",
   review: "Needs review",
 };
+
+/** Stage chips on the Interviews tab. */
+const STAGE_CHIPS: { id: string | null; label: string }[] = [
+  { id: null, label: "All" },
+  ...INTERVIEW_STAGES.map((st) => ({ id: st as string, label: INTERVIEW_ROUND_LABELS[st] })),
+  { id: "offer", label: "Offer" },
+];
+
+/** What an email is, in the user's words ("Technical interview", "Application received"…). */
+function kindLabel(item: InboxItem): string {
+  const stage = item.interviewStage ? normalizeRound(item.interviewStage) : "other";
+  if (item.category === "interview") {
+    if (stage === "ai_screening") return "AI screening";
+    return stage === "other" ? "Interview" : `${INTERVIEW_ROUND_LABELS[stage]} interview`;
+  }
+  if (item.category === "assessment") {
+    if (stage === "ai_screening") return "AI screening";
+    return stage === "technical" ? "Technical assessment" : "Assessment";
+  }
+  if (item.category === "rejection") return "Rejected";
+  return MAIL_CATEGORY_LABELS[item.category];
+}
 
 const CATEGORY_DOT: Record<MailCategory | "unclassified", string> = {
   interview: "bg-violet-500",
@@ -145,7 +179,7 @@ function fitsView(item: InboxItem, view: InboxView): boolean {
     case "review":
       return reviewable;
     case "interviews":
-      return c === "interview" || c === "assessment";
+      return c === "interview" || c === "assessment" || c === "offer";
     case "rejections":
       return c === "rejection";
     case "applied":
@@ -180,7 +214,9 @@ type Handlers = {
 
 export function InboxPageClient() {
   const [folder, setFolder] = useState<Folder>("attention");
-  const view: InboxView = folder === "activity" ? "inbox" : folder;
+  const view: InboxView = WIDE.includes(folder) ? "inbox" : (folder as InboxView);
+  const wide = WIDE.includes(folder);
+  const [stage, setStage] = useState<string | null>(null);
   const [profileId, setProfileId] = useState("all");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -214,11 +250,12 @@ export function InboxPageClient() {
     (before?: string) => {
       const params = new URLSearchParams({ view });
       if (profileId !== "all") params.set("profileId", profileId);
+      if (folder === "interviews" && stage) params.set("stage", stage);
       if (search) params.set("q", search);
       if (before) params.set("before", before);
       return `/api/inbox?${params}`;
     },
-    [view, profileId, search],
+    [view, profileId, search, folder, stage],
   );
 
   const load = useCallback(
@@ -234,7 +271,7 @@ export function InboxPageClient() {
         // Nothing needs the user: open on All instead of an empty to-do list.
         if (!choseFolder.current && view === "attention" && next.counts.attention === 0) {
           choseFolder.current = true;
-          setFolder("inbox");
+          setFolder("interviews");
           return;
         }
         choseFolder.current = true;
@@ -419,6 +456,7 @@ export function InboxPageClient() {
   const pickFolder = (f: Folder) => {
     choseFolder.current = true;
     setFolder(f);
+    setStage(null);
     setSelectedId(null);
   };
   const handlers: Handlers = { stageName, onPatch: patch, onAct: act, onLink: setLinkFor, onAdd: setAddFor };
@@ -461,8 +499,8 @@ export function InboxPageClient() {
       <section
         className={cn(
           "flex min-h-0 w-full shrink-0 flex-col border-r",
-          folder === "activity" ? "md:w-full" : "md:w-[400px] xl:w-[440px]",
-          selected && folder !== "activity" && "hidden md:flex",
+          wide ? "md:w-full" : "md:w-[400px] xl:w-[440px]",
+          selected && !wide && "hidden md:flex",
         )}
         aria-label="Emails"
       >
@@ -504,7 +542,7 @@ export function InboxPageClient() {
           </div>
           <div className="flex items-center gap-1" role="tablist" aria-label="Inbox views">
             {TABS.map((t) => {
-              const count = counts?.[t.id] ?? 0;
+              const count = t.id === "attention" ? counts?.attention ?? 0 : 0;
               const active = folder === t.id;
               return (
                 <button
@@ -558,9 +596,28 @@ export function InboxPageClient() {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+          {folder === "interviews" ? (
+            <div className="-mx-1 flex w-0 min-w-full gap-1 overflow-x-auto px-1" aria-label="Interview stage">
+              {STAGE_CHIPS.map((c) => (
+                <button
+                  key={c.label}
+                  type="button"
+                  onClick={() => setStage(c.id)}
+                  className={cn(
+                    "shrink-0 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                    stage === c.id ? "border-foreground bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
-        {folder === "activity" ? (
+        {folder === "responses" ? (
+          <ResponsesPanel profileId={profileId} search={search} />
+        ) : folder === "activity" ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto max-w-3xl p-4 sm:p-6">
               <p className="mb-4 text-sm text-muted-foreground">Every board move, from emails and by hand. Undo any of them.</p>
@@ -626,7 +683,7 @@ export function InboxPageClient() {
         )}
       </section>
 
-      {folder !== "activity" ? (
+      {!wide ? (
         <section className={cn("min-w-0 flex-1 flex-col", selected ? "flex" : "hidden md:flex")} aria-label="Email">
           {selected ? (
             <ReadingPane key={selected.id} item={selected} onBack={() => setSelectedId(null)} {...handlers} />
@@ -796,7 +853,7 @@ function MessageRow({
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{listTime(item.receivedAt)}</span>
         </div>
         <p className="mt-0.5 line-clamp-1 pl-4 text-xs text-muted-foreground">
-          <span className="text-foreground/80">{MAIL_CATEGORY_LABELS[item.category]}</span> — {item.summary || item.subject}
+          <span className="text-foreground/80">{kindLabel(item)}</span> — {item.summary || item.subject}
         </p>
         {todo ? <TodoLine item={item} {...handlers} /> : null}
       </div>
@@ -947,7 +1004,7 @@ function ReadingPane({ item, onBack, stageName, onPatch, onAct, onLink, onAdd }:
           <div className="mt-5 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className={cn("h-2 w-2 rounded-full", CATEGORY_DOT[item.category])} />
-              <span className="font-medium">{MAIL_CATEGORY_LABELS[item.category]}</span>
+              <span className="font-medium">{kindLabel(item)}</span>
               {item.application ? (
                 <>
                   <span className="text-muted-foreground">for</span>
@@ -1243,5 +1300,248 @@ function AddDialog({ item, onClose, onAdded }: { item: InboxItem | null; onClose
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const STATUS_STYLE: Record<ResponseStatus, string> = {
+  not_responded: "bg-muted text-muted-foreground",
+  interviewing: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+  rejected: "bg-rose-500/10 text-rose-700 dark:text-rose-300",
+  offer: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+};
+
+function statusText(a: ApplicationResponse): string {
+  if (a.status === "interviewing") return a.stage ? `Interview · ${INTERVIEW_ROUND_LABELS[a.stage]}` : "Interview";
+  if (a.status === "not_responded") {
+    const days = Math.floor((Date.now() - new Date(a.appliedAt).getTime()) / 86_400_000);
+    return `Not responded · ${days} d`;
+  }
+  return RESPONSE_STATUS_LABELS[a.status];
+}
+
+/** Every application's status from its emails: the overview the Inbox exists for. */
+function ResponsesPanel({ profileId, search }: { profileId: string; search: string }) {
+  const [status, setStatus] = useState<ResponseStatus | null>(null);
+  const [stage, setStage] = useState<string | null>(null);
+  const [data, setData] = useState<ResponsesResponse | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<ApplicationResponse | null>(null);
+
+  const url = useCallback(
+    (offset = 0) => {
+      const params = new URLSearchParams();
+      if (status) params.set("status", status);
+      if (stage) params.set("stage", stage);
+      if (profileId !== "all") params.set("profileId", profileId);
+      if (search) params.set("q", search);
+      if (offset) params.set("offset", String(offset));
+      return `/api/inbox/responses?${params}`;
+    },
+    [status, stage, profileId, search],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(url(), { credentials: "same-origin" })
+      .then(async (res) => ({ ok: res.ok, body: await res.json() }))
+      .then(({ ok, body }) => {
+        if (cancelled) return;
+        if (!ok) throw new Error(body.error || "Could not load application statuses.");
+        setData(body as ResponsesResponse);
+        setError(null);
+      })
+      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : "Could not load application statuses."));
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  const more = async () => {
+    if (!data) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(url(data.items.length), { credentials: "same-origin" });
+      const body = (await res.json()) as ResponsesResponse;
+      setData((prev) => (prev ? { ...prev, items: [...prev.items, ...body.items], hasMore: body.hasMore } : prev));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const pick = (next: ResponseStatus | null, nextStage: string | null = null) => {
+    setStatus(next);
+    setStage(nextStage);
+  };
+
+  if (error) return <p className="p-8 text-center text-sm text-muted-foreground">{error}</p>;
+  if (!data) return <ListSkeleton />;
+  const sm = data.summary;
+  const rate = sm.applied ? Math.round((sm.responded / sm.applied) * 100) : 0;
+  const cards: { label: string; value: number; sub?: string; status: ResponseStatus | null; tone: string }[] = [
+    { label: "Applied", value: sm.applied, status: null, tone: "text-foreground" },
+    { label: "Interview", value: sm.interviewing, status: "interviewing", tone: "text-violet-600 dark:text-violet-400" },
+    { label: "Rejected", value: sm.rejected, status: "rejected", tone: "text-rose-600 dark:text-rose-400" },
+    { label: "Not responded", value: sm.notResponded, status: "not_responded", tone: "text-muted-foreground" },
+  ];
+  if (sm.offer > 0) cards.splice(3, 0, { label: "Offer", value: sm.offer, status: "offer", tone: "text-emerald-600 dark:text-emerald-400" });
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            <strong className="text-foreground">{sm.responded.toLocaleString()}</strong> of {sm.applied.toLocaleString()} applications got a
+            response ({rate}%).
+            {data.trackingSince
+              ? ` Applications since ${new Date(data.trackingSince).toLocaleDateString(undefined, { month: "short", day: "numeric" })}, when the mailbox's history starts.`
+              : ""}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {cards.map((c) => (
+            <button
+              key={c.label}
+              type="button"
+              onClick={() => pick(c.status)}
+              className={cn(
+                "rounded-xl border bg-card p-4 text-left transition-colors hover:bg-muted/40",
+                status === c.status && !stage && "border-foreground/40 ring-1 ring-foreground/20",
+              )}
+            >
+              <p className="text-xs text-muted-foreground">{c.label}</p>
+              <p className={cn("mt-1 text-2xl font-semibold tabular-nums", c.tone)}>{c.value.toLocaleString()}</p>
+            </button>
+          ))}
+        </div>
+
+        {sm.interviewing > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-xs text-muted-foreground">Interviews by stage:</span>
+            {INTERVIEW_STAGES.map((st) => (
+              <button
+                key={st}
+                type="button"
+                disabled={sm.byStage[st] === 0}
+                onClick={() => pick("interviewing", st)}
+                className={cn(
+                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors disabled:opacity-40",
+                  stage === st ? "border-foreground bg-foreground text-background" : "hover:bg-muted",
+                )}
+              >
+                {INTERVIEW_ROUND_LABELS[st]} <span className="tabular-nums opacity-70">{sm.byStage[st]}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="overflow-hidden rounded-xl border">
+          {data.items.length === 0 ? (
+            <p className="p-10 text-center text-sm text-muted-foreground">No applications here.</p>
+          ) : (
+            <ul className="divide-y">
+              {data.items.map((a) => (
+                <li key={a.applicationId}>
+                  <button type="button" onClick={() => setOpen(a)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/40">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">
+                        <span className="font-semibold">{a.company || "Unknown company"}</span>
+                        {a.jobTitle ? <span className="text-muted-foreground"> · {a.jobTitle}</span> : null}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {[a.candidateName, `applied ${new Date(a.appliedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`, a.received ? "received ✓" : null, a.lastSummary]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                    <span className={cn("shrink-0 rounded-md px-2 py-0.5 text-xs font-medium", STATUS_STYLE[a.status])}>{statusText(a)}</span>
+                    {a.lastResponseAt ? (
+                      <span className="hidden w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:block">
+                        {listTime(a.lastResponseAt)}
+                      </span>
+                    ) : (
+                      <span className="hidden w-16 shrink-0 sm:block" />
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {data.hasMore ? (
+          <div className="flex justify-center">
+            <Button variant="ghost" size="sm" onClick={() => void more()} disabled={loadingMore}>
+              {loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ChevronDown className="mr-2 h-4 w-4" />}
+              Load more
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <TimelineSheet application={open} onClose={() => setOpen(null)} />
+    </div>
+  );
+}
+
+/** One application's emails, newest first. */
+function TimelineSheet({ application, onClose }: { application: ApplicationResponse | null; onClose: () => void }) {
+  const [items, setItems] = useState<InboxItem[] | null>(null);
+
+  useEffect(() => {
+    if (!application) return;
+    let cancelled = false;
+    setItems(null);
+    fetch(`/api/inbox?view=all&applicationId=${application.applicationId}`, { credentials: "same-origin" })
+      .then((res) => res.json())
+      .then((body: InboxResponse) => !cancelled && setItems(body.items ?? []))
+      .catch(() => !cancelled && setItems([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [application]);
+
+  return (
+    <Sheet open={application !== null} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        {application ? (
+          <>
+            <SheetHeader className="text-left">
+              <SheetTitle>{application.company || "Application"}</SheetTitle>
+              <SheetDescription>
+                {[application.jobTitle, application.candidateName].filter(Boolean).join(" · ")}
+              </SheetDescription>
+              <span className={cn("w-fit rounded-md px-2 py-0.5 text-xs font-medium", STATUS_STYLE[application.status])}>
+                {statusText(application)}
+              </span>
+            </SheetHeader>
+            <ol className="mt-4 space-y-0 px-4 pb-6">
+              <li className="relative border-l pb-5 pl-5">
+                <span className="absolute -left-1.5 top-1 h-3 w-3 rounded-full border-2 border-background bg-slate-400" />
+                <p className="text-xs text-muted-foreground">{new Date(application.appliedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}</p>
+                <p className="text-sm font-medium">Applied</p>
+              </li>
+              {items === null ? (
+                <li className="pl-5 text-sm text-muted-foreground">Loading…</li>
+              ) : (
+                [...items].reverse().map((m) => (
+                  <li key={m.id} className="relative border-l pb-5 pl-5">
+                    <span className={cn("absolute -left-1.5 top-1 h-3 w-3 rounded-full border-2 border-background", CATEGORY_DOT[m.category])} />
+                    <p className="text-xs text-muted-foreground">{new Date(m.receivedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</p>
+                    <p className="text-sm font-medium">{kindLabel(m)}</p>
+                    <p className="text-sm text-muted-foreground">{m.summary || m.subject}</p>
+                    {m.webLink ? (
+                      <a href={m.webLink} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                        <ExternalLink className="h-3 w-3" />
+                        Open in Outlook
+                      </a>
+                    ) : null}
+                  </li>
+                ))
+              )}
+            </ol>
+          </>
+        ) : null}
+      </SheetContent>
+    </Sheet>
   );
 }

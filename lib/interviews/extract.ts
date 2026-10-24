@@ -1,6 +1,7 @@
 import "server-only";
 
 import { serverOpenAI } from "@/lib/ai/server-openai";
+import { INTERVIEW_ROUNDS, type InterviewRound } from "@/lib/interviews/types";
 import { formatIsoInTimeZone } from "@/lib/timezone";
 
 /**
@@ -17,7 +18,7 @@ export type InterviewDetails = {
   meetingUrl: string | null;
   location: string | null;
   interviewers: string | null;
-  round: "screen" | "technical" | "final" | "other" | null;
+  round: InterviewRound | null;
 };
 
 const MODEL = process.env.MAIL_AI_MODEL?.trim() || "gpt-4o-mini";
@@ -37,7 +38,7 @@ timezone: IANA name of the timezone the time is written in (ET/EST/EDT → Ameri
 meeting_url: the video-call or assessment link (Zoom, Teams, Google Meet, Webex, HireVue…), exactly as written. null if none.
 location: the address or "Phone" when it is a phone call; null if none.
 interviewers: names (and titles) of the people the candidate meets, comma-separated; null if none.
-round: "screen" (recruiter, HR, hiring-manager intro), "technical" (technical, coding, system design, skills), "final" (final round, onsite, panel, executive), "other"; null when unclear.`;
+round: "ai_screening" (AI interviewer, one-way video, automated screening), "screening" (first recruiter call), "hr" (HR or hiring manager), "technical" (technical, coding, system design), "final" (final round, onsite, panel, executive), "other"; null when unclear.`;
 
 const RESPONSE_FORMAT = {
   type: "json_schema" as const,
@@ -57,7 +58,7 @@ const RESPONSE_FORMAT = {
         meeting_url: { type: ["string", "null"] },
         location: { type: ["string", "null"] },
         interviewers: { type: ["string", "null"] },
-        round: { type: ["string", "null"], enum: ["screen", "technical", "final", "other", null] },
+        round: { type: ["string", "null"], enum: [...INTERVIEW_ROUNDS, null] },
       },
     },
   },

@@ -1,3 +1,4 @@
+import { INTERVIEW_ROUND_LABELS, normalizeRound, type InterviewStage } from "@/lib/interviews/types";
 import type { MailCategory } from "@/lib/mail/categories";
 
 /**
@@ -54,18 +55,25 @@ function level(roles: StageRoles, stage: string | null): number | null {
   return index >= 0 ? index : null;
 }
 
-/** Interview round from the AI, or from the wording when the AI did not say. */
-export function interviewRole(
-  stageHint: string | null | undefined,
-  text: string,
-): "hr" | "technical" | "final" {
-  if (stageHint === "screen") return "hr";
-  if (stageHint === "technical" || stageHint === "final") return stageHint;
+/** The interview stage from the AI, or from the wording when the AI did not say. */
+export function interviewStageOf(stageHint: string | null | undefined, text: string): InterviewStage {
+  const hint = normalizeRound(stageHint);
+  if (hint !== "other") return hint;
   if (/\b(final|onsite|on-site|panel|superday|last round|executive)\b/i.test(text)) return "final";
-  if (/\b(technical|coding|system design|live cod|pair program|tech screen|engineering interview)\b/i.test(text)) {
+  if (/\b(technical|coding|system design|live cod|pair program|tech screen|engineering interview|hackerrank|codesignal|codility)\b/i.test(text)) {
     return "technical";
   }
-  return "hr";
+  if (/\b(hirevue|one-way|one way|video interview|ai interview|ai interviewer|asynchronous|spark hire|paradox|olivia)\b/i.test(text)) {
+    return "ai_screening";
+  }
+  if (/\b(hiring manager|hr interview|human resources)\b/i.test(text)) return "hr";
+  return "screening";
+}
+
+/** The board column role for an interview stage. */
+export function interviewRole(stageHint: string | null | undefined, text: string): "screening" | "hr" | "technical" | "final" {
+  const stage = interviewStageOf(stageHint, text);
+  return stage === "ai_screening" ? "screening" : stage;
 }
 
 /** A stored suggestion still makes sense: forward, or a rejection of a card not yet rejected. */
@@ -104,13 +112,17 @@ export function planMove(input: {
   if (input.category === "offer") {
     target = roles.final;
     what = "Offer email";
-  } else if (input.category === "interview") {
-    const role = interviewRole(input.interviewStage, input.text);
+  } else if (input.category === "interview" || input.category === "assessment") {
+    const stage = interviewStageOf(input.interviewStage, input.text);
+    // An assessment is at most a technical step; it never skips to the final column.
+    const role = stage === "ai_screening" ? "screening" : input.category === "assessment" && stage === "final" ? "technical" : stage;
     target = roles[role];
-    what = role === "hr" ? "Interview invite (screen)" : role === "technical" ? "Technical interview invite" : "Final interview invite";
-  } else if (input.category === "assessment") {
-    target = roles.screening;
-    what = "Assessment invite";
+    what =
+      input.category === "assessment"
+        ? input.interviewStage
+          ? `${INTERVIEW_ROUND_LABELS[role === "screening" ? stage : role]} assessment`
+          : "Assessment"
+        : `${INTERVIEW_ROUND_LABELS[stage]} interview`;
   }
   if (!target) return null;
 

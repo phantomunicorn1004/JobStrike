@@ -7,6 +7,7 @@ import { getMicrosoftMessageText, listMicrosoftEvents } from "@/lib/integrations
 import { CALENDAR_WRITE_SCOPE } from "@/lib/integrations/providers";
 import type { CalendarEvent } from "@/lib/interviews/calendar-types";
 import { extractInterviewDetails, type InterviewDetails } from "@/lib/interviews/extract";
+import { normalizeRound } from "@/lib/interviews/types";
 import {
   findByCalendarEvent,
   findInterviewNear,
@@ -17,7 +18,7 @@ import {
   type InterviewFields,
   type InterviewRow,
 } from "@/lib/interviews/repository";
-import { interviewRole } from "@/lib/mail/board-rules";
+import { interviewStageOf } from "@/lib/mail/board-rules";
 import { listMatchCandidates } from "@/lib/mail/inbox-repository";
 import type { MatchCandidate } from "@/lib/mail/match";
 import { organisationMatchesCompany, senderOrganisation } from "@/lib/mail/prefilter";
@@ -86,10 +87,11 @@ async function findThreadInterview(email: InterviewEmail): Promise<InterviewRow 
 
 /** Two rounds can be the same interview ("other" is unknown, so it fits any). */
 function sameRound(a: string | null | undefined, b: string | null | undefined): boolean {
-  return !a || !b || a === b || a === "other" || b === "other";
+  const x = normalizeRound(a);
+  const y = normalizeRound(b);
+  return x === y || x === "other" || y === "other";
 }
 
-const ROUND_FROM_STAGE: Record<string, InterviewDetails["round"]> = { hr: "screen", technical: "technical", final: "final" };
 
 /** Stores, moves or cancels the interview an email describes. */
 async function applyDetails(email: InterviewEmail, details: InterviewDetails, userTimeZone: string): Promise<string> {
@@ -121,7 +123,7 @@ async function applyDetails(email: InterviewEmail, details: InterviewDetails, us
 
   const round =
     details.round ??
-    ROUND_FROM_STAGE[interviewRole(email.extracted?.interviewStage, `${email.subject ?? ""}`)] ??
+    interviewStageOf(email.extracted?.interviewStage, `${email.subject ?? ""}`) ??
     "other";
   const fields: InterviewFields = {
     application_id: email.application_id,
@@ -373,11 +375,11 @@ export async function syncCalendar(account: SyncAccount, force = false): Promise
     if (!match) continue;
     // The same interview from an email: within hours, or within two days when the email's time
     // was off; the calendar invite's time wins.
-    const role = interviewRole(null, `${event.subject} ${event.preview}`);
+    const stage = interviewStageOf(null, `${event.subject} ${event.preview}`);
     let near = await findInterviewNear(account.user_id, match, event.startsAt);
     if (!near) {
       const candidate = await findInterviewNear(account.user_id, match, event.startsAt, 48, "unlinkedEmail");
-      if (candidate && sameRound(candidate.round, ROUND_FROM_STAGE[role] ?? "other")) near = candidate;
+      if (candidate && sameRound(candidate.round, stage)) near = candidate;
     }
     if (near) {
       if (!near.calendar_event_id) {
@@ -398,7 +400,7 @@ export async function syncCalendar(account: SyncAccount, force = false): Promise
       title: event.subject.slice(0, 300) || null,
       starts_at: event.startsAt,
       ends_at: event.endsAt,
-      round: ROUND_FROM_STAGE[role] ?? "other",
+      round: stage,
       meeting_url: event.meetingUrl,
       location: event.location,
       source: "calendar",

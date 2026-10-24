@@ -18,7 +18,7 @@ export const MAIL_CATEGORY_LABELS: Record<MailCategory | "unclassified", string>
   offer: "Offer",
   rejection: "Rejection",
   update: "Update",
-  confirmation: "Applied",
+  confirmation: "Application received",
   outreach: "Recruiter",
   other: "Other",
   not_job: "Not job-related",
@@ -67,6 +67,8 @@ export type InboxItem = {
   summary: string | null;
   company: string | null;
   jobTitle: string | null;
+  /** Interviews and assessments: "ai_screening", "screening", "hr", "technical", "final". */
+  interviewStage: string | null;
   application: InboxApplication | null;
   matchScore: number | null;
   matchReason: string | null;

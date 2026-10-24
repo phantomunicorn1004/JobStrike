@@ -1,7 +1,7 @@
 import "server-only";
 
 import { failOn } from "@/lib/integrations/accounts-repository";
-import { INTERVIEW_ROUNDS, type InterviewRound, type InterviewView } from "@/lib/interviews/types";
+import { normalizeRound, type InterviewRound, type InterviewView } from "@/lib/interviews/types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const interviews = () => getSupabaseAdminClient().from("interviews");
@@ -35,7 +35,7 @@ const COLUMNS =
   "id, user_id, application_id, account_id, company, job_title, starts_at, ends_at, timezone, round, title, meeting_url, location, interviewers, source, source_ref, calendar_event_id, status, result, notes";
 
 export function asRound(value: string | null | undefined): InterviewRound {
-  return INTERVIEW_ROUNDS.includes(value as InterviewRound) ? (value as InterviewRound) : "other";
+  return normalizeRound(value);
 }
 
 export async function getInterviewRow(userId: string, id: string): Promise<InterviewRow | null> {

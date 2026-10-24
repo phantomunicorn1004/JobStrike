@@ -197,7 +197,7 @@ type ItemRow = {
   category_source: "ai" | "user";
   confidence: number | null;
   summary: string | null;
-  extracted: { company?: string | null; jobTitle?: string | null } | null;
+  extracted: { company?: string | null; jobTitle?: string | null; interviewStage?: string | null } | null;
   match_score: number | null;
   match_reason: string | null;
   link_source: "auto" | "user";
@@ -229,6 +229,7 @@ function toItem(row: ItemRow): InboxItem {
     summary: row.summary,
     company: row.extracted?.company ?? null,
     jobTitle: row.extracted?.jobTitle ?? null,
+    interviewStage: row.extracted?.interviewStage ?? null,
     application: row.application
       ? {
           id: row.application.id,
@@ -257,14 +258,21 @@ const VIEW_CATEGORIES: Record<InboxView, MailCategory[] | null> = {
   attention: null,
   suggested: null,
   review: ["interview", "assessment", "offer", "rejection", "update", "other"],
-  interviews: ["interview", "assessment"],
+  interviews: ["interview", "assessment", "offer"],
   rejections: ["rejection"],
   applied: ["confirmation"],
   unmatched: ["confirmation"],
   all: null,
 };
 
-type Filters = { accountIds: string[] | null; search: string };
+type Filters = {
+  accountIds: string[] | null;
+  search: string;
+  /** An interview stage ("technical"…) or "offer". */
+  stage?: string | null;
+  /** One application's emails (its timeline). */
+  applicationId?: number | null;
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applyView(query: any, userId: string, view: InboxView, filters: Filters) {
@@ -274,6 +282,9 @@ function applyView(query: any, userId: string, view: InboxView, filters: Filters
   if (view === "review") q = q.eq("link_source", "auto");
   if (view === "unmatched") q = q.is("application_id", null);
   if (view === "suggested") q = q.eq("action_status", "suggested");
+  if (filters.applicationId) q = q.eq("application_id", filters.applicationId);
+  if (filters.stage === "offer") q = q.eq("category", "offer");
+  else if (filters.stage) q = q.in("category", ["interview", "assessment"]).eq("extracted->>interviewStage", filters.stage);
   if (filters.accountIds) {
     q = q.in("account_id", filters.accountIds.length ? filters.accountIds : ["00000000-0000-0000-0000-000000000000"]);
   }

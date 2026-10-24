@@ -26,6 +26,8 @@ export async function GET(request: NextRequest) {
     const filters = {
       accountIds: Number.isInteger(profileId) && profileId > 0 ? await accountIdsForProfile(user.id, profileId) : null,
       search: (params.get("q") ?? "").slice(0, 100),
+      stage: /^(ai_screening|screening|hr|technical|final|offer)$/.test(params.get("stage") ?? "") ? params.get("stage") : null,
+      applicationId: Number(params.get("applicationId")) > 0 ? Number(params.get("applicationId")) : null,
     };
     const before = params.get("before");
 
@@ -33,7 +35,8 @@ export async function GET(request: NextRequest) {
       listMailAccounts(user.id),
       listProfiles(user.id),
       listInboxItems(user.id, view, filters, { before: before && !Number.isNaN(Date.parse(before)) ? before : null, limit: PAGE_SIZE }),
-      countInboxViews(user.id, INBOX_VIEWS, filters),
+      // Tab counts ignore the stage and application filters.
+      countInboxViews(user.id, INBOX_VIEWS, { accountIds: filters.accountIds, search: filters.search }),
       countPendingMessages(user.id),
       listPipelineStages(),
       suggestionSummary(user.id),

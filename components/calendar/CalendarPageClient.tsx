@@ -56,7 +56,9 @@ import { formatIsoInTimeZone, getDayKeyInTimeZone, zonedLocalToUtcIso } from "@/
 import { cn } from "@/lib/utils";
 
 const ROUND_STYLE: Record<InterviewRound, string> = {
-  screen: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  ai_screening: "border-cyan-500/30 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300",
+  screening: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  hr: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
   technical: "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300",
   final: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
   other: "border-zinc-500/30 bg-zinc-500/10 text-zinc-700 dark:text-zinc-300",
@@ -105,13 +107,17 @@ const HOUR_PX = 52;
 
 /** Event blocks in the time grid, by round. */
 const BLOCK_STYLE: Record<InterviewRound, string> = {
-  screen: "border-sky-500 bg-sky-500/15 text-sky-950 dark:text-sky-100",
+  ai_screening: "border-cyan-500 bg-cyan-500/15 text-cyan-950 dark:text-cyan-100",
+  screening: "border-sky-500 bg-sky-500/15 text-sky-950 dark:text-sky-100",
+  hr: "border-amber-500 bg-amber-500/15 text-amber-950 dark:text-amber-100",
   technical: "border-violet-500 bg-violet-500/15 text-violet-950 dark:text-violet-100",
   final: "border-emerald-500 bg-emerald-500/15 text-emerald-950 dark:text-emerald-100",
   other: "border-zinc-400 bg-zinc-500/10 text-zinc-900 dark:text-zinc-100",
 };
 const DOT_STYLE: Record<InterviewRound, string> = {
-  screen: "bg-sky-500",
+  ai_screening: "bg-cyan-500",
+  screening: "bg-sky-500",
+  hr: "bg-amber-500",
   technical: "bg-violet-500",
   final: "bg-emerald-500",
   other: "bg-zinc-400",
@@ -1210,7 +1216,7 @@ function EditDialog({
   const [date, setDate] = useState("");
   const [time, setTime] = useState("10:00");
   const [duration, setDuration] = useState("45");
-  const [round, setRound] = useState<InterviewRound>("screen");
+  const [round, setRound] = useState<InterviewRound>("screening");
   const [meetingUrl, setMeetingUrl] = useState("");
   const [location, setLocation] = useState("");
   const [interviewers, setInterviewers] = useState("");
@@ -1234,7 +1240,7 @@ function EditDialog({
       setDate(getDayKeyInTimeZone(new Date(Date.now() + 86_400_000).toISOString(), tz));
       setTime("10:00");
       setDuration("45");
-      setRound("screen");
+      setRound("screening");
       setMeetingUrl("");
       setLocation("");
       setInterviewers("");
