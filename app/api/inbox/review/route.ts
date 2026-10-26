@@ -6,8 +6,15 @@ import type { InboxItem } from "@/lib/mail/categories";
 import type { ReviewStats } from "@/lib/mail/response-types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
-/** Emails per review session. */
+/** Emails per review session, and how many of each kind. */
 const SESSION = 30;
+const QUOTAS: [string[], number][] = [
+  [["interview", "assessment"], 9],
+  [["rejection"], 7],
+  [["offer", "update", "other", "outreach"], 5],
+  [["not_job"], 5],
+  [["confirmation"], 4],
+];
 
 
 async function stats(userId: string): Promise<ReviewStats | null> {
@@ -38,7 +45,7 @@ export async function GET(request: NextRequest) {
     const [{ data: candidates }, reviewedRes, score] = await Promise.all([
       db
         .from("mail_messages")
-        .select("id")
+        .select("id, category")
         .eq("user_id", user.id)
         .eq("category_source", "ai")
         .neq("category", "unclassified")
@@ -48,13 +55,23 @@ export async function GET(request: NextRequest) {
       stats(user.id),
     ]);
     const reviewed = new Set(((reviewedRes.data ?? []) as { message_id: string }[]).map((r) => r.message_id));
-    const pool = ((candidates ?? []) as { id: string }[]).map((c) => c.id).filter((id) => !reviewed.has(id));
-    // A fair random sample (Fisher–Yates on the first SESSION places).
-    for (let i = 0; i < Math.min(SESSION, pool.length); i++) {
-      const j = i + Math.floor(Math.random() * (pool.length - i));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
+    const pool = ((candidates ?? []) as { id: string; category: string }[]).filter((c) => !reviewed.has(c.id));
+    const shuffle = <T,>(list: T[]) => {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      return list;
+    };
+    // Weighted towards what decides a status; "application received" is most mail but matters least.
+    const picked: string[] = [];
+    for (const [categories, quota] of QUOTAS) {
+      picked.push(...shuffle(pool.filter((c) => categories.includes(c.category))).slice(0, quota).map((c) => c.id));
     }
-    const items = (await Promise.all(pool.slice(0, SESSION).map((id) => getInboxItem(user.id, id)))).filter(
+    // Fill up from the rest when a group has too few.
+    const rest = shuffle(pool.filter((c) => !picked.includes(c.id)));
+    while (picked.length < SESSION && rest.length) picked.push(rest.pop()!.id);
+    const items = (await Promise.all(shuffle(picked).map((id) => getInboxItem(user.id, id)))).filter(
       (i): i is InboxItem => i !== null,
     );
     return NextResponse.json({ items, stats: score, setupRequired: score === null });
