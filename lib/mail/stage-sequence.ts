@@ -7,6 +7,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
  * Interview stages by order, per application:
  * - The first scheduled call is the Screening, and so is every email about it (availability
  *   request, confirmation, reminder, reschedule): it ends 12 hours after that call starts.
+ *   Unless an AI screening came first: that was the screening, so the first call is a next step.
  * - Later calls are never Screening: the AI's HR / Technical / Final stays; "screening" or
  *   unknown becomes HR, the step after screening.
  * - AI screenings (one-way video, AI interviewer) and assessments are not calls; left as they are.
@@ -20,6 +21,7 @@ const FIRST_CALL_AFTER_START_MS = 12 * 3_600_000;
 
 type EmailRow = {
   id: string;
+  category: string;
   application_id: number;
   received_at: string;
   extracted: Record<string, unknown> | null;
@@ -57,9 +59,10 @@ export async function sequenceInterviewStages(userId: string, applicationIds?: n
 
   let emailQuery = db
     .from("mail_messages")
-    .select("id, application_id, received_at, extracted, category_source, action_status")
+    .select("id, category, application_id, received_at, extracted, category_source, action_status")
     .eq("user_id", userId)
-    .eq("category", "interview")
+    // Assessments only tell when an AI screening happened; their stage is left alone.
+    .in("category", ["interview", "assessment"])
     .not("application_id", "is", null);
   if (applicationIds) emailQuery = emailQuery.in("application_id", applicationIds.length ? applicationIds : [-1]);
   const { data: emailData, error: emailError } = await emailQuery.order("received_at", { ascending: true }).limit(5000);
@@ -84,8 +87,24 @@ export async function sequenceInterviewStages(userId: string, applicationIds?: n
     const calls = interviews.filter(
       (i) => i.application_id === appId && i.status !== "cancelled" && normalizeRound(i.round) !== "ai_screening",
     );
-    const appEmails = emails.filter((e) => e.application_id === appId);
+    const appEmails = emails.filter((e) => e.application_id === appId && e.category === "interview");
     const firstHumanEmail = appEmails.find((e) => normalizeRound(e.extracted?.interviewStage as string) !== "ai_screening");
+
+    // An AI screening before the first call was the screening step.
+    const aiTimes = [
+      ...emails
+        .filter((e) => e.application_id === appId && normalizeRound(e.extracted?.interviewStage as string) === "ai_screening")
+        .map((e) => new Date(e.received_at).getTime()),
+      ...interviews
+        .filter((i) => i.application_id === appId && i.status !== "cancelled" && normalizeRound(i.round) === "ai_screening")
+        .map((i) => new Date(i.starts_at).getTime()),
+    ];
+    const firstHumanAt = calls[0]
+      ? new Date(calls[0].starts_at).getTime()
+      : firstHumanEmail
+        ? new Date(firstHumanEmail.received_at).getTime()
+        : Infinity;
+    const screenedByAi = aiTimes.some((t) => t < firstHumanAt);
 
     // When the first call is over.
     const firstCallEnd = calls[0]
@@ -97,7 +116,8 @@ export async function sequenceInterviewStages(userId: string, applicationIds?: n
     for (const e of appEmails) {
       const stage = e.extracted?.interviewStage as string | null | undefined;
       if (e.category_source === "user" || normalizeRound(stage) === "ai_screening") continue;
-      const wanted: InterviewStage = new Date(e.received_at).getTime() < firstCallEnd ? "screening" : laterStage(stage);
+      const wanted: InterviewStage =
+        !screenedByAi && new Date(e.received_at).getTime() < firstCallEnd ? "screening" : laterStage(stage);
       if (normalizeRound(stage) === wanted) continue;
       const patch: Record<string, unknown> = { extracted: { ...(e.extracted ?? {}), interviewStage: wanted } };
       // A suggestion made for the old stage is worked out again.
@@ -117,7 +137,7 @@ export async function sequenceInterviewStages(userId: string, applicationIds?: n
       }
       // The first call is the Screening; later ones follow the last stage reached.
       const wanted: InterviewStage =
-        index === 0 ? "screening" : current === "other" && highest ? after(highest) : laterStage(current);
+        index === 0 && !screenedByAi ? "screening" : current === "other" && highest ? after(highest) : laterStage(current);
       highest = wanted;
       if (current === wanted) continue;
       const { error } = await db.from("interviews").update({ round: wanted } as never).eq("id", call.id).eq("user_id", userId);
