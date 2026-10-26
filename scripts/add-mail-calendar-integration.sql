@@ -181,3 +181,9 @@ CREATE INDEX IF NOT EXISTS application_status_overrides_user_idx ON public.appli
 ALTER TABLE public.application_status_overrides ENABLE ROW LEVEL SECURITY;
 
 NOTIFY pgrst, 'reload schema';
+
+-- An interview round set by hand ('user') is never changed by the automatic stage order.
+ALTER TABLE public.interviews
+  ADD COLUMN IF NOT EXISTS round_source text NOT NULL DEFAULT 'auto';
+
+NOTIFY pgrst, 'reload schema';

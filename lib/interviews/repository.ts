@@ -53,13 +53,24 @@ export async function insertInterview(userId: string, fields: InterviewFields & 
   return data as unknown as InterviewRow;
 }
 
-export async function updateInterview(userId: string, id: string, fields: InterviewFields): Promise<InterviewRow | null> {
-  const { data, error } = await interviews()
-    .update({ ...fields, updated_at: new Date().toISOString() } as never)
-    .eq("id", id)
-    .eq("user_id", userId)
-    .select(COLUMNS)
-    .maybeSingle();
+export async function updateInterview(
+  userId: string,
+  id: string,
+  fields: InterviewFields & { round_source?: "user" | "auto" },
+): Promise<InterviewRow | null> {
+  const run = (values: Record<string, unknown>) =>
+    interviews()
+      .update({ ...values, updated_at: new Date().toISOString() } as never)
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select(COLUMNS)
+      .maybeSingle();
+  let { data, error } = await run(fields);
+  // Before the round_source column exists the round still saves.
+  if (error && "round_source" in fields && /round_source/.test(error.message)) {
+    const { round_source: _ignored, ...rest } = fields;
+    ({ data, error } = await run(rest));
+  }
   failOn(error);
   return (data as InterviewRow | null) ?? null;
 }

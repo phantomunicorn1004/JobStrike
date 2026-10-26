@@ -66,7 +66,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         Object.assign(patch, { action: null, action_status: "none", action_checked_at: null });
         restage = true;
       }
-      await db.from("interviews").update({ round: stage } as never).eq("user_id", user.id).eq("source_ref", id);
+      const roundUpdate = await db
+        .from("interviews")
+        .update({ round: stage, round_source: "user" } as never)
+        .eq("user_id", user.id)
+        .eq("source_ref", id);
+      if (roundUpdate.error) {
+        // Before the round_source column exists.
+        await db.from("interviews").update({ round: stage } as never).eq("user_id", user.id).eq("source_ref", id);
+      }
     }
 
     if (body.ignoreSender === true) {

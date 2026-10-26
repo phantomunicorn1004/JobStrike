@@ -1281,7 +1281,8 @@ function EditDialog({
           applicationId: app?.id ?? null,
           startsAt,
           endsAt,
-          round,
+          // Only a changed round is sent: it is then kept as the user's choice.
+          ...(!existing || round !== existing.round ? { round } : {}),
           meetingUrl: meetingUrl.trim() || null,
           location,
           interviewers,

@@ -3,6 +3,8 @@ import "server-only";
 import { serverOpenAI } from "@/lib/ai/server-openai";
 import { extractInterviewsFromEmails, type InterviewExtractResult } from "@/lib/interviews/process";
 import { applyPendingActions } from "@/lib/mail/actions";
+import { sequenceInterviewStages } from "@/lib/mail/stage-sequence";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { APPLICATION_CATEGORIES } from "@/lib/mail/categories";
 import { classifyMessages, MailAiUnavailableError } from "@/lib/mail/classify";
 import {
@@ -110,19 +112,31 @@ async function sortBatch(batch: PendingMessage[], context: UserContext, result: 
  */
 export async function processPendingMessages(userId: string | null, deadline: number): Promise<ProcessResult> {
   const result = await sortPendingMessages(userId, deadline);
+  // Interview emails: date, time and link into the Calendar.
+  try {
+    result.interviews = await extractInterviewsFromEmails(userId, deadline);
+  } catch (error) {
+    console.error("Reading interview emails failed:", error instanceof Error ? error.message : error);
+  }
+  // Stages in order (first call = Screening), before the board uses them.
+  try {
+    for (const owner of userId ? [userId] : await mailUsers()) await sequenceInterviewStages(owner);
+  } catch (error) {
+    console.error("Ordering interview stages failed:", error instanceof Error ? error.message : error);
+  }
   // Then the board: sorted emails that were not checked for a move yet.
   try {
     Object.assign(result, await applyPendingActions(userId, deadline));
   } catch (error) {
     console.error("Board updates from email failed:", error instanceof Error ? error.message : error);
   }
-  // Then interview emails: date, time and link into the Calendar.
-  try {
-    result.interviews = await extractInterviewsFromEmails(userId, deadline);
-  } catch (error) {
-    console.error("Reading interview emails failed:", error instanceof Error ? error.message : error);
-  }
   return result;
+}
+
+/** Users with a connected mailbox (the timer works for all of them). */
+async function mailUsers(): Promise<string[]> {
+  const { data } = await getSupabaseAdminClient().from("mail_accounts").select("user_id");
+  return [...new Set(((data ?? []) as { user_id: string }[]).map((a) => a.user_id))];
 }
 
 async function sortPendingMessages(userId: string | null, deadline: number): Promise<ProcessResult> {

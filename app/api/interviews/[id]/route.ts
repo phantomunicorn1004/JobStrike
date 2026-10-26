@@ -29,7 +29,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (parsed.fields.application_id && !(await getApplicationById(parsed.fields.application_id, user.id))) {
       return NextResponse.json({ error: "Application not found." }, { status: 400 });
     }
-    const updated = await updateInterview(user.id, id, parsed.fields);
+    // A round chosen here is the user's: the automatic stage order leaves it alone.
+    const updated = await updateInterview(user.id, id, parsed.fields.round ? { ...parsed.fields, round_source: "user" } : parsed.fields);
     return updated ? NextResponse.json({ ok: true }) : notFound();
   } catch (error) {
     return failure(error, "Could not save the interview.");
