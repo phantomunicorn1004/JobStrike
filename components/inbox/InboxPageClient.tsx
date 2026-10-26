@@ -66,13 +66,14 @@ import {
   type ApplicationResponse,
   type ResponseStatus,
   type ResponsesResponse,
+  type ReviewStats,
 } from "@/lib/mail/response-types";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 /** "responses" and "activity" are full-width views, not email lists. */
-type Folder = InboxView | "activity" | "responses";
-const WIDE: Folder[] = ["activity", "responses"];
+type Folder = InboxView | "activity" | "responses" | "accuracy";
+const WIDE: Folder[] = ["activity", "responses", "accuracy"];
 
 /** The tabs everyone needs; the rest sit under "More". */
 const TABS: { id: Folder; label: string; hint: string }[] = [
@@ -87,6 +88,7 @@ const MORE: { id: Folder; label: string }[] = [
   { id: "unmatched", label: "Received, not in Resume DB" },
   { id: "all", label: "Everything, incl. not job-related" },
   { id: "activity", label: "Activity (board moves)" },
+  { id: "accuracy", label: "Check accuracy" },
 ];
 const FOLDER_TITLES: Partial<Record<Folder, string>> = {
   inbox: "All job mail",
@@ -577,10 +579,12 @@ export function InboxPageClient() {
                   type="button"
                   className={cn(
                     "ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors",
-                    moreTitle || folder === "activity" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    moreTitle || folder === "activity" || folder === "accuracy"
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
                   )}
                 >
-                  {folder === "activity" ? "Activity" : moreTitle ?? "More"}
+                  {folder === "activity" ? "Activity" : folder === "accuracy" ? "Check accuracy" : moreTitle ?? "More"}
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
               </DropdownMenuTrigger>
@@ -588,7 +592,7 @@ export function InboxPageClient() {
                 {MORE.map((m) => (
                   <DropdownMenuItem key={m.id} onSelect={() => pickFolder(m.id)}>
                     <span className="flex-1">{m.label}</span>
-                    {m.id !== "activity" && counts?.[m.id as InboxView] ? (
+                    {!WIDE.includes(m.id) && counts?.[m.id as InboxView] ? (
                       <span className="ml-4 text-xs tabular-nums text-muted-foreground">{counts[m.id as InboxView].toLocaleString()}</span>
                     ) : null}
                   </DropdownMenuItem>
@@ -615,7 +619,9 @@ export function InboxPageClient() {
           ) : null}
         </div>
 
-        {folder === "responses" ? (
+        {folder === "accuracy" ? (
+          <AccuracyPanel />
+        ) : folder === "responses" ? (
           <ResponsesPanel profileId={profileId} search={search} />
         ) : folder === "activity" ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -1651,5 +1657,325 @@ function StatusMenu({ application: a, onSet }: { application: ApplicationRespons
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+const pct = (v: number | null) => (v === null ? "–" : `${Math.round(v * 100)}%`);
+
+/** A right / wrong switch for one part of how JobStrike read an email. */
+function Verdict({ ok, onChange }: { ok: boolean; onChange: (ok: boolean) => void }) {
+  return (
+    <div className="flex shrink-0 overflow-hidden rounded-md border text-xs">
+      <button type="button" onClick={() => onChange(true)} className={cn("px-2.5 py-1", ok ? "bg-emerald-600 text-white" : "hover:bg-muted")}>
+        Right
+      </button>
+      <button type="button" onClick={() => onChange(false)} className={cn("border-l px-2.5 py-1", !ok ? "bg-rose-600 text-white" : "hover:bg-muted")}>
+        Wrong
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Accuracy check: random emails the AI handled, one at a time. The user says what was right or
+ * fixes it; fixes are saved like any correction (and teach the sorter), and the verdicts give the
+ * real accuracy of the type, the interview stage and the linked application.
+ */
+function AccuracyPanel() {
+  const [items, setItems] = useState<InboxItem[] | null>(null);
+  const [stats, setStats] = useState<ReviewStats | null>(null);
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [index, setIndex] = useState(0);
+  const [round, setRound] = useState(0);
+  const [typeOk, setTypeOk] = useState(true);
+  const [stageOk, setStageOk] = useState(true);
+  const [linkOk, setLinkOk] = useState(true);
+  const [category, setCategory] = useState<MailCategory | null>(null);
+  const [stage, setStage] = useState<string | null>(null);
+  const [application, setApplication] = useState<InboxApplication | null | undefined>(undefined);
+  const [linking, setLinking] = useState(false);
+  const [body, setBody] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setItems(null);
+    fetch("/api/inbox/review", { credentials: "same-origin" })
+      .then((res) => res.json())
+      .then((data: { items?: InboxItem[]; stats?: ReviewStats | null; setupRequired?: boolean }) => {
+        if (cancelled) return;
+        setItems(data.items ?? []);
+        setStats(data.stats ?? null);
+        setSetupRequired(Boolean(data.setupRequired));
+        setIndex(0);
+      })
+      .catch(() => !cancelled && setItems([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [round]);
+
+  const item = items?.[index] ?? null;
+  const isInterview = (c: string | null | undefined) => c === "interview" || c === "assessment";
+
+  // Fresh answers and the email's text for each email.
+  useEffect(() => {
+    setTypeOk(true);
+    setStageOk(true);
+    setLinkOk(true);
+    setCategory(null);
+    setStage(null);
+    setApplication(undefined);
+    setBody(null);
+    if (!item) return;
+    let cancelled = false;
+    fetch(`/api/inbox/${item.id}/body`, { credentials: "same-origin" })
+      .then((res) => (res.ok ? res.json() : { text: "" }))
+      .then((d: { text?: string }) => !cancelled && setBody(d.text || item.snippet))
+      .catch(() => !cancelled && setBody(item.snippet));
+    return () => {
+      cancelled = true;
+    };
+  }, [item]);
+
+  const next = () => setIndex((i) => i + 1);
+
+  const submit = async (allRight: boolean) => {
+    if (!item) return;
+    const tOk = allRight || typeOk;
+    const showStage = isInterview(item.category);
+    const sOk = showStage ? allRight || stageOk : null;
+    const expectsApp = item.category !== "unclassified" && (APPLICATION_CATEGORIES.includes(item.category) || item.application !== null);
+    const lOk = expectsApp ? allRight || linkOk : null;
+    setSaving(true);
+    try {
+      // The fixes, like any correction.
+      const fix: Record<string, unknown> = {};
+      if (!tOk && category) fix.category = category;
+      const finalCategory = (!tOk && category) || item.category;
+      if (isInterview(finalCategory) && (!tOk || sOk === false) && stage) fix.interviewStage = stage;
+      if (lOk === false && application !== undefined) fix.applicationId = application ? application.id : null;
+      if (Object.keys(fix).length) {
+        const res = await fetch(`/api/inbox/${item.id}`, {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fix),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || "Could not save the fix.");
+      }
+      const res = await fetch("/api/inbox/review", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: item.id, typeOk: tOk, stageOk: sOk, linkOk: lOk }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not save the review.");
+      setStats(data.stats ?? stats);
+      next();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const header = (
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight">Check accuracy</h2>
+        <p className="text-sm text-muted-foreground">
+          Say what JobStrike got right. Fixes are saved and teach the sorting; the scores show how exact it is.
+        </p>
+      </div>
+      {stats ? (
+        <div className="flex gap-2 text-center text-xs">
+          {(
+            [
+              ["Type", stats.type],
+              ["Stage", stats.stage],
+              ["Application", stats.link],
+            ] as const
+          ).map(([label, value]) => (
+            <div key={label} className="rounded-lg border px-3 py-1.5">
+              <p className="text-muted-foreground">{label}</p>
+              <p className="text-base font-semibold tabular-nums">{pct(value)}</p>
+            </div>
+          ))}
+          <div className="rounded-lg border px-3 py-1.5">
+            <p className="text-muted-foreground">Checked</p>
+            <p className="text-base font-semibold tabular-nums">{stats.reviewed}</p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
+        {header}
+        {setupRequired ? (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3 text-sm">
+            Run <code className="text-xs">scripts/add-mail-calendar-integration.sql</code> in Supabase to save results.
+          </p>
+        ) : null}
+
+        {items === null ? (
+          <ListSkeleton />
+        ) : !item ? (
+          <div className="rounded-xl border p-10 text-center">
+            <CheckCircle2 className="mx-auto mb-3 h-8 w-8 text-emerald-500/70" />
+            <p className="font-medium">{items.length ? "Round done — thank you" : "Nothing left to check"}</p>
+            {stats ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                Type {pct(stats.type)} · Stage {pct(stats.stage)} · Application {pct(stats.link)} right, from {stats.reviewed} emails.
+              </p>
+            ) : null}
+            {items.length ? (
+              <Button className="mt-4" onClick={() => setRound((r) => r + 1)}>
+                Check {items.length} more
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-xl border">
+            <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+              Email {index + 1} of {items.length}
+              <div className="ml-auto h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-primary" style={{ width: `${(index / items.length) * 100}%` }} />
+              </div>
+            </div>
+            <div className="space-y-3 p-4 sm:p-5">
+              <div>
+                <p className="font-semibold">{item.subject || "(no subject)"}</p>
+                <p className="text-xs text-muted-foreground">
+                  {senderName(item)} &lt;{item.fromEmail}&gt; · {new Date(item.receivedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                  {item.webLink ? (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <a href={item.webLink} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                        Open in Outlook
+                      </a>
+                    </>
+                  ) : null}
+                </p>
+              </div>
+              <div className="max-h-56 overflow-y-auto rounded-lg bg-muted/40 p-3">
+                {body === null ? <p className="text-sm text-muted-foreground">Loading…</p> : <EmailText text={body} />}
+              </div>
+            </div>
+
+            <div className="divide-y border-t">
+              <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="text-xs text-muted-foreground">Type</p>
+                  <p className="font-medium">{MAIL_CATEGORY_LABELS[item.category]}</p>
+                </div>
+                {!typeOk ? (
+                  <Select value={category ?? ""} onValueChange={(v) => setCategory(v as MailCategory)}>
+                    <SelectTrigger className="h-8 w-48 text-xs">
+                      <SelectValue placeholder="What is it really?" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MAIL_CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {MAIL_CATEGORY_LABELS[c]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+                <Verdict ok={typeOk} onChange={setTypeOk} />
+              </div>
+
+              {isInterview(item.category) || (!typeOk && isInterview(category)) ? (
+                <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1 text-sm">
+                    <p className="text-xs text-muted-foreground">Interview stage</p>
+                    <p className="font-medium">
+                      {item.interviewStage ? INTERVIEW_ROUND_LABELS[normalizeRound(item.interviewStage)] : "Not said"}
+                    </p>
+                  </div>
+                  {!stageOk || (!typeOk && isInterview(category)) ? (
+                    <Select value={stage ?? ""} onValueChange={setStage}>
+                      <SelectTrigger className="h-8 w-48 text-xs">
+                        <SelectValue placeholder="Which stage?" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {INTERVIEW_STAGES.map((st) => (
+                          <SelectItem key={st} value={st}>
+                            {INTERVIEW_ROUND_LABELS[st]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                  {isInterview(item.category) ? <Verdict ok={stageOk} onChange={setStageOk} /> : null}
+                </div>
+              ) : null}
+
+              {item.category !== "unclassified" && (APPLICATION_CATEGORIES.includes(item.category) || item.application) ? (
+                <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1 text-sm">
+                    <p className="text-xs text-muted-foreground">Application</p>
+                    <p className="truncate font-medium">
+                      {item.application
+                        ? `${item.application.company}${item.application.jobTitle ? ` · ${item.application.jobTitle}` : ""}`
+                        : "None linked"}
+                    </p>
+                    {!linkOk && application !== undefined ? (
+                      <p className="truncate text-xs text-emerald-700 dark:text-emerald-400">
+                        → {application ? `${application.company}${application.jobTitle ? ` · ${application.jobTitle}` : ""}` : "No application"}
+                      </p>
+                    ) : null}
+                  </div>
+                  {!linkOk ? (
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setLinking(true)}>
+                        Pick the right one
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setApplication(null)}>
+                        None
+                      </Button>
+                    </div>
+                  ) : null}
+                  <Verdict ok={linkOk} onChange={setLinkOk} />
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 border-t bg-muted/20 px-4 py-3">
+              <Button variant="ghost" size="sm" onClick={next} disabled={saving}>
+                Skip
+              </Button>
+              <div className="ml-auto flex gap-2">
+                {!typeOk || !stageOk || !linkOk ? (
+                  <Button size="sm" onClick={() => void submit(false)} disabled={saving}>
+                    {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                    Save and next
+                  </Button>
+                ) : (
+                  <Button size="sm" onClick={() => void submit(true)} disabled={saving}>
+                    {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1.5 h-3.5 w-3.5" />}
+                    All right
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <LinkDialog
+        item={linking ? item : null}
+        onClose={() => setLinking(false)}
+        onPick={(app) => {
+          setApplication(app);
+          setLinking(false);
+        }}
+      />
+    </div>
   );
 }

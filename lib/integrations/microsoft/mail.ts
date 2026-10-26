@@ -149,3 +149,60 @@ export async function deleteMicrosoftSubscription(accessToken: string, id: strin
     if ((error as { status?: number }).status !== 404) throw error;
   }
 }
+
+// --- Folders other than the Inbox -------------------------------------------------------------
+
+/** Not job mail, or the user's own: never read. */
+const SKIPPED_FOLDERS = ["inbox", "sentitems", "drafts", "deleteditems", "outbox"];
+
+type GraphFolder = { id: string; displayName?: string; childFolderCount?: number; totalItemCount?: number };
+
+/**
+ * Junk, Archive and the user's own folders (one level of sub-folders too), where Outlook rules
+ * or archiving put mail the Inbox delta never sees.
+ */
+export async function listOtherMicrosoftFolders(accessToken: string): Promise<{ id: string; name: string }[]> {
+  const skipped = new Set<string>();
+  let inboxId: string | null = null;
+  for (const name of SKIPPED_FOLDERS) {
+    const f = await graph<GraphFolder>(accessToken, `/me/mailFolders/${name}?$select=id`).catch(() => null);
+    if (!f?.id) continue;
+    skipped.add(f.id);
+    if (name === "inbox") inboxId = f.id;
+  }
+  const top = (await graph<{ value: GraphFolder[] }>(accessToken, "/me/mailFolders?$top=100&$select=id,displayName,childFolderCount"))?.value ?? [];
+  const out: { id: string; name: string }[] = [];
+  for (const f of top) {
+    const own = !skipped.has(f.id);
+    if (own) out.push({ id: f.id, name: f.displayName ?? "" });
+    // Sub-folders of the user's folders and of the Inbox (where rules often file mail).
+    if ((f.childFolderCount ?? 0) > 0 && (own || f.id === inboxId)) {
+      const kids =
+        (await graph<{ value: GraphFolder[] }>(accessToken, `/me/mailFolders/${f.id}/childFolders?$top=100&$select=id,displayName`))?.value ?? [];
+      for (const k of kids) if (!skipped.has(k.id)) out.push({ id: k.id, name: `${f.displayName ?? ""}/${k.displayName ?? ""}` });
+    }
+  }
+  return out;
+}
+
+/** A folder's messages received since `since`, newest first (at most 100). */
+export async function fetchMicrosoftFolderMessages(
+  accessToken: string,
+  accountEmail: string,
+  folderId: string,
+  since: Date,
+): Promise<FetchedMessage[]> {
+  const out: FetchedMessage[] = [];
+  let url: string | null =
+    `/me/mailFolders/${encodeURIComponent(folderId)}/messages?$select=${SELECT}&$top=50&$orderby=receivedDateTime desc` +
+    `&$filter=receivedDateTime ge ${since.toISOString().replace(/\.\d+Z$/, "Z")}`;
+  for (let page = 0; url && page < 2; page++) {
+    const body: { value: GraphMessage[]; "@odata.nextLink"?: string } | null = await graph(accessToken, url);
+    for (const m of body?.value ?? []) {
+      const message = toMessage(m, accountEmail);
+      if (message) out.push(message);
+    }
+    url = body?.["@odata.nextLink"] ?? null;
+  }
+  return out;
+}

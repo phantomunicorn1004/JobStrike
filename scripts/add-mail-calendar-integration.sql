@@ -187,3 +187,19 @@ ALTER TABLE public.interviews
   ADD COLUMN IF NOT EXISTS round_source text NOT NULL DEFAULT 'auto';
 
 NOTIFY pgrst, 'reload schema';
+
+-- Accuracy check: the user's verdict on how JobStrike read an email.
+CREATE TABLE IF NOT EXISTS public.mail_reviews (
+  message_id  uuid PRIMARY KEY REFERENCES public.mail_messages(id) ON DELETE CASCADE,
+  user_id     uuid NOT NULL REFERENCES public.app_users(id) ON DELETE CASCADE,
+  type_ok     boolean NOT NULL,
+  stage_ok    boolean,          -- interviews only
+  link_ok     boolean,          -- only where an application is expected
+  reviewed_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS mail_reviews_user_idx ON public.mail_reviews (user_id, reviewed_at DESC);
+
+ALTER TABLE public.mail_reviews ENABLE ROW LEVEL SECURITY;
+
+NOTIFY pgrst, 'reload schema';

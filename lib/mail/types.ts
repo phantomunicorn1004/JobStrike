@@ -30,4 +30,6 @@ export type MailSyncProgress = {
   kept?: number;
   startedAt?: string;
   finishedAt?: string;
+  /** When the folders other than the Inbox were last read. */
+  otherFoldersAt?: string;
 };

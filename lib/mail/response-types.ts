@@ -51,3 +51,11 @@ export type ResponsesResponse = {
   /** Applications from this date on are tracked (the mailboxes' first scan reaches back to it). */
   trackingSince: string | null;
 };
+
+/** Accuracy check scores: the share JobStrike got right (0–1), null before any review. */
+export type ReviewStats = {
+  reviewed: number;
+  type: number | null;
+  stage: number | null;
+  link: number | null;
+};

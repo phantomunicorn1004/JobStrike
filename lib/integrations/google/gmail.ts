@@ -7,8 +7,9 @@ import { MailCursorExpiredError, type FetchedMessage, type MailPage } from "@/li
 const PAGE_SIZE = 50;
 const PARALLEL = 10;
 /** Everything the user received, without their own, chat, spam and bin messages. */
-const RECEIVED = "-in:sent -in:drafts -in:chats -in:spam -in:trash";
-const SKIP_LABELS = new Set(["SENT", "DRAFT", "CHAT", "SPAM", "TRASH"]);
+/** Everything received, in every label and in Spam (rejections land there too). */
+const RECEIVED = "-in:sent -in:drafts -in:chats -in:trash in:anywhere";
+const SKIP_LABELS = new Set(["SENT", "DRAFT", "CHAT", "TRASH"]);
 
 /**
  * Stored position. While scanning: the history id from the start (`h`), the time the scan reaches

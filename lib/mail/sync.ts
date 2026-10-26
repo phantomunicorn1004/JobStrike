@@ -6,7 +6,9 @@ import { fetchGmailPage } from "@/lib/integrations/google/gmail";
 import {
   createMicrosoftSubscription,
   deleteMicrosoftSubscription,
+  fetchMicrosoftFolderMessages,
   fetchMicrosoftMailPage,
+  listOtherMicrosoftFolders,
   renewMicrosoftSubscription,
 } from "@/lib/integrations/microsoft/mail";
 import { getMailOAuthProvider, MailAuthError, MailThrottledError } from "@/lib/integrations/providers";
@@ -26,6 +28,8 @@ import {
   saveSubscriptionExpiry,
   saveSyncError,
   saveSyncPosition,
+  saveSyncProgress,
+  storedMessageKeys,
   type SyncAccount,
 } from "@/lib/mail/sync-repository";
 import { MailCursorExpiredError, type MailSyncProgress } from "@/lib/mail/types";
@@ -78,6 +82,41 @@ function scanStart(account: SyncAccount): Date {
  * the job-related messages, and saves its position after every page. Safe to call from several
  * places at once: only one run holds a mailbox; the others ask it to read once more.
  */
+/** Folders other than the Inbox are read at most this often. */
+const OTHER_FOLDERS_EVERY_MS = 10 * 60_000;
+
+/**
+ * Reads Junk, Archive and the user's own folders since the last time (an hour of overlap; the
+ * first time as far back as the first scan). A message moved there from the Inbox has a new id
+ * in Outlook, so mail already stored (same sender, same time) is skipped.
+ */
+async function syncOtherFolders(
+  account: SyncAccount,
+  accessToken: string,
+  context: PrefilterContext,
+  progress: MailSyncProgress,
+): Promise<number> {
+  const last = progress.otherFoldersAt ? new Date(progress.otherFoldersAt).getTime() : 0;
+  if (Date.now() - last < OTHER_FOLDERS_EVERY_MS) return 0;
+  const since = last ? new Date(last - 3_600_000) : new Date(Date.now() - INITIAL_SCAN_DAYS * 86_400_000);
+
+  let kept = 0;
+  for (const folder of await listOtherMicrosoftFolders(accessToken)) {
+    const messages = await fetchMicrosoftFolderMessages(accessToken, account.email, folder.id, since);
+    const keep = messages
+      .map((message) => ({ message, verdict: prefilterMessage(message, context) }))
+      .filter((m) => m.verdict.keep);
+    if (keep.length === 0) continue;
+    const known = await storedMessageKeys(account.id, keep.map((k) => k.message.receivedAt));
+    const fresh = keep
+      .filter((k) => !known.has(`${k.message.fromEmail}|${new Date(k.message.receivedAt).toISOString()}`))
+      .map((k) => ({ message: k.message, reason: `${k.verdict.reason} (${folder.name})` }));
+    kept += await insertMailMessages(account, fresh);
+  }
+  await saveSyncProgress(account.id, { ...progress, otherFoldersAt: new Date().toISOString() });
+  return kept;
+}
+
 export async function syncAccount(accountId: string, deadline: number): Promise<SyncResult> {
   const result: SyncResult = { accountId, outcome: "partial", scanned: 0, kept: 0 };
   if (!(await claimSync(accountId, LOCK_SECONDS))) {
@@ -150,6 +189,16 @@ export async function syncAccount(accountId: string, deadline: number): Promise<
       // New mail was announced while this pass ran: read once more.
       const latest = await getSyncAccount(account.id);
       if (!latest?.sync_requested_at || latest.sync_requested_at < passStarted) break;
+    }
+
+    // Junk, Archive and the user's folders (Outlook), every 10 minutes, with the time left.
+    if (result.outcome === "done" && account.provider === "microsoft" && Date.now() < deadline - 20_000) {
+      try {
+        const extra = await syncOtherFolders(account, accessToken, context, progress);
+        result.kept += extra;
+      } catch (error) {
+        console.error(`Reading other folders for account ${accountId} failed:`, error instanceof Error ? error.message : error);
+      }
     }
 
     // The calendar too (at most every 10 minutes), with the time left. Loaded here to keep

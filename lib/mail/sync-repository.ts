@@ -195,3 +195,21 @@ export async function saveCalendarReadAt(id: string, at: string): Promise<void> 
   const { error } = await accounts().update({ calendar_cursor: at } as never).eq("id", id);
   failOn(error);
 }
+
+export async function saveSyncProgress(id: string, progress: MailSyncProgress): Promise<void> {
+  const { error } = await accounts().update({ sync_progress: progress } as never).eq("id", id);
+  failOn(error);
+}
+
+/** "sender|time" of messages already stored around these times (moved mail keeps both). */
+export async function storedMessageKeys(accountId: string, receivedAts: string[]): Promise<Set<string>> {
+  if (receivedAts.length === 0) return new Set();
+  const iso = receivedAts.map((t) => new Date(t).toISOString());
+  const { data, error } = await getSupabaseAdminClient()
+    .from("mail_messages")
+    .select("from_email, received_at")
+    .eq("account_id", accountId)
+    .in("received_at", iso);
+  failOn(error);
+  return new Set(((data ?? []) as { from_email: string; received_at: string }[]).map((r) => `${r.from_email}|${new Date(r.received_at).toISOString()}`));
+}
