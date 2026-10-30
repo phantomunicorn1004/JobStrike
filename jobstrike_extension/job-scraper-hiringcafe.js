@@ -135,8 +135,14 @@
   }
 
   /** Days to send to HiringCafe (hour windows → 1). */
+  /**
+   * Days for HiringCafe's search. It returns almost nothing for exactly 2
+   * (8 jobs, against 19,494 for 1, 3 or 7 in a test), so 2 days searches 3;
+   * the panel then keeps only jobs inside the 2-day window.
+   */
   function dateWindowDays(dateWindow) {
-    return parseFreshnessWindow(dateWindow).hcDays;
+    const days = parseFreshnessWindow(dateWindow).hcDays;
+    return days === 2 ? 3 : days;
   }
 
   function dateWindowLabel(dateWindow) {
@@ -166,6 +172,53 @@
       };
     }
     return cloneDefaultSearchState(dateWindow);
+  }
+
+  /**
+   * Remote contract jobs open to candidates in one country. HiringCafe's own
+   * default search names the visitor's country the same way (id "user_country"),
+   * and its flexible regions add jobs open to that continent or the world.
+   */
+  function countryLocation(code, name) {
+    const country = String(code || '').trim().toUpperCase();
+    const label = String(name || country).trim();
+    return {
+      formatted_address: label,
+      types: ['country'],
+      geometry: { location: { lat: 0, lon: 0 } },
+      id: 'user_country',
+      address_components: [{ long_name: label, short_name: country, types: ['country'] }],
+      workplace_types: ['Remote'],
+      options: { flexible_regions: ['anywhere_in_continent', 'anywhere_in_world'] },
+    };
+  }
+
+  function countrySearchState(code, name) {
+    return {
+      ...DEFAULT_SEARCH_STATE,
+      locations: [countryLocation(code, name)],
+      commitmentTypes: ['Contract'],
+    };
+  }
+
+  /**
+   * "Any country": every continent, through the largest remote-contract markets.
+   * Each adds jobs open to its continent or the world. Listing all countries
+   * makes an address HiringCafe refuses (37 KB); these 18 make 9 KB.
+   */
+  const ANY_COUNTRY_CODES = ['GB', 'DE', 'PL', 'UA', 'RO', 'BR', 'AR', 'CO', 'MX', 'CA', 'IN', 'PK', 'PH', 'VN', 'ZA', 'NG', 'EG', 'AU'];
+  function anyCountrySearchState() {
+    let names = null;
+    try {
+      names = new Intl.DisplayNames(['en'], { type: 'region' });
+    } catch (_) {
+      names = null;
+    }
+    return {
+      ...DEFAULT_SEARCH_STATE,
+      locations: ANY_COUNTRY_CODES.map((code) => countryLocation(code, names?.of(code) || code)),
+      commitmentTypes: ['Contract'],
+    };
   }
 
   function buildHiringCafeUrl(dateWindow, page, customSearchState) {
@@ -364,6 +417,7 @@
       language_requirements: Array.isArray(processed.language_requirements)
         ? processed.language_requirements.map((x) => String(x || '').trim()).filter(Boolean)
         : [],
+      worldwide_ok: processed.is_workplace_worldwide_ok === true,
       workplace_countries: Array.isArray(processed.boundless_workplace_countries)
         ? processed.boundless_workplace_countries.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean)
         : [],
@@ -544,8 +598,16 @@
       // A date without a time could be any moment of that day.
       return { ms, latest: dateOnly ? ms + DAY_MS - 1 : ms, dateOnly };
     };
-    const withEarlierDate = (kept, other) => {
-      if (originOf(kept) === originOf(other)) return kept;
+    // Where the job may be done from: HiringCafe states it, Jobright does not.
+    const statesPlaces = (job) =>
+      job?.worldwide_ok === true ||
+      (Array.isArray(job?.workplace_countries) && job.workplace_countries.length > 0);
+    const withEarlierDate = (keptJob, other) => {
+      if (originOf(keptJob) === originOf(other)) return keptJob;
+      const kept =
+        !statesPlaces(keptJob) && statesPlaces(other)
+          ? { ...keptJob, workplace_countries: other.workplace_countries || [], worldwide_ok: other.worldwide_ok === true }
+          : keptJob;
       const mine = postedAt(kept);
       const theirs = postedAt(other);
       if (!theirs) return kept;
@@ -799,6 +861,8 @@
     atsMatchesList,
     filterJobsByPublishDate,
     dedupeJobs,
+    countrySearchState,
+    anyCountrySearchState,
     applyLocalFilters,
     jobsToCsv,
     extractPagePropsInTab,

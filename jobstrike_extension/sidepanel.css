@@ -4200,3 +4200,328 @@ textarea.js-input {
   border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
   background: color-mix(in srgb, var(--brand) 10%, transparent);
 }
+
+/* Scrape mode switch (US jobs / Worldwide contract). */
+.js-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.js-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 85%, var(--border));
+}
+
+.js-mode-btn {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.js-mode-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.js-mode-btn.is-active {
+  background: var(--brand);
+  color: #fff;
+}
+
+.js-mode-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.js-country-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.js-country-row[hidden] {
+  display: none;
+}
+
+.js-country-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.js-mode-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.js-filter-row[hidden] {
+  display: none;
+}
+
+/* Live mode card. */
+.js-live {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.js-live.is-on {
+  border-color: color-mix(in srgb, #22c55e 45%, var(--border));
+  background: color-mix(in srgb, #22c55e 6%, transparent);
+}
+.js-live-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.js-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+.js-live.is-on .js-live-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 25%, transparent);
+}
+.js-live-name {
+  font-size: 14px;
+  color: var(--text);
+}
+.js-live-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.js-live-meta,
+.js-live-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.js-live-settings summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.js-live-settings[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.js-live-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+.js-live-field span {
+  flex: 0 0 110px;
+}
+.js-live-field .js-input {
+  flex: 1;
+  min-width: 0;
+}
+.js-live-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* Live bidding queue. */
+.js-q-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+.js-q-newcount {
+  color: #22c55e;
+  font-weight: 700;
+}
+.js-q-hide {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.js-q-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px;
+  border-top: 1px solid var(--border);
+}
+.js-q-row.is-opened {
+  opacity: 0.5;
+}
+.js-q-main {
+  flex: 1;
+  min-width: 0;
+}
+.js-q-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.js-q-title span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.js-q-tag {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #22c55e;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+.js-q-done {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.js-q-meta {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.js-q-score {
+  flex: 0 0 auto;
+  min-width: 28px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--brand);
+}
+.js-q-open,
+.js-q-skip,
+.js-q-more {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.js-q-open {
+  padding: 5px 10px;
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 600;
+}
+.js-q-open:hover {
+  background: var(--brand);
+  color: #fff;
+}
+.js-q-skip {
+  padding: 5px 7px;
+  color: var(--muted);
+}
+.js-q-skip:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+.js-q-more {
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px;
+}
+/* Queue for AutoGen: per row and for the whole list. */
+.js-q-gen,
+.js-q-gen-all {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.js-q-gen {
+  padding: 5px 8px;
+}
+.js-q-gen:hover:not(:disabled),
+.js-q-gen-all:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.js-q-gen:disabled {
+  cursor: default;
+  color: var(--muted);
+}
+.js-q-gen.is-error {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+.js-q-gen-all {
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.js-q-gen-all.is-running {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+.js-q-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.js-q-empty {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* The Live queue uses the results list (otherwise retired, hidden above). */
+.js-results-list.is-live-queue:not([hidden]) {
+  display: block !important;
+  margin-top: 4px;
+}
+
+.js-q-hide {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.js-q-hide input {
+  margin: 0;
+}

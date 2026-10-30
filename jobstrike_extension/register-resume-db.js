@@ -1130,6 +1130,86 @@
   }
 
   /**
+   * POST /api/resume-db/capture. Resolves { id } once queued, or { duplicateId }
+   * when the profile already has the job; throws with the website's reason
+   * otherwise (e.g. the profile's kit cannot generate).
+   */
+  async function captureForAutogen({ profileId, jobLink, jobTitle, company, jobDescription }) {
+    const connected = await checkBackendConnection({ skipDriveBadge: true });
+    if (!connected) {
+      throw new Error('Not signed in. Open Settings → Website connection and sign in first.');
+    }
+    const config = await getBackendConfig();
+    const res = await backendFetch(`${config.baseUrl}/api/resume-db/capture`, {
+      method: 'POST',
+      headers: { ...apiHeaders(config), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId: Number(profileId), jobLink, jobTitle, company, jobDescription }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409 && data.duplicateId) return { duplicateId: data.duplicateId };
+    if (!res.ok) throw new Error(data.error || `Queueing failed (${res.status}).`);
+    return { id: data.id };
+  }
+
+  /**
+   * Bid tab → Resume DB row queued for AutoGen: the job as shown (profile,
+   * link, title, company, Note as the job description). AutoGen then builds
+   * the resume with the profile's own prompt, by ChatGPT tab or API.
+   */
+  function wireQueueForAutogen(showStatus) {
+    const btn = document.getElementById('regQueueAutogenBtn');
+    const spinner = document.getElementById('regQueueAutogenSpinner');
+    if (!btn || btn.dataset.wired === '1') return;
+    btn.dataset.wired = '1';
+    let inFlight = false;
+
+    btn.addEventListener('click', async () => {
+      if (inFlight) return;
+      const fields = readRegisterFormFields();
+      const minJd = Number(global.SmartJobBidFitPreflight?.MIN_JD_CHARS) || 80;
+      const missing = [
+        fields.profileId ? '' : 'a profile',
+        fields.jobLink ? '' : 'the job link',
+        fields.jobTitle ? '' : 'the job title',
+        fields.companyName ? '' : 'the company',
+        fields.note.length >= minJd ? '' : 'the job description (Note)',
+      ].filter(Boolean);
+      if (missing.length) {
+        showStatus?.(`To queue for AutoGen, add ${missing.join(', ')}.`, 'error');
+        return;
+      }
+      if (lastBidFitResult?.level === 'blocked') {
+        showStatus?.('The fit check says skip this job, so it was not queued.', 'error');
+        return;
+      }
+
+      inFlight = true;
+      btn.disabled = true;
+      if (spinner) spinner.hidden = false;
+      try {
+        const out = await captureForAutogen({
+          profileId: fields.profileId,
+          jobLink: fields.jobLink,
+          jobTitle: fields.jobTitle,
+          company: fields.companyName,
+          jobDescription: fields.note,
+        });
+        if (out.duplicateId) {
+          showStatus?.(`Already in Resume DB for this profile (#${out.duplicateId}), so it was not queued again.`, 'error');
+          return;
+        }
+        showStatus?.(`Queued #${out.id} for AutoGen. Its resume will be generated with this profile's prompt.`, 'success');
+      } catch (error) {
+        showStatus?.(error?.message || String(error), 'error');
+      } finally {
+        inFlight = false;
+        btn.disabled = false;
+        if (spinner) spinner.hidden = true;
+      }
+    });
+  }
+
+  /**
    * fetch() for the website, with a time limit. Reads (GET) are tried once more
    * after a dropped connection; a POST is not, so a registration is never sent twice.
    */
@@ -2065,7 +2145,7 @@
     return list;
   }
 
-  async function fetchProfileRecord(profileId) {
+  async function fetchProfileRecord(profileId, { fresh = false } = {}) {
     const id = String(profileId || '').trim();
     if (!id) return null;
     const config = await getBackendConfig();
@@ -2075,7 +2155,8 @@
     const cacheKey = `${config.baseUrl}|${config.username || ''}`;
     const cache = profileRecordsCache;
     let list = null;
-    if (cache.key === cacheKey && cache.list && Date.now() - cache.at < PROFILE_RECORDS_TTL_MS) {
+    // fresh: Autofill reads the profile as it is now, not as it was 2 minutes ago.
+    if (!fresh && cache.key === cacheKey && cache.list && Date.now() - cache.at < PROFILE_RECORDS_TTL_MS) {
       list = cache.list;
     } else if (cache.key === cacheKey && cache.pending) {
       // Checks for several open tabs share one request.
@@ -3809,6 +3890,101 @@
     Object.assign(entry, aheadLevel(verdict, jd), { state: 'done' });
   }
 
+  /** A job page this slow to load is read as it is. */
+  const QUEUE_READ_LOAD_MS = 45000;
+  const QUEUE_READ_TRIES = 3;
+
+  function waitForTabLoaded(tabId, timeoutMs) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (loaded) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve(loaded);
+      };
+      const onUpdated = (id, info) => {
+        if (id === tabId && info.status === 'complete') finish(true);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      chrome.tabs.onUpdated.addListener(onUpdated);
+      chrome.tabs
+        .get(tabId)
+        .then((tab) => {
+          if (tab?.status === 'complete') finish(true);
+        })
+        .catch(() => finish(false));
+    });
+  }
+
+  /**
+   * Opens a job link in a background tab, reads the posting the way the Bid
+   * tab does (embedded boards included), and closes the tab. Null when the
+   * page holds no readable posting (closed, apply-only, blocked).
+   */
+  async function readJobInBackgroundTab(url) {
+    const tab = await chrome.tabs.create({ url, active: false });
+    try {
+      await waitForTabLoaded(tab.id, QUEUE_READ_LOAD_MS);
+      const frames = global.SmartJobPostingFrames;
+      for (let attempt = 0; attempt < QUEUE_READ_TRIES; attempt += 1) {
+        // Pages that render their description late get a moment, then another.
+        await new Promise((resolve) => setTimeout(resolve, attempt ? AHEAD_RETRY_MS : 1500));
+        const top = await withTimeout(
+          global.sendMessageToTab(tab.id, { action: 'fetchJobPosting' }),
+          AHEAD_READ_TIMEOUT_MS
+        ).catch(() => null);
+        const response =
+          top && frames?.withFrameFallback ? await frames.withFrameFallback(tab.id, top).catch(() => top) : top;
+        const posting = response?.posting || null;
+        const jd = String(response?.job_description || posting?.rawFullText || '').trim();
+        if (!looksLikeJobPosting(posting, jd)) continue;
+        const current = await chrome.tabs.get(tab.id).catch(() => null);
+        return {
+          jobLink: String(response?.job_link || posting?.jobLink || current?.url || url).trim(),
+          jobTitle: String(response?.job_title || posting?.jobTitle || '').trim(),
+          company: String(response?.company_name || posting?.companyName || '').trim(),
+          jobDescription: jd,
+        };
+      }
+      return null;
+    } finally {
+      chrome.tabs.remove(tab.id).catch(() => {});
+    }
+  }
+
+  /** The profile chosen in the Bid tab: the one queued jobs are generated for. */
+  function getSelectedRegisterProfile() {
+    const select = document.getElementById('regProfileId');
+    const id = String(select?.value || '').trim();
+    if (!id) return null;
+    const name = String(select.selectedOptions?.[0]?.textContent || '').trim();
+    return { id, name };
+  }
+
+  /**
+   * Live queue → AutoGen: reads the job from its link in a background tab and
+   * queues it for the Bid tab's profile. The scraper's title and company are
+   * kept when given (the names its lists were matched against).
+   * Resolves { id } | { duplicateId }; throws with a reason to show.
+   */
+  async function queueJobLinkForAutogen({ url, jobTitle = '', company = '' }) {
+    const profile = getSelectedRegisterProfile();
+    if (!profile) throw new Error('Choose a profile in the Bid tab first: queued jobs are generated for it.');
+    if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('This job has no link.');
+    const job = await readJobInBackgroundTab(url);
+    if (!job) throw new Error('Could not read a job description on the page (closed, apply-only or blocked).');
+    const out = await captureForAutogen({
+      profileId: profile.id,
+      jobLink: job.jobLink,
+      jobTitle: jobTitle || job.jobTitle,
+      company: company || job.company,
+      jobDescription: job.jobDescription,
+    });
+    return { ...out, jobLink: job.jobLink, profileName: profile.name };
+  }
+
   const AHEAD_ORDER = { skip: 0, review: 1, ok: 2, checking: 3 };
   const AHEAD_TAG = { skip: 'Skip', review: 'Review', ok: 'OK', checking: 'Checking…' };
 
@@ -4764,6 +4940,7 @@
     wireJson2docxGenerate(showStatus);
     wireBidFitToggle();
     wireBidFitAiCompat(showStatus);
+    wireQueueForAutogen(showStatus);
     initAheadChecks();
     wireBidDetailsSummary();
     // Kick off the first check shortly after init (a JD may already be present).
@@ -4936,6 +5113,16 @@
             return;
           }
           registeredRecord = record;
+          // The scraper's Live queue drops this job at once.
+          document.dispatchEvent(
+            new CustomEvent('jobstrike-registered', {
+              detail: {
+                jobLink: draft.fields?.jobLink || '',
+                jobTitle: draft.fields?.jobTitle || '',
+                company: draft.fields?.companyName || '',
+              },
+            })
+          );
           if (result.alreadyRegistered) {
             setRegisterStatus(`Already in Resume DB (#${record.id}) for this profile — marked as registered.`, 'success');
             if (showStatus) showStatus(`This job was already registered (#${record.id}).`, 'info');
@@ -5009,6 +5196,8 @@
     blockCurrentJobFromRegister,
     syncJobLinkBlockButton,
     setRegisterFieldValue,
+    getSelectedRegisterProfile,
+    queueJobLinkForAutogen,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND

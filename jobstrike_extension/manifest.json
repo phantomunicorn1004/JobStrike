@@ -18,7 +18,8 @@
     "sidePanel",
     "tabs",
     "identity",
-    "cookies"
+    "cookies",
+    "notifications"
   ],
   "host_permissions": [
     "<all_urls>",

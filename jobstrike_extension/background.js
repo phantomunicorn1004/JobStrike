@@ -110,6 +110,25 @@ async function reenableSidePanelOnTab(tabId) {
   }
 }
 
+// Live mode's "new jobs" notification: bring the window forward with the panel.
+try {
+  chrome.notifications?.onClicked?.addListener(async (id) => {
+    if (id !== 'jobstrike-live') return;
+    try {
+      const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+      if (win?.id != null) {
+        await chrome.windows.update(win.id, { focused: true });
+        await chrome.sidePanel?.open?.({ windowId: win.id }).catch(() => {});
+      }
+    } catch (_) {
+      /* the panel opens from the toolbar icon as usual */
+    }
+    chrome.notifications.clear(id);
+  });
+} catch (_) {
+  /* notifications not granted */
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log('JobStrike installed');
   configureSidePanelBehavior();

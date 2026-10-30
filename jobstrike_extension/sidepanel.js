@@ -742,7 +742,8 @@ async function loadWebsiteProfileForAutofill() {
     return false;
   }
   showStatus('Loading website profile…', 'info', 0);
-  const record = await api.fetchProfileRecord(profileId);
+  // Fresh: a value just fixed on the website must be used right away.
+  const record = await api.fetchProfileRecord(profileId, { fresh: true });
   if (!record) {
     showStatus('Selected profile was not found on the website.', 'error');
     return false;
@@ -994,14 +995,14 @@ function bindEvents() {
     if (changes[CUSTOM_QUESTIONS_KEY]) {
       currentQuestions = Array.isArray(changes[CUSTOM_QUESTIONS_KEY].newValue) ? changes[CUSTOM_QUESTIONS_KEY].newValue : [];
       renderQuestionsList();
-      regeneratePlan();
+      refreshPlanKeepingWork();
     }
     if (changes[SETTINGS_KEY]) {
       currentSettings = { ...defaultSettings, ...(changes[SETTINGS_KEY].newValue || {}) };
       fillSettingsForm(currentSettings);
     syncAiUiVisibility();
       syncAiUiVisibility();
-      regeneratePlan();
+      refreshPlanKeepingWork();
     }
     if (changes[STORAGE_KEY] || changes[DAILY_COUNT_KEY] || changes[DAILY_DATE_KEY]) {
       updateDailyStats();
@@ -1451,7 +1452,8 @@ function capturePageSession() {
         customQuestionId: row.customQuestionId
       })),
       url: currentScanUrl,
-      skipped: lastSkippedCount
+      skipped: lastSkippedCount,
+      frameId: autofillFrameId
     }
   };
 }
@@ -1468,12 +1470,17 @@ function restorePageSession(data) {
   currentFields = Array.isArray(saved.fields) ? saved.fields : [];
   currentScanUrl = saved.url || '';
   lastSkippedCount = Number.isFinite(saved.skipped) ? saved.skipped : 0;
+  autofillFrameId = Number(saved.frameId) || 0;
 
   const planById = new Map((saved.plan || []).map((row) => [row.fieldId, row]));
   currentPlan = currentFields.map((field) => {
     const fresh = createPlanRow(field);
     const stored = planById.get(field.id);
     if (!stored) return fresh;
+    // Which file goes in is decided now (this job's files), not by the saved text.
+    if (/_upload$/.test(field.fieldCategory || '')) {
+      return { ...fresh, fillOutcome: stored.fillOutcome || null };
+    }
     return {
       ...fresh,
       suggestedValue: stored.suggestedValue !== undefined ? stored.suggestedValue : fresh.suggestedValue,
@@ -1580,14 +1587,34 @@ function normalizeText(text) {
     .trim();
 }
 
+/**
+ * Technology names that plain normalisation would merge ("C#", "C++" and "C"
+ * all became "c"; ".NET" became "net"). Must match techAwareText() in content.js.
+ */
+function techAwareText(text) {
+  return String(text || '')
+    .replace(/c\s*#/gi, ' csharp ')
+    .replace(/c\s*\+\+/gi, ' cplusplus ')
+    .replace(/f\s*#/gi, ' fsharp ')
+    .replace(/(^|[^a-z0-9])\.net\b/gi, '$1 dotnet ');
+}
+
+/** Numbers in two questions must agree: "3 years" is not "7 years". */
+function questionNumbersAgree(a, b) {
+  const nums = (t) => (String(t).match(/\d+/g) || []).sort().join(',');
+  return nums(a) === nums(b);
+}
+
 function tokenSimilarity(a, b) {
-  const x = normalizeText(a);
-  const y = normalizeText(b);
+  const x = normalizeText(techAwareText(a));
+  const y = normalizeText(techAwareText(b));
   if (!x || !y) return 0;
   if (x === y) return 1;
-  if (x.includes(y) || y.includes(x)) return 0.88;
-  const xt = new Set(x.split(' ').filter((t) => t.length > 1));
-  const yt = new Set(y.split(' ').filter((t) => t.length > 1));
+  if (!questionNumbersAgree(x, y)) return 0;
+  // Whole words only: "with Java" is not inside "with JavaScript".
+  if (` ${x} `.includes(` ${y} `) || ` ${y} `.includes(` ${x} `)) return 0.88;
+  const xt = new Set(x.split(' ').filter(Boolean));
+  const yt = new Set(y.split(' ').filter(Boolean));
   if (!xt.size || !yt.size) return 0;
   let overlap = 0;
   yt.forEach((token) => { if (xt.has(token)) overlap += 1; });
@@ -1657,7 +1684,9 @@ function sendMessageToTab(tabId, message) {
 let autofillFrameId = 0;
 
 /** Fill and focus messages go to whichever frame the last scan found the form in. */
-async function sendToFormFrame(message) {
+async function sendToFormFrame(rawMessage) {
+  // The page records the user's own answers under the profile that filled it.
+  const message = { ...rawMessage, profileId: document.getElementById('regProfileId')?.value?.trim() || '' };
   if (!autofillFrameId) return sendToActiveTab(message);
   const tab = await getActiveTab();
   if (!tab || !tab.id) throw new Error('Open a normal web page first.');
@@ -2390,6 +2419,8 @@ function normalizeKit(raw, now) {
     resume: raw.resume && raw.resume.dataUrl ? { ...raw.resume } : null,
     coverLetter: raw.coverLetter && raw.coverLetter.dataUrl ? { ...raw.coverLetter } : null,
     workExperience,
+    // Website profile this kit belongs to; '' = any profile.
+    profileId: String(raw.profileId || '').trim(),
     isDefault: Boolean(raw.isDefault),
     createdAt: raw.createdAt || ts,
     updatedAt: raw.updatedAt || ts
@@ -2488,8 +2519,31 @@ function syncKitNameFromDom(kitId) {
   if (nameInput) kit.name = nameInput.value.trim() || kit.name;
 }
 
+/**
+ * The kit for the selected profile: one assigned to it (its default first),
+ * else one shared by all profiles. A kit assigned to another profile — another
+ * candidate's resume and work history — is never used.
+ */
 function getDefaultKit() {
-  return applicationKits.find((k) => k.isDefault) || applicationKits[0] || null;
+  const profileId = document.getElementById('regProfileId')?.value?.trim() || '';
+  const pick = (list) => list.find((k) => k.isDefault) || list[0] || null;
+  const own = profileId ? applicationKits.filter((k) => k.profileId === profileId) : [];
+  if (own.length) return pick(own);
+  return pick(applicationKits.filter((k) => !k.profileId));
+}
+
+/** The Bid tab's profiles, for a kit's "Use for profile" choice. */
+function kitProfileOptionsHtml(selected) {
+  const select = document.getElementById('regProfileId');
+  const options = Array.from(select?.options || []).filter((o) => o.value);
+  const known = options.some((o) => o.value === selected);
+  return [
+    `<option value="" ${selected ? '' : 'selected'}>All profiles</option>`,
+    ...options.map(
+      (o) => `<option value="${escapeHtml(o.value)}" ${o.value === selected ? 'selected' : ''}>${escapeHtml(o.textContent || o.value)}</option>`
+    ),
+    ...(selected && !known ? [`<option value="${escapeHtml(selected)}" selected>Profile ${escapeHtml(selected)}</option>`] : []),
+  ].join('');
 }
 
 function persistProfileData(profile, cb) {
@@ -2603,6 +2657,8 @@ function saveKitFromDom(kitId, silent) {
   if (kitEl) {
     const nameInput = kitEl.querySelector('.kit-name-input');
     if (nameInput) kit.name = nameInput.value.trim() || kit.name;
+    const profileSelect = kitEl.querySelector('.kit-profile-select');
+    if (profileSelect) kit.profileId = String(profileSelect.value || '').trim();
     const roles = readWorkExperienceFromDom(kitId);
     if (roles) kit.workExperience = roles;
   }
@@ -2831,6 +2887,10 @@ function renderApplicationKits() {
           <label class="full">
             Kit name
             <input class="kit-name-input" type="text" value="${escapeHtml(kit.name)}" placeholder="e.g. Frontend SWE">
+          </label>
+          <label class="full">
+            Use for profile
+            <select class="kit-profile-select" title="Autofill uses this kit's resume, cover letter and work history only for this profile. All profiles: shared.">${kitProfileOptionsHtml(kit.profileId || '')}</select>
           </label>
           ${renderKitFileSlot('Resume', kit.resume, 'resume', kit.id)}
           ${renderKitFileSlot('Cover letter', kit.coverLetter, 'coverLetter', kit.id)}
@@ -3361,7 +3421,10 @@ async function scanCurrentPage({ silent = false } = {}) {
     if (!silent) showStatus('Scanning current page...', 'info', 0);
     // Every scan path (Refresh as well as Autofill) must see this job's files.
     await stageJobUploadFiles().catch(() => {});
-    let { response, tab } = await sendToActiveTab({ action: 'scanApplicationForm' });
+    let { response, tab } = await sendToActiveTab({
+      action: 'scanApplicationForm',
+      profileId: document.getElementById('regProfileId')?.value?.trim() || '',
+    });
     if (!response || !response.success) throw new Error(response?.error || 'Scan failed.');
     // A form embedded in an iframe is invisible to the top frame's scan.
     autofillFrameId = 0;
@@ -3431,7 +3494,20 @@ async function scanCurrentPage({ silent = false } = {}) {
 const FORM_LOAD_RETRIES = 6;
 const FORM_LOAD_RETRY_MS = 1500;
 
+/** The tab generation an Autofill run started on (null when none is running). */
+let autofillRunToken = null;
+
+/** True when the user switched tabs since the running Autofill started. */
+function autofillTabChanged(token) {
+  const TS = window.SmartJobTabSession;
+  return Boolean(TS) && token != null && !TS.isCurrentGeneration(token);
+}
+
+const AUTOFILL_SWITCHED_MSG = 'Autofill stopped: you switched tabs. Click Autofill again on the tab you want to fill.';
+
 async function autofillThisPage({ useAi = false } = {}) {
+  autofillRunToken = window.SmartJobTabSession?.getGeneration?.() ?? null;
+  const runToken = autofillRunToken;
   const fillBtn = document.getElementById(useAi ? 'fillSelectedAiBtn' : 'regAutofillBtn')
     || document.getElementById(useAi ? 'fillSelectedAiBtn' : 'fillSelectedBtn');
   const otherBtn = document.getElementById(useAi ? 'regAutofillBtn' : 'fillSelectedAiBtn')
@@ -3470,9 +3546,15 @@ async function autofillThisPage({ useAi = false } = {}) {
     // Some boards fetch the form after the page loads (Ashby shows "Fetching
     // application form" for several seconds). Give it time before giving up.
     for (let attempt = 0; attempt < FORM_LOAD_RETRIES && !currentFields.length; attempt += 1) {
+      if (autofillTabChanged(runToken)) break;
       showStatus('Waiting for the application form to load…', 'info', 0);
       await delay(FORM_LOAD_RETRY_MS);
       scanResponse = await scanCurrentPage({ silent: true });
+    }
+    // The fields now on screen would be another tab's restored plan.
+    if (autofillTabChanged(runToken)) {
+      showStatus(AUTOFILL_SWITCHED_MSG, 'info', 5000);
+      return;
     }
     const adapterInfo = scanResponse && scanResponse.adapter ? ` (${scanResponse.adapter} adapter)` : '';
     const skippedInfo = lastSkippedCount > 0
@@ -3505,9 +3587,33 @@ async function autofillThisPage({ useAi = false } = {}) {
       if (spinner) spinner.hidden = true;
     }
     if (otherBtn) otherBtn.disabled = false;
+    autofillRunToken = null;
     window.SmartJobRegisterResumeDb?.syncResumeBuilderActionButtons?.();
     updateReadyCountHint();
   }
+}
+
+/**
+ * Rebuild suggestions after the saved answers, settings or profile changed,
+ * keeping what was already done: AI answers, typed values, filled rows.
+ */
+function refreshPlanKeepingWork() {
+  if (!Array.isArray(currentFields) || !currentFields.length) return regeneratePlan();
+  const keyOf = (field) => field?.elementPath || field?.id || '';
+  const previous = new Map(currentPlan.map((row) => [keyOf(row.field), row]));
+  currentPlan = currentFields.map((field) => {
+    const fresh = createPlanRow(field);
+    const prev = previous.get(keyOf(field));
+    if (!prev) return fresh;
+    const prevHasValue = Boolean(String(prev.suggestedValue || '').trim());
+    const freshHasValue = Boolean(String(fresh.suggestedValue || '').trim());
+    const keep =
+      Boolean(prev.fillOutcome) || prev.source === 'ai' || prev.source === 'typed' || (prevHasValue && !freshHasValue);
+    return keep ? prev : fresh;
+  });
+  invalidateAiContextCache();
+  renderFieldPlan();
+  saveScanState();
 }
 
 function regeneratePlan() {
@@ -3518,20 +3624,39 @@ function regeneratePlan() {
   saveScanState();
 }
 
+/** Words that describe experience in general, not one skill. */
+const GENERIC_EXPERIENCE_WORD_RE =
+  /^(?:professional|relevant|industry|related|similar|total|overall|work|working|full|paid|prior|previous|direct|hands|software|engineering|development|technical|technology|it|tech|the|this|that|a|an|our|your|such)$/;
+
+/**
+ * A years question about one skill ("How many years of experience with
+ * Kubernetes?", "Years of Python experience"): the profile's total years does
+ * not answer it.
+ */
+function isSkillYearsField(field) {
+  if ((field?.fieldCategory || '') !== 'experience_years') return false;
+  if (String(field.fieldType || '') === 'yes-no') return true;
+  const text = String(field.questionText || field.labelText || '').toLowerCase();
+  let m = text.match(/(?:experience|years)[^?]*?\b(?:with|in|using|on|working with)\s+([a-z0-9.#+\-]+)/);
+  if (m && !GENERIC_EXPERIENCE_WORD_RE.test(m[1])) return true;
+  m = text.match(/years?\s+of\s+([a-z0-9.#+\-]+)(?:\s+[a-z0-9.#+\-]+)?\s+experience/);
+  return Boolean(m && !GENERIC_EXPERIENCE_WORD_RE.test(m[1]));
+}
+
 function createPlanRow(field) {
   let category = field.fieldCategory || 'unknown';
-  // "Do you have at least 5 years of AWS experience?" wants Yes or No about one
-  // skill; total years of experience does not answer it. Leave it as an open
-  // question for the user or the AI.
-  if (category === 'experience_years' && String(field.fieldType || '') === 'yes-no') {
+  // "Do you have at least 5 years of AWS experience?" or "How many years of
+  // Kubernetes?" ask about one skill; total years of experience does not answer
+  // it. Leave it as an open question for the user or the AI.
+  if (isSkillYearsField(field)) {
     category = 'custom_question';
   }
   const profileKey = categoryToProfileKey[category];
   const profileValue = profileKey ? (currentProfile[profileKey] || '') : '';
 
   // What the user answered by hand on an earlier form outranks everything
-  // derived: the profile mapping, adapter defaults, saved Q&A and the AI.
-  const learned = matchLearnedAnswer(field);
+  // derived — except a value in the profile, which is where the user changes it.
+  const learned = String(profileValue || '').trim() ? null : matchLearnedAnswer(field);
   if (learned) {
     return {
       field,
@@ -3761,7 +3886,11 @@ function createPlanRow(field) {
 // mapping, adapter defaults and the AI.
 const LEARNED_KEY = 'autofill_learned_answers_v1';
 const LEARN_ENABLED_KEY = 'autofill_learn_enabled';
-const LEARN_EXEMPT_CATEGORIES = new Set(['resume_upload', 'cover_letter_upload', 'acknowledgment', 'employment_kit']);
+const LEARN_EXEMPT_CATEGORIES = new Set([
+  'resume_upload', 'cover_letter_upload', 'acknowledgment', 'employment_kit',
+  'gender', 'gender_identity', 'race', 'hispanic_latino', 'sexual_orientation', 'transgender',
+  'veteran_status', 'disability_status', 'date_of_birth',
+]);
 const LEARN_PLACEHOLDER_RE =
   /^[-–—\s]*(?:(?:please\s+)?(?:select|choose)(?:\s+(?:one|an?\b.*|your\b.*|the\b.*|from\b.*|option.*))?[-–—\s.…:]*|[-–—.\s]+)$/i;
 /** A free-text answer this long was written for one company; elsewhere it is an example for the AI. */
@@ -3773,7 +3902,7 @@ let learnEnabledSetting = true;
 
 /** Must match learnKey() in content.js. */
 function learnedKey(question) {
-  return normalizeText(question)
+  return normalizeText(techAwareText(question))
     .replace(/\b(required|optional)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -3796,7 +3925,8 @@ function learnedBank() {
 }
 
 function learnedTokens(key) {
-  return new Set(String(key || '').split(' ').filter((t) => t.length > 1));
+  // One-letter words count: "R" and "C" are languages, "3" is a number of years.
+  return new Set(String(key || '').split(' ').filter(Boolean));
 }
 
 /** Share of words two questions have in common (Jaccard). */
@@ -3851,10 +3981,30 @@ function learnedEntryFor(field) {
   if (learnedTokens(key).size < 3) return null;
   let best = null;
   for (const [otherKey, entry] of Object.entries(bank)) {
+    if (!questionNumbersAgree(key, otherKey)) continue;
     const score = learnedSimilarity(key, otherKey);
     if (score >= LEARN_FUZZY_MIN && (!best || score > best.confidence)) best = { entry, confidence: score };
   }
   return best;
+}
+
+/**
+ * Questions whose answer is about one company or one application: reused only
+ * on the same site. "Who referred you", "Have you worked here before", "Why
+ * this company", and bare follow-ups ("If yes, please explain") that depend on
+ * the question before them.
+ */
+const LEARN_COMPANY_SPECIFIC_RE =
+  /\b(?:refer(?:red|ral|rer)?|previously (?:worked|employed|applied|interviewed)|(?:worked|employed) (?:for|at|with|by) (?:this|our|the) (?:company|organi[sz]ation)|currently employed (?:by|at)|current employee|former employee|how did you (?:hear|learn|find)|why (?:do you want|are you interested|this company|us\b|join)|interest(?:ed)? in (?:this|our) (?:role|position|company|team)|relatives?|family members?)/i;
+const LEARN_FOLLOWUP_KEY_RE =
+  /^(?:if (?:yes|so|other|applicable|no)\b|please (?:explain|specify|describe|elaborate|list|provide|indicate)\b|explain\b|specify\b|other\b|details?\b|comments?\b|additional (?:information|comments|details))/;
+
+function currentScanHost() {
+  try {
+    return new URL(currentScanUrl || '').hostname.replace(/^www\./, '');
+  } catch (_) {
+    return '';
+  }
 }
 
 /** @returns {{ value: string, confidence: number }|null} */
@@ -3863,7 +4013,18 @@ function matchLearnedAnswer(field) {
   if (LEARN_EXEMPT_CATEGORIES.has(field.fieldCategory || '')) return null;
   const hit = learnedEntryFor(field);
   if (!hit) return null;
-  const { entry, confidence } = hit;
+  let { entry, confidence } = hit;
+  const questionText = String(field.questionText || field.labelText || '');
+  const questionKey = learnedKey(questionText);
+  const siteBound =
+    LEARN_COMPANY_SPECIFIC_RE.test(questionText) ||
+    (LEARN_FOLLOWUP_KEY_RE.test(questionKey) && questionKey.split(' ').length <= 8);
+  if (siteBound) {
+    const here = entry.hosts ? entry.hosts[currentScanHost()] : '';
+    if (!here) return null;
+    // This site's own answer, for its own choices.
+    entry = { ...entry, a: here, alts: {} };
+  }
   const options = (Array.isArray(field.options) ? field.options : []).filter(
     (o) => String(o || '').trim() && !LEARN_PLACEHOLDER_RE.test(String(o).trim())
   );
@@ -3980,7 +4141,20 @@ function wireLearnedAnswers() {
       renderLearnedSettings();
     }
   });
-  document.getElementById('regProfileId')?.addEventListener('change', renderLearnedSettings);
+  document.getElementById('regProfileId')?.addEventListener('change', () => {
+    renderLearnedSettings();
+    // Another candidate: the plan's values and earlier answers were the old one's.
+    if (Array.isArray(currentFields) && currentFields.length) {
+      loadWebsiteProfileForAutofill()
+        .then((ok) => {
+          if (ok) {
+            regeneratePlan();
+            showStatus('Profile changed: suggestions updated for this profile.', 'info', 3000);
+          }
+        })
+        .catch(() => {});
+    }
+  });
   // The profile list fills in after start-up, and without a change event.
   document.addEventListener('click', (event) => {
     if (event.target.closest?.('[data-tab="settings"], #openSettingsBtn, .settings-open')) renderLearnedSettings();
@@ -4101,8 +4275,8 @@ function isSelfIdQuestion(row) {
 function isProfileField(row) {
   const field = row?.field || {};
   const category = field.fieldCategory || 'unknown';
-  // A yes/no about years in one skill is an open question, not the profile's total.
-  if (category === 'experience_years' && String(field.fieldType || '') === 'yes-no') return false;
+  // Years in one skill is an open question, not the profile's total.
+  if (isSkillYearsField(field)) return false;
   return Boolean(categoryToProfileKey[category]);
 }
 
@@ -4324,9 +4498,14 @@ function matchValueToOptions(value, options) {
   for (const opt of options) {
     if (String(opt).trim().toLowerCase() === lower) return String(opt).trim();
   }
+  // Whole words, and never the opposite Yes/No: "No" is inside "now" and "not".
+  const words = (t) => ` ${normalizeText(t)} `;
+  const polarity = (t) => (/^(yes|no)\b/.exec(normalizeText(t)) || [])[1] || '';
+  const want = polarity(target);
   for (const opt of options) {
-    const s = String(opt).trim().toLowerCase();
-    if (s.includes(lower) || lower.includes(s)) return String(opt).trim();
+    const s = String(opt).trim();
+    if (want && polarity(s) && polarity(s) !== want) continue;
+    if (words(s).includes(words(target)) || words(target).includes(words(s))) return s;
   }
   return '';
 }
@@ -4337,7 +4516,12 @@ function matchValueToOptions(value, options) {
 function isDeterministicFactRow(row) {
   if (!row || !isRowFillable(row)) return false;
   const src = row.source;
-  if (src === 'profile' || src === 'custom' || src === 'kit' || src === 'acknowledgment' || src === 'learned') return true;
+  if (
+    src === 'profile' || src === 'custom' || src === 'kit' || src === 'acknowledgment' ||
+    src === 'learned' || src === 'typed' || src === 'suggested'
+  ) {
+    return true;
+  }
   const cat = row.field?.fieldCategory;
   if (cat && DETERMINISTIC_PROFILE_CATEGORIES.has(cat) && String(row.suggestedValue || '').trim()) {
     return true;
@@ -4375,7 +4559,7 @@ function resolveDeterministicValueForRow(row) {
 
   const cat = field.fieldCategory || '';
   const profileKey = categoryToProfileKey[cat];
-  const yesNoAboutYears = cat === 'experience_years' && String(field.fieldType || '') === 'yes-no';
+  const yesNoAboutYears = isSkillYearsField(field);
   if (profileKey && DETERMINISTIC_PROFILE_CATEGORIES.has(cat) && !yesNoAboutYears) {
     let profileValue = String(currentProfile[profileKey] || '').trim();
     if (cat === 'full_name' && !profileValue) {
@@ -4923,6 +5107,10 @@ function renderFieldPlan() {
       planRow.suggestedValue = textarea.value;
       const hasValue = Boolean(textarea.value.trim());
       planRow.fillError = '';
+      // Typed by the user: fillable, whatever the row started as.
+      if (hasValue && ['voluntary', 'optional', 'manual', 'missing'].includes(planRow.source)) {
+        planRow.source = 'typed';
+      }
       if (hasValue) {
         planRow.status = 'Ready';
         planRow.fillOutcome = null;
@@ -5073,6 +5261,7 @@ async function fillSelectedFields({ useAi = false } = {}) {
   }
 
   try {
+    if (autofillTabChanged(autofillRunToken)) throw new Error(AUTOFILL_SWITCHED_MSG);
     showStatus(`Auto-filling ${payload.length} field${payload.length === 1 ? '' : 's'}...`, 'info', 0);
     const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: payload, thresholds });
     if (!response || !response.success) throw new Error(response?.error || 'Fill failed.');
@@ -5102,9 +5291,17 @@ async function fillSelectedFieldsWithAi() {
   if (!requireOpenAiApiKey()) return;
 
   invalidateAiContextCache();
+  // The tab this run is for: a switch mid-run must not answer or fill the other tab.
+  const aiRunToken = autofillRunToken ?? window.SmartJobTabSession?.getGeneration?.() ?? null;
+  // Optional and voluntary rows are filled when they already have a value (from
+  // the profile or the kit); only rows without one are left out of the AI run.
   const targets = currentPlan
     .map((row, index) => ({ row, index }))
-    .filter(({ row }) => row.source !== 'voluntary' && row.source !== 'optional' && !row.field?.voluntary && !row.field?.optional);
+    .filter(
+      ({ row }) =>
+        isRowFillable(row) ||
+        (row.source !== 'voluntary' && row.source !== 'optional' && !row.field?.voluntary && !row.field?.optional)
+    );
 
   if (!targets.length) {
     showStatus('No fields to process.', 'info');
@@ -5120,6 +5317,11 @@ async function fillSelectedFieldsWithAi() {
     showStatus(`AI: preparing answers for ${targets.length} field${targets.length === 1 ? '' : 's'}…`, 'info', 0);
 
     for (const { row, index } of targets) {
+      if (autofillTabChanged(aiRunToken)) {
+        saveScanState();
+        showStatus(AUTOFILL_SWITCHED_MSG, 'info', 5000);
+        return;
+      }
       const rowEl = document.querySelector(`.field-row[data-index="${index}"]`);
 
       if (isConsentQuestion(row) && !isRowFillable(row)) {
@@ -5177,9 +5379,21 @@ async function fillSelectedFieldsWithAi() {
         continue;
       }
 
+      // Consent and self-identification are never sent to the AI.
+      if (isConsentQuestion(row) || isSelfIdQuestion(row)) {
+        row.status = 'Left for you — consent or self-identification';
+        updateFieldRowAppearance(rowEl, row);
+        continue;
+      }
+
       if (!isRowFillable(row) || row.source !== 'ai') {
         try {
           const resolved = await generateAiValueForRow(row);
+          // Answered for the tab the run started on; do not write it into another.
+          if (autofillTabChanged(aiRunToken)) {
+            showStatus(AUTOFILL_SWITCHED_MSG, 'info', 5000);
+            return;
+          }
           applyAiValueToRow(row, resolved, rowEl);
           if (resolved.source === 'ai') generated += 1;
         } catch (error) {
@@ -5296,7 +5510,7 @@ function commitCustomQuestions(next, statusMessage) {
     chrome.storage.local.set({ [CUSTOM_QUESTIONS_KEY]: next }, () => {
       currentQuestions = next;
       renderQuestionsList();
-      regeneratePlan();
+      refreshPlanKeepingWork();
       if (statusMessage) showStatus(statusMessage, 'success', 2800);
       resolve();
     });

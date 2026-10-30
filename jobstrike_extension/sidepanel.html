@@ -253,6 +253,10 @@
                     <span class="rb-btn-label">Copy Prompt</span>
                     <span class="rb-spinner" id="regBuildCopySpinner" hidden aria-hidden="true"></span>
                   </button>
+                  <button type="button" class="btn rb-action-secondary rb-action-wide" id="regQueueAutogenBtn" title="Add this job to Resume DB and queue its resume for AutoGen (ChatGPT tab or API), using this profile's prompt">
+                    <span class="rb-btn-label">Queue for AutoGen</span>
+                    <span class="rb-spinner" id="regQueueAutogenSpinner" hidden aria-hidden="true"></span>
+                  </button>
                 </div>
 
                 <div class="rb-action-group rb-action-group--files">
@@ -385,6 +389,51 @@
       <section class="tab-panel" id="tab-job-scraper">
         <div class="tab-panel-scroll js-scraper">
           <div class="card js-panel">
+            <!-- Scrape mode: each keeps its own filters, profile, search and results. -->
+            <div class="js-mode">
+              <div class="js-mode-switch" role="radiogroup" aria-label="Scrape mode">
+                <button type="button" class="js-mode-btn is-active" data-js-mode="us" role="radio" aria-checked="true">US jobs</button>
+                <button type="button" class="js-mode-btn" data-js-mode="intl" role="radio" aria-checked="false">Worldwide contract</button>
+              </div>
+              <label class="js-country-row" id="jsCountryRow" hidden>
+                <span>Candidate country</span>
+                <select id="jsCandidateCountry" class="js-input">
+                  <option value="">Choose…</option>
+                </select>
+              </label>
+              <p class="js-mode-hint" id="jsModeHint">Remote jobs in the US.</p>
+            </div>
+            <!-- Live: scheduled checks during working hours; new jobs join the queue. -->
+            <div class="js-live" id="jsLiveCard">
+              <div class="js-live-top">
+                <span class="js-live-dot" aria-hidden="true"></span>
+                <strong class="js-live-name">Live</strong>
+                <span class="js-live-status" id="jsLiveStatus">Off</span>
+                <label class="js-source-switch" title="Check for new jobs on a schedule during your working hours, while this panel is open">
+                  <input type="checkbox" id="jsLiveToggle" aria-label="Live">
+                  <span aria-hidden="true"></span>
+                </label>
+              </div>
+              <p class="js-live-meta" id="jsLiveMeta">Checks HiringCafe every 30 min and Jobright every 3 h during your hours.</p>
+              <details class="js-live-settings">
+                <summary>Live settings</summary>
+                <label class="js-live-field">
+                  <span>Working hours</span>
+                  <input type="text" id="jsLiveHours" class="js-input" placeholder="10:00-20:30, 01:00-07:30" spellcheck="false">
+                </label>
+                <label class="js-live-field">
+                  <span>HiringCafe every</span>
+                  <select id="jsLiveEvery" class="js-input">
+                    <option value="15">15 min</option>
+                    <option value="30">30 min</option>
+                    <option value="60">60 min</option>
+                  </select>
+                </label>
+                <label class="js-live-check"><input type="checkbox" id="jsLiveNotify" checked> Desktop notification for new jobs</label>
+                <button type="button" class="btn-secondary-full" id="jsLiveCheckNow">Check now</button>
+                <p class="js-live-note">Jobright is read every 3 hours while today's requests allow a full read. Checks run only while this panel is open.</p>
+              </details>
+            </div>
             <!-- Sources, in scrape order. Freshness is the setting changed most, so it lives on the row. -->
             <div class="js-sources">
               <div class="js-source-card">
@@ -558,6 +607,10 @@
                 <label class="js-filter-row">
                   <input type="checkbox" id="jsHideClearance" checked>
                   <span class="js-filter-name" title="Hides jobs the source marks as requiring a security clearance. Jobright provides this; HiringCafe jobs are checked later on the Bid tab.">Hide clearance-required jobs</span>
+                </label>
+                <label class="js-filter-row" hidden>
+                  <input type="checkbox" id="jsOpenToCountry" checked>
+                  <span class="js-filter-name" title="Worldwide mode: hides jobs whose countries leave out the candidate's country, jobs based in another country, and titles limited to the US. With Any country, only jobs limited to the US are hidden. A job that states nothing is kept.">Only jobs open to the candidate's country</span>
                 </label>
                 <label class="js-filter-row">
                   <input type="checkbox" id="jsUsOnly" checked>

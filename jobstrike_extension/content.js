@@ -2353,7 +2353,9 @@
       if (tracker && typeof tracker.setValue === 'function') tracker.setValue('');
     } catch (_) {}
 
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    // A textarea has its own setter; the input one throws "Illegal invocation" on it.
+    const proto = element instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
     if (setter) setter.call(element, str);
     else element.value = str;
 
@@ -6965,9 +6967,13 @@
     const sameJob = Boolean(staged && jobKey && staged.jobKey === jobKey);
     const jobFile = sameJob ? (kind === 'resume' ? staged.resume : kind === 'coverLetter' ? staged.coverLetter : null) : null;
     if (jobFile && jobFile.dataUrl) return jobFile;
-    const kits = Array.isArray(result[KIT_STORAGE_KEY]) ? result[KIT_STORAGE_KEY] : [];
+    const kits = (Array.isArray(result[KIT_STORAGE_KEY]) ? result[KIT_STORAGE_KEY] : []).filter(Boolean);
     if (!kits.length) return null;
-    const kit = kits.find((k) => k && k.isDefault) || kits[0];
+    // A kit assigned to another profile is another candidate's file: never used.
+    const profileId = learnTabProfileId || learnProfileId || '';
+    const own = profileId ? kits.filter((k) => String(k.profileId || '') === profileId) : [];
+    const pool = own.length ? own : kits.filter((k) => !k.profileId);
+    const kit = pool.find((k) => k.isDefault) || pool[0];
     if (!kit) return null;
     const file = kind === 'resume' ? kit.resume : kind === 'coverLetter' ? kit.coverLetter : null;
     if (!file || !file.dataUrl) return null;
@@ -7391,7 +7397,11 @@
     const b = normalizeText(targetText);
     if (!a || !b) return 0;
     if (a === b) return 1;
-    if (a.includes(b) || b.includes(a)) return 0.8;
+    // "No" must never pick "Yes, I will now…": the opposite answer scores nothing.
+    const polarity = (t) => (/^(yes|no)\b/.exec(t) || [])[1] || '';
+    if (polarity(a) && polarity(b) && polarity(a) !== polarity(b)) return 0;
+    // Whole words only: "no" is inside "now", "not", "know".
+    if (` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `)) return 0.8;
     const aTokens = new Set(a.split(' '));
     const bTokens = new Set(b.split(' '));
     let overlap = 0;
@@ -7430,17 +7440,14 @@
     const group = name
       ? Array.from(document.querySelectorAll(`input[type="radio"][name="${cssEscape(name)}"]`))
       : [el];
-    let target = null;
-    for (const radio of group) {
-      const label = getLabelText(radio) || radio.value || '';
-      if (normalizeText(label) === normalizeText(pick)) {
-        target = radio;
-        break;
-      }
-      if (isAcknowledgmentOptionText(label) || isAcknowledgmentOptionText(radio.value)) {
-        target = radio;
-        break;
-      }
+    const labelOf = (radio) => getLabelText(radio) || radio.value || '';
+    // The answer itself wins; only without one does any "I understand…" option do.
+    let target =
+      group.find((radio) => normalizeText(labelOf(radio)) === normalizeText(pick)) ||
+      group.find((radio) => normalizeText(radio.value || '') === normalizeText(pick)) ||
+      null;
+    if (!target) {
+      target = group.find((radio) => isAcknowledgmentOptionText(labelOf(radio)) || isAcknowledgmentOptionText(radio.value)) || null;
     }
     if (!target && group.length === 1) target = group[0];
     if (!target) return { success: false, error: 'Acknowledgment option not found.' };
@@ -8222,11 +8229,15 @@
     return Boolean(hiddenMirror && trim(hiddenMirror.value || ''));
   }
 
-  function verifyAutocompleteSelection(el, hiddenMirror, expectedValue, beforeValue) {
+  function verifyAutocompleteSelection(el, hiddenMirror, expectedValue, beforeValue, typedText) {
     if (isLeverLocationInput(el)) return verifyLeverLocationSelection(hiddenMirror);
     if (isGreenhouseLocationCombobox(el)) return verifyGreenhouseLocationSelection(el);
     if (hiddenMirror && trim(hiddenMirror.value || '')) return true;
     const current = trim(el.value || '');
+    // No result was clicked: only the text we typed is in the box. That is not a selection.
+    if (typedText != null) {
+      return Boolean(current) && current !== beforeValue && current.toLowerCase() !== trim(String(typedText)).toLowerCase();
+    }
     if (current && current !== beforeValue) return true;
     if (current && expectedValue && current.toLowerCase().includes(String(expectedValue).slice(0, 3).toLowerCase())) return true;
     return false;
@@ -8410,7 +8421,7 @@
       } else if (waited.state === 'timeout') {
         await tryKeyboardAutocompletePick(el);
         await delay(100);
-        if (verifyAutocompleteSelection(el, hiddenMirror, value, before)) {
+        if (verifyAutocompleteSelection(el, hiddenMirror, value, before, attempt)) {
           return { success: true };
         }
         lastReason = `Autocomplete did not respond in time for "${attempt}".`;
@@ -8521,6 +8532,17 @@
     if (!el || el.tagName !== 'INPUT' || value == null) return value;
     if (fieldCategory === 'phone') return normalizePhoneForField(value);
     if (fieldCategory === 'date_of_birth') return formatDateForField(el, value);
+    const type = (el.getAttribute('type') || 'text').toLowerCase();
+    // The browser blanks a value in the wrong format ("11/09/2026" in a date box).
+    if (type === 'date') return formatDateForField(el, value);
+    if (type === 'number') {
+      // "$120,000" or "120k" → 120000; a range keeps its first number.
+      const m = String(value).match(/-?\d[\d,]*(?:\.\d+)?\s*(k\b)?/i);
+      if (!m) return value;
+      let n = Number(m[0].replace(/[,\s]|k$/gi, ''));
+      if (m[1]) n *= 1000;
+      return Number.isFinite(n) ? String(n) : value;
+    }
     return value;
   }
 
@@ -8595,7 +8617,14 @@
         if (tag === 'INPUT' && (inputType === 'text' || inputType === 'search') && isSearchAutocomplete(el)) {
           return fillSearchAutocomplete(el, value, thresholds?.selectMatchThreshold, fieldCategory);
         }
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return await fillTextLike(el, value);
+        if (tag === 'INPUT' || tag === 'TEXTAREA') {
+          const typed = await fillTextLike(el, value);
+          // Date, number and time boxes silently drop a value they cannot parse.
+          if (typed?.success && /^(number|date|datetime|month|week|time)$/.test(inputType) && !String(el.value || '').trim() && String(value || '').trim()) {
+            return { success: false, error: `This ${inputType} field did not accept "${value}". Enter it by hand.` };
+          }
+          return typed;
+        }
         if (el.isContentEditable) return fillContentEditable(el, value);
         return { success: false, error: `Cannot type into ${tag.toLowerCase()} element.` };
 
@@ -8703,6 +8732,8 @@
   async function fillApplicationFields(fields, thresholds) {
     pickAdapter();
     const results = [];
+    // An answer typed just before this fill is the user's: save it before it is overwritten.
+    flushLearned();
     // What the extension writes is not the user's answer: stay deaf while filling.
     learnOwnFillDepth += 1;
     try {
@@ -8710,6 +8741,14 @@
         try {
           const result = await fillField(field, thresholds);
           results.push({ id: field.id, elementPath: field.elementPath, ...result });
+          if (result?.success) {
+            try {
+              const written = resolveFieldElement(field);
+              if (written) learnFilledValues.set(written, normalizeText(learnReadAnswer(written, field)));
+            } catch (_) {
+              /* not readable: nothing to remember */
+            }
+          }
         } catch (error) {
           results.push({ id: field.id, elementPath: field.elementPath, success: false, error: error?.message || String(error) });
         }
@@ -9157,7 +9196,14 @@
   const LEARN_CARRY_MS = 30000;
   const LEARN_MAX_PER_PROFILE = 3000;
   const LEARN_MAX_ANSWER_CHARS = 4000;
-  const LEARN_EXEMPT_CATEGORIES = new Set(['resume_upload', 'cover_letter_upload', 'acknowledgment', 'employment_kit']);
+  // Self-identification and dates are never remembered: the profile answers
+  // self-ID, and a date is right for one application only.
+  const LEARN_EXEMPT_CATEGORIES = new Set([
+    'resume_upload', 'cover_letter_upload', 'acknowledgment', 'employment_kit',
+    'gender', 'gender_identity', 'race', 'hispanic_latino', 'sexual_orientation', 'transgender',
+    'veteran_status', 'disability_status', 'date_of_birth',
+  ]);
+  const LEARN_DATE_QUESTION_RE = /\b(?:today'?s date|date of|start date|available (?:from|to start|start)|availability date|earliest (?:start|date))\b/i;
   /** Never remembered, whatever the answer. */
   const LEARN_NEVER_QUESTION_RE =
     /\b(password|passcode|ssn|social security|national id|passport (number|no)|driver'?s? licen[cs]e (number|no)|bank|routing|iban|credit card|card number|cvv|security code|verification code|one[- ]time|otp|captcha)\b/i;
@@ -9182,10 +9228,26 @@
   let learnOwnFillDepth = 0;
   let learnQuietUntil = 0;
   const learnTouched = new Map();
+  // Learning starts only on a page the user scanned or filled with Autofill: an
+  // application form, not every website with a few inputs.
+  let learnArmed = false;
+  // The profile the side panel filled this page with (answers belong to it).
+  let learnTabProfileId = '';
+  // What Autofill itself wrote into each field: kept unchanged, it is not the user's answer.
+  const learnFilledValues = new WeakMap();
+
+  /** Must match techAwareText() in sidepanel.js: "C#", "C++" and "C" stay apart. */
+  function techAwareText(text) {
+    return String(text || '')
+      .replace(/c\s*#/gi, ' csharp ')
+      .replace(/c\s*\+\+/gi, ' cplusplus ')
+      .replace(/f\s*#/gi, ' fsharp ')
+      .replace(/(^|[^a-z0-9])\.net\b/gi, '$1 dotnet ');
+  }
 
   /** Same normalisation as the side panel's lookup, so both sides agree on a question. */
   function learnKey(question) {
-    return normalizeText(question)
+    return normalizeText(techAwareText(question))
       .replace(/\b(required|optional)\b/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -9345,11 +9407,18 @@
     }
 
     const fieldType = String(field.fieldType || field.inputType || '');
-    const isChoice = /radio|checkbox|yes-no/.test(fieldType) || field.inputType === 'radio' || field.inputType === 'checkbox';
+    const isChoice =
+      /radio|checkbox|yes-no|select|combobox|dropdown/.test(fieldType) ||
+      field.inputType === 'radio' || field.inputType === 'checkbox' ||
+      el.tagName === 'SELECT' || (Array.isArray(field.options) && field.options.length > 0);
     if (isChoice && LEARN_CONSENT_RE.test(question)) return null;
-
+    if (/^(date|datetime|month|week|time)/.test(fieldType) || /^(date|datetime-local|month|week|time)$/.test(String(el.getAttribute?.('type') || '')) || LEARN_DATE_QUESTION_RE.test(question)) {
+      return null;
+    }
     const answer = learnReadAnswer(el, field).slice(0, LEARN_MAX_ANSWER_CHARS).trim();
     if (!answer || LEARN_PLACEHOLDER_RE.test(answer) || LEARN_NEVER_ANSWER_RE.test(answer)) return null;
+    // Left as Autofill wrote it: the user did not answer this, the extension did.
+    if (learnFilledValues.has(el) && learnFilledValues.get(el) === normalizeText(answer)) return null;
 
     return {
       key,
@@ -9370,7 +9439,7 @@
         if (chrome.runtime.lastError) return;
         const stored = (result || {})[LEARNED_KEY];
         const store = stored && typeof stored === 'object' ? stored : {};
-        const profile = learnProfileId || '_';
+        const profile = learnTabProfileId || learnProfileId || '_';
         const bank = store[profile] && typeof store[profile] === 'object' ? store[profile] : {};
         const keepLast = (map, limit) => {
           const keys = Object.keys(map);
@@ -9425,6 +9494,11 @@
     if (learnTimer) clearTimeout(learnTimer);
     learnTimer = null;
     if (!learnTouched.size) return;
+    // Mid-fill the fields hold Autofill's values: record once it is done.
+    if (learnOwnFillDepth > 0) {
+      learnTimer = setTimeout(flushLearned, LEARN_FLUSH_MS);
+      return;
+    }
     const fields = Array.from(learnTouched.values());
     learnTouched.clear();
     const records = [];
@@ -9443,8 +9517,10 @@
   }
 
   function onLearnEvent(event) {
-    if (!learnEnabled || !event.isTrusted) return;
+    if (!learnEnabled || !event.isTrusted || !learnArmed) return;
     if (learnOwnFillDepth > 0 || Date.now() < learnQuietUntil) return;
+    // Moving through the form (Tab, arrows) is not answering it.
+    if (event.type === 'keyup' && /^(Tab|Shift|Control|Alt|Meta|Escape|Enter|Home|End|PageUp|PageDown|Arrow)/.test(event.key || '')) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
     if (target.id === 'remote-helper-assistant-host') return;
@@ -9536,6 +9612,11 @@
       if (request.action === 'getAdapterDebug') {
         sendResponse(getAdapterDebugInfo());
         return true;
+      }
+
+      if (request.action === 'scanApplicationForm' || request.action === 'fillApplicationFields') {
+        learnArmed = true;
+        if (request.profileId) learnTabProfileId = String(request.profileId).trim();
       }
 
       if (request.action === 'scanApplicationForm') {

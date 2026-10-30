@@ -14,7 +14,44 @@
     jrGuard: 'job_scraper_jobright_guard_v1',
     registered: 'job_scraper_registered_v1',
     scrapedNames: 'job_scraper_names_by_link_v1',
+    live: 'job_scraper_live_v1',
   };
+
+  /**
+   * Scrape modes. "us": remote US jobs (the original setup). "intl": remote
+   * contract jobs open to candidates in another country. Each mode keeps its own
+   * filters, profile, HiringCafe search, results and "new" marks; the block
+   * lists, the Jobright request budget and the Bid tab's names are shared.
+   */
+  const MODE_KEY = 'job_scraper_mode_v1';
+  const MODE_STORAGE_FIELDS = ['prefs', 'lastResults', 'customSearch', 'seen', 'registered', 'live'];
+  const US_STORAGE_KEYS = Object.fromEntries(MODE_STORAGE_FIELDS.map((f) => [f, STORAGE[f]]));
+  function applyModeStorageKeys(mode) {
+    for (const f of MODE_STORAGE_FIELDS) {
+      STORAGE[f] = mode === 'intl' ? `${US_STORAGE_KEYS[f]}_intl` : US_STORAGE_KEYS[f];
+    }
+  }
+
+  /** Countries a worldwide-contract candidate can be in (the US is the other mode). */
+  const CANDIDATE_COUNTRIES = [
+    'CA', 'MX', 'BR', 'AR', 'CO', 'CL', 'PE', 'UY', 'CR', 'GT', 'DO', 'EC', 'VE',
+    'GB', 'IE', 'DE', 'FR', 'ES', 'PT', 'IT', 'NL', 'BE', 'CH', 'AT', 'PL', 'RO', 'BG', 'UA', 'RS',
+    'HR', 'CZ', 'SK', 'HU', 'GR', 'SE', 'NO', 'DK', 'FI', 'EE', 'LV', 'LT', 'MD', 'GE', 'AM', 'AZ',
+    'TR', 'IL', 'AE', 'SA', 'EG', 'MA', 'TN', 'ZA', 'NG', 'KE', 'GH',
+    'IN', 'PK', 'BD', 'LK', 'NP', 'PH', 'VN', 'ID', 'MY', 'TH', 'SG', 'KR', 'JP', 'TW', 'HK', 'CN',
+    'KZ', 'UZ', 'AU', 'NZ',
+  ];
+  /** Worldwide mode's "Any country": candidates anywhere outside the US. */
+  const ANY_COUNTRY = 'ANY';
+
+  function countryName(code) {
+    if (code === ANY_COUNTRY) return 'any country';
+    try {
+      return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || code;
+    } catch (_) {
+      return code;
+    }
+  }
 
   /** How many scraped jobs' names are remembered for the Bid tab. */
   const SCRAPED_NAMES_MAX = 4000;
@@ -149,9 +186,44 @@
     /** Which sources a scrape reads. HiringCafe needs no account; Jobright uses yours. */
     useJobright: true,
     useHiringCafe: true,
+    /** Worldwide mode: the candidate's country (ISO code), and hide jobs not open to it. */
+    candidateCountry: '',
+    openToCountryOnly: true,
+    /** Live mode: checks on a schedule during working hours, new jobs added to the list. */
+    liveEnabled: false,
+    liveHours: '10:00-20:30, 01:00-07:30',
+    liveHcMinutes: 30,
+    liveNotify: true,
+    liveHideOpened: false,
   };
 
+  /** Defaults of the worldwide-contract mode: contract only, no US filter, HiringCafe only. */
+  const DEFAULT_PREFS_INTL = {
+    ...DEFAULT_PREFS,
+    usOnly: false,
+    showFullTime: false,
+    showPartTime: false,
+    showTemporary: false,
+    showInternship: false,
+    showContract: true,
+    // Jobright's Recommend feed is US jobs; it can be switched on if yours is not.
+    useJobright: false,
+    // Contract jobs are posted less often and often dated by day only: 3 days fills a list.
+    freshnessWindowHc: '3d',
+    candidateCountry: ANY_COUNTRY,
+  };
+
+  function defaultPrefs() {
+    return state.mode === 'intl' ? DEFAULT_PREFS_INTL : DEFAULT_PREFS;
+  }
+
   const state = {
+    mode: 'us',
+    /** Live mode: when HiringCafe was last read, the status line, and whether a live check runs. */
+    live: { lastHcAt: 0, lastCheckAt: 0, lastAdded: 0, status: '', running: false },
+    /** Set for one run: which sources it reads (Live decides), and that it is a live check. */
+    runSources: null,
+    liveRun: false,
     prefs: { ...DEFAULT_PREFS },
     blockedCompanies: [],
     blockedAts: [],
@@ -646,7 +718,7 @@
     pruneSeen();
 
     const storedPrefs = result[STORAGE.prefs] || {};
-    state.prefs = { ...DEFAULT_PREFS, ...storedPrefs };
+    state.prefs = { ...defaultPrefs(), ...storedPrefs };
     // Migrate single freshnessWindow → per-source only when that source was never set.
     const legacyFresh = normalizeFreshnessPref(
       storedPrefs.freshnessWindow || storedPrefs.dateWindow
@@ -692,6 +764,15 @@
         ? savedRegistered.companies
         : [];
     }
+
+    const savedLive = (await storageGet([STORAGE.live]))[STORAGE.live];
+    state.live = {
+      lastHcAt: Number(savedLive?.lastHcAt) || 0,
+      lastCheckAt: Number(savedLive?.lastCheckAt) || 0,
+      lastAdded: Number(savedLive?.lastAdded) || 0,
+      status: '',
+      running: false,
+    };
 
     const custom = result[STORAGE.customSearch];
     if (custom && custom.searchState && typeof custom.searchState === 'object') {
@@ -856,6 +937,13 @@
     if (stats.removedDegree) bits.push(`${stats.removedDegree} higher degree`);
     if (stats.removedLanguage) bits.push(`${stats.removedLanguage} other language`);
     if (stats.removedJobType) bits.push(`${stats.removedJobType} job type`);
+    if (stats.removedNotOpen) {
+      bits.push(
+        state.prefs.candidateCountry === ANY_COUNTRY
+          ? `${stats.removedNotOpen} US-only`
+          : `${stats.removedNotOpen} not open to ${state.prefs.candidateCountry}`
+      );
+    }
 
     if (stats.removedRegisteredJobs) bits.push(`${stats.removedRegisteredJobs} reg. jobs`);
     if (stats.removedRegisteredCompanies) {
@@ -877,6 +965,17 @@
       normalizeFreshnessPref(state.prefs.freshnessWindow) ||
       DEFAULT_PREFS.freshnessWindowJr
     );
+  }
+
+  /** The HiringCafe search a run uses: an imported one, else this mode's default. */
+  function hcSearchStateForRun() {
+    if (state.customSearchState) return state.customSearchState;
+    if (state.mode === 'intl' && state.prefs.candidateCountry) {
+      const code = state.prefs.candidateCountry;
+      if (code === ANY_COUNTRY) return api()?.anyCountrySearchState?.() || null;
+      return api()?.countrySearchState?.(code, countryName(code)) || null;
+    }
+    return null;
   }
 
   function resolveHcDateWindow() {
@@ -1026,7 +1125,8 @@
     // Only a stated, different country excludes; an unknown one does not.
     // A stated other country excludes; so does a title that limits the job to
     // another region. An unknown country alone does not.
-    const domestic = state.prefs.usOnly
+    const worldwide = state.mode === 'intl';
+    const domestic = !worldwide && state.prefs.usOnly
       ? cleared.filter(
           (job) =>
             (!job.country_code || /^(us|usa)$/i.test(String(job.country_code).trim())) &&
@@ -1034,10 +1134,15 @@
         )
       : cleared;
     const removedForeign = cleared.length - domestic.length;
+    const reachable =
+      worldwide && state.prefs.openToCountryOnly && state.prefs.candidateCountry
+        ? domestic.filter((job) => openToCountry(job, state.prefs.candidateCountry))
+        : domestic;
+    const removedNotOpen = domestic.length - reachable.length;
     const degreeOk = state.prefs.hideAdvancedDegree
-      ? domestic.filter((job) => job.advanced_degree_required !== true)
-      : domestic;
-    const removedDegree = domestic.length - degreeOk.length;
+      ? reachable.filter((job) => job.advanced_degree_required !== true)
+      : reachable;
+    const removedDegree = reachable.length - degreeOk.length;
     const languageOk = state.prefs.hideForeignLanguage
       ? degreeOk.filter((job) => job.foreign_language_required !== true)
       : degreeOk;
@@ -1077,6 +1182,7 @@
       removedDegree,
       removedLanguage,
       removedJobType,
+      removedNotOpen,
       // Jobs both sources listed, and how often the other source's posting time was earlier.
       crossSourceDates: deduped.dateMerge || null,
       groupedSameCompany,
@@ -1344,6 +1450,9 @@
       ...sourceStatedFacts(job),
       work_model: job?.work_model || null,
       job_type: jobTypeLabel(job?.job_type || job?.employment_type) || null,
+      // Where the job may be done from (HiringCafe), for the worldwide mode.
+      workplace_countries: Array.isArray(job?.workplace_countries) ? job.workplace_countries : [],
+      worldwide_ok: job?.worldwide_ok === true,
       repost: job?.repost === true,
       easy_apply: job?.easy_apply === true,
       first_seen_at: job?.first_seen_at || null,
@@ -1573,9 +1682,9 @@
   const NON_US_REGION_RE = new RegExp(
     [
       // "remote within Germany", "remote in the EU", "Remote (Europe)", "Remote - UK"
-      String.raw`remote\s*(?:[-–—:,(|/]\s*)?(?:only\s+)?(?:within|in|across|from)?\s*(?:the\s+)?(?:germany|deutschland|deutschlandweit|austria|switzerland|dach|europe|european union|eu|emea|uk|united kingdom|england|ireland|france|spain|portugal|italy|netherlands|belgium|poland|romania|bulgaria|czechia|czech republic|hungary|greece|sweden|norway|denmark|finland|baltics|estonia|latvia|lithuania|ukraine|serbia|croatia|turkey|israel|canada|mexico|latam|latin america|south america|brazil|argentina|colombia|chile|costa rica|india|apac|asia|philippines|singapore|vietnam|pakistan|sri lanka|indonesia|malaysia|australia|new zealand|africa|south africa|nigeria|kenya|egypt|armenia)\b`,
+      String.raw`remote\s*(?:[-–—:,(|/]\s*)?(?:only\s+)?(?:within|in|across|from)?\s*(?:the\s+)?(?<!new\s)(?:germany|deutschland|deutschlandweit|austria|switzerland|dach|europe|european union|eu|emea|uk|united kingdom|england|ireland|france|spain|portugal|italy|netherlands|belgium|poland|romania|bulgaria|czechia|czech republic|hungary|greece|sweden|norway|denmark|finland|baltics|estonia|latvia|lithuania|ukraine|serbia|croatia|turkey|israel|canada|mexico|latam|latin america|south america|brazil|argentina|colombia|chile|costa rica|india|apac|asia|philippines|singapore|vietnam|pakistan|sri lanka|indonesia|malaysia|australia|new zealand|africa|south africa|nigeria|kenya|egypt|armenia)\b`,
       // "UK - Remote", "Germany (Remote)", "Europe / remote"
-      String.raw`\b(?:germany|deutschland|deutschlandweit|austria|switzerland|dach|europe|european union|eu|emea|uk|united kingdom|england|ireland|france|spain|portugal|italy|netherlands|belgium|poland|romania|bulgaria|czechia|czech republic|hungary|greece|sweden|norway|denmark|finland|baltics|estonia|latvia|lithuania|ukraine|serbia|croatia|turkey|israel|canada|mexico|latam|latin america|south america|brazil|argentina|colombia|chile|costa rica|india|apac|asia|philippines|singapore|vietnam|pakistan|sri lanka|indonesia|malaysia|australia|new zealand|africa|south africa|nigeria|kenya|egypt|armenia)\s*(?:[-–—:,(|/]\s*)?(?:fully\s+)?remote`,
+      String.raw`\b(?<!new\s)(?:germany|deutschland|deutschlandweit|austria|switzerland|dach|europe|european union|eu|emea|uk|united kingdom|england|ireland|france|spain|portugal|italy|netherlands|belgium|poland|romania|bulgaria|czechia|czech republic|hungary|greece|sweden|norway|denmark|finland|baltics|estonia|latvia|lithuania|ukraine|serbia|croatia|turkey|israel|canada|mexico|latam|latin america|south america|brazil|argentina|colombia|chile|costa rica|india|apac|asia|philippines|singapore|vietnam|pakistan|sri lanka|indonesia|malaysia|australia|new zealand|africa|south africa|nigeria|kenya|egypt|armenia)\s*(?:[-–—:,(|/]\s*)?(?:fully\s+)?remote`,
       // working hours tied to a European or Asian time zone
       String.raw`\b(?:cet|cest|gmt\+?[1-9]|ist|eet|eest|bst)\b`,
     ].join('|'),
@@ -1585,7 +1694,69 @@
 
   // German job-title words ("Entwickler", "Berater", "Produktmanager:in", "Werkstudent").
   const GERMAN_TITLE_RE =
-    /\b(?:\w*entwickler|berater|ingenieur|\w*leiter|mitarbeiter|werkstudent|praktik|ausbildung|sachbearbeiter|referent|fachkraft|\w*deutschland)\w*|\w(?::|\*)in(?:nen)?\b/i;
+    /\b(?:\w*entwickler|berater|ingenieur|\w*leiter|mitarbeiter|werkstudent|praktik|ausbildung|sachbearbeiter|fachkraft|\w*deutschland)\w*|\breferent(?:in)?\b|\w(?::|\*)in(?:nen)?\b/i;
+
+  /** Words in a title that open a job beyond the US (a region or "anywhere"). */
+  const BEYOND_US_RE =
+    /\b(?:worldwide|global(?:ly)?|anywhere|international|remote[- ]first|latam|latin america|emea|apac|europe|eu|americas)\b/i;
+
+  /**
+   * Can a candidate in `code` take this job? The source's list of countries
+   * decides when it has one; a job based in another country (Jobright states
+   * the job's country) or a title limited to the US does not qualify. A job
+   * that states nothing is kept: unknown never excludes.
+   */
+  /** A title limited to US residents. Time zones (EST, PST) are not: LATAM contracts often ask for them. */
+  const US_ONLY_TITLE_RE = /\b(?:us|u\.s\.?|usa|united states|us-based)\b/i;
+  /** Other ways a title names a country than its English display name. */
+  const COUNTRY_ALIASES = {
+    GB: ['uk', 'united kingdom', 'britain', 'england', 'scotland'],
+    TR: ['turkey', 'türkiye'],
+    HK: ['hong kong'],
+    CZ: ['czech'],
+    KR: ['korea'],
+    AE: ['uae', 'emirates', 'dubai'],
+    NL: ['netherlands', 'holland'],
+    VN: ['vietnam'],
+    CN: ['china'],
+    TW: ['taiwan'],
+  };
+  function titleNamesCountry(title, code) {
+    const text = String(title || '').toLowerCase();
+    const names = [countryName(code), ...(COUNTRY_ALIASES[code] || [])].map((n) => String(n).toLowerCase());
+    return names.some((n) => n && text.includes(n)) || new RegExp(`\\b${code}\\b`).test(title);
+  }
+
+  /** Any country outside the US: only a job limited to the US is out. */
+  function openOutsideUs(job) {
+    if (job?.worldwide_ok === true) return true;
+    const countries = (Array.isArray(job?.workplace_countries) ? job.workplace_countries : [])
+      .map((c) => String(c || '').trim().toUpperCase())
+      .filter(Boolean);
+    if (countries.length) return countries.some((c) => c !== 'US' && c !== 'USA');
+    const stated = String(job?.country_code || '').trim().toUpperCase();
+    if (stated === 'US' || stated === 'USA') return false;
+    const title = String(job?.title || '');
+    return !(US_ONLY_TITLE_RE.test(title) && !BEYOND_US_RE.test(title));
+  }
+
+  function openToCountry(job, code) {
+    const want = String(code || '').toUpperCase();
+    if (!want) return true;
+    if (want === ANY_COUNTRY) return openOutsideUs(job);
+    if (job?.worldwide_ok === true) return true;
+    const countries = (Array.isArray(job?.workplace_countries) ? job.workplace_countries : [])
+      .map((c) => String(c || '').trim().toUpperCase())
+      .filter(Boolean);
+    if (countries.length) return countries.includes(want);
+    const stated = String(job?.country_code || '').trim().toUpperCase();
+    if (stated && stated !== want) return false;
+    const title = String(job?.title || '');
+    if (US_ONLY_TITLE_RE.test(title) && !titleNamesCountry(title, want) && !BEYOND_US_RE.test(title)) {
+      return false;
+    }
+    return true;
+  }
 
   function titleLimitsToOutsideUs(title) {
     const text = String(title || '');
@@ -1650,9 +1821,14 @@
       const url = String(job?.apply_url || '')
         .trim()
         .toLowerCase();
-      const key =
+      const base =
         url ||
         `${String(job?.company_name || '').toLowerCase()}::${String(job?.title || '').toLowerCase()}`;
+      // Only a repeat from the same source is dropped here. The same job from the
+      // other source is kept for dedupeJobs, which merges the two (earlier date,
+      // HiringCafe's countries) instead of throwing one away.
+      const origin = String(job?.origin || job?.source || '').toLowerCase();
+      const key = base ? `${origin}|${base}` : '';
       if (!key || seen.has(key)) continue;
       seen.add(key);
       out.push(job);
@@ -1725,6 +1901,7 @@
       { header: 'Job Title', width: 220 },
       { header: 'Company', width: 140 },
       { header: 'Job Type', width: 90 },
+      ...(state.mode === 'intl' ? [{ header: 'Open To', width: 110 }] : []),
       // A real number, so the sheet can sort and filter on it.
       { header: 'Score', width: 55 },
       { header: 'Applicants', width: 75 },
@@ -1806,6 +1983,15 @@
             note: several ? `${at.index} of ${at.count} jobs at this company` : '',
           },
           job?.job_type || '',
+          ...(state.mode === 'intl'
+            ? [
+                job?.worldwide_ok
+                  ? 'Worldwide'
+                  : (job?.workplace_countries || []).length
+                    ? job.workplace_countries.join(', ')
+                    : 'Not stated',
+              ]
+            : []),
           { number: priority.score },
           // "~" marks a count the source did not give, taken from jobs of the same age.
           priority.estimated ? `~${priority.applicants}` : applicantsLabel(job),
@@ -1969,6 +2155,7 @@ ${groupSheetStyles()}
       ['jsTypePartTime', 'showPartTime'],
       ['jsTypeTemporary', 'showTemporary'],
       ['jsTypeInternship', 'showInternship'],
+      ['jsOpenToCountry', 'openToCountryOnly'],
       ['jsOnePerCompany', 'onePerCompany'],
       ['jsUseJobright', 'useJobright'],
       ['jsUseHiringCafe', 'useHiringCafe'],
@@ -1979,6 +2166,7 @@ ${groupSheetStyles()}
     }
 
     syncFreshnessSelect();
+    syncModeUi();
 
     const hasProfile = Boolean(state.prefs.candidateFilter);
     const regJobs = document.getElementById('jsFilterRegisteredJobs');
@@ -2026,8 +2214,12 @@ ${groupSheetStyles()}
     const scrapeBtn = document.getElementById('jsScrapeBtn');
     if (scrapeBtn) {
       const busy = state.runActive || (state.scraping && !state.pausedForChallenge);
-      scrapeBtn.disabled = busy;
+      // Paused for a site check: Resume continues it, Stop keeps what it collected.
+      scrapeBtn.disabled = busy || state.pausedForChallenge;
       scrapeBtn.classList.toggle('is-busy', busy);
+      scrapeBtn.title = state.pausedForChallenge
+        ? 'A scrape is paused. Click Resume to continue it, or Stop to keep what it collected.'
+        : '';
     }
     if (resumeBtn) resumeBtn.disabled = state.runActive;
 
@@ -2056,11 +2248,17 @@ ${groupSheetStyles()}
 
     const hcSummary = state.customSearchState
       ? scraper?.summarizeSearchState?.(state.customSearchState) || 'Custom search imported'
-      : 'Built-in default';
+      : state.mode === 'intl'
+        ? state.prefs.candidateCountry === ANY_COUNTRY
+          ? 'Remote contract · any country'
+          : state.prefs.candidateCountry
+            ? `Remote contract · open to ${countryName(state.prefs.candidateCountry)}`
+            : 'Choose the candidate country'
+        : 'Built-in default';
 
     // Freshness has its own control on the row, so the line says only what is searched.
     const hcOn = state.prefs.useHiringCafe !== false;
-    const jrOn = state.prefs.useJobright !== false;
+    const jrOn = state.mode !== 'intl' && state.prefs.useJobright !== false;
     if (hcEl) {
       hcEl.textContent = hcOn ? hcSummary : 'Off';
       hcEl.title = `${hcSummary} · ${hcLabel} (HiringCafe searches whole days; shorter windows are cut afterwards)`;
@@ -2072,7 +2270,9 @@ ${groupSheetStyles()}
       // narrow: the request count lives in the tooltip.
       const held = jrOn && (guard.cooldownUntil > Date.now() || jobrightRequestsLeft() <= 0);
       jrEl.textContent = !jrOn
-        ? 'Off'
+        ? state.mode === 'intl'
+          ? 'Not used: US jobs only'
+          : 'Off'
         : guard.cooldownUntil > Date.now()
           ? `Paused until ${clockTime(guard.cooldownUntil)}`
           : jobrightRequestsLeft() <= 0
@@ -2340,6 +2540,495 @@ ${groupSheetStyles()}
     return state.filteredJobs;
   }
 
+  // ───────────────────────────── Live mode ─────────────────────────────
+
+  const LIVE_TICK_MS = 30 * 1000;
+  /** Jobright: a full read at most this often (also its own 3-hour safety gap). */
+  const LIVE_JR_EVERY_MS = 3 * 60 * 60 * 1000;
+  /** Jobs posted longer ago than this leave the Live list. */
+  const LIVE_MAX_AGE_HOURS = 48;
+  const LIVE_QUEUE_SHOW = 60;
+  let liveTimer = null;
+  let liveQueueShowAll = false;
+
+  function liveKey(job) {
+    const url = window.SmartJobJobUrl?.canonicalJobUrl?.(job?.apply_url) || String(job?.apply_url || '').trim().toLowerCase();
+    return url || `${String(job?.company_name || '').toLowerCase()}::${String(job?.title || '').toLowerCase()}`;
+  }
+
+  /** One row per source: the same job from both sources is merged later (dedupeJobs). */
+  function liveRowKey(job) {
+    return `${String(job?.origin || job?.source || '').toLowerCase()}|${liveKey(job)}`;
+  }
+
+  function dropAgedLiveJobs(jobs) {
+    const now = Date.now();
+    const seen = new Set();
+    return jobs.filter((job) => {
+      const key = liveRowKey(job);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      const posted = jobPostedTimes(job, now);
+      return !posted || (now - posted.ms) / 3600000 <= LIVE_MAX_AGE_HOURS;
+    });
+  }
+
+  async function persistLive() {
+    await storageSet({
+      [STORAGE.live]: { lastHcAt: state.live.lastHcAt, lastCheckAt: state.live.lastCheckAt, lastAdded: state.live.lastAdded },
+    });
+  }
+
+  /** "10:00-20:30, 01:00-07:30" → [[600, 1230], [60, 450]] (minutes of the day). */
+  function parseLiveHours(text) {
+    const spans = [];
+    for (const part of String(text || '').split(/[,;]/)) {
+      const m = part.trim().match(/^(\d{1,2}):?(\d{2})?\s*[-–]\s*(\d{1,2}):?(\d{2})?$/);
+      if (!m) continue;
+      const from = Number(m[1]) * 60 + Number(m[2] || 0);
+      const to = Number(m[3]) * 60 + Number(m[4] || 0);
+      if (from <= 24 * 60 && to <= 24 * 60 && from !== to) spans.push([from, to]);
+    }
+    return spans;
+  }
+
+  function withinLiveHours(at = new Date()) {
+    const spans = parseLiveHours(state.prefs.liveHours);
+    if (!spans.length) return true;
+    const minute = at.getHours() * 60 + at.getMinutes();
+    return spans.some(([from, to]) => (from < to ? minute >= from && minute < to : minute >= from || minute < to));
+  }
+
+  function nextLiveStartLabel() {
+    const spans = parseLiveHours(state.prefs.liveHours);
+    if (!spans.length) return '';
+    const now = new Date();
+    const minute = now.getHours() * 60 + now.getMinutes();
+    const ahead = spans
+      .map(([from]) => ({ from, wait: (from - minute + 24 * 60) % (24 * 60) }))
+      .sort((a, b) => a.wait - b.wait)[0];
+    const h = Math.floor(ahead.from / 60);
+    const m = ahead.from % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  function liveHcEveryMs() {
+    const minutes = Math.max(15, Math.min(Number(state.prefs.liveHcMinutes) || 30, 120));
+    return minutes * 60 * 1000;
+  }
+
+  function setLiveStatus(text) {
+    state.live.status = text;
+    const el = document.getElementById('jsLiveStatus');
+    if (el) el.textContent = text;
+  }
+
+  /** After a check: when, how many jobs it added, and the alerts. */
+  function noteLiveCheck(added) {
+    state.live.lastCheckAt = Date.now();
+    state.live.lastAdded = added;
+    void persistLive();
+    updateLiveBadge();
+    if (added > 0) notifyLiveJobs(added);
+    renderLiveCard();
+  }
+
+  function liveNewJobs() {
+    return state.filteredJobs.filter((job) => job.live_new && !job.opened_at);
+  }
+
+  function updateLiveBadge() {
+    try {
+      const count = state.prefs.liveEnabled ? liveNewJobs().length : 0;
+      chrome.action?.setBadgeBackgroundColor?.({ color: '#3b6fd4' });
+      chrome.action?.setBadgeText?.({ text: count ? String(Math.min(count, 999)) : '' });
+    } catch (_) {
+      /* no badge: the queue still shows them */
+    }
+  }
+
+  function notifyLiveJobs(added) {
+    if (!state.prefs.liveNotify || !chrome.notifications?.create) return;
+    const top = liveNewJobs()[0];
+    try {
+      chrome.notifications.create('jobstrike-live', {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+        title: `${added} new job${added === 1 ? '' : 's'} to bid on`,
+        message: top ? `Top: ${top.title || 'Job'}${top.company_name ? ` (${top.company_name})` : ''}` : 'Open JobStrike to see them.',
+        priority: 1,
+      });
+    } catch (_) {
+      /* notifications off: the badge still counts them */
+    }
+  }
+
+  /** Decide whether a check is due, and run it. Called every 30 s and on demand. */
+  async function liveTick({ force = false } = {}) {
+    if (!state.prefs.liveEnabled) {
+      renderLiveCard();
+      return;
+    }
+    if (state.pausedForChallenge) {
+      setLiveStatus('Paused: a site asked for a check. Complete it in the scrape tab, then click Resume.');
+      return;
+    }
+    if (state.runActive || state.scraping || state.live.running) return;
+    if (!withinLiveHours()) {
+      setLiveStatus(`Paused outside working hours · resumes ${nextLiveStartLabel()}`);
+      return;
+    }
+    if (state.mode === 'intl' && !state.prefs.candidateCountry && !state.customSearchState) {
+      setLiveStatus("Choose the candidate's country to start.");
+      return;
+    }
+    const now = Date.now();
+    const useHc = state.prefs.useHiringCafe !== false;
+    const useJr = state.mode !== 'intl' && state.prefs.useJobright !== false;
+    await loadJobrightGuard();
+    const guard = jobrightGuard();
+    const jrDue =
+      useJr &&
+      !jobrightHoldReason() &&
+      jobrightRequestsLeft() >= JR_FULL_READ_REQUESTS &&
+      now - (guard.lastRunAt || 0) >= Math.max(LIVE_JR_EVERY_MS, JR_MIN_GAP_MS);
+    const hcDue = useHc && (force || now - (state.live.lastHcAt || 0) >= liveHcEveryMs());
+    if (!jrDue && !hcDue) {
+      const wait = Math.max(1, Math.round((state.live.lastHcAt + liveHcEveryMs() - now) / 60000));
+      setLiveStatus(useHc ? `Next check in ${wait} min` : 'Waiting for Jobright (every 3 h, while requests last)');
+      return;
+    }
+    state.live.running = true;
+    state.live.lastHcAt = useHc ? now : state.live.lastHcAt;
+    await persistLive();
+    setLiveStatus(jrDue ? 'Checking Jobright and HiringCafe…' : 'Checking HiringCafe…');
+    try {
+      await runScrape({ live: { jr: jrDue, hc: useHc } });
+    } finally {
+      state.live.running = false;
+      renderLiveCard();
+    }
+  }
+
+  function startLiveTimer() {
+    if (liveTimer) clearInterval(liveTimer);
+    liveTimer = setInterval(() => void liveTick(), LIVE_TICK_MS);
+  }
+
+  /** The Live card: switch, status, settings. */
+  function renderLiveCard() {
+    const on = Boolean(state.prefs.liveEnabled);
+    const toggle = document.getElementById('jsLiveToggle');
+    if (toggle) toggle.checked = on;
+    document.getElementById('jsLiveCard')?.classList.toggle('is-on', on);
+    const hoursEl = document.getElementById('jsLiveHours');
+    if (hoursEl && document.activeElement !== hoursEl) hoursEl.value = state.prefs.liveHours || '';
+    const every = document.getElementById('jsLiveEvery');
+    if (every) every.value = String(state.prefs.liveHcMinutes || 30);
+    const notify = document.getElementById('jsLiveNotify');
+    if (notify) notify.checked = state.prefs.liveNotify !== false;
+    const meta = document.getElementById('jsLiveMeta');
+    if (meta) {
+      const last = state.live.lastCheckAt
+        ? `Last check ${new Date(state.live.lastCheckAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · +${state.live.lastAdded} new`
+        : 'No check yet';
+      meta.textContent = on ? last : 'Checks HiringCafe every 30 min and Jobright every 3 h during your hours.';
+    }
+    if (!on) setLiveStatus('Off');
+    else if (!state.live.status || state.live.status === 'Off') setLiveStatus('Starting…');
+    else setLiveStatus(state.live.status);
+  }
+
+  async function setLiveEnabled(on) {
+    state.prefs.liveEnabled = Boolean(on);
+    await persistPrefs();
+    renderLiveCard();
+    renderResults();
+    updateLiveBadge();
+    if (on) {
+      showToast('Live on: new jobs will be added while the panel is open.', 'success');
+      setTimeout(() => void liveTick(), 1500);
+    }
+  }
+
+  /** Mark a job opened (by its link), everywhere it appears. */
+  async function markLiveOpened(job) {
+    const key = liveKey(job);
+    const at = new Date().toISOString();
+    for (const item of state.rawJobs) {
+      if (liveKey(item) === key) {
+        item.opened_at = at;
+        item.live_new = false;
+      }
+    }
+    recomputeFiltered();
+    await persistResults();
+    renderResults();
+    updateLiveBadge();
+  }
+
+  // ───────────────────── Queue for AutoGen (from the Live queue) ─────────────────────
+
+  /** Per job (liveKey): { state: 'waiting' | 'reading' | 'error', error }. Not saved: a reload starts clean. */
+  const autogenStates = new Map();
+  const autogenRun = { running: false, stop: false, pending: [], tally: null };
+
+  /** Failures every later job would hit too: the run stops at the first. */
+  const AUTOGEN_STOP_RE = /cannot generate resumes yet|Not signed in|Choose a profile|Unauthorized|did not answer|Could not reach/i;
+
+  function autogenButtonHtml(job) {
+    const entry = autogenStates.get(liveKey(job));
+    if (entry?.state === 'reading') {
+      return '<button type="button" class="js-q-gen" disabled title="Reading the job page, then queuing it">Queuing…</button>';
+    }
+    if (entry?.state === 'waiting') {
+      return '<button type="button" class="js-q-gen" disabled title="Waiting its turn">Waiting</button>';
+    }
+    const failed = entry?.state === 'error';
+    const title = failed
+      ? `Not queued: ${entry.error}. Click to try again.`
+      : "Queue for AutoGen: read the job and generate its resume for the Bid tab's profile";
+    return `<button type="button" class="js-q-gen${failed ? ' is-error' : ''}" data-q-action="autogen" title="${escapeHtml(title)}">${failed ? 'Retry' : 'Queue'}</button>`;
+  }
+
+  /** The job is in Resume DB now (queued or already there): it leaves the queue like a registered one. */
+  function dropQueuedJob(job, resolvedLink) {
+    autogenStates.delete(liveKey(job));
+    for (const jobLink of new Set([job.apply_url, resolvedLink].filter(Boolean))) {
+      onJobRegistered({ detail: { jobLink, jobTitle: job.title || '', company: job.company_name || '' } });
+    }
+  }
+
+  async function queueJobsForAutogen(jobs) {
+    const api = window.SmartJobRegisterResumeDb;
+    if (!api?.queueJobLinkForAutogen) {
+      showToast('The Bid tab is not loaded yet. Open it once, then try again.', 'warn');
+      return;
+    }
+    if (!api.getSelectedRegisterProfile?.()) {
+      showToast('Choose a profile in the Bid tab first: queued jobs are generated for it.', 'warn');
+      return;
+    }
+    for (const job of jobs) {
+      const entry = autogenStates.get(liveKey(job));
+      if (entry && entry.state !== 'error') continue;
+      autogenStates.set(liveKey(job), { state: 'waiting' });
+      autogenRun.pending.push(job);
+    }
+    renderLiveQueue();
+    if (autogenRun.running) return;
+
+    autogenRun.running = true;
+    autogenRun.stop = false;
+    autogenRun.tally = { queued: 0, already: 0, failed: 0 };
+    let stoppedBy = '';
+    try {
+      while (autogenRun.pending.length && !autogenRun.stop) {
+        const job = autogenRun.pending.shift();
+        autogenStates.set(liveKey(job), { state: 'reading' });
+        renderLiveQueue();
+        try {
+          const out = await api.queueJobLinkForAutogen({
+            url: job.apply_url,
+            jobTitle: job.title || '',
+            company: job.company_name || '',
+          });
+          autogenRun.tally[out.duplicateId ? 'already' : 'queued'] += 1;
+          dropQueuedJob(job, out.jobLink);
+        } catch (error) {
+          const message = error?.message || String(error);
+          autogenRun.tally.failed += 1;
+          autogenStates.set(liveKey(job), { state: 'error', error: message });
+          if (AUTOGEN_STOP_RE.test(message)) {
+            stoppedBy = message;
+            break;
+          }
+        }
+        renderLiveQueue();
+      }
+    } finally {
+      for (const job of autogenRun.pending) autogenStates.delete(liveKey(job));
+      autogenRun.pending = [];
+      autogenRun.running = false;
+      const { queued, already, failed } = autogenRun.tally;
+      const summary = [
+        `${queued} queued for AutoGen`,
+        already ? `${already} already in Resume DB` : '',
+        failed ? `${failed} not queued (hover Retry for why)` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      if (stoppedBy) showToast(`Stopped: ${stoppedBy}`, 'error');
+      else showToast(summary, failed && !queued ? 'warn' : 'success');
+      renderLiveQueue();
+    }
+  }
+
+  function liveQueueRowHtml(job, index, typical, nowMs) {
+    const priority = jobPriority(job, nowMs, typical);
+    const posted = jobPostedTimes(job, nowMs);
+    const age = posted ? formatAgeMinutes(Math.round((nowMs - posted.ms) / 60000)) : '';
+    const fresh = job.live_new && !job.opened_at;
+    const meta = [job.company_name, job.application_site, age ? `${age} ago` : ''].filter(Boolean).map(escapeHtml).join(' · ');
+    return `
+      <div class="js-q-row${job.opened_at ? ' is-opened' : ''}${fresh ? ' is-new' : ''}" data-q-index="${index}">
+        <div class="js-q-main">
+          <div class="js-q-title">${fresh ? '<span class="js-q-tag">NEW</span>' : job.opened_at ? '<span class="js-q-done" title="Opened">✓</span>' : ''}<span title="${escapeHtml(job.title || '')}">${escapeHtml(job.title || 'Untitled job')}</span></div>
+          <div class="js-q-meta">${meta}</div>
+        </div>
+        <span class="js-q-score" title="Score: freshness and competition">${Math.round(priority.score)}</span>
+        <button type="button" class="js-q-open" data-q-action="open" title="Open the job; the Bid tab loads it">Open</button>
+        ${autogenButtonHtml(job)}
+        <button type="button" class="js-q-skip" data-q-action="skip" title="Not for me: block this job so it never comes back" aria-label="Not for me">✕</button>
+      </div>`;
+  }
+
+  /** The bidding queue, shown while Live is on. */
+  function renderLiveQueue() {
+    const list = document.getElementById('jsResultsList');
+    if (!list || !state.prefs.liveEnabled) return;
+    const nowMs = Date.now();
+    const typical = typicalApplicantsByAge(state.rawJobs, nowMs);
+    const all = state.filteredJobs;
+    // Too old to be worth a bid (they leave the list at the next check).
+    const recent = (job) => {
+      const posted = jobPostedTimes(job, nowMs);
+      return !posted || (nowMs - posted.ms) / 3600000 <= LIVE_MAX_AGE_HOURS;
+    };
+    const visible = all.filter((job) => recent(job) && !(state.prefs.liveHideOpened && job.opened_at));
+    const shown = liveQueueShowAll ? visible : visible.slice(0, LIVE_QUEUE_SHOW);
+    const fresh = liveNewJobs().length;
+    const openedCount = all.filter((job) => job.opened_at).length;
+    const profileName = window.SmartJobRegisterResumeDb?.getSelectedRegisterProfile?.()?.name || '';
+    const genAll = autogenRun.running
+      ? `<button type="button" class="js-q-gen-all is-running" data-q-action="autogen-stop" title="Finish the job being read, then stop">Stop (${autogenRun.pending.length + 1} left)</button>`
+      : shown.length
+        ? `<button type="button" class="js-q-gen-all" data-q-action="autogen-all" title="${escapeHtml(
+            `Read each job shown and queue it for AutoGen${profileName ? ` for ${profileName}` : ''} (one at a time, in background tabs)`
+          )}">Queue all</button>`
+        : '';
+    list.innerHTML = `
+      <div class="js-q-head">
+        <span><strong>Queue</strong> · ${visible.length} to bid${fresh ? ` · <span class="js-q-newcount">${fresh} new</span>` : ''}</span>
+        <span class="js-q-tools">
+          ${genAll}
+          <label class="js-q-hide"><input type="checkbox" id="jsLiveHideOpened" ${state.prefs.liveHideOpened ? 'checked' : ''}> Hide opened (${openedCount})</label>
+        </span>
+      </div>
+      ${shown.map((job) => liveQueueRowHtml(job, all.indexOf(job), typical, nowMs)).join('') || '<p class="js-q-empty">Nothing to bid on yet. New jobs appear here as they are found.</p>'}
+      ${visible.length > shown.length ? `<button type="button" class="js-q-more" data-q-action="more">Show all ${visible.length}</button>` : ''}`;
+    list.classList.add('is-live-queue');
+    list.hidden = false;
+  }
+
+  async function onLiveQueueClick(event) {
+    const btn = event.target.closest('[data-q-action]');
+    if (!btn) return;
+    const action = btn.getAttribute('data-q-action');
+    if (action === 'more') {
+      liveQueueShowAll = true;
+      renderLiveQueue();
+      return;
+    }
+    if (action === 'autogen-stop') {
+      autogenRun.stop = true;
+      btn.disabled = true;
+      btn.textContent = 'Stopping…';
+      return;
+    }
+    if (action === 'autogen-all') {
+      const jobs = [...document.querySelectorAll('#jsResultsList [data-q-index]')]
+        .map((row) => state.filteredJobs[Number(row.getAttribute('data-q-index'))])
+        .filter((job) => job?.apply_url && !job.opened_at);
+      if (!jobs.length) {
+        showToast('No unopened jobs with a link to queue.', 'warn');
+        return;
+      }
+      void queueJobsForAutogen(jobs);
+      return;
+    }
+    const row = btn.closest('[data-q-index]');
+    const job = state.filteredJobs[Number(row?.getAttribute('data-q-index'))];
+    if (!job) return;
+    if (action === 'open') {
+      if (!job.apply_url) {
+        showToast('This job has no link.', 'warn');
+        return;
+      }
+      await chrome.tabs.create({ url: job.apply_url, active: true });
+      await markLiveOpened(job);
+    } else if (action === 'autogen') {
+      if (!job.apply_url) {
+        showToast('This job has no link.', 'warn');
+        return;
+      }
+      void queueJobsForAutogen([job]);
+    } else if (action === 'skip') {
+      btn.disabled = true;
+      await addBlockedJob(job);
+      updateLiveBadge();
+    }
+  }
+
+  /** The Bid tab registered a job: it leaves the queue now, not at the next sync. */
+  function onJobRegistered(event) {
+    const detail = event?.detail || {};
+    const jobLink = String(detail.jobLink || '').trim();
+    if (!jobLink) return;
+    state.registeredJobs = [
+      ...state.registeredJobs,
+      { jobLink, jobTitle: String(detail.jobTitle || ''), company: String(detail.company || '') },
+    ];
+    const company = String(detail.company || '').trim();
+    if (company && !state.registeredCompanies.includes(company)) {
+      state.registeredCompanies = [...state.registeredCompanies, company];
+    }
+    recomputeFiltered();
+    void persistResults();
+    renderResults();
+    renderMeta();
+    updateLiveBadge();
+  }
+
+  function wireLive() {
+    document.getElementById('jsLiveToggle')?.addEventListener('change', (event) => void setLiveEnabled(event.target.checked));
+    document.getElementById('jsLiveHours')?.addEventListener('change', async (event) => {
+      const text = String(event.target.value || '').trim();
+      if (text && !parseLiveHours(text).length) {
+        showToast('Use the form 10:00-20:30, 01:00-07:30', 'warn');
+        event.target.value = state.prefs.liveHours || '';
+        return;
+      }
+      state.prefs.liveHours = text;
+      await persistPrefs();
+      void liveTick();
+    });
+    document.getElementById('jsLiveEvery')?.addEventListener('change', async (event) => {
+      state.prefs.liveHcMinutes = Number(event.target.value) || 30;
+      await persistPrefs();
+      void liveTick();
+    });
+    document.getElementById('jsLiveNotify')?.addEventListener('change', async (event) => {
+      state.prefs.liveNotify = Boolean(event.target.checked);
+      await persistPrefs();
+    });
+    document.getElementById('jsLiveCheckNow')?.addEventListener('click', () => void liveTick({ force: true }));
+    const list = document.getElementById('jsResultsList');
+    list?.addEventListener('click', (event) => void onLiveQueueClick(event));
+    list?.addEventListener('change', async (event) => {
+      if (event.target?.id !== 'jsLiveHideOpened') return;
+      state.prefs.liveHideOpened = Boolean(event.target.checked);
+      await persistPrefs();
+      renderLiveQueue();
+    });
+    document.addEventListener('jobstrike-registered', onJobRegistered);
+    startLiveTimer();
+    renderLiveCard();
+    updateLiveBadge();
+    // Opening the panel catches up at once.
+    if (state.prefs.liveEnabled) setTimeout(() => void liveTick(), 8000);
+  }
+
   function renderResults() {
     const empty = document.getElementById('jsResultsEmpty');
     const emptyText = document.getElementById('jsResultsEmptyText');
@@ -2376,6 +3065,7 @@ ${groupSheetStyles()}
       empty.hidden = true;
     }
 
+    renderLiveQueue();
     updateActionButtons();
     syncResultsPanelUi();
   }
@@ -2469,6 +3159,13 @@ ${groupSheetStyles()}
       if (state.stats?.removedDegree) bits.push(`${state.stats.removedDegree} Master's/PhD required`);
       if (state.stats?.removedLanguage) bits.push(`${state.stats.removedLanguage} other language required`);
       if (state.stats?.removedJobType) bits.push(`${state.stats.removedJobType} other job types`);
+      if (state.stats?.removedNotOpen) {
+        bits.push(
+          state.prefs.candidateCountry === ANY_COUNTRY
+            ? `${state.stats.removedNotOpen} US-only hidden`
+            : `${state.stats.removedNotOpen} not open to ${countryName(state.prefs.candidateCountry)}`
+        );
+      }
       if (state.stats?.companiesWithSeveral) {
         bits.push(
           `${state.stats.companiesWithSeveral} compan${state.stats.companiesWithSeveral === 1 ? 'y has' : 'ies have'} several jobs (grouped)`
@@ -2548,15 +3245,33 @@ ${groupSheetStyles()}
    * "loading" (ads, trackers) long after its job list is there: the reader
    * (waitUntilPageReady) checks for the list itself and reports if it is missing.
    */
-  async function waitForTabLoaded(tabId) {
+  async function waitForTabLoaded(tabId, url = '') {
     try {
       await waitForTabComplete(tabId, 45000);
     } catch (err) {
       if (/was closed/i.test(err?.message || '')) throw err;
       const tab = await chrome.tabs.get(tabId).catch(() => null);
       if (!tab) throw err;
+      // Still on the previous page (the new one never committed): reading it
+      // would take the old page's jobs for this one.
+      if (tab.pendingUrl) throw err;
+      if (url) {
+        try {
+          const want = new URL(url);
+          const have = new URL(tab.url || '');
+          const samePage =
+            have.hostname.replace(/^www\./, '') === want.hostname.replace(/^www\./, '') &&
+            (have.searchParams.get('page') || '') === (want.searchParams.get('page') || '');
+          if (!samePage) throw err;
+        } catch (_) {
+          throw err;
+        }
+      }
     }
   }
+
+  /** The tab the scraper itself opened last (a tab it may navigate). */
+  const CREATED_TAB_KEY = 'job_scraper_created_tab_v1';
 
   async function ensureScrapeTab(url) {
     let tabId = await getStoredScrapeTabId();
@@ -2570,23 +3285,29 @@ ${groupSheetStyles()}
       // Tab ids are reused across browser restarts: only navigate a tab that is
       // still one of ours (a scrape page, or blank), never something the user opened.
       const href = String(tab?.url || tab?.pendingUrl || '');
+      // A Jobright tab may be the user's own Recommend tab, adopted for reading
+      // the feed: only one this scraper opened may be sent elsewhere.
+      const createdByUs = Number((await storageGet([CREATED_TAB_KEY]))[CREATED_TAB_KEY]) === tab?.id;
       const ours =
         !href ||
         /^(about:blank|chrome:\/\/newtab)/i.test(href) ||
-        /hiringcafe\.com|hiring\.cafe|jobright\.ai/i.test(href);
+        /hiringcafe\.com|hiring\.cafe/i.test(href) ||
+        (createdByUs && /jobright\.ai/i.test(href));
       if (tab?.id && ours) {
         await chrome.tabs.update(tab.id, { url, active: false });
-        await waitForTabLoaded(tab.id);
+        await waitForTabLoaded(tab.id, url);
         await sleep(400);
         return tab.id;
       }
       await setStoredScrapeTabId(null);
     }
 
-    const created = await chrome.tabs.create({ url, active: true });
+    // A live check must not pull you away from the application you are filling.
+    const created = await chrome.tabs.create({ url, active: !state.liveRun });
     if (!created?.id) throw new Error(`Could not open ${sourceLabel()} tab.`);
     await setStoredScrapeTabId(created.id);
-    await waitForTabLoaded(created.id);
+    await storageSet({ [CREATED_TAB_KEY]: created.id });
+    await waitForTabLoaded(created.id, url);
     await sleep(500);
     return created.id;
   }
@@ -2771,8 +3492,15 @@ ${groupSheetStyles()}
     state.scrapeCursor = null;
     state.combinedRun = null;
     state.pausedForChallenge = false;
+    const merging = Boolean(state.prefs.liveEnabled);
     // Nothing new and nothing recognised: the sources returned nothing at all.
-    if (merged.length === 0 && !known) return false;
+    if (merged.length === 0 && !known) {
+      if (!state.liveRun) return false;
+      // A quiet live check: the list stays as it is (but a failure is said).
+      noteLiveCheck(0);
+      if (error) showToast(`Live check ended early: ${error}`, 'warn');
+      return true;
+    }
 
     let employerLinks = { tried: 0, found: 0, duplicates: 0 };
 
@@ -2782,13 +3510,27 @@ ${groupSheetStyles()}
 
     // The list is what this run found. Bids, blocks and companies are filtered
     // from it; having been scraped before is not a reason to leave a job out.
-    state.rawJobs = merged;
+    // In Live mode the run adds to the list instead: opened marks and jobs from
+    // earlier checks stay, and jobs older than LIVE_MAX_AGE_HOURS leave.
+    let addedNow = merged;
+    if (merging) {
+      const have = new Set(state.rawJobs.map(liveRowKey));
+      const haveJob = new Set(state.rawJobs.map(liveKey));
+      // New to the list: NEW only if no source had it before.
+      addedNow = merged
+        .filter((job) => !have.has(liveRowKey(job)))
+        .map((job) => ({ ...job, live_new: !haveJob.has(liveKey(job)) }));
+      state.rawJobs = dropAgedLiveJobs([...addedNow, ...state.rawJobs]);
+    } else {
+      state.rawJobs = merged;
+    }
+    const previousReport = state.stats?.report || {};
     state.lastScrapedAt = stamp;
     state.stats = {
       pagesFetched,
       reportedTotal,
-      scraped: merged.length,
-      newCount: merged.length,
+      scraped: state.rawJobs.length,
+      newCount: merging ? addedNow.length : merged.length,
       knownCount: known,
       source: 'both',
       jrCount: jrJobs.length,
@@ -2800,8 +3542,15 @@ ${groupSheetStyles()}
       report: {
         employerLinks,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
-        jobright: { ...summarizeSourceAges(jrJobs), ...(report?.jobright || {}) },
-        hiringcafe: { ...summarizeSourceAges(hcJobs), ...(report?.hiringcafe || {}) },
+        // A live check that skipped a source keeps that source's last report.
+        jobright:
+          merging && !jrJobs.length && !report?.jobright
+            ? previousReport.jobright || null
+            : { ...summarizeSourceAges(jrJobs), ...(report?.jobright || {}) },
+        hiringcafe:
+          merging && !hcJobs.length && !report?.hiringcafe
+            ? previousReport.hiringcafe || null
+            : { ...summarizeSourceAges(hcJobs), ...(report?.hiringcafe || {}) },
       },
     };
     state.selectedKeys = new Set();
@@ -2829,6 +3578,19 @@ ${groupSheetStyles()}
         recomputeFiltered();
         await persistResults();
         await persistSeen();
+      }
+    }
+
+    if (merging) {
+      const readyAdded = state.filteredJobs.filter((job) => job.live_new && !job.opened_at && addedNow.some((a) => liveKey(a) === liveKey(job))).length;
+      noteLiveCheck(readyAdded);
+      if (state.liveRun) {
+        // A live check is quiet: the queue, badge and notification say what is new.
+        if (outcome === 'partial' && error) showToast(`Live check ended early: ${error}`, 'warn');
+        finishScrapeUiReveal();
+        renderResults();
+        renderMeta();
+        return true;
       }
     }
 
@@ -2958,7 +3720,20 @@ ${groupSheetStyles()}
       outcome: 'stopped',
       known: (Number(held.jrKnown) || 0) + (Number(cursor?.knownCount) || 0) + (Number(cursor?.hcKnown) || 0),
       warnings: held.jrWarnings || [],
-      report: { jobright: held.jrReport || null },
+      report: {
+        jobright: held.jrReport || null,
+        ...(inHc
+          ? {
+              hiringcafe: {
+                kept: hcJobs.length,
+                pagesRead: Number(cursor?.pagesFetched) || 0,
+                siteTotal: cursor?.reportedTotal ?? null,
+                pages: Array.isArray(cursor?.pagesLog) ? cursor.pagesLog : [],
+                stoppedWhilePaused: true,
+              },
+            }
+          : {}),
+      },
     });
     state.scraping = false;
     if (!kept) {
@@ -2999,8 +3774,8 @@ ${groupSheetStyles()}
     // Jobright was read first (or tried); otherwise this is a one-source run.
     const twoStep = combined && !state.combinedRun?.jrSkipped;
     // "A page of only old jobs means we are past the window" holds for date order only.
-    const sortedByDate =
-      !state.customSearchState || String(state.customSearchState.sortBy || '') === 'date';
+    const runSearch = hcSearchStateForRun();
+    const sortedByDate = !runSearch || String(runSearch.sortBy || '') === 'date';
     // Newest-first paging ends itself once it leaves the window, so it may read
     // on to the hard limit instead of cutting a busy window off at the usual 8.
     const maxPages = sortedByDate
@@ -3070,11 +3845,7 @@ ${groupSheetStyles()}
           total: overallTotal,
           phase: combined ? 'hiringcafe' : null,
         });
-        const url = scraper.buildHiringCafeUrl(
-          dateWindow,
-          page,
-          state.customSearchState
-        );
+        const url = scraper.buildHiringCafeUrl(dateWindow, page, runSearch);
         // A page that fails ends the paging, not the run: earlier pages and the
         // Jobright jobs are still worth having.
         let extracted;
@@ -3175,6 +3946,11 @@ ${groupSheetStyles()}
         }
         pagesFetched += 1;
 
+        // Live check, newest-first: a page with nothing not seen before means caught up.
+        if (state.liveRun && sortedByDate && part.inWindow.length > 0 &&
+            !part.inWindow.some((job) => !isSeenJob(job, 'HiringCafe'))) {
+          break;
+        }
         // Newest-first, and two pages in a row hold nothing new: caught up with the last run.
         if (fresh.length > 0) {
           knownPages = 0;
@@ -4038,7 +4814,9 @@ ${groupSheetStyles()}
 
         // Gentle scroll only if the API gave nothing at all. A page of jobs we
         // already have is an answer, not a failure.
-        if (pushResult.added === 0 && !pushResult.known) {
+        // (Scrolling makes the page send its own feed requests.)
+        const apiAnswered = Boolean(apiResult?.ok && apiResult.rows?.length);
+        if (pushResult.added === 0 && !pushResult.known && !apiAnswered) {
           const harvest = await runJobrightTabFn(tabId, jr.harvestMoreJobsInTab, [
             scrollsPerBatch,
           ]);
@@ -4355,17 +5133,24 @@ ${groupSheetStyles()}
   }
 
   /** One run at a time. The flag is set before any await, so a double-click cannot start two. */
-  async function runScrape({ resume = false } = {}) {
+  async function runScrape({ resume = false, live = null } = {}) {
     if (state.runActive) return;
     if (resume && !state.pausedForChallenge) return;
     state.runActive = true;
     state.stopRequested = false;
     if (!resume) state.runStartedAt = Date.now();
+    // A live check reads the sources Live chose, in a background tab, quietly.
+    state.runSources = live ? { jr: Boolean(live.jr), hc: Boolean(live.hc) } : null;
+    state.liveRun = Boolean(live);
     syncControlsFromState();
     let stoppedWhileParking = false;
     try {
       await dispatchScrape({ resume });
     } finally {
+      state.runSources = null;
+      state.liveRun = false;
+      state.live.running = false;
+      renderLiveCard();
       stoppedWhileParking = state.stopRequested && state.pausedForChallenge;
       state.runActive = false;
       state.stopRequested = false;
@@ -4379,10 +5164,24 @@ ${groupSheetStyles()}
   }
 
   async function dispatchScrape({ resume = false } = {}) {
+    if (!resume && state.mode === 'intl' && !state.prefs.candidateCountry && !state.customSearchState) {
+      showToast("Choose the candidate's country first (under the mode buttons).", 'warn');
+      document.getElementById('jsCandidateCountry')?.focus();
+      return;
+    }
     if (activeSource() === 'both' || state.combinedRun?.active) {
       if (!resume || !state.combinedRun?.active) {
-        const useJr = state.prefs.useJobright !== false;
-        const useHc = state.prefs.useHiringCafe !== false;
+        // Worldwide mode: Jobright's feed is US jobs (999 of 1,000 rows in a test
+        // run), so reading it only spends the US mode's daily requests.
+        const useJr = state.runSources
+          ? Boolean(state.runSources.jr)
+          : state.mode !== 'intl' && state.prefs.useJobright !== false;
+        const useHc = state.runSources ? Boolean(state.runSources.hc) : state.prefs.useHiringCafe !== false;
+        if (!state.liveRun) {
+          // A manual scrape counts as a check: Live's next HiringCafe read waits a full interval.
+          state.live.lastHcAt = useHc ? Date.now() : state.live.lastHcAt;
+          void persistLive();
+        }
         if (!useJr && !useHc) {
           showToast('Both sources are switched off. Switch one on to scrape.', 'warn');
           return;
@@ -4407,7 +5206,7 @@ ${groupSheetStyles()}
             `Read Jobright with ${left} request${left === 1 ? '' : 's'} left today?\n\nA full read of the feed needs about ${JR_FULL_READ_REQUESTS}. ` +
             `With fewer, the read stops part-way and the jobs it did not reach are missing from the list.`;
         }
-        if (question) {
+        if (question && !state.liveRun) {
           const ask =
             typeof window.rwhConfirm === 'function'
               ? window.rwhConfirm
@@ -4655,6 +5454,8 @@ ${groupSheetStyles()}
         {
           headers: { 'X-Extension-Key': config.extensionApiKey },
           cache: 'no-store',
+          // A website that never answers must not hold a scrape (and its Jobright jobs) forever.
+          signal: AbortSignal.timeout(20000),
         }
       );
       const data = await res.json().catch(() => ({}));
@@ -4748,7 +5549,116 @@ ${groupSheetStyles()}
     closeJsModal('import');
   }
 
+  /** Mode buttons, the candidate country, and which filter rows apply. */
+  function syncModeUi() {
+    const intl = state.mode === 'intl';
+    document.querySelectorAll('[data-js-mode]').forEach((btn) => {
+      const on = btn.getAttribute('data-js-mode') === state.mode;
+      btn.classList.toggle('is-active', on);
+      btn.setAttribute('aria-checked', on ? 'true' : 'false');
+      btn.disabled = (state.scraping || state.runActive || state.pausedForChallenge) && !on;
+    });
+    const countryRow = document.getElementById('jsCountryRow');
+    if (countryRow) countryRow.hidden = !intl;
+    const select = document.getElementById('jsCandidateCountry');
+    if (select) {
+      if (select.options.length <= 1) {
+        select.add(new Option('Any country (outside the US)', ANY_COUNTRY));
+        const options = CANDIDATE_COUNTRIES.map((code) => ({ code, name: countryName(code) })).sort((a, b) =>
+          a.name.localeCompare(b.name)
+        );
+        for (const { code, name } of options) select.add(new Option(name, code));
+      }
+      select.value = state.prefs.candidateCountry || '';
+      select.disabled = state.scraping || state.runActive;
+    }
+    const hint = document.getElementById('jsModeHint');
+    if (hint) {
+      hint.textContent = intl
+        ? state.prefs.candidateCountry === ANY_COUNTRY
+          ? 'Remote contract jobs open to candidates outside the US, any country. Own filters, profile and results.'
+          : state.prefs.candidateCountry
+            ? `Remote contract jobs open to candidates in ${countryName(state.prefs.candidateCountry)}. Own filters, profile and results.`
+            : "Choose the candidate's country to search remote contract jobs open to it."
+        : 'Remote jobs in the US.';
+    }
+    // Jobright cannot be switched on here (see dispatchScrape); its setting is kept for the US mode.
+    const jrSwitch = document.getElementById('jsUseJobright');
+    if (jrSwitch) {
+      jrSwitch.disabled = intl;
+      if (intl) jrSwitch.checked = false;
+      else jrSwitch.checked = state.prefs.useJobright !== false;
+      jrSwitch.closest('label')?.setAttribute(
+        'title',
+        intl
+          ? "Jobright's Recommend feed is US jobs, so Worldwide mode does not read it (and keeps its daily requests for US mode)."
+          : 'Read Jobright on the next scrape. It uses your Jobright account.'
+      );
+    }
+    const usRow = document.getElementById('jsUsOnly')?.closest('.js-filter-row');
+    if (usRow) usRow.hidden = intl;
+    const openRow = document.getElementById('jsOpenToCountry')?.closest('.js-filter-row');
+    if (openRow) openRow.hidden = !intl;
+  }
+
+  /** Switch scrape mode: save this one's state, load the other's. */
+  async function switchMode(mode) {
+    const next = mode === 'intl' ? 'intl' : 'us';
+    if (next === state.mode) return;
+    if (state.scraping || state.runActive || state.pausedForChallenge) {
+      showToast(
+        state.runActive && state.stopRequested
+          ? 'The scrape is still stopping. Switch mode once it has finished.'
+          : 'Stop the running scrape before switching mode.',
+        'warn'
+      );
+      return;
+    }
+    await persistPrefs();
+    await persistResults();
+    state.mode = next;
+    applyModeStorageKeys(next);
+    await storageSet({ [MODE_KEY]: next });
+    Object.assign(state, {
+      rawJobs: [],
+      filteredJobs: [],
+      selectedKeys: new Set(),
+      stats: null,
+      lastScrapedAt: null,
+      customSearchState: null,
+      customSearchSourceUrl: '',
+      registeredJobs: [],
+      registeredCompanies: [],
+      scrapeCursor: null,
+      pausedForChallenge: false,
+    });
+    // The profile list shows this mode's profile, not the one left from the other mode.
+    const profileSelect = document.getElementById('jsProfileFilter');
+    if (profileSelect) profileSelect.value = '';
+    await loadState();
+    recomputeFiltered();
+    syncControlsFromState();
+    renderResults();
+    renderMeta();
+    renderLiveCard();
+    updateLiveBadge();
+    void loadProfileFilterContext({ silent: true });
+    showToast(next === 'intl' ? 'Worldwide contract mode' : 'US jobs mode', 'info');
+  }
+
   function wireUi() {
+    document.querySelectorAll('[data-js-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => void switchMode(btn.getAttribute('data-js-mode')));
+    });
+    document.getElementById('jsCandidateCountry')?.addEventListener('change', async (event) => {
+      state.prefs.candidateCountry = String(event.target.value || '').toUpperCase();
+      await persistPrefs();
+      recomputeFiltered();
+      await persistResults();
+      syncControlsFromState();
+      renderResults();
+      renderMeta();
+    });
     document.querySelectorAll('[data-js-open-modal]').forEach((btn) => {
       btn.addEventListener('click', () => {
         openJsModal(btn.getAttribute('data-js-open-modal'));
@@ -4816,6 +5726,7 @@ ${groupSheetStyles()}
       ['jsTypePartTime', 'showPartTime'],
       ['jsTypeTemporary', 'showTemporary'],
       ['jsTypeInternship', 'showInternship'],
+      ['jsOpenToCountry', 'openToCountryOnly'],
       ['jsOnePerCompany', 'onePerCompany'],
     ].forEach(([id, key]) => {
       document.getElementById(id)?.addEventListener('change', async (event) => {
@@ -4996,9 +5907,11 @@ ${groupSheetStyles()}
             higherDegreeRequired: stats.removedDegree || 0,
             otherLanguageRequired: stats.removedLanguage || 0,
             jobType: stats.removedJobType || 0,
+            notOpenToCandidateCountry: stats.removedNotOpen || 0,
             registeredJobs: stats.removedRegisteredJobs || 0,
             registeredCompanies: stats.removedRegisteredCompanies || 0,
           },
+          mode: state.mode === 'intl' ? `worldwide contract (${state.prefs.candidateCountry || 'no country'})` : 'us',
           // Jobs listed by both sources: how often one source's posting time was
           // surely earlier (it is the one kept), and by how many hours.
           crossSourceDates: stats.crossSourceDates || null,
@@ -5099,11 +6012,15 @@ ${groupSheetStyles()}
 
   async function initJobScraperPanel() {
     if (!document.getElementById('tab-job-scraper')) return;
+    const savedMode = (await storageGet([MODE_KEY]))[MODE_KEY];
+    state.mode = savedMode === 'intl' ? 'intl' : 'us';
+    applyModeStorageKeys(state.mode);
     await loadState();
     // The list already on screen counts too, not only the next scrape.
     void rememberScrapedNames(state.filteredJobs).catch(() => {});
     wireUi();
     syncControlsFromState();
+    wireLive();
     void loadProfileFilterContext({ silent: true });
   }
 
