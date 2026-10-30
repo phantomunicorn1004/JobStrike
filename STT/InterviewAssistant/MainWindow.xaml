@@ -9,21 +9,21 @@
     <DockPanel>
         <!-- Toolbar (full view): preparing the session -->
         <Border x:Name="Toolbar" DockPanel.Dock="Top" Background="{DynamicResource PanelBg}"
-                BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="14,10">
+                BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="16,10">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="NewChatButton" ToolTip="Open a fresh chat and send your call prompt (profile, company, job description, resume)"
                             Click="OnNewChatClick">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE710;" FontFamily="{StaticResource IconFont}" FontSize="12" VerticalAlignment="Center"
-                                       Margin="0,0,8,0" Foreground="{DynamicResource Accent}" />
+                                       Margin="0,1,8,0" Foreground="{DynamicResource Accent}" FontWeight="Bold" />
                             <TextBlock Text="New chat + call prompt" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button AutomationProperties.Name="Settings" Content="&#xE713;" Style="{StaticResource IconButton}" Width="34" Height="32" FontSize="16"
                             Margin="0,0,8,0" Click="OnSetupClick"
                             ToolTip="Settings: your details and call prompt, how Send works, display, hotkeys" />
-                    <Button Style="{StaticResource PrimaryButton}" Margin="0" Click="OnToggleCompactClick"
+                    <Button Style="{StaticResource PrimaryButton}" Margin="0" Padding="18,7" Click="OnToggleCompactClick"
                             ToolTip="Small window for the interview: live captions and the AI answer in large, clean text">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="Interview view" VerticalAlignment="Center" />
@@ -33,10 +33,10 @@
                     </Button>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Image Source="/Assets/AppIcon.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality"
+                    <Image Source="/Assets/AppIcon.png" Width="26" Height="26" RenderOptions.BitmapScalingMode="HighQuality"
                            VerticalAlignment="Center" />
-                    <TextBlock Text="Interview Assistant" FontFamily="{StaticResource DisplayFont}" FontSize="14.5" FontWeight="SemiBold"
-                               Foreground="{DynamicResource Strong}" VerticalAlignment="Center" Margin="10,0,0,0" />
+                    <TextBlock Text="Interview Assistant" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="ExtraBold"
+                               Foreground="{DynamicResource Strong}" VerticalAlignment="Center" Margin="10,0,0,1" />
                     <Border Width="1" Background="{DynamicResource Border}" Margin="16,6" />
                     <Border Style="{StaticResource SegmentHost}">
                         <StackPanel Orientation="Horizontal">
@@ -56,7 +56,8 @@
             <DockPanel>
                 <TextBlock x:Name="HotkeyHint" DockPanel.Dock="Right" Foreground="{DynamicResource Faint}"
                            FontSize="11.5" Margin="16,0,0,0" Cursor="Help" VerticalAlignment="Center" />
-                <Border DockPanel.Dock="Right" Style="{StaticResource Pill}" Padding="9,1" Margin="16,0,0,0">
+                <Border DockPanel.Dock="Right" Style="{StaticResource Pill}" Padding="10,1" Margin="16,0,0,0"
+                        Background="{DynamicResource PendingBg}" BorderBrush="Transparent">
                     <TextBlock x:Name="ModeText" Foreground="{DynamicResource Accent}" FontSize="11.5" />
                 </Border>
                 <TextBlock x:Name="StatusText" FontSize="11.5" Foreground="{DynamicResource Muted}"
@@ -81,8 +82,11 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
                                 ToolTip="Tip: in Live Captions settings turn OFF 'Include microphone audio' so only the interviewer is captured.">
-                        <TextBlock Text="Live captions" FontFamily="{StaticResource DisplayFont}" FontSize="14"
-                                   FontWeight="SemiBold" Foreground="{DynamicResource Strong}" VerticalAlignment="Center" />
+                        <Border Style="{StaticResource SmallIconChip}" Background="{DynamicResource MintBg}">
+                            <TextBlock Text="&#xE720;" Style="{StaticResource SmallChipGlyph}" Foreground="{DynamicResource MintFg}" />
+                        </Border>
+                        <TextBlock Text="Live captions" FontFamily="{StaticResource DisplayFont}" FontSize="14.5"
+                                   FontWeight="ExtraBold" Foreground="{DynamicResource Strong}" VerticalAlignment="Center" />
                         <Border Style="{StaticResource Pill}" Margin="10,0,0,0" Padding="8,2" VerticalAlignment="Center">
                             <StackPanel Orientation="Horizontal">
                                 <Ellipse x:Name="SourceDot" Width="7" Height="7" Fill="{DynamicResource Danger}"
@@ -110,31 +114,43 @@
                         Visibility="Collapsed" Click="OnJumpLatestClick"
                         ToolTip="Scroll to the newest captions and keep following them" />
 
-                <!-- Full view: the waiting message with its actions -->
+                <!-- Full view: the waiting message with its actions, on a soft shadow (drawn by its own
+                     border so the text stays crisp) -->
+                <Border x:Name="NextPanelShadow" Grid.Row="2" Background="{DynamicResource Surface}" CornerRadius="18"
+                        Margin="12,0,12,12" Effect="{StaticResource SoftShadow}" />
                 <Border x:Name="NextPanel" Grid.Row="2" Background="{DynamicResource Surface}"
-                        BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="12"
-                        Margin="10,0,10,10" Padding="14,12">
+                        BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="18"
+                        Margin="12,0,12,12" Padding="16,14">
                     <StackPanel>
                         <DockPanel>
                             <Border x:Name="SendKeyChip" DockPanel.Dock="Right" Style="{StaticResource KeyChip}"
                                     VerticalAlignment="Center" ToolTip="Send hotkey">
                                 <TextBlock x:Name="SendKeyText" />
                             </Border>
+                            <Border Style="{StaticResource SmallIconChip}" Background="{DynamicResource SkyBg}">
+                                <TextBlock Text="&#xE8BD;" Style="{StaticResource SmallChipGlyph}" Foreground="{DynamicResource SkyFg}" />
+                            </Border>
                             <TextBlock VerticalAlignment="Center">
-                                <Run Text="Next message" FontWeight="SemiBold" Foreground="{DynamicResource Strong}" />
+                                <Run Text="Next message" FontWeight="ExtraBold" Foreground="{DynamicResource Strong}" />
                                 <Run x:Name="PendingInfo" FontSize="11.5" Foreground="{DynamicResource Muted}" />
                             </TextBlock>
                         </DockPanel>
                         <!-- Automatic mode only: fills up while the interviewer pauses -->
-                        <ProgressBar x:Name="PauseProgress" Height="3" Margin="0,8,0,0" Minimum="0" Maximum="1"
+                        <ProgressBar x:Name="PauseProgress" Height="5" Margin="0,10,0,0" Minimum="0" Maximum="1"
                                      Background="{DynamicResource Border}" Foreground="{DynamicResource Accent}" Visibility="Collapsed" />
                         <ScrollViewer MaxHeight="120" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto">
                             <TextBlock x:Name="PendingText" TextWrapping="Wrap" FontSize="14" LineHeight="21"
                                        Foreground="{DynamicResource Muted}" Text="Waiting for the interviewer…" />
                         </ScrollViewer>
                         <DockPanel Margin="0,12,0,0" LastChildFill="False">
-                            <Button x:Name="SendNowButton" Content="Send" Style="{StaticResource PrimaryButton}"
-                                    Click="OnSendNowClick" Margin="0,0,6,0" Padding="18,7" />
+                            <Button x:Name="SendNowButton" Style="{StaticResource PrimaryButton}"
+                                    Click="OnSendNowClick" Margin="0,0,6,0" Padding="18,7">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE724;" FontFamily="{StaticResource IconFont}" FontSize="12" VerticalAlignment="Center"
+                                               Margin="0,1,8,0" />
+                                    <TextBlock Text="Send" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
                             <Button x:Name="DiscardButton" Content="Discard" Click="OnDiscardClick" Margin="0" />
                             <!-- What is already in the chat page's message box -->
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
@@ -158,7 +174,7 @@
                         <Button AutomationProperties.Name="Menu" x:Name="CompactMenuButton" DockPanel.Dock="Right" Content="&#xE712;" Style="{StaticResource IconButton}"
                                 Click="OnMainMenuClick" ToolTip="Menu: send, view, new chat, Settings (or right-click)" />
                         <Border x:Name="ViewSwitch" DockPanel.Dock="Right" Style="{StaticResource SegmentHost}"
-                                Padding="2" CornerRadius="8" Margin="0,0,6,0" VerticalAlignment="Center"
+                                Padding="2" CornerRadius="13" Margin="0,0,6,0" VerticalAlignment="Center"
                                 ToolTip="Show the clean answer, or the ChatGPT / DeepSeek page itself">
                             <StackPanel Orientation="Horizontal">
                                 <RadioButton x:Name="ViewAnswerTab" Content="Answer" GroupName="InterviewPane"
@@ -200,8 +216,11 @@
                                 </StackPanel>
                                 <StackPanel VerticalAlignment="Center">
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="AI answer" FontFamily="{StaticResource DisplayFont}" FontSize="14"
-                                                   FontWeight="SemiBold" Foreground="{DynamicResource Strong}" VerticalAlignment="Center" />
+                                        <Border Style="{StaticResource SmallIconChip}" Background="{DynamicResource LilacBg}">
+                                            <TextBlock Text="&#xE99A;" Style="{StaticResource SmallChipGlyph}" Foreground="{DynamicResource LilacFg}" />
+                                        </Border>
+                                        <TextBlock Text="AI answer" FontFamily="{StaticResource DisplayFont}" FontSize="14.5"
+                                                   FontWeight="ExtraBold" Foreground="{DynamicResource Strong}" VerticalAlignment="Center" />
                                         <Border Style="{StaticResource Pill}" Margin="10,0,0,0" Padding="8,1" VerticalAlignment="Center">
                                             <TextBlock x:Name="AnswerState" Text="Waiting" FontSize="11" Foreground="{DynamicResource Muted}" />
                                         </Border>
@@ -212,7 +231,7 @@
                             </DockPanel>
                         </Border>
                         <!-- Moving bar while the AI is thinking or writing (brush animated in code) -->
-                        <Border x:Name="LoadingBar" DockPanel.Dock="Top" Height="3" Visibility="Hidden" />
+                        <Border x:Name="LoadingBar" DockPanel.Dock="Top" Height="4" Visibility="Hidden" />
                         <Grid>
                             <RichTextBox x:Name="AnswerBox" IsReadOnly="True" IsReadOnlyCaretVisible="False"
                                          BorderThickness="0" Background="Transparent" Foreground="{DynamicResource Text}"
@@ -222,14 +241,25 @@
                             </RichTextBox>
                             <StackPanel x:Name="ReaderEmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="28"
                                         MaxWidth="380" IsHitTestVisible="False">
-                                <Border Width="56" Height="56" CornerRadius="28" Background="{DynamicResource Surface}"
-                                        BorderBrush="{DynamicResource Border}" BorderThickness="1" HorizontalAlignment="Center">
-                                    <TextBlock Text="&#xE8BD;" FontFamily="{StaticResource IconFont}" FontSize="22"
-                                               Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                                <TextBlock Text="Ready for the first question" FontFamily="{StaticResource DisplayFont}" FontSize="15"
-                                           FontWeight="SemiBold" Foreground="{DynamicResource Strong}" HorizontalAlignment="Center"
-                                           Margin="0,14,0,6" />
+                                <Grid Width="108" Height="92" HorizontalAlignment="Center">
+                                    <Ellipse Width="13" Height="13" Fill="{DynamicResource SunFg}" HorizontalAlignment="Right"
+                                             VerticalAlignment="Top" Margin="0,4,8,0" />
+                                    <Ellipse Width="9" Height="9" Fill="{DynamicResource MintFg}" HorizontalAlignment="Left"
+                                             VerticalAlignment="Bottom" Margin="8,0,0,12" />
+                                    <Ellipse Width="7" Height="7" Fill="{DynamicResource PeachFg}" HorizontalAlignment="Left"
+                                             VerticalAlignment="Top" Margin="14,12,0,0" />
+                                    <Ellipse Width="6" Height="6" Fill="{DynamicResource SkyFg}" HorizontalAlignment="Right"
+                                             VerticalAlignment="Bottom" Margin="0,0,12,6" />
+                                    <Border Width="72" Height="72" CornerRadius="24" Background="{DynamicResource AccentGradient}"
+                                            BorderBrush="{DynamicResource AccentBorder}" BorderThickness="0,0,0,4"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock Text="&#xE99A;" FontFamily="{StaticResource IconFont}" FontSize="32" Foreground="#FFFFFF"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                </Grid>
+                                <TextBlock Text="Ready for the first question" FontFamily="{StaticResource DisplayFont}" FontSize="17"
+                                           FontWeight="ExtraBold" Foreground="{DynamicResource Strong}" HorizontalAlignment="Center"
+                                           Margin="0,12,0,6" />
                                 <TextBlock x:Name="ReaderEmpty" Foreground="{DynamicResource Muted}" FontSize="12.5"
                                            TextWrapping="Wrap" TextAlignment="Center" LineHeight="20" />
                             </StackPanel>

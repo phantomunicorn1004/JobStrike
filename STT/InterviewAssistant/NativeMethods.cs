@@ -128,7 +128,7 @@ static partial class NativeMethods
     const int DwmwaTextColor = 36;
 
     /// <summary>
-    /// Title bar in the current theme's window colour (Windows 11; older versions keep the dark/light
+    /// Title bar in the current theme's panel colour, so it joins the toolbar (Windows 11; older versions keep the dark/light
     /// mode flag and ignore the colours).
     /// </summary>
     public static void ApplyWindowChrome(System.Windows.Window window)
@@ -136,7 +136,7 @@ static partial class NativeMethods
         IntPtr hwnd = new WindowInteropHelper(window).EnsureHandle();
         int dark = ThemeManager.IsDark ? 1 : 0;
         DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref dark, sizeof(int));
-        int caption = ColorRef(ThemeManager.ColorOf("WindowBg"));
+        int caption = ColorRef(ThemeManager.ColorOf("PanelBg"));
         int border = ColorRef(ThemeManager.ColorOf("Border"));
         int text = ColorRef(ThemeManager.ColorOf("Text"));
         DwmSetWindowAttribute(hwnd, DwmwaCaptionColor, ref caption, sizeof(int));

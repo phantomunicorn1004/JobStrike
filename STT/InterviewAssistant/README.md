@@ -75,7 +75,7 @@ The app only reads from JobStrike; it changes nothing there.
 ## During the interview (interview view)
 
 - **Captions**: the Live Captions text exactly as shown, for the whole interview. Grey text was
-  already sent; text in the accent colour (blue) is waiting. It follows the newest line unless you
+  already sent; text in the accent colour (violet) is waiting. It follows the newest line unless you
   scroll up; **↓ Latest** jumps back.
 - **Answer**: the latest AI answer in large text (about 70 characters per line), with headings,
   bullets, **bold key terms** and code kept, updated live. The header always says what is happening: **● Thinking… 5s** from the
@@ -143,7 +143,8 @@ between them to resize. In full view the captions are always on the left.
 
 Dark (the default) is low-glare for dim rooms and long sessions; Light is quicker to read in a bright
 room; Match Windows follows Settings → Personalization → Colors. Title bars and the chat page switch
-with the app.
+with the app. Both use the same friendly look: the rounded Nunito typeface (bundled in `Assets/Fonts`,
+SIL Open Font License), a violet accent, pill buttons and rounded cards.
 
 ## How captions are read
 

@@ -16,8 +16,8 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Bd" Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
-                                CornerRadius="8" Padding="12,8" Margin="0,0,0,2">
+                        <Border x:Name="Bd" Background="Transparent" BorderBrush="Transparent" BorderThickness="1.5"
+                                CornerRadius="14" Padding="12,9" Margin="0,0,0,3">
                             <ContentPresenter />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -26,7 +26,7 @@
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PendingBg}" />
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -37,12 +37,17 @@
 
     <DockPanel>
         <!-- Header -->
-        <StackPanel DockPanel.Dock="Top" Margin="24,18,24,8">
-            <TextBlock Text="Load from JobStrike" FontFamily="{StaticResource DisplayFont}" FontSize="20" FontWeight="SemiBold"
-                       Foreground="{DynamicResource Strong}" />
-            <TextBlock Foreground="{DynamicResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"
-                       Text="Pick the application you are interviewing for. Its company, job description and resume are filled into Settings for you to check." />
-        </StackPanel>
+        <DockPanel DockPanel.Dock="Top" Margin="24,20,24,10">
+            <Border Style="{StaticResource IconChip}" Width="40" Height="40" CornerRadius="13" Background="{DynamicResource LilacBg}">
+                <TextBlock Text="&#xE821;" Style="{StaticResource ChipGlyph}" FontSize="18" Foreground="{DynamicResource LilacFg}" />
+            </Border>
+            <StackPanel>
+                <TextBlock Text="Load from JobStrike" FontFamily="{StaticResource DisplayFont}" FontSize="21" FontWeight="ExtraBold"
+                           Foreground="{DynamicResource Strong}" />
+                <TextBlock Foreground="{DynamicResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0"
+                           Text="Pick the application you are interviewing for. Its company, job description and resume are filled into Settings for you to check." />
+            </StackPanel>
+        </DockPanel>
 
         <!-- Footer -->
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource Border}"
@@ -60,10 +65,10 @@
 
         <Grid Margin="24,8,24,16">
             <!-- Sign in (once; only the access key JobStrike returns is kept) -->
-            <Border x:Name="SignInPanel" Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource Border}"
-                    BorderThickness="1" CornerRadius="12" Padding="20,16,20,20" VerticalAlignment="Top" Visibility="Collapsed">
+            <ContentControl x:Name="SignInPanel" Style="{StaticResource Card}" Margin="0,4,0,0" VerticalAlignment="Top"
+                            Visibility="Collapsed">
                 <StackPanel MaxWidth="420" HorizontalAlignment="Left" Width="420">
-                    <TextBlock Text="Sign in to JobStrike" FontFamily="{StaticResource DisplayFont}" FontSize="15" FontWeight="SemiBold"
+                    <TextBlock Text="Sign in to JobStrike" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="ExtraBold"
                                Foreground="{DynamicResource Strong}" />
                     <TextBlock x:Name="SiteText" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,3,0,0" />
                     <TextBlock Text="Username" Style="{StaticResource FieldLabel}" />
@@ -77,7 +82,7 @@
                     <TextBlock Foreground="{DynamicResource Faint}" FontSize="11.5" TextWrapping="Wrap" Margin="0,12,0,0"
                                Text="Your password is not saved. JobStrike gives this app an access key, which is kept encrypted for your Windows account." />
                 </StackPanel>
-            </Border>
+            </ContentControl>
 
             <!-- Applications -->
             <DockPanel x:Name="ListPanel" Visibility="Collapsed">
@@ -100,9 +105,11 @@
                     </Border>
                 </DockPanel>
                 <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
-                    <TextBox x:Name="SearchBox" TextChanged="OnSearchChanged" />
+                    <TextBox x:Name="SearchBox" TextChanged="OnSearchChanged" Padding="36,8,12,8" />
+                    <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="13" IsHitTestVisible="False"
+                               Foreground="{DynamicResource Muted}" Margin="14,0,0,0" VerticalAlignment="Center" />
                     <TextBlock x:Name="SearchHint" Text="Search company, job title or candidate" IsHitTestVisible="False"
-                               Foreground="{DynamicResource Faint}" Margin="13,0,0,0" VerticalAlignment="Center" />
+                               Foreground="{DynamicResource Faint}" Margin="38,0,0,0" VerticalAlignment="Center" />
                 </Grid>
                 <CheckBox x:Name="ProfileToggle" DockPanel.Dock="Bottom" Style="{StaticResource ToggleSwitch}" Margin="0,12,0,0">
                     <StackPanel>
@@ -125,14 +132,14 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <!-- Company initials in a colour picked from the name -->
-                                    <Border Width="34" Height="34" CornerRadius="17" Background="{Binding AvatarBrush, Mode=OneWay}"
+                                    <Border Width="36" Height="36" CornerRadius="12" Background="{Binding AvatarBrush, Mode=OneWay}"
                                             VerticalAlignment="Center" Margin="0,0,12,0">
-                                        <TextBlock Text="{Binding Initials, Mode=OneWay}" Foreground="White" FontWeight="SemiBold"
+                                        <TextBlock Text="{Binding Initials, Mode=OneWay}" Foreground="White" FontWeight="ExtraBold"
                                                    FontSize="12.5" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock TextTrimming="CharacterEllipsis">
-                                            <Run Text="{Binding Company, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Strong}" />
+                                            <Run Text="{Binding Company, Mode=OneWay}" FontWeight="Bold" Foreground="{DynamicResource Strong}" />
                                             <Run Text="{Binding TitleSuffix, Mode=OneWay}" Foreground="{DynamicResource Text}" />
                                         </TextBlock>
                                         <TextBlock Text="{Binding Details, Mode=OneWay}" Foreground="{DynamicResource Muted}" FontSize="11.5"

@@ -11,13 +11,13 @@
                       UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
-    <Border x:Name="Frame" CornerRadius="14" BorderThickness="1">
+    <Border x:Name="Frame" CornerRadius="18" BorderThickness="1">
         <DockPanel x:Name="Body">
             <Grid DockPanel.Dock="Top" Height="38" Margin="14,0,8,0">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" ToolTip="Drag here to move · drag the edges to resize">
                     <Image Source="/Assets/AppIcon.png" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center"
                            RenderOptions.BitmapScalingMode="HighQuality" />
-                    <TextBlock Text="Interview Assistant" FontSize="11.5" FontWeight="SemiBold"
+                    <TextBlock Text="Interview Assistant" FontSize="11.5" FontWeight="ExtraBold"
                                Foreground="{DynamicResource Muted}" VerticalAlignment="Center" />
                     <Ellipse x:Name="LiveDot" Width="7" Height="7" Fill="{DynamicResource Accent}" Margin="8,0,0,0"
                              VerticalAlignment="Center" ToolTip="Green: Live Captions connected" />

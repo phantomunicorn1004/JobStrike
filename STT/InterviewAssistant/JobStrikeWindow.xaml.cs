@@ -243,7 +243,7 @@ public partial class JobStrikeWindow : Window
     {
         public string Company => Application.Company.Length > 0 ? Application.Company : "(no company)";
         public string TitleSuffix => Application.JobTitle.Length > 0 ? "  ·  " + Application.JobTitle : "";
-        static readonly string[] AvatarColors = ["#4F6DBF", "#3E8E7E", "#8A5CB8", "#B8743E", "#3E7FB8", "#B8506A", "#5C8A3E"];
+        static readonly string[] AvatarColors = ["#6C5CE7", "#13996A", "#E0703C", "#2F80D8", "#D9508C", "#0E9AA7", "#9B5DE5"];
 
         public string Initials => string.Concat(Application.Company
             .Split([' ', '-', '&', ',', '.', '(', ')'], StringSplitOptions.RemoveEmptyEntries)

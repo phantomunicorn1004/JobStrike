@@ -1075,6 +1075,7 @@ public partial class MainWindow : Window
         StatusBar.Visibility = shown;
         CaptionHeader.Visibility = shown;
         NextPanel.Visibility = shown;
+        NextPanelShadow.Visibility = shown;
         CompactBar.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
         // The overlay has Menu and Full view in its own top bar, and can only show the answer.
         CompactMenuButton.Visibility = overlay ? Visibility.Collapsed : Visibility.Visible;
