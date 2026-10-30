@@ -9,6 +9,7 @@ import type {
 } from "@/lib/dashboard/stats";
 import { endOfDayUtcIso, startOfDayUtcIso } from "@/lib/timezone";
 import type { ResponseApplicationRow } from "@/lib/dashboard/response-stats";
+import { QUEUED_APPLY } from "@/lib/resume-db/types";
 
 /**
  * Thin all-time rows for candidate breakdowns (no applied_at needed beyond optional id).
@@ -22,6 +23,7 @@ export async function listApplicationCandidateKeysForDashboard(
       .from("resume_db_applications")
       .select("id, profile_id, candidate_name, applied_at")
       .eq("user_id", userId)
+      .neq("apply", QUEUED_APPLY)
       .order("id", { ascending: true })
       .range(from, to),
   );
@@ -42,6 +44,7 @@ export async function listApplicationsForDashboardRange(
       .from("resume_db_applications")
       .select("id, applied_at, profile_id, candidate_name")
       .eq("user_id", userId)
+      .neq("apply", QUEUED_APPLY)
       .gte("applied_at", fromIso)
       .lte("applied_at", toIso)
       .order("id", { ascending: true })
@@ -94,6 +97,7 @@ export async function listApplicationsForResponseStats(
         .from("resume_db_applications")
         .select("id, job_link, applied_at, pipeline_stage_id, profile_id, candidate_name")
         .eq("user_id", userId)
+        .neq("apply", QUEUED_APPLY)
         .order("id", { ascending: true })
         .range(from, to),
     );
@@ -104,6 +108,7 @@ export async function listApplicationsForResponseStats(
         .from("resume_db_applications")
         .select("id, job_link, applied_at, profile_id, candidate_name")
         .eq("user_id", userId)
+        .neq("apply", QUEUED_APPLY)
         .order("id", { ascending: true })
         .range(from, to),
     );

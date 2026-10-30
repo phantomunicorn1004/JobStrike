@@ -49,6 +49,13 @@ export async function GET(request: NextRequest) {
       appliedAt: entry.appliedAt,
       exportedAt: new Date().toISOString(),
     };
+    if (entry.builtResumeJson) {
+      try {
+        payload.builtResume = JSON.parse(entry.builtResumeJson);
+      } catch {
+        payload.builtResume = entry.builtResumeJson;
+      }
+    }
 
     if (searchParams.get("download") === "1") {
       const fileName = `resume-db-${payload.entryId || payload.id}.json`;

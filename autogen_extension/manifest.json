@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "AutoGen",
+  "version": "1.0.0",
+  "description": "JobStrike AutoGen: generates queued resumes with a ChatGPT tab or the JobStrike API engine, using each profile's own prompt.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "AutoGen",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "tabs",
+    "sidePanel",
+    "scripting",
+    "clipboardRead",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "autogen-mode-detector.js",
+        "autogen-json-extract.js",
+        "autogen-model-adapter.js",
+        "chatgpt-content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

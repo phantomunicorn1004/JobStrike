@@ -21,7 +21,22 @@ export type ResumeDbApplication = {
   coverLetterStoragePath?: string | null;
   resumeDriveFileId?: string | null;
   coverDriveFileId?: string | null;
+  /** The posting text resume generation works from; "" before scripts/add-autogen-to-resume-db.sql. */
+  jobDescription?: string;
+  /** Resume generation (AutoGen); "none" for rows that are not part of it. */
+  generationStatus?: GenerationStatus;
+  autogenClaimedAt?: string | null;
+  generationError?: string;
+  generationMeta?: Record<string, unknown> | null;
+  builtResumeJson?: string | null;
 };
+
+/** apply value of a job queued for resume generation and not yet sent: not a bid, so not counted. */
+export const QUEUED_APPLY = "Queued";
+
+export const GENERATION_STATUSES =["none", "queue", "generating", "completed", "failed"] as const;
+
+export type GenerationStatus = (typeof GENERATION_STATUSES)[number];
 
 export type ResumeDbApplicationInput = {
   entryId: string;
@@ -42,6 +57,9 @@ export type ResumeDbApplicationInput = {
   coverDriveFileId?: string;
   pipelineJobId?: number | null;
   pipelineStageId?: string | null;
+  /** Written only when given (needs scripts/add-autogen-to-resume-db.sql). */
+  jobDescription?: string;
+  generationStatus?: GenerationStatus;
 };
 
 export type ResumeDbJobExport = {
@@ -58,6 +76,8 @@ export type ResumeDbJobExport = {
   apply: string;
   appliedAt: string;
   exportedAt: string;
+  /** The resume JSON AutoGen built (checked against the kit), when there is one. */
+  builtResume?: unknown;
 };
 
 export type ProfileListItem = {

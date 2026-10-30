@@ -5,6 +5,7 @@ import {
   resolveRequestUser,
   unauthorizedJson,
 } from "@/lib/auth/resolve-request-user";
+import { listGenerationStates } from "@/lib/autogen/claim";
 import { parseResumeFromPublicUrl } from "@/lib/resume-db/parseFromUrl";
 import {
   createApplication,
@@ -377,7 +378,17 @@ export async function GET(request: NextRequest) {
         : Promise.resolve([] as string[]),
     ]);
 
-    const resumes = entries.map((entry) => mapForList(entry, timeZone, stageMap));
+    const generation = await listGenerationStates(
+      userId,
+      entries.map((entry) => entry.id),
+    );
+    const resumes = entries.map((entry) => {
+      const state = generation.get(entry.id);
+      return {
+        ...mapForList(entry, timeZone, stageMap),
+        ...(state && { generationStatus: state.status, generationError: state.error }),
+      };
+    });
 
     // For pipeline ordering we only guarantee ordering within the loaded page.
     if (sortKey === "pipeline" && resumes.length > 0) {

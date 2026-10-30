@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AutoGen</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="sidepanel.css" />
+    <script src="theme.js"></script>
+  </head>
+  <body class="sidepanel">
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <div class="brand-logo" aria-hidden="true">
+            <img src="icons/icon-48.png" alt="" class="brand-mark" width="32" height="32" />
+          </div>
+          <div>
+            <div class="eyebrow">JobStrike</div>
+            <h1>AutoGen</h1>
+          </div>
+        </div>
+      </header>
+
+      <nav class="nav-primary" aria-label="AutoGen">
+        <button type="button" class="tab tab-main active" id="tab-monitor" data-tab="monitor" role="tab" aria-selected="true">
+          <span class="tab-label">Monitor</span>
+        </button>
+        <button type="button" class="tab tab-main" id="tab-applications" data-tab="applications" role="tab" aria-selected="false">
+          <span class="tab-label">Applications</span>
+        </button>
+        <button type="button" class="tab tab-main" id="tab-settings" data-tab="settings" role="tab" aria-selected="false">
+          <span class="tab-label">Settings</span>
+        </button>
+      </nav>
+
+      <main class="app-main">
+        <section class="tab-panel" id="panel-monitor" role="tabpanel" aria-labelledby="tab-monitor">
+          <div class="card monitor-card">
+            <div class="monitor-summary">
+              <div class="summary-stat">
+                <div class="summary-stat-value" id="summary-window-status">Idle</div>
+                <div class="summary-stat-label">This window</div>
+              </div>
+              <div class="summary-stat success">
+                <div class="summary-stat-value" id="summary-completed">0</div>
+                <div class="summary-stat-label">Completed</div>
+              </div>
+              <div class="summary-stat error">
+                <div class="summary-stat-value" id="summary-failed">0</div>
+                <div class="summary-stat-label">Failed</div>
+              </div>
+              <div class="summary-stat neutral">
+                <div class="summary-stat-value" id="summary-skipped">0</div>
+                <div class="summary-stat-label">Skipped</div>
+              </div>
+              <button
+                type="button"
+                id="reset-stats-btn"
+                class="icon-button"
+                title="Reset session totals"
+                aria-label="Reset session totals"
+              >
+                &#8635;
+              </button>
+            </div>
+            <div class="monitor-drive-line" id="monitor-drive-line" data-state="unknown" hidden>
+              <span class="drive-status-dot" aria-hidden="true"></span>
+              <div class="monitor-drive-text">
+                <span class="monitor-drive-title">JobStrike</span>
+                <span class="monitor-drive-detail" id="monitor-drive-label">Checking…</span>
+              </div>
+              <button
+                type="button"
+                id="monitor-refresh-drive-btn"
+                class="icon-button"
+                title="Refresh Google Drive status"
+                aria-label="Refresh Google Drive status"
+              >
+                &#8635;
+              </button>
+            </div>
+          </div>
+          <div id="window-card-container"></div>
+          <div class="card activity-log-block">
+            <div class="activity-log-header">
+              <div class="field-label">Activity log</div>
+              <button
+                type="button"
+                id="clear-activity-log-btn"
+                class="icon-button danger"
+                title="Clear log history"
+                aria-label="Clear log history"
+              >
+                &#128465;
+              </button>
+            </div>
+            <textarea id="activity-log" class="activity-log" rows="12" readonly spellcheck="false"></textarea>
+          </div>
+        </section>
+
+        <section class="tab-panel hidden" id="panel-applications" role="tabpanel" aria-labelledby="tab-applications">
+          <div class="card toolbar applications-toolbar">
+            <p class="hint-text">
+              Runs against the ChatGPT tab in this window. Open more ChatGPT windows and start each panel to run several at once.
+            </p>
+            <div class="toolbar-row">
+              <button type="button" id="run-selected-btn" class="btn primary primary-button" disabled>Run selected</button>
+              <button
+                type="button"
+                id="toggle-run-btn"
+                class="btn secondary-button"
+                title="Start background auto-claim in this window"
+                aria-label="Start background auto-claim in this window"
+              >
+                Run in background
+              </button>
+              <button type="button" id="stop-selected-btn" class="btn danger danger-button" title="Stop this window's processing" aria-label="Stop this window's processing">Stop</button>
+            </div>
+            <div class="toolbar-row">
+              <button type="button" id="fetch-candidates-btn" class="btn secondary-button" title="Fetch the latest applications from the server" aria-label="Fetch applications">
+                Fetch
+              </button>
+              <button type="button" id="clear-candidates-btn" class="btn secondary-button" title="Clear the locally stored application list" aria-label="Clear stored applications">
+                Clear
+              </button>
+              <span id="candidates-progress" class="status-indicator idle"></span>
+            </div>
+          </div>
+          <label class="select-all-row">
+            <input type="checkbox" id="select-all-candidates" />
+            Select all
+          </label>
+          <div id="candidates-list" class="candidates-list"></div>
+          <p id="candidates-empty" class="empty-state">No applications need generation.</p>
+        </section>
+
+        <section class="tab-panel hidden" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings">
+          <div class="card appearance-card">
+            <h2>Appearance</h2>
+            <p class="muted">Light or dark, same as JobStrike. Saved in this browser.</p>
+            <div class="theme-segmented" role="group" aria-label="Theme">
+              <button type="button" class="theme-option" data-theme-option="light">Light</button>
+              <button type="button" class="theme-option" data-theme-option="dark">Dark</button>
+            </div>
+          </div>
+
+          <form id="settings-form">
+            <div class="card form-grid">
+              <h2>JobStrike</h2>
+            <label class="full">
+              Server URL
+              <input type="url" id="setting-server-url" required placeholder="http://localhost:3000" />
+            </label>
+            <label class="full">
+              Username
+              <input type="text" id="setting-email" required placeholder="JobStrike username" autocomplete="username" />
+            </label>
+            <label class="full">
+              Password
+              <input type="password" id="setting-password" required autocomplete="current-password" />
+            </label>
+            <div class="drive-status-block full" id="drive-status-block">
+              <div class="tab-pickers-header">
+                <span class="field-label">Connection</span>
+                <button
+                  type="button"
+                  id="refresh-drive-status-btn"
+                  class="icon-button"
+                  title="Check the connection to JobStrike"
+                  aria-label="Check the connection to JobStrike"
+                >
+                  &#8635;
+                </button>
+              </div>
+              <div class="drive-status-row" id="drive-status-row" data-state="unknown">
+                <span class="drive-status-dot" id="drive-status-dot" aria-hidden="true"></span>
+                <span class="drive-status-label" id="drive-status-label">Not checked yet</span>
+              </div>
+              <p class="hint-text" id="drive-status-hint">
+                Signs in with your JobStrike username and password and uses the account's extension key.
+              </p>
+            </div>
+            </div>
+
+            <div class="card form-grid">
+              <h2>Resume generation</h2>
+            <label class="full">
+              Engine
+              <select id="setting-engine">
+                <option value="chatgpt">ChatGPT tab (this window's chatgpt.com tab)</option>
+                <option value="api">API key (JobStrike server's OpenAI key)</option>
+              </select>
+            </label>
+            <p class="hint-text full">
+              Both use each profile's own prompt from JobStrike and the same checks before saving.
+              ChatGPT tab needs a signed-in chatgpt.com tab active in this window; API key needs no tab
+              (the server must have OPENAI_API_KEY set).
+            </p>
+            </div>
+
+            <div class="card form-grid">
+              <h2>Queue</h2>
+            <label class="full">
+              Fetch period (seconds, 5–60)
+              <input type="number" id="setting-fetch-period" min="5" max="60" required />
+            </label>
+            <label class="full">
+              Maximum try count
+              <input type="number" id="setting-max-try" min="1" max="10" required />
+            </label>
+            <label class="full">
+              Maximum wait per attempt (seconds)
+              <input type="number" id="setting-max-wait" min="30" max="1200" required />
+            </label>
+            <label class="select-all-row full">
+              <input type="checkbox" id="setting-auto-claim" />
+              Auto-claim the oldest queued application when this window is idle
+            </label>
+            <p class="hint-text full">
+              When a running window's queue is empty, claim the next pending application
+              instead of sitting idle. "Run in background" turns this on.
+            </p>
+            </div>
+
+            <div class="card form-grid">
+              <h2>ChatGPT session</h2>
+            <label class="full">
+              Before each application
+              <select id="setting-start-chat">
+                <option value="temporary">New temporary chat (recommended)</option>
+                <option value="asis">Use the open chat</option>
+              </select>
+            </label>
+            <p class="hint-text full">
+              AutoGen applies this action before the first attempt, then applies the Chat or Work selection below before pasting.
+            </p>
+            <label class="full">
+              Before each retry
+              <select id="setting-retry-chat">
+                <option value="reuse">Reuse current chat</option>
+                <option value="reload">Reload, then paste</option>
+                <option value="new">New chat, then paste</option>
+                <option value="temporary">Temporary chat, then paste</option>
+                <option value="delete-new">Delete current chat, then new chat</option>
+              </select>
+            </label>
+            <p class="hint-text full">
+              A failed attempt uses the retry action selected here before the next paste.
+            </p>
+            <label class="full">
+              Chat model / reasoning
+              <select id="setting-chat-mode-model">
+                <option value="asis">Leave as is</option>
+                <option value="instant">Instant</option>
+                <option value="medium">Medium</option>
+                <option value="high" selected>High</option>
+                <option value="extra-high">Extra high</option>
+                <option value="pro">Pro</option>
+                <option value="pro-standard">Pro Standard</option>
+                <option value="pro-extended">Pro Extended</option>
+              </select>
+            </label>
+            <label class="full">
+              Work model / reasoning
+              <select id="setting-work-mode-model">
+                <option value="asis">Leave as is</option>
+                <option value="instant">Instant</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="extra-high" selected>Extra high</option>
+                <option value="pro">Pro</option>
+                <option value="pro-standard">Pro Standard</option>
+                <option value="pro-extended">Pro Extended</option>
+              </select>
+            </label>
+            <p class="hint-text full">
+              AutoGen uses the selection for the active Chat or Work experience. Options hidden by your plan or workspace are skipped and the current selection is kept, so resume generation can continue.
+            </p>
+            <div class="full">
+              <button type="button" id="test-chatgpt-model-btn" class="btn secondary-button">Test</button>
+            </div>
+            <p class="hint-text full" id="test-chatgpt-model-hint">
+              Test applies the Chat or Work selection above to the ChatGPT tab open in this window.
+            </p>
+            <label class="full">
+              After successful resumes
+              <select id="setting-thread-reset">
+                <option value="keep">Keep the same thread</option>
+                <option value="temporary">Fresh temporary chat</option>
+              </select>
+            </label>
+            <label class="full">
+              Successes before a fresh temporary chat
+              <input type="number" id="setting-thread-reset-after" min="1" max="50" required />
+            </label>
+            <p class="hint-text full">
+              Used only when Fresh temporary chat is selected. The open thread stays in history, and the next resume starts in a new temporary chat.
+            </p>
+            </div>
+
+            <div class="button-row settings-save-row">
+              <button type="submit" class="btn primary">Save settings</button>
+              <span id="settings-saved" class="saved-hint hidden">Saved.</span>
+            </div>
+          </form>
+
+          <div class="card config-io-block">
+            <h2>Configuration</h2>
+            <div class="config-io-buttons">
+              <button type="button" id="export-config-btn" class="btn secondary-button">Export</button>
+              <button type="button" id="import-config-btn" class="btn secondary-button">Import</button>
+              <input type="file" id="import-config-file" accept="application/json,.json" hidden />
+            </div>
+            <p class="hint-text">
+              Export downloads AutoGen settings as JSON. Import loads them back, including the server URL and credentials.
+            </p>
+            <span id="config-io-hint" class="saved-hint hidden"></span>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="autogen-json-extract.js"></script>
+    <script src="autogen-api.js"></script>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

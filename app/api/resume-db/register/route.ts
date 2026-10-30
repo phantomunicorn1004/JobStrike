@@ -4,11 +4,15 @@ import { requireRequestUser } from "@/lib/auth/resolve-request-user";
 import { isGoogleDriveConfigured } from "@/lib/google-drive/config";
 import { isGoogleOAuthWebConfigured } from "@/lib/google-drive/oauth-web";
 import { isUserGoogleDriveConnected } from "@/lib/google-drive/user-drive";
+import { dequeueIfQueued } from "@/lib/autogen/claim";
 import {
   createApplication,
   findApplicationByJobLink,
+  getApplicationById,
   getProfileById,
+  updateApplication,
 } from "@/lib/resume-db/repository";
+import { QUEUED_APPLY, type ResumeDbApplication } from "@/lib/resume-db/types";
 import { resolveRegisterFiles } from "@/lib/resume-db/resolve-register-files";
 import { newEntryId } from "@/lib/resume-db/storage";
 
@@ -81,17 +85,33 @@ export async function POST(request: NextRequest) {
     }
     // Checked here, before any upload: the extension no longer downloads every
     // application to find out, and two panels cannot both register one job.
+    // A job queued for AutoGen (apply "Queued", not yet a bid) is the one
+    // exception: registering it fills in that row.
+    let queuedRow: ResumeDbApplication | null = null;
     if (duplicate) {
-      return corsJson(
-        {
-          error: `Duplicate job link — already in Resume DB for this profile (#${duplicate.id}).`,
-          duplicateId: duplicate.id,
-        },
-        { status: 409 },
-      );
+      const existing = await getApplicationById(duplicate.id, user.id);
+      if (existing?.apply !== QUEUED_APPLY) {
+        return corsJson(
+          {
+            error: `Duplicate job link — already in Resume DB for this profile (#${duplicate.id}).`,
+            duplicateId: duplicate.id,
+          },
+          { status: 409 },
+        );
+      }
+      if (existing.generationStatus === "generating") {
+        // No duplicateId: the extension would take that as "already registered".
+        return corsJson(
+          {
+            error: `AutoGen is generating this job's resume right now (#${existing.id}). Wait until it finishes, then click Register again.`,
+          },
+          { status: 409 },
+        );
+      }
+      queuedRow = existing;
     }
 
-    const entryId = newEntryId();
+    const entryId = queuedRow?.entryId || newEntryId();
     const resolved = await resolveRegisterFiles({
       userId: user.id,
       origin,
@@ -105,7 +125,7 @@ export async function POST(request: NextRequest) {
     });
 
     const savedMeanwhile = await findApplicationByJobLink(user.id, profileId, jobLink);
-    if (savedMeanwhile) {
+    if (savedMeanwhile && savedMeanwhile.id !== queuedRow?.id) {
       return corsJson(
         {
           error: `Duplicate job link — already in Resume DB for this profile (#${savedMeanwhile.id}).`,
@@ -115,11 +135,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const application = await createApplication(user.id, {
-      entryId,
-      profileId,
-      candidateName: profile.full_name,
-      jobLink,
+    const fields = {
       jobTitle,
       company: companyName,
       atsPlatform: atsPlatform || undefined,
@@ -131,7 +147,22 @@ export async function POST(request: NextRequest) {
       coverLetterStoragePath: resolved.coverStoragePath,
       resumeDriveFileId: resolved.resumeDriveFileId,
       coverDriveFileId: resolved.coverDriveFileId,
-    });
+    };
+    let application: ResumeDbApplication;
+    if (queuedRow) {
+      await updateApplication(queuedRow.id, user.id, fields);
+      // Bid by hand: AutoGen need not build a resume for it (unless it already started).
+      await dequeueIfQueued(user.id, queuedRow.id);
+      application = (await getApplicationById(queuedRow.id, user.id)) ?? queuedRow;
+    } else {
+      application = await createApplication(user.id, {
+        entryId,
+        profileId,
+        candidateName: profile.full_name,
+        jobLink,
+        ...fields,
+      });
+    }
 
     const userDriveConnected = await isUserGoogleDriveConnected(user.id);
 
@@ -156,8 +187,9 @@ export async function POST(request: NextRequest) {
           serviceAccountConfigured: isGoogleDriveConfigured(),
           oauthWebConfigured: isGoogleOAuthWebConfigured(),
         },
+        ...(queuedRow && { fromQueue: true }),
       },
-      { status: 201 },
+      { status: queuedRow ? 200 : 201 },
     );
   } catch (error) {
     console.error("Resume DB register error:", error);

@@ -1,8 +1,10 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
-import type {
-  ProfileListItem,
-  ResumeDbApplication,
-  ResumeDbApplicationInput,
+import {
+  GENERATION_STATUSES,
+  type GenerationStatus,
+  type ProfileListItem,
+  type ResumeDbApplication,
+  type ResumeDbApplicationInput,
 } from "@/lib/resume-db/types";
 import { DEFAULT_TIMEZONE, endOfDayUtcIso, normalizeTimeZone, startOfDayUtcIso } from "@/lib/timezone";
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
@@ -33,7 +35,19 @@ type DbRow = {
   cover_letter_storage_path: string | null;
   resume_drive_file_id: string | null;
   cover_drive_file_id: string | null;
+  /** Absent until scripts/add-autogen-to-resume-db.sql has run. */
+  job_description?: string | null;
+  generation_status?: string | null;
+  autogen_claimed_at?: string | null;
+  generation_error?: string | null;
+  generation_meta?: Record<string, unknown> | null;
+  built_resume_json?: string | null;
 };
+
+function toGenerationStatus(value: unknown): GenerationStatus {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return (GENERATION_STATUSES as readonly string[]).includes(raw) ? (raw as GenerationStatus) : "none";
+}
 
 /** Columns needed for Resume DB table list (avoid select *). */
 export const RESUME_DB_LIST_COLUMNS =
@@ -90,7 +104,18 @@ function mapRow(row: DbRow): ResumeDbApplication {
     coverLetterStoragePath: row.cover_letter_storage_path ?? null,
     resumeDriveFileId: row.resume_drive_file_id ?? null,
     coverDriveFileId: row.cover_drive_file_id ?? null,
+    jobDescription: row.job_description ?? "",
+    generationStatus: toGenerationStatus(row.generation_status),
+    autogenClaimedAt: row.autogen_claimed_at ?? null,
+    generationError: row.generation_error ?? "",
+    generationMeta: row.generation_meta ?? null,
+    builtResumeJson: row.built_resume_json ?? null,
   };
+}
+
+/** Same mapping as the rest of Resume DB, for modules that query rows themselves (AutoGen). */
+export function mapApplicationRow(row: Record<string, unknown>): ResumeDbApplication {
+  return mapRow(row as unknown as DbRow);
 }
 
 export async function listProfiles(userId: string): Promise<ProfileListItem[]> {
@@ -546,6 +571,8 @@ export async function createApplication(
     cover_letter_storage_path: input.coverLetterStoragePath ?? null,
     resume_drive_file_id: input.resumeDriveFileId ?? null,
     cover_drive_file_id: input.coverDriveFileId ?? null,
+    ...(input.jobDescription !== undefined && { job_description: input.jobDescription }),
+    ...(input.generationStatus !== undefined && { generation_status: input.generationStatus }),
   };
 
   const atsPlatform = input.atsPlatform?.trim() || atsPlatformFromLink(input.jobLink);

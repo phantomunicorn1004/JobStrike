@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -13,8 +13,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { generationReadiness, type GenerationReadiness } from "@/lib/autogen/kit";
 import { REQUIRED_BUILT_RESUME_JSON_FIELDS } from "@/lib/promptBuilder";
 import {
   emptyProfilePromptKit,
@@ -107,6 +108,41 @@ function FieldBlock({
   );
 }
 
+/** Whether resume generation (ChatGPT tab or API) can use this profile's kit, as edited. */
+function GenerationReadinessNote({ readiness, dirty }: { readiness: GenerationReadiness; dirty: boolean }) {
+  const pending = dirty ? " Save the kit for resume generation to use these changes." : "";
+  if (readiness.ready) {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-foreground">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
+        <p>
+          Ready for resume generation: queued jobs for this profile use this prompt, with the ChatGPT tab or the API.
+          {pending}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div
+      role="status"
+      className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-foreground"
+    >
+      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+      <div className="min-w-0 space-y-1">
+        <p className="font-medium">Resume generation cannot use this kit yet. Queued jobs for this profile will fail:</p>
+        <ul className="list-disc space-y-0.5 pl-4">
+          {readiness.problems.map((problem) => (
+            <li key={problem} className="break-words">
+              {problem}
+            </li>
+          ))}
+        </ul>
+        {pending ? <p className="text-muted-foreground">{pending.trim()}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function kitEquals(a: ProfilePromptKit, b: ProfilePromptKit): boolean {
   return (
     a.template === b.template && a.resumeTemplateJson === b.resumeTemplateJson
@@ -124,6 +160,10 @@ export function ResumeBuilderPageClient() {
 
   const dirty = profileId != null && !kitEquals(kit, savedKit);
   const editorsDisabled = profileId == null;
+  const readiness = useMemo(
+    () => generationReadiness(kit.template, kit.resumeTemplateJson),
+    [kit.template, kit.resumeTemplateJson],
+  );
 
   const loadKitForProfile = useCallback(async (id: number) => {
     const local = readProfilePromptKit(id);
@@ -391,11 +431,13 @@ export function ResumeBuilderPageClient() {
           </div>
         </div>
 
+        {profileId != null ? <GenerationReadinessNote readiness={readiness} dirty={dirty} /> : null}
+
         <div className="flex min-h-0 flex-1 flex-col gap-4">
           <FieldBlock
             id="rb-prompt-template"
             label="Original prompt"
-            hint="Template with placeholders {resume_template_json} and {job_description}. The extension fills job description from Note when building."
+            hint="This profile's own prompt, used by Copy Prompt and by resume generation (ChatGPT tab and API). Keep the placeholders {resume_template_json} and {job_description}."
             value={kit.template}
             onChange={(value) => patchKit({ template: value })}
             onClear={() => patchKit({ template: "" })}
