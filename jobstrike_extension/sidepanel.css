@@ -4525,3 +4525,67 @@ textarea.js-input {
 .js-q-hide input {
   margin: 0;
 }
+
+/* Auto-bid card (autobid-runner.js); shares the Live card's look. */
+.ab-counts:empty {
+  display: none;
+}
+.ab-needs {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.ab-needs summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #d97706;
+}
+.ab-need {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.ab-need-main {
+  flex: 1;
+  min-width: 0;
+}
+.ab-need-title,
+.ab-need-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ab-need-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.ab-need-reason {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ab-need-btn {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.ab-need-btn:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.ab-log {
+  max-height: 160px;
+  overflow: auto;
+  margin: 6px 0 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+.ab-log:empty {
+  display: none;
+}

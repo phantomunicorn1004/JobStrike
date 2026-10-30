@@ -430,8 +430,42 @@
                   </select>
                 </label>
                 <label class="js-live-check"><input type="checkbox" id="jsLiveNotify" checked> Desktop notification for new jobs</label>
+                <label class="js-live-check" title="Each new job is read and queued for AutoGen, as the Queue button does, for the profile selected in the Bid tab when you switch this on">
+                  <input type="checkbox" id="jsLiveAutoQueue"> Queue new jobs for AutoGen automatically <span id="jsLiveAutoQueueFor"></span>
+                </label>
+                <label class="js-live-check" title="Others (Workday, iCIMS…) would be filled but left for you to submit">
+                  <input type="checkbox" id="jsLiveAutoQueueSupported" checked> Only Greenhouse, Lever and Ashby jobs
+                </label>
                 <button type="button" class="btn-secondary-full" id="jsLiveCheckNow">Check now</button>
                 <p class="js-live-note">Jobright is read every 3 hours while today's requests allow a full read. Checks run only while this panel is open.</p>
+              </details>
+            </div>
+            <!-- Auto-bid: applies to jobs whose resume AutoGen generated (autobid-runner.js). -->
+            <div class="js-live ab-card" id="abCard">
+              <div class="js-live-top">
+                <span class="js-live-dot" aria-hidden="true"></span>
+                <strong class="js-live-name">Auto-bid</strong>
+                <span class="js-live-status" id="abStatus">Off</span>
+                <label class="js-source-switch" title="Apply to jobs whose resume is generated, one at a time in this window, while this panel is open">
+                  <input type="checkbox" id="abToggle" aria-label="Auto-bid">
+                  <span aria-hidden="true"></span>
+                </label>
+              </div>
+              <p class="js-live-meta" id="abStep">Applies to jobs whose resume AutoGen generated.</p>
+              <p class="js-live-meta ab-counts" id="abCounts"></p>
+              <details class="ab-needs" id="abNeedsYou" hidden></details>
+              <details class="js-live-settings">
+                <summary>Auto-bid settings</summary>
+                <label class="js-live-check" title="Off: dry run. Each form is filled and checked, then left open for you to submit.">
+                  <input type="checkbox" id="abSubmit"> Press Submit (Greenhouse, Lever, Ashby)
+                </label>
+                <label class="js-live-field">
+                  <span>Applications per day</span>
+                  <input type="number" id="abDailyLimit" class="js-input" min="1" max="200" step="1">
+                </label>
+                <button type="button" class="btn-secondary-full" id="abRefresh">Refresh</button>
+                <p class="js-live-note">Needs: json2docx running on this machine, and Autofill with AI on (Settings) for custom questions. Keep this window for Auto-bid: it opens each job here. A CAPTCHA, a required answer it does not have, or no confirmation stops the job and lists it under Needs you.</p>
+                <pre class="ab-log" id="abLog"></pre>
               </details>
             </div>
             <!-- Sources, in scrape order. Freshness is the setting changed most, so it lives on the row. -->
@@ -1005,5 +1039,6 @@
   <script src="job-scraper-panel.js"></script>
   <script src="register-resume-db.js"></script>
   <script src="sidepanel.js"></script>
+  <script src="autobid-runner.js"></script>
 </body>
 </html>

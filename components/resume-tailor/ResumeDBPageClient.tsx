@@ -118,6 +118,11 @@ export type ResumeDbRow = {
   /** AutoGen: "queue" | "generating" | "completed" | "failed"; absent when never queued. */
   generationStatus?: string;
   generationError?: string;
+  /** Auto-bid: "bidding" | "submitted" | "needs_you" | "failed"; absent when never attempted. */
+  bidState?: string;
+  bidError?: string;
+  /** Submit was clicked before it stopped: the application may already be sent. */
+  bidSubmitClicked?: boolean;
 };
 
 /** Saved by AutoGen's capture: in Resume DB, but not sent yet. */
@@ -361,6 +366,74 @@ function GenerationState({
     );
   }
   return <span className="text-muted-foreground">—</span>;
+}
+
+/** The Status cell of a queued job (not sent yet): where the Auto-bid runner is with it. */
+function QueuedBidStatus({
+  row,
+  busy,
+  onRetry,
+}: {
+  row: ResumeDbRow;
+  busy: boolean;
+  onRetry: (row: ResumeDbRow) => void;
+}) {
+  if (row.bidState === "bidding") {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-primary" title="The Auto-bid runner is applying now">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Applying
+      </span>
+    );
+  }
+  if (row.bidState === "submitted") {
+    return (
+      <span
+        className="text-xs font-medium text-emerald-700 dark:text-emerald-400"
+        title="Sent by Auto-bid and confirmed by the site, but Register did not save it. Register it from the Bid tab to attach the files."
+      >
+        Sent · not registered
+      </span>
+    );
+  }
+  if (row.bidState === "needs_you" || row.bidState === "failed") {
+    const reason = row.bidError || (row.bidState === "failed" ? "Auto-bid failed." : "Stopped for you.");
+    return (
+      <div className="flex items-center justify-center gap-1">
+        <span
+          className="inline-flex cursor-help items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400"
+          title={row.bidSubmitClicked ? `Submit was clicked: check the site before retrying. ${reason}` : reason}
+        >
+          <TriangleAlert className="h-3.5 w-3.5" />
+          Needs you
+        </span>
+        {!row.bidSubmitClicked && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 rounded-md px-2 text-xs"
+            title={`${reason} Give it back to the Auto-bid runner.`}
+            disabled={busy}
+            onClick={() => onRetry(row)}
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Retry"}
+          </Button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <span
+      className="text-xs text-muted-foreground"
+      title={
+        row.generationStatus === "completed"
+          ? "Resume generated: waiting for the Auto-bid runner (or register it in the Bid tab)."
+          : "Queued for AutoGen: not applied yet. Registering it in the Bid tab makes it a bid."
+      }
+    >
+      Not sent
+    </span>
+  );
 }
 
 function formatApplied(iso: string, fallback: string, timeZone: string): string {
@@ -919,6 +992,7 @@ export function ResumeDBPageClient() {
   const [bulkRemoving, setBulkRemoving] = useState(false);
   const [bulkExporting, setBulkExporting] = useState(false);
   const [requeueing, setRequeueing] = useState<Set<number>>(() => new Set());
+  const [retryingBids, setRetryingBids] = useState<Set<number>>(() => new Set());
   const tableRef = useRef<HTMLTableElement>(null);
   const { percents, resizePair, fitColumn } = useResizableColumns();
   const [profiles, setProfiles] = useState<{ id: number; full_name: string }[]>([]);
@@ -1341,6 +1415,28 @@ export function ResumeDBPageClient() {
       toast.error(error instanceof Error ? error.message : "Could not queue for generation.");
     } finally {
       setRequeueing(new Set());
+    }
+  };
+
+  /** Needs-you jobs go back to the Auto-bid runner. */
+  const retryAutoBid = async (ids: number[]) => {
+    if (ids.length === 0) return;
+    setRetryingBids(new Set(ids));
+    try {
+      const res = await fetch("/api/autobid/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ ids }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { retried?: number; error?: string };
+      if (!res.ok) throw new Error(data.error || "Could not retry.");
+      toast.success(`${Number(data.retried ?? 0)} given back to Auto-bid.`);
+      void loadRows();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not retry.");
+    } finally {
+      setRetryingBids(new Set());
     }
   };
 
@@ -1867,12 +1963,11 @@ export function ResumeDBPageClient() {
                           className="overflow-hidden"
                         >
                           {row.apply === QUEUED_APPLY ? (
-                            <span
-                              className="text-xs text-muted-foreground"
-                              title="Queued for AutoGen: not applied yet. Registering it in the Bid tab makes it a bid."
-                            >
-                              Not sent
-                            </span>
+                            <QueuedBidStatus
+                              row={row}
+                              busy={retryingBids.has(row.rowIndex)}
+                              onRetry={(target) => void retryAutoBid([target.rowIndex])}
+                            />
                           ) : (
                           <div className="flex items-center justify-center gap-1">
                             <Select

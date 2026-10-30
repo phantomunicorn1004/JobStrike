@@ -138,12 +138,39 @@ Select the fields you want to fill, edit answers if needed, then click **Fill Se
 
 The extension does not submit the application. You must review the page and submit manually.
 
+## Auto-bid (hands-free)
+
+The whole hand flow, run by itself on a dedicated machine (e.g. the VPS):
+
+1. **Live** finds jobs. With *Live settings → Queue new jobs for AutoGen
+   automatically*, each new job is read in a background tab and queued for the
+   profile selected when the option was switched on (optionally only
+   Greenhouse, Lever and Ashby jobs).
+2. **AutoGen** (`autogen_extension`) generates and checks the resume JSON.
+3. **Auto-bid** (card under Live, `autobid-runner.js`) takes each generated job,
+   one at a time in this window: opens its form, applies the resume JSON,
+   generates the Word files with json2docx, runs Autofill (with AI when it is
+   on in Settings), checks every required field, presses Submit, waits for the
+   site's confirmation and registers it in Resume DB.
+
+It stops a job before (or at) Submit and lists it under **Needs you**, with the
+tab left open, for: a CAPTCHA, a required field it has no answer for, a form
+on a site other than Greenhouse / Lever / Ashby, no confirmation after Submit,
+or the site rejecting the form. A job is recorded as sent before Register runs
+and is never attempted twice. *Press Submit* off = dry run: one job is filled
+and left open for review, then Auto-bid turns itself off. A daily limit caps
+the applications sent.
+
+Needs `scripts/add-autobid-to-resume-db.sql` run once in Supabase, json2docx
+running on the same machine, and this panel open (checks run only while it is).
+
 ## Safety Rules
 
 The extension does not:
 
-- Auto-submit job applications.
-- Bypass CAPTCHA.
+- Auto-submit job applications, except Auto-bid with *Press Submit* on, and
+  then only Greenhouse / Lever / Ashby forms whose required fields are all filled.
+- Bypass CAPTCHA (Auto-bid stops and lists the job under Needs you).
 - Bypass job site protections.
 - Invent profile data.
 - Send page data to external servers.

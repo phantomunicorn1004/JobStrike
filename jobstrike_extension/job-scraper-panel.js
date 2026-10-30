@@ -194,6 +194,11 @@
     liveHours: '10:00-20:30, 01:00-07:30',
     liveHcMinutes: 30,
     liveNotify: true,
+    /** New Live jobs are read and queued for AutoGen (the Bid tab's profile). */
+    liveAutoQueue: false,
+    liveAutoQueueProfileId: '',
+    liveAutoQueueProfileName: '',
+    liveAutoQueueSupported: true,
     liveHideOpened: false,
   };
 
@@ -2630,7 +2635,23 @@ ${groupSheetStyles()}
     void persistLive();
     updateLiveBadge();
     if (added > 0) notifyLiveJobs(added);
+    if (added > 0) autoQueueNewJobs();
     renderLiveCard();
+  }
+
+  /** Sites Auto-bid submits on: other jobs would only be filled and left for the user. */
+  const AUTO_SUBMIT_SITE_RE = /greenhouse|lever|ashby/i;
+
+  /** Live "Queue new jobs for AutoGen automatically": the new, unopened jobs, as Queue all would. */
+  function autoQueueNewJobs() {
+    if (!state.prefs.liveAutoQueue || !state.prefs.liveAutoQueueProfileId) return;
+    const jobs = liveNewJobs().filter(
+      (job) =>
+        job.apply_url &&
+        !autogenStates.has(liveKey(job)) &&
+        (!state.prefs.liveAutoQueueSupported || AUTO_SUBMIT_SITE_RE.test(`${job.application_site || ''} ${job.apply_url}`))
+    );
+    if (jobs.length) void queueJobsForAutogen(jobs, { profileId: state.prefs.liveAutoQueueProfileId });
   }
 
   function liveNewJobs() {
@@ -2727,6 +2748,16 @@ ${groupSheetStyles()}
     if (every) every.value = String(state.prefs.liveHcMinutes || 30);
     const notify = document.getElementById('jsLiveNotify');
     if (notify) notify.checked = state.prefs.liveNotify !== false;
+    const autoQueue = document.getElementById('jsLiveAutoQueue');
+    if (autoQueue) autoQueue.checked = Boolean(state.prefs.liveAutoQueue);
+    const autoQueueFor = document.getElementById('jsLiveAutoQueueFor');
+    if (autoQueueFor) {
+      autoQueueFor.textContent = state.prefs.liveAutoQueue && state.prefs.liveAutoQueueProfileName
+        ? `for ${state.prefs.liveAutoQueueProfileName}`
+        : '';
+    }
+    const supportedOnly = document.getElementById('jsLiveAutoQueueSupported');
+    if (supportedOnly) supportedOnly.checked = state.prefs.liveAutoQueueSupported !== false;
     const meta = document.getElementById('jsLiveMeta');
     if (meta) {
       const last = state.live.lastCheckAt
@@ -2799,13 +2830,14 @@ ${groupSheetStyles()}
     }
   }
 
-  async function queueJobsForAutogen(jobs) {
+  /** profileId: a fixed profile (Live auto-queue); otherwise the Bid tab's, read per job. */
+  async function queueJobsForAutogen(jobs, { profileId = '' } = {}) {
     const api = window.SmartJobRegisterResumeDb;
     if (!api?.queueJobLinkForAutogen) {
       showToast('The Bid tab is not loaded yet. Open it once, then try again.', 'warn');
       return;
     }
-    if (!api.getSelectedRegisterProfile?.()) {
+    if (!profileId && !api.getSelectedRegisterProfile?.()) {
       showToast('Choose a profile in the Bid tab first: queued jobs are generated for it.', 'warn');
       return;
     }
@@ -2813,7 +2845,7 @@ ${groupSheetStyles()}
       const entry = autogenStates.get(liveKey(job));
       if (entry && entry.state !== 'error') continue;
       autogenStates.set(liveKey(job), { state: 'waiting' });
-      autogenRun.pending.push(job);
+      autogenRun.pending.push({ job, profileId });
     }
     renderLiveQueue();
     if (autogenRun.running) return;
@@ -2824,7 +2856,7 @@ ${groupSheetStyles()}
     let stoppedBy = '';
     try {
       while (autogenRun.pending.length && !autogenRun.stop) {
-        const job = autogenRun.pending.shift();
+        const { job, profileId: forProfile } = autogenRun.pending.shift();
         autogenStates.set(liveKey(job), { state: 'reading' });
         renderLiveQueue();
         try {
@@ -2832,6 +2864,7 @@ ${groupSheetStyles()}
             url: job.apply_url,
             jobTitle: job.title || '',
             company: job.company_name || '',
+            profileId: forProfile,
           });
           autogenRun.tally[out.duplicateId ? 'already' : 'queued'] += 1;
           dropQueuedJob(job, out.jobLink);
@@ -2847,7 +2880,7 @@ ${groupSheetStyles()}
         renderLiveQueue();
       }
     } finally {
-      for (const job of autogenRun.pending) autogenStates.delete(liveKey(job));
+      for (const { job } of autogenRun.pending) autogenStates.delete(liveKey(job));
       autogenRun.pending = [];
       autogenRun.running = false;
       const { queued, already, failed } = autogenRun.tally;
@@ -3010,6 +3043,27 @@ ${groupSheetStyles()}
     });
     document.getElementById('jsLiveNotify')?.addEventListener('change', async (event) => {
       state.prefs.liveNotify = Boolean(event.target.checked);
+      await persistPrefs();
+    });
+    document.getElementById('jsLiveAutoQueue')?.addEventListener('change', async (event) => {
+      // The profile is fixed now: Auto-bid switches the Bid tab's profile per job.
+      const profile = event.target.checked
+        ? window.SmartJobRegisterResumeDb?.getSelectedRegisterProfile?.()
+        : null;
+      if (event.target.checked && !profile) {
+        event.target.checked = false;
+        showToast('Choose a profile in the Bid tab first: new Live jobs are queued for it.', 'warn');
+        return;
+      }
+      state.prefs.liveAutoQueue = Boolean(profile);
+      state.prefs.liveAutoQueueProfileId = profile?.id || '';
+      state.prefs.liveAutoQueueProfileName = profile?.name || '';
+      await persistPrefs();
+      renderLiveCard();
+      if (profile) showToast(`New Live jobs will be queued for AutoGen for ${profile.name}.`, 'success');
+    });
+    document.getElementById('jsLiveAutoQueueSupported')?.addEventListener('change', async (event) => {
+      state.prefs.liveAutoQueueSupported = Boolean(event.target.checked);
       await persistPrefs();
     });
     document.getElementById('jsLiveCheckNow')?.addEventListener('click', () => void liveTick({ force: true }));

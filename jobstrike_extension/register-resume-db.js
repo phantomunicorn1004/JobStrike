@@ -1035,6 +1035,12 @@
     }
   }
 
+  /** Queued for AutoGen: in Resume DB but not sent, so not a bid to warn about. Registering it completes that row. */
+  const QUEUED_APPLY = 'Queued';
+  function isSentBid(app) {
+    return String(app?.apply || '') !== QUEUED_APPLY;
+  }
+
   function applicationSameJobLink(app, jobLink) {
     const api = jobUrlApi();
     if (api?.jobLinksMatch) return api.jobLinksMatch(app.jobLink, jobLink);
@@ -1149,6 +1155,51 @@
     if (res.status === 409 && data.duplicateId) return { duplicateId: data.duplicateId };
     if (!res.ok) throw new Error(data.error || `Queueing failed (${res.status}).`);
     return { id: data.id };
+  }
+
+  /**
+   * Auto-bid: Register the job now in the form, as the Register button does,
+   * minus its confirmations (the runner has attached the generated files).
+   */
+  async function registerForAutobid() {
+    if (generateInFlight) throw new Error('Files are still being generated.');
+    const draft = prepareRegisterDraftForSubmit();
+    if (!draft.ok) throw new Error(draft.errors[0] || 'Register draft is incomplete.');
+    const submittedLinkKey = canonicalJobLinkKey(draft.fields?.jobLink || '');
+    const result = await registerJobToBackend();
+    if (!result.alreadyRegistered) rememberRegisteredApplication(result);
+    registeredRecord = {
+      id: String(result.id || ''),
+      at: Date.now(),
+      jobLinkKey: submittedLinkKey,
+      profileId: String(draft.fields?.profileId || ''),
+    };
+    document.dispatchEvent(
+      new CustomEvent('jobstrike-registered', {
+        detail: {
+          jobLink: draft.fields?.jobLink || '',
+          jobTitle: draft.fields?.jobTitle || '',
+          company: draft.fields?.companyName || '',
+        },
+      })
+    );
+    clearAllRegisterFiles();
+    return result;
+  }
+
+  /** The website's Auto-bid API (signed in): parsed JSON, or an Error with its reason. */
+  async function autobidFetch(path, { method = 'GET', body } = {}) {
+    const connected = await checkBackendConnection({ skipDriveBadge: true });
+    if (!connected) throw new Error('Not signed in. Open Settings → Website connection and sign in first.');
+    const config = await getBackendConfig();
+    const res = await backendFetch(`${config.baseUrl}${path}`, {
+      method,
+      headers: { ...apiHeaders(config), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
+    return data;
   }
 
   /**
@@ -1297,7 +1348,7 @@
     const profileId = document.getElementById('regProfileId')?.value?.trim();
     if (!profileId || !String(jobLink || '').trim() || !Array.isArray(applicationsCache.resumes)) return false;
     return applicationsCache.resumes.some(
-      (app) => String(app.profileId) === String(profileId) && applicationSameJobLink(app, jobLink)
+      (app) => String(app.profileId) === String(profileId) && isSentBid(app) && applicationSameJobLink(app, jobLink)
     );
   }
 
@@ -1381,6 +1432,7 @@
     }
     const forCandidate = applications
       .filter((app) => String(app.profileId) === String(profileId))
+      .filter(isSentBid)
       .filter((app) => isWithinDuplicateCheckWindow(app, windowDays));
 
     if (field === 'company') {
@@ -3954,6 +4006,14 @@
     }
   }
 
+  /** A profile from the Bid tab's list by id (Live auto-queue keeps the one chosen when it was switched on). */
+  function profileById(id) {
+    const option = [...(document.getElementById('regProfileId')?.options || [])].find(
+      (o) => o.value && o.value === String(id)
+    );
+    return option ? { id: option.value, name: String(option.textContent || '').trim() } : null;
+  }
+
   /** The profile chosen in the Bid tab: the one queued jobs are generated for. */
   function getSelectedRegisterProfile() {
     const select = document.getElementById('regProfileId');
@@ -3969,8 +4029,8 @@
    * kept when given (the names its lists were matched against).
    * Resolves { id } | { duplicateId }; throws with a reason to show.
    */
-  async function queueJobLinkForAutogen({ url, jobTitle = '', company = '' }) {
-    const profile = getSelectedRegisterProfile();
+  async function queueJobLinkForAutogen({ url, jobTitle = '', company = '', profileId = '' }) {
+    const profile = profileId ? profileById(profileId) : getSelectedRegisterProfile();
     if (!profile) throw new Error('Choose a profile in the Bid tab first: queued jobs are generated for it.');
     if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('This job has no link.');
     const job = await readJobInBackgroundTab(url);
@@ -5198,6 +5258,10 @@
     setRegisterFieldValue,
     getSelectedRegisterProfile,
     queueJobLinkForAutogen,
+    generateFilesFromResumeJson,
+    registerForAutobid,
+    autobidFetch,
+    waitForTabLoaded,
     BACKEND_URL_KEY,
     EXTENSION_API_KEY_KEY,
     DEFAULT_BACKEND

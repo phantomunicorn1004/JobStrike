@@ -5,6 +5,7 @@ import {
   resolveRequestUser,
   unauthorizedJson,
 } from "@/lib/auth/resolve-request-user";
+import { listBidStates } from "@/lib/autobid/claim";
 import { listGenerationStates } from "@/lib/autogen/claim";
 import { parseResumeFromPublicUrl } from "@/lib/resume-db/parseFromUrl";
 import {
@@ -378,15 +379,18 @@ export async function GET(request: NextRequest) {
         : Promise.resolve([] as string[]),
     ]);
 
-    const generation = await listGenerationStates(
-      userId,
-      entries.map((entry) => entry.id),
-    );
+    const pageIds = entries.map((entry) => entry.id);
+    const [generation, bids] = await Promise.all([
+      listGenerationStates(userId, pageIds),
+      listBidStates(userId, pageIds),
+    ]);
     const resumes = entries.map((entry) => {
       const state = generation.get(entry.id);
+      const bid = bids.get(entry.id);
       return {
         ...mapForList(entry, timeZone, stageMap),
         ...(state && { generationStatus: state.status, generationError: state.error }),
+        ...(bid && { bidState: bid.state, bidError: bid.error, bidSubmitClicked: bid.submitClicked }),
       };
     });
 
