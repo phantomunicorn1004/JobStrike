@@ -2,6 +2,7 @@ import "server-only";
 
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { QUEUED_APPLY } from "@/lib/resume-db/types";
+import { toAutobidJob, type AutobidJob, type AutobidRowInput } from "@/lib/autobid/stages";
 
 /** A claim this old is abandoned (panel closed, crash): the row can be taken again. */
 export const BID_STALE_MS = 20 * 60 * 1000;
@@ -102,9 +103,15 @@ async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
     (!row.bid_claimed_at || Date.now() - new Date(row.bid_claimed_at).getTime() >= BID_STALE_MS);
   if (!ready && !abandoned) return null;
 
+  const now = new Date().toISOString();
   let update = supabase
     .from(TABLE)
-    .update({ bid_state: "bidding", bid_claimed_at: new Date().toISOString(), bid_error: "" } as never)
+    .update({
+      bid_state: "bidding",
+      bid_claimed_at: now,
+      bid_error: "",
+      bid_meta: { startedAt: now, step: "Taken by the runner", steps: [{ at: now, text: "Taken by the runner" }] },
+    } as never)
     .eq("id", id)
     .eq("user_id", userId)
     .eq("bid_state", row.bid_state);
@@ -140,7 +147,54 @@ export async function claimNextBid(userId: string): Promise<BidJob | null> {
   return null;
 }
 
-/** Records the outcome, only while the caller still holds the claim. */
+const MAX_LOGGED_STEPS = 40;
+
+/** The claimed row's bid_meta, while the caller still holds the claim; null when it does not. */
+async function heldBidMeta(userId: string, id: number, claimedAt: string): Promise<Record<string, unknown> | null> {
+  const { data, error } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .select("bid_meta")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .eq("bid_state", "bidding")
+    .eq("bid_claimed_at", claimedAt)
+    .maybeSingle();
+  if (error) rethrow(error.message);
+  if (!data) return null;
+  const meta = (data as { bid_meta: unknown }).bid_meta;
+  return meta && typeof meta === "object" ? (meta as Record<string, unknown>) : {};
+}
+
+function withLoggedStep(meta: Record<string, unknown>, text: string, at: string): Record<string, unknown> {
+  const steps = Array.isArray(meta.steps) ? meta.steps : [];
+  return { ...meta, steps: [...steps, { at, text: text.slice(0, 300) }].slice(-MAX_LOGGED_STEPS) };
+}
+
+/** What the runner is doing now, for the Auto-bid page. Only the claim holder can write it. */
+export async function recordBidStep(userId: string, id: number, claimedAt: string, step: string): Promise<boolean> {
+  const current = await heldBidMeta(userId, id, claimedAt);
+  if (!current) return false;
+  const at = new Date().toISOString();
+  const { data, error } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .update({ bid_meta: { ...withLoggedStep(current, step, at), step: step.slice(0, 300) } } as never)
+    .eq("id", id)
+    .eq("user_id", userId)
+    .eq("bid_state", "bidding")
+    .eq("bid_claimed_at", claimedAt)
+    .select("id")
+    .maybeSingle();
+  if (error) rethrow(error.message);
+  return Boolean(data);
+}
+
+const OUTCOME_STEP: Record<BidOutcome, string> = {
+  submitted: "Sent: the site confirmed the application",
+  needs_you: "Stopped: needs you",
+  failed: "Failed",
+};
+
+/** Records the outcome, only while the caller still holds the claim. Keeps the step history. */
 export async function finishBid(
   userId: string,
   id: number,
@@ -149,13 +203,22 @@ export async function finishBid(
   detail: string,
   meta: Record<string, unknown>,
 ): Promise<boolean> {
+  const current = await heldBidMeta(userId, id, claimedAt);
+  if (!current) return false;
+  const at = new Date().toISOString();
+  const { steps: _ignored, step: _current, ...reported } = meta;
   const { data, error } = await getSupabaseAdminClient()
     .from(TABLE)
     .update({
       bid_state: outcome,
       bid_claimed_at: null,
       bid_error: outcome === "submitted" ? "" : String(detail || "Stopped.").slice(0, 4000),
-      bid_meta: { ...meta, finishedAt: new Date().toISOString() },
+      bid_meta: {
+        ...withLoggedStep(current, detail && outcome !== "submitted" ? `${OUTCOME_STEP[outcome]} — ${detail}` : OUTCOME_STEP[outcome], at),
+        ...reported,
+        step: "",
+        finishedAt: at,
+      },
     } as never)
     .eq("id", id)
     .eq("user_id", userId)
@@ -180,6 +243,30 @@ export async function releaseBid(userId: string, id: number, claimedAt: string):
     .maybeSingle();
   if (error) rethrow(error.message);
   return Boolean(data);
+}
+
+/**
+ * A queued row was just registered (by the runner after Submit, or by hand):
+ * notes when, for the Auto-bid page. Rows the runner never touched are left alone.
+ */
+export async function noteBidRegistered(userId: string, id: number): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("bid_state, bid_meta")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) rethrow(error.message);
+  const row = data as { bid_state: string; bid_meta: Record<string, unknown> | null } | null;
+  if (!row || row.bid_state === "none" || row.bid_state === "bidding") return;
+  const at = new Date().toISOString();
+  const { error: updateError } = await supabase
+    .from(TABLE)
+    .update({ bid_meta: { ...withLoggedStep(row.bid_meta ?? {}, "Registered in Resume DB", at), registeredAt: at } } as never)
+    .eq("id", id)
+    .eq("user_id", userId);
+  if (updateError) rethrow(updateError.message);
 }
 
 /** Needs-you and failed rows, still not sent, go back to the runner. Submitted ones never do. */
@@ -273,4 +360,25 @@ export async function listBidStates(userId: string, ids: number[]): Promise<Map<
     });
   }
   return states;
+}
+
+/** How many jobs the Auto-bid page shows (newest first). */
+const MONITOR_LIMIT = 300;
+
+/**
+ * The jobs in the automatic chain, newest first: still queued (Applied =
+ * Queued), or touched by the runner. Rows only ever bid by hand are left out.
+ */
+export async function listAutobidJobs(userId: string): Promise<AutobidJob[]> {
+  const { data, error } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .select(
+      "id, profile_id, candidate_name, company, job_title, job_link, apply, created_at, generation_status, generation_error, generation_meta, autogen_claimed_at, bid_state, bid_error, bid_meta, bid_claimed_at",
+    )
+    .eq("user_id", userId)
+    .or(`apply.eq.${QUEUED_APPLY},bid_state.neq.none`)
+    .order("id", { ascending: false })
+    .limit(MONITOR_LIMIT);
+  if (error) rethrow(error.message);
+  return ((data ?? []) as AutobidRowInput[]).map(toAutobidJob);
 }

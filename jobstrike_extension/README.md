@@ -161,6 +161,10 @@ and is never attempted twice. *Press Submit* off = dry run: one job is filled
 and left open for review, then Auto-bid turns itself off. A daily limit caps
 the applications sent.
 
+The site's **Auto-bid** page follows each job from any computer: Queued →
+Resume → Apply → Sent → Registered with the time of each step, what the runner
+is doing now, why a job stopped (with Retry), and the runner's step history.
+
 Needs `scripts/add-autobid-to-resume-db.sql` run once in Supabase, json2docx
 running on the same machine, and this panel open (checks run only while it is).
 

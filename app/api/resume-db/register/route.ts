@@ -5,6 +5,7 @@ import { isGoogleDriveConfigured } from "@/lib/google-drive/config";
 import { isGoogleOAuthWebConfigured } from "@/lib/google-drive/oauth-web";
 import { isUserGoogleDriveConnected } from "@/lib/google-drive/user-drive";
 import { dequeueIfQueued } from "@/lib/autogen/claim";
+import { noteBidRegistered } from "@/lib/autobid/claim";
 import {
   createApplication,
   findApplicationByJobLink,
@@ -153,6 +154,8 @@ export async function POST(request: NextRequest) {
       await updateApplication(queuedRow.id, user.id, fields);
       // Bid by hand: AutoGen need not build a resume for it (unless it already started).
       await dequeueIfQueued(user.id, queuedRow.id);
+      // For the Auto-bid page. Not worth failing a saved Register over.
+      await noteBidRegistered(user.id, queuedRow.id).catch(() => {});
       application = (await getApplicationById(queuedRow.id, user.id)) ?? queuedRow;
     } else {
       application = await createApplication(user.id, {

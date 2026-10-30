@@ -40,6 +40,7 @@
     step: '',
     summary: null,
     log: [],
+    stepPost: Promise.resolve(),
   };
 
   const bid = () => window.SmartJobRegisterResumeDb;
@@ -73,6 +74,16 @@
   function setStep(text) {
     state.step = text;
     render();
+    // Shown on the Auto-bid page of the site, so the run can be watched from any computer.
+    // One at a time, in order: each write adds to the job's step history.
+    const job = state.job;
+    if (job && text) {
+      state.stepPost = state.stepPost.then(() =>
+        bid()
+          .autobidFetch(`/api/autobid/${job.id}/step`, { method: 'POST', body: { claimedAt: job.claimed_at, step: text } })
+          .catch(() => {})
+      );
+    }
   }
 
   function render() {
@@ -319,6 +330,7 @@
   }
 
   async function finish(job, outcome, detail, meta) {
+    await state.stepPost;
     try {
       await bid().autobidFetch(`/api/autobid/${job.id}/finish`, {
         method: 'POST',
@@ -330,6 +342,7 @@
   }
 
   async function release(job) {
+    await state.stepPost;
     try {
       await bid().autobidFetch(`/api/autobid/${job.id}/release`, { method: 'POST', body: { claimedAt: job.claimed_at } });
     } catch (_) {

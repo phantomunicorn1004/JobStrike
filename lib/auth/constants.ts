@@ -12,6 +12,7 @@ export const DEFAULT_RESUME_DB_OWNER_USERNAME = "stevenspiethdev@gmail.com";
 export const MEMBER_ROUTE_PREFIXES = [
   "/dashboard",
   "/resume-db",
+  "/autobid",
   "/resume-tailor",
   "/resume-builder",
   "/prompt-builder",

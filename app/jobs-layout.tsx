@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Bot,
   CalendarDays,
   Columns3,
   FileEdit,
@@ -59,6 +60,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Resume DB",
     icon: Database,
     isActive: (pathname) => pathname.startsWith("/resume-db"),
+  },
+  {
+    href: "/autobid",
+    label: "Auto-bid",
+    icon: Bot,
+    isActive: (pathname) => pathname.startsWith("/autobid"),
   },
   {
     href: "/jobs",
