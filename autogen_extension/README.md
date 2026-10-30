@@ -48,6 +48,9 @@ extension uses). The password is never included in Export config.
   candidate or ChatGPT memory is in context. With the API engine no tab is
   needed. More windows = more in parallel.
 - **Stop** gives the in-flight application back to the queue.
+- After a Chrome restart, as many restored windows as were running start again
+  by themselves: each one whose active tab is ChatGPT (not minimized), for up
+  to 15 minutes after the restart. Reloading the extension stops every window.
 
 ## Server API (`app/api/autogen/*`)
 

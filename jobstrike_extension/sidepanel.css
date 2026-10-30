@@ -4526,6 +4526,41 @@ textarea.js-input {
   margin: 0;
 }
 
+/* Full auto card (autobid-runner.js): one switch, and a checklist of what it needs. */
+.fa-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.fa-check {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--text);
+}
+.fa-mark {
+  flex: 0 0 12px;
+  font-weight: 700;
+  text-align: center;
+}
+.fa-check[data-state="ok"] .fa-mark {
+  color: #16a34a;
+}
+.fa-check[data-state="off"] .fa-mark {
+  color: #d97706;
+}
+.fa-check[data-state="unknown"] .fa-mark {
+  color: var(--muted);
+}
+.fa-label em {
+  font-style: normal;
+  color: var(--muted);
+}
+
 /* Auto-bid card (autobid-runner.js); shares the Live card's look. */
 .ab-counts:empty {
   display: none;

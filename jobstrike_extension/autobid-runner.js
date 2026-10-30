@@ -25,6 +25,10 @@
   const BIND_WAIT_MS = 25 * 1000;
   const CONFIRM_WAIT_MS = 45 * 1000;
   const CONFIRM_POLL_MS = 2000;
+  /** A problem with this machine (json2docx down, signed out): wait this long, then try again. */
+  const PAUSE_RETRY_MS = 5 * 60 * 1000;
+  /** Needs-you tabs kept open for the user; older ones are closed (the job stays listed). */
+  const MAX_TABS_LEFT_OPEN = 8;
   /** Sites Auto-bid presses Submit on. Others are filled and left for the user. */
   const SUBMIT_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com)$/i;
   /** Problems with this machine, not the job: the job goes back and the runner pauses. */
@@ -41,6 +45,7 @@
     summary: null,
     log: [],
     stepPost: Promise.resolve(),
+    tabsLeftOpen: [],
   };
 
   const bid = () => window.SmartJobRegisterResumeDb;
@@ -144,6 +149,7 @@
 
     const log = document.getElementById('abLog');
     if (log) log.textContent = state.log.join('\n');
+    renderFullAuto();
   }
 
   function localMidnightIso() {
@@ -500,16 +506,25 @@
         }
         logLine(`#${job.id}: ${detail}`);
         if (stop.outcome === 'pause') {
-          state.prefs.enabled = false;
-          await savePrefs();
-          toast(`Auto-bid paused: ${detail}`, 'error');
+          // Unattended runs recover by themselves (json2docx restarted, signed in again).
+          state.pauseReason = detail;
+          toast(`Auto-bid paused: ${detail} It tries again in 5 minutes.`, 'error');
         }
         return stop.outcome;
       }
       await finish(job, stop.outcome, detail, { ...meta, ...stop.meta, submitClicked: submitClicked || undefined });
       logLine(`Needs you — ${job.company} · ${job.job_title} (#${job.id}): ${detail}`);
       // Left open for the user (a failed one too: it shows what happened).
+      if (tabId) keepTabOpen(tabId);
       return stop.outcome;
+    }
+  }
+
+  /** Running all day, stopped jobs would fill the window: only the newest few stay open. */
+  function keepTabOpen(tabId) {
+    state.tabsLeftOpen = [...state.tabsLeftOpen.filter((id) => id !== tabId), tabId];
+    while (state.tabsLeftOpen.length > MAX_TABS_LEFT_OPEN) {
+      chrome.tabs.remove(state.tabsLeftOpen.shift()).catch(() => {});
     }
   }
 
@@ -547,6 +562,14 @@
       logLine(`${dryRun ? 'Dry run' : 'Applying'}: ${job.company} · ${job.job_title} (#${job.id}).`);
       const outcome = await applyToJob(job, win?.id);
       next = Math.max(5, Number(state.prefs.gapSeconds) || 30) * 1000;
+      if (outcome === 'pause') {
+        next = PAUSE_RETRY_MS;
+        const at = new Date(Date.now() + next).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        state.job = null;
+        setStep(`Paused: ${state.pauseReason} Trying again at ${at}.`);
+        return;
+      }
+      state.pauseReason = '';
       if (dryRun && outcome !== 'release' && outcome !== 'pause') {
         // One form at a time to review, not a window full of them.
         state.prefs.enabled = false;
@@ -602,6 +625,108 @@
     }
   }
 
+  // ───────────────────────────── Full auto ─────────────────────────────
+  // One switch for the whole chain: Live finds jobs → they are queued for
+  // AutoGen → Auto-bid applies and presses Submit. AutoGen itself runs in its
+  // own extension; its windows only need "Run in background" once.
+
+  const HEALTH_EVERY_MS = 2 * 60 * 1000;
+  const fullAuto = { json2docx: null, checkedAt: 0, busy: false };
+
+  function live() {
+    return window.SmartJobLive || null;
+  }
+
+  function isFullAuto() {
+    const l = live()?.autoState?.();
+    return Boolean(l?.live && l?.autoQueue && state.prefs.enabled && state.prefs.submit);
+  }
+
+  async function checkJson2docx(force = false) {
+    if (!force && Date.now() - fullAuto.checkedAt < HEALTH_EVERY_MS) return;
+    fullAuto.checkedAt = Date.now();
+    const health = await window.SmartJobJson2Docx?.checkJson2docxHealth?.({ updateUi: false }).catch(() => null);
+    fullAuto.json2docx = health ? Boolean(health.ok) : null;
+  }
+
+  function renderFullAuto() {
+    const card = document.getElementById('faCard');
+    if (!card) return;
+    const l = live()?.autoState?.() || {};
+    const on = isFullAuto();
+    card.classList.toggle('is-on', on);
+    const toggle = document.getElementById('faToggle');
+    if (toggle && !fullAuto.busy) toggle.checked = on;
+    const aiOn = typeof isAiModeEnabled === 'function' && isAiModeEnabled();
+    const checks = [
+      ['Live checks for new jobs', l.live, l.challenge ? 'Paused: a site asked for a check (Job Scraper tab)' : l.status || ''],
+      ['New Greenhouse, Lever and Ashby jobs queued for AutoGen', l.autoQueue, l.profileName ? `for ${l.profileName}` : ''],
+      [
+        'Auto-bid applies and presses Submit',
+        state.prefs.enabled && state.prefs.submit,
+        state.prefs.enabled && !state.prefs.submit
+          ? 'Dry run: Press Submit is off'
+          : state.pauseReason
+            ? `Paused: ${state.pauseReason}`
+            : '',
+      ],
+      ['json2docx running', fullAuto.json2docx, fullAuto.json2docx === false ? 'Start it on this machine (start_server.bat)' : ''],
+      ['AI answers custom questions', aiOn, aiOn ? '' : 'Settings → Autofill with AI, with an OpenAI key'],
+    ];
+    const list = document.getElementById('faChecks');
+    if (list) {
+      list.innerHTML = checks
+        .map(([label, ok, note]) => {
+          const mark = ok ? 'ok' : ok === null || ok === undefined ? 'unknown' : 'off';
+          const sign = mark === 'ok' ? '✓' : mark === 'off' ? '✗' : '?';
+          return `<li class="fa-check" data-state="${mark}"><span class="fa-mark" aria-hidden="true">${sign}</span><span class="fa-label">${escapeHtml(label)}${
+            note ? ` <em>${escapeHtml(note)}</em>` : ''
+          }</span></li>`;
+        })
+        .join('');
+    }
+    const status = document.getElementById('faStatus');
+    if (status) {
+      const s = state.summary;
+      status.textContent = !on
+        ? 'Off'
+        : s
+          ? `${s.submittedSince} sent today of ${state.prefs.dailyLimit} · ${s.needsYou.length} need you`
+          : 'On';
+    }
+  }
+
+  async function setFullAuto(on) {
+    if (fullAuto.busy) return;
+    fullAuto.busy = true;
+    try {
+      if (!live()?.setAutoQueue) {
+        toast('Open the Job Scraper tab once, then turn Full auto on.', 'warn');
+        return;
+      }
+      if (on) {
+        const profile = bid()?.getSelectedRegisterProfile?.();
+        if (!profile) {
+          toast('Choose the profile in the Bid tab first: new jobs are applied to for it.', 'warn');
+          return;
+        }
+        await live().setAutoQueue(profile);
+        state.prefs.submit = true;
+        await savePrefs();
+        await setEnabled(true);
+        await checkJson2docx(true);
+        toast(`Full auto on for ${profile.name}: new jobs are found, generated and applied to by themselves.`, 'success');
+      } else {
+        await live().setAutoQueue(null);
+        await setEnabled(false);
+        toast('Full auto off. Live keeps checking and alerting; nothing is queued or sent.', 'info');
+      }
+    } finally {
+      fullAuto.busy = false;
+      renderFullAuto();
+    }
+  }
+
   async function init() {
     if (!document.getElementById('abCard')) return;
     await loadPrefs();
@@ -619,6 +744,10 @@
     });
     document.getElementById('abRefresh')?.addEventListener('click', () => void refreshSummary());
     document.getElementById('abNeedsYou')?.addEventListener('click', (event) => void onNeedsYouClick(event));
+    document.getElementById('faToggle')?.addEventListener('change', (event) => void setFullAuto(event.target.checked));
+    setInterval(() => {
+      void checkJson2docx().then(renderFullAuto);
+    }, 5000);
     render();
     if (state.prefs.enabled) {
       setStep('Starting…');

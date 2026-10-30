@@ -474,6 +474,7 @@ async function resetRunStateOnReload() {
     ? Object.keys(data.autogenRunningWindows).length > 0
     : false;
   await chrome.storage.local.set({ autogenRunningWindows: {} });
+  await chrome.storage.local.remove("autogenAdoptAfterRestart");
   if (wasRunning || hadQueued) {
     await appendActivityLog(
       null,
@@ -549,13 +550,16 @@ async function restartWindowsIfActive() {
   });
   const disconnected = data.autogenDisconnectedWindows || {};
   const running = data.autogenRunningWindows && typeof data.autogenRunningWindows === "object" ? data.autogenRunningWindows : {};
+  let lost = 0;
   for (const key of Object.keys(running)) {
     if (disconnected[key]) continue;
     const windowId = Number(key);
     try {
       await chrome.windows.get(windowId);
     } catch (_e) {
-      // Window is gone (or ids were reassigned by a full Chrome/OS restart) - drop it.
+      // Window is gone without a close (onRemoved drops closed ones first): Chrome
+      // restarted and gave the restored windows new ids. Taken over below.
+      lost += 1;
       continue;
     }
     const worker = getOrCreateWindowWorker(windowId);
@@ -563,6 +567,53 @@ async function restartWindowsIfActive() {
     if (!worker.tickTimer) scheduleWindowTick(windowId, 1000);
   }
   await persistRunningWindows();
+  await adoptRestoredWindows(lost);
+}
+
+/** How long after a Chrome restart restored ChatGPT windows are still taken over. */
+const ADOPT_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * After a Chrome restart, as many restored windows as were running before
+ * start again: each one whose active tab is ChatGPT and that is not running
+ * yet. Windows can be restored after onStartup, so the heartbeat keeps
+ * looking for a while. An extension reload never gets here (it clears the
+ * running windows on purpose).
+ */
+let adopting = Promise.resolve();
+
+function adoptRestoredWindows(lost) {
+  // Startup and the heartbeat can both call this: one at a time, or a window is counted twice.
+  adopting = adopting.then(() => adoptRestoredWindowsNow(lost)).catch(() => {});
+  return adopting;
+}
+
+async function adoptRestoredWindowsNow(lost) {
+  const data = await chrome.storage.local.get({ autogenAdoptAfterRestart: null });
+  let pending = data.autogenAdoptAfterRestart;
+  if (lost > 0) {
+    pending = { count: (pending?.count || 0) + lost, until: Date.now() + ADOPT_WINDOW_MS };
+  }
+  if (!pending || pending.count <= 0) return;
+  if (Date.now() > pending.until) {
+    await chrome.storage.local.remove("autogenAdoptAfterRestart");
+    return;
+  }
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] }).catch(() => []);
+  for (const win of windows) {
+    if (pending.count <= 0) break;
+    if (windowWorkers[win.id]?.running || win.state === "minimized") continue;
+    const active = (win.tabs || []).find((tab) => tab.active);
+    if (!active || !isChatGptUrl(active.url || active.pendingUrl)) continue;
+    pending.count -= 1;
+    const worker = getOrCreateWindowWorker(win.id);
+    worker.running = true;
+    await appendActivityLog(win.id, null, "Chrome restarted - running again in this window");
+    scheduleWindowTick(win.id, 3000);
+  }
+  await persistRunningWindows();
+  if (pending.count > 0) await chrome.storage.local.set({ autogenAdoptAfterRestart: pending });
+  else await chrome.storage.local.remove("autogenAdoptAfterRestart");
 }
 
 chrome.action.onClicked.addListener(async (tab) => {

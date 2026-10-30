@@ -403,6 +403,20 @@
               </label>
               <p class="js-mode-hint" id="jsModeHint">Remote jobs in the US.</p>
             </div>
+            <!-- Full auto: Live + queue for AutoGen + Auto-bid with Submit, in one switch (autobid-runner.js). -->
+            <div class="js-live fa-card" id="faCard">
+              <div class="js-live-top">
+                <span class="js-live-dot" aria-hidden="true"></span>
+                <strong class="js-live-name">Full auto</strong>
+                <span class="js-live-status" id="faStatus">Off</span>
+                <label class="js-source-switch" title="Find new jobs with Live, queue them for AutoGen, and apply with Auto-bid (Press Submit on), for the profile chosen in the Bid tab">
+                  <input type="checkbox" id="faToggle" aria-label="Full auto">
+                  <span aria-hidden="true"></span>
+                </label>
+              </div>
+              <ul class="fa-checks" id="faChecks"></ul>
+              <p class="js-live-note">Keep this panel open in its own window. AutoGen windows: press Run in background once. Do one dry run (Auto-bid with Press Submit off) before the first Full auto.</p>
+            </div>
             <!-- Live: scheduled checks during working hours; new jobs join the queue. -->
             <div class="js-live" id="jsLiveCard">
               <div class="js-live-top">

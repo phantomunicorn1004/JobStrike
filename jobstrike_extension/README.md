@@ -140,7 +140,12 @@ The extension does not submit the application. You must review the page and subm
 
 ## Auto-bid (hands-free)
 
-The whole hand flow, run by itself on a dedicated machine (e.g. the VPS):
+The whole hand flow, run by itself on a dedicated machine (e.g. the VPS).
+**Full auto** (Job Scraper tab, top card) turns it all on with one switch for
+the profile chosen in the Bid tab: Live, queueing new Greenhouse / Lever /
+Ashby jobs for AutoGen, and Auto-bid with Press Submit. Its checklist shows
+what is missing (json2docx offline, AI autofill off, a site check pausing
+Live). Off stops queueing and sending; Live keeps checking and alerting.
 
 1. **Live** finds jobs. With *Live settings → Queue new jobs for AutoGen
    automatically*, each new job is read in a background tab and queued for the
@@ -156,7 +161,9 @@ The whole hand flow, run by itself on a dedicated machine (e.g. the VPS):
 It stops a job before (or at) Submit and lists it under **Needs you**, with the
 tab left open, for: a CAPTCHA, a required field it has no answer for, a form
 on a site other than Greenhouse / Lever / Ashby, no confirmation after Submit,
-or the site rejecting the form. A job is recorded as sent before Register runs
+or the site rejecting the form (only the newest 8 of those tabs stay open).
+A problem with the machine (json2docx down, signed out) gives the job back and
+tries again every 5 minutes. A job is recorded as sent before Register runs
 and is never attempted twice. *Press Submit* off = dry run: one job is filled
 and left open for review, then Auto-bid turns itself off. A daily limit caps
 the applications sent.

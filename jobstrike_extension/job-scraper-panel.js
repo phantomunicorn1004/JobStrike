@@ -2654,6 +2654,38 @@ ${groupSheetStyles()}
     if (jobs.length) void queueJobsForAutogen(jobs, { profileId: state.prefs.liveAutoQueueProfileId });
   }
 
+  /** For Full auto (autobid-runner.js): what Live is set to do. */
+  function autoState() {
+    return {
+      live: Boolean(state.prefs.liveEnabled),
+      autoQueue: Boolean(state.prefs.liveAutoQueue && state.prefs.liveAutoQueueProfileId),
+      profileName: state.prefs.liveAutoQueueProfileName || '',
+      supportedOnly: state.prefs.liveAutoQueueSupported !== false,
+      status: state.live.status || '',
+      challenge: Boolean(state.pausedForChallenge),
+    };
+  }
+
+  /**
+   * Full auto on: Live on, new jobs queued for `profile` (Greenhouse, Lever and
+   * Ashby only), and the new jobs already in the list queued now. Off: stops
+   * queuing; Live keeps checking and alerting.
+   */
+  async function setAutoQueue(profile) {
+    state.prefs.liveAutoQueue = Boolean(profile);
+    state.prefs.liveAutoQueueProfileId = profile?.id || '';
+    state.prefs.liveAutoQueueProfileName = profile?.name || '';
+    if (profile) {
+      state.prefs.liveAutoQueueSupported = true;
+      if (!state.prefs.liveEnabled) {
+        await setLiveEnabled(true);
+      }
+    }
+    await persistPrefs();
+    renderLiveCard();
+    if (profile) autoQueueNewJobs();
+  }
+
   function liveNewJobs() {
     return state.filteredJobs.filter((job) => job.live_new && !job.opened_at);
   }
@@ -3076,6 +3108,7 @@ ${groupSheetStyles()}
       renderLiveQueue();
     });
     document.addEventListener('jobstrike-registered', onJobRegistered);
+    window.SmartJobLive = { autoState, setAutoQueue };
     startLiveTimer();
     renderLiveCard();
     updateLiveBadge();
