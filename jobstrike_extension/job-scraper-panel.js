@@ -2663,6 +2663,9 @@ ${groupSheetStyles()}
       supportedOnly: state.prefs.liveAutoQueueSupported !== false,
       status: state.live.status || '',
       challenge: Boolean(state.pausedForChallenge),
+      hours: state.prefs.liveHours || '',
+      lastCheckAt: state.live.lastCheckAt ? new Date(state.live.lastCheckAt).toISOString() : null,
+      lastAdded: Number(state.live.lastAdded) || 0,
     };
   }
 

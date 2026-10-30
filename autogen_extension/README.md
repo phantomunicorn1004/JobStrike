@@ -51,6 +51,9 @@ extension uses). The password is never included in Export config.
 - After a Chrome restart, as many restored windows as were running start again
   by themselves: each one whose active tab is ChatGPT (not minimized), for up
   to 15 minutes after the restart. Reloading the extension stops every window.
+- Every minute (and when a window starts or stops) it reports its windows to
+  JobStrike, for the website's Auto-bid page: running or not, what each one is
+  generating, minimized or not on a ChatGPT tab. No prompt or job text is sent.
 
 ## Server API (`app/api/autogen/*`)
 

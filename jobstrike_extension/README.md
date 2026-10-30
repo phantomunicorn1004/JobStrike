@@ -171,6 +171,10 @@ the applications sent.
 The site's **Auto-bid** page follows each job from any computer: Queued →
 Resume → Apply → Sent → Registered with the time of each step, what the runner
 is doing now, why a job stopped (with Retry), and the runner's step history.
+Above the jobs it shows this panel (Auto-bid state, Full auto checklist, Live)
+and the AutoGen windows, from the reports both extensions send every minute;
+a part that stops reporting is shown as not running. Needs
+`scripts/add-runner-status-to-app-users.sql` run once in Supabase.
 
 Needs `scripts/add-autobid-to-resume-db.sql` run once in Supabase, json2docx
 running on the same machine, and this panel open (checks run only while it is).

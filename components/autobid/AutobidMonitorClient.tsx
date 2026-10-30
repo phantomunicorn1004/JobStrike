@@ -17,6 +17,11 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
+  RunnerStatusPanel,
+  type AutobidReport,
+  type AutogenReport,
+} from "@/components/autobid/RunnerStatusPanel";
+import {
   STAGE_GROUP,
   type AutobidGroup,
   type AutobidJob,
@@ -236,13 +241,22 @@ export function AutobidMonitorClient() {
   const [now, setNow] = useState(() => Date.now());
   const [view, setView] = useState<View>("active");
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
+  const [runners, setRunners] = useState<{
+    autobid: AutobidReport | null;
+    autogen: AutogenReport | null;
+    setupError?: string;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/autobid/jobs", { credentials: "same-origin", cache: "no-store" });
+      const [res, statusRes] = await Promise.all([
+        fetch("/api/autobid/jobs", { credentials: "same-origin", cache: "no-store" }),
+        fetch("/api/autobid/status", { credentials: "same-origin", cache: "no-store" }).catch(() => null),
+      ]);
       const data = (await res.json().catch(() => ({}))) as { jobs?: AutobidJob[]; error?: string };
       if (!res.ok) throw new Error(data.error || "Could not load Auto-bid jobs.");
+      if (statusRes?.ok) setRunners(await statusRes.json().catch(() => null));
       setJobs(data.jobs ?? []);
       setError("");
       setLoadedAt(Date.now());
@@ -279,11 +293,6 @@ export function AutobidMonitorClient() {
       applying: list.filter((job) => job.stage === "applying").length,
       ready: list.filter((job) => job.stage === "ready").length,
     };
-  }, [jobs]);
-
-  const lastRunnerWord = useMemo(() => {
-    const times = (jobs ?? []).flatMap((job) => job.log.map((entry) => entry.at)).sort();
-    return times.at(-1) ?? null;
   }, [jobs]);
 
   const shown = useMemo(
@@ -328,15 +337,23 @@ export function AutobidMonitorClient() {
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span title="The last step any job reported from the Auto-bid runner">
-            Runner last reported: {lastRunnerWord ? formatAgo(lastRunnerWord, now) : "never"}
-          </span>
           <Button variant="outline" size="sm" className="h-8 rounded-md" disabled={loading} onClick={() => void load()}>
             <RefreshCw className={cn("mr-1 h-3.5 w-3.5", loading && "animate-spin")} />
             {loadedAt ? formatTime(new Date(loadedAt).toISOString()) : "Refresh"}
           </Button>
         </div>
       </div>
+
+      {runners && (
+        <RunnerStatusPanel
+          autobid={runners.autobid}
+          autogen={runners.autogen}
+          setupError={runners.setupError}
+          now={now}
+          ago={(iso) => formatAgo(iso, now)}
+          time={formatTime}
+        />
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Tile label="Applying now" value={counts.applying} tone={counts.applying ? "text-primary" : undefined} />

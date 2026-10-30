@@ -649,16 +649,11 @@
     fullAuto.json2docx = health ? Boolean(health.ok) : null;
   }
 
-  function renderFullAuto() {
-    const card = document.getElementById('faCard');
-    if (!card) return;
+  /** What the whole chain needs, as [label, ok (true / false / null = unknown), note]. */
+  function fullAutoChecks() {
     const l = live()?.autoState?.() || {};
-    const on = isFullAuto();
-    card.classList.toggle('is-on', on);
-    const toggle = document.getElementById('faToggle');
-    if (toggle && !fullAuto.busy) toggle.checked = on;
     const aiOn = typeof isAiModeEnabled === 'function' && isAiModeEnabled();
-    const checks = [
+    return [
       ['Live checks for new jobs', l.live, l.challenge ? 'Paused: a site asked for a check (Job Scraper tab)' : l.status || ''],
       ['New Greenhouse, Lever and Ashby jobs queued for AutoGen', l.autoQueue, l.profileName ? `for ${l.profileName}` : ''],
       [
@@ -673,6 +668,16 @@
       ['json2docx running', fullAuto.json2docx, fullAuto.json2docx === false ? 'Start it on this machine (start_server.bat)' : ''],
       ['AI answers custom questions', aiOn, aiOn ? '' : 'Settings → Autofill with AI, with an OpenAI key'],
     ];
+  }
+
+  function renderFullAuto() {
+    const card = document.getElementById('faCard');
+    if (!card) return;
+    const on = isFullAuto();
+    card.classList.toggle('is-on', on);
+    const toggle = document.getElementById('faToggle');
+    if (toggle && !fullAuto.busy) toggle.checked = on;
+    const checks = fullAutoChecks();
     const list = document.getElementById('faChecks');
     if (list) {
       list.innerHTML = checks
@@ -693,6 +698,59 @@
         : s
           ? `${s.submittedSince} sent today of ${state.prefs.dailyLimit} · ${s.needsYou.length} need you`
           : 'On';
+    }
+  }
+
+  // ───────────────────────────── Report to the website ─────────────────────────────
+  // The site's Auto-bid page shows this panel's state. Sent when it changes,
+  // and at least every minute so the page can tell a closed panel from an idle one.
+
+  const REPORT_EVERY_MS = 60 * 1000;
+  const report = { last: '', at: 0, sending: false };
+
+  function runnerState() {
+    if (!state.prefs.enabled) return 'off';
+    if (state.job) return 'applying';
+    if (state.pauseReason) return 'paused';
+    if (state.prefs.submit && state.summary && state.summary.submittedSince >= state.prefs.dailyLimit) return 'limit';
+    return 'waiting';
+  }
+
+  function statusReport() {
+    const l = live()?.autoState?.() || null;
+    const s = state.summary;
+    return {
+      version: chrome.runtime?.getManifest?.().version || '',
+      state: runnerState(),
+      fullAuto: isFullAuto(),
+      enabled: Boolean(state.prefs.enabled),
+      submit: Boolean(state.prefs.submit),
+      dailyLimit: state.prefs.dailyLimit,
+      step: state.step,
+      pauseReason: state.pauseReason || '',
+      job: state.job ? { id: state.job.id, company: state.job.company, jobTitle: state.job.job_title } : null,
+      summary: s ? { ready: s.ready, sentToday: s.submittedSince, needsYou: s.needsYou.length } : null,
+      checks: fullAutoChecks().map(([label, ok, note]) => ({ label, ok: ok === undefined ? null : ok, note })),
+      live: l,
+      log: state.log.slice(0, 15),
+    };
+  }
+
+  async function reportStatus() {
+    if (report.sending) return;
+    const body = statusReport();
+    const text = JSON.stringify(body);
+    if (text === report.last && Date.now() - report.at < REPORT_EVERY_MS) return;
+    report.sending = true;
+    try {
+      await bid().autobidFetch('/api/autobid/status', { method: 'POST', body: { kind: 'autobid', status: body } });
+      report.last = text;
+      report.at = Date.now();
+    } catch (_) {
+      /* not signed in or the migration has not run: the next round tries again */
+      report.at = Date.now();
+    } finally {
+      report.sending = false;
     }
   }
 
@@ -746,7 +804,9 @@
     document.getElementById('abNeedsYou')?.addEventListener('click', (event) => void onNeedsYouClick(event));
     document.getElementById('faToggle')?.addEventListener('change', (event) => void setFullAuto(event.target.checked));
     setInterval(() => {
-      void checkJson2docx().then(renderFullAuto);
+      void checkJson2docx()
+        .then(renderFullAuto)
+        .then(reportStatus);
     }, 5000);
     render();
     if (state.prefs.enabled) {

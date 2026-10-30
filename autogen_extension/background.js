@@ -355,6 +355,7 @@ async function stopWindow(windowId, reason) {
       reason || "user clicked Stop - interrupted this window's in-flight work",
     );
   }
+  void reportStatusToWebsite();
 }
 
 async function startWindow(windowId) {
@@ -364,6 +365,7 @@ async function startWindow(windowId) {
   await persistRunningWindows();
   await appendActivityLog(windowId, null, "user started processing in this window");
   scheduleWindowTick(windowId, 300);
+  void reportStatusToWebsite();
 }
 
 /**
@@ -457,9 +459,66 @@ async function purgeLegacyStorageEntries() {
 // worker gets evicted while a timer was pending.
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) {
-    restartWindowsIfActive();
+    restartWindowsIfActive().finally(() => reportStatusToWebsite());
   }
 });
+
+/**
+ * Tells JobStrike which windows are generating and what each is on, for the
+ * website's Auto-bid page. Sent every minute (the heartbeat) and when a window
+ * starts or stops; the page shows AutoGen as stopped when reports stop coming.
+ */
+async function reportStatusToWebsite() {
+  try {
+    const settings = await autogenGetSettings();
+    if (!settings.serverBaseUrl || !settings.username) return;
+    const data = await chrome.storage.local.get({
+      autogenRunningWindows: {},
+      autogenWindowStatus: {},
+      autogenSessionStats: {},
+      autogenActivityLog: [],
+    });
+    const running = data.autogenRunningWindows || {};
+    const statusById = data.autogenWindowStatus || {};
+    const ids = new Set([...Object.keys(running), ...Object.keys(windowWorkers)].map(Number));
+    const windows = [];
+    for (const windowId of ids) {
+      const win = await chrome.windows.get(windowId, { populate: true }).catch(() => null);
+      if (!win) continue;
+      const entry = statusById[windowId] || {};
+      const activeTab = (win.tabs || []).find((tab) => tab.active);
+      windows.push({
+        windowId,
+        running: Boolean(windowWorkers[windowId]?.running || running[windowId]),
+        busy: Boolean(windowWorkers[windowId]?.busy),
+        minimized: win.state === "minimized",
+        chatGptActive: isChatGptUrl(activeTab?.url || ""),
+        status: entry.status || "",
+        applicationId: entry.id ?? null,
+        company: entry.company || "",
+        jobTitle: entry.jobTitle || "",
+        error: String(entry.error || "").slice(0, 300),
+        updatedAt: entry.updatedAt || null,
+      });
+    }
+    const log = (Array.isArray(data.autogenActivityLog) ? data.autogenActivityLog : [])
+      .slice(-12)
+      .reverse()
+      .map((row) => ({ at: row.timestamp, windowId: row.windowId ?? null, text: String(row.message || "").slice(0, 300) }));
+    await autogenApiFetch(settings, "/api/autobid/status", autogenJsonPost({
+      kind: "autogen",
+      status: {
+        version: chrome.runtime.getManifest().version,
+        engine: settings.engine === "api" ? "api" : "chatgpt",
+        windows,
+        stats: data.autogenSessionStats || {},
+        log,
+      },
+    }));
+  } catch (_error) {
+    /* signed out, offline or the migration has not run: the next heartbeat tries again */
+  }
+}
 
 /** Forces a clean "off" state on extension reload/update: stops every window's
  * worker and drops any queued (not yet in-flight) selected-run work, so the
