@@ -162,6 +162,11 @@ It stops a job before (or at) Submit and lists it under **Needs you**, with the
 tab left open, for: a CAPTCHA, a required field it has no answer for, a form
 on a site other than Greenhouse / Lever / Ashby, no confirmation after Submit,
 or the site rejecting the form (only the newest 8 of those tabs stay open).
+After Submit it compares the page with the one before: a success message or
+confirmation address, or (Ashby, where each company writes its own message)
+the form replaced by new text, counts as sent; a spam/bot refusal, an error or
+a closed job does not. What appeared after Submit is kept in the job's history
+on the Auto-bid page either way.
 A problem with the machine (json2docx down, signed out) gives the job back and
 tries again every 5 minutes. A job is recorded as sent before Register runs
 and is never attempted twice. *Press Submit* off = dry run: one job is filled

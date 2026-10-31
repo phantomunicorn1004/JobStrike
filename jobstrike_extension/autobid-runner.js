@@ -262,24 +262,30 @@
     return { clicked: false };
   }
 
-  /** Runs in every frame. What the page says after Submit. */
+  /**
+   * Runs in every frame. The page as the runner judges Submit by: its address,
+   * its visible lines (to see what appeared after Submit), whether the form is
+   * still there, a CAPTCHA challenge, and field errors.
+   */
   function probeApplicationOutcome() {
     const visible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = getComputedStyle(el);
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
     };
-    const text = String(document.body?.innerText || '').slice(0, 30000);
-    let path = '';
-    try {
-      path = new URL(location.href).pathname;
-    } catch (_) {
-      /* about:blank */
-    }
-    const confirmed =
-      /thank(s| you) for (applying|your application|submitting)|application (has been |was )?(successfully )?(submitted|received)|we('ve| have) received your application|your application (has been|was) (sent|submitted)/i.test(
-        text
-      ) || /\/(confirmation|thanks|thank-you|thank_you|submitted)(\/|$)/i.test(path);
+    const lines = [
+      ...new Set(
+        String(document.body?.innerText || '')
+          .split(/\n+/)
+          .map((line) => line.replace(/\s+/g, ' ').trim())
+          .filter((line) => line.length > 1)
+          .map((line) => line.slice(0, 200))
+      ),
+    ].slice(0, 400);
+    const submitButton = [
+      ...document.querySelectorAll('button, input[type="submit"], [data-qa="btn-submit"], #submit_app'),
+    ].some((el) => visible(el) && /submit|send application/i.test(String(el.innerText || el.value || el.getAttribute('aria-label') || '')));
+    const fields = [...document.querySelectorAll('form input:not([type="hidden"]), form textarea, form select')].filter(visible).length;
     const captcha = [...document.querySelectorAll('iframe')].some(
       (frame) =>
         /recaptcha\/(api2|enterprise)\/bframe|hcaptcha\.com\/.*(challenge|hcaptcha)|challenges\.cloudflare\.com/i.test(frame.src || '') &&
@@ -292,9 +298,15 @@
       ),
     ]
       .filter(visible)
-      .map((el) => String(el.innerText || el.getAttribute('aria-label') || el.getAttribute('name') || '').trim())
-      .filter((t) => t && t.length < 160);
-    return { href: location.href, confirmed, captcha, errors: [...new Set(errors)].slice(0, 6) };
+      .map((el) => String(el.innerText || el.getAttribute('aria-label') || el.getAttribute('name') || '').replace(/\s+/g, ' ').trim())
+      .filter((t) => t && t.length < 200);
+    return {
+      href: location.href,
+      lines,
+      formPresent: submitButton || fields >= 2,
+      captcha,
+      errors: [...new Set(errors)].slice(0, 6),
+    };
   }
 
   async function probeOutcome(tabId) {
@@ -302,15 +314,69 @@
       const results = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: probeApplicationOutcome });
       const frames = results.map((r) => r?.result).filter(Boolean);
       return {
-        confirmed: frames.some((f) => f.confirmed),
+        hrefs: frames.map((f) => f.href),
+        lines: frames.flatMap((f) => f.lines || []),
+        formPresent: frames.some((f) => f.formPresent),
         captcha: frames.some((f) => f.captcha),
         errors: frames.flatMap((f) => f.errors || []).slice(0, 6),
-        hrefs: frames.map((f) => f.href),
       };
     } catch (_) {
       // Navigating after Submit: nothing to read for a moment.
-      return { confirmed: false, captcha: false, errors: [], hrefs: [], navigating: true };
+      return { hrefs: [], lines: [], formPresent: false, captcha: false, errors: [], navigating: true };
     }
+  }
+
+  const CONFIRM_TEXT_RE =
+    /thank(s| you)( so much)? for (applying|your application|submitting|your interest)|application (has been |was )?(successfully )?(submitted|received|sent|complete)|we('ve| have) received your application|successfully (applied|submitted)|you('ve| have) (successfully )?applied|submission (received|successful)/i;
+  const CONFIRM_PATH_RE = /\/(confirmation|thanks|thank-you|thank_you|submitted|success)(\/|$)/i;
+  /** A refusal of the whole application (not one field): it was not sent. */
+  const SPAM_TEXT_RE =
+    /flagged as (possible |potential )?spam|possible spam|suspicious activity|unusual activity|automated (submission|traffic|activity)|verify (that )?you('re| are) (a )?human|bot detected/i;
+  const FAILURE_TEXT_RE =
+    /something went wrong|an error occurred|could not be submitted|couldn't be submitted|failed to submit|unable to submit|there (was|were) (an |a )?(error|problem)|no longer (accepting|available)|(job|position) (has been |is )?(closed|filled)|page not found|job not found/i;
+
+  function pathOf(href) {
+    try {
+      return new URL(href).pathname;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /**
+   * Compares the page before Submit with the page now. Only what appeared after
+   * Submit counts, so a posting that itself says "thank you for applying" is
+   * not a confirmation. Returns { verdict, by, newText, errors }, verdict one of:
+   *   confirmed  a success message appeared, the address became a confirmation
+   *              page, or the form was replaced by new text (`by` says which)
+   *   spam       the site refused the application as spam or a bot
+   *   failed     the site showed an error for the whole application
+   *   captcha    a CAPTCHA challenge is open
+   *   errors     field errors are showing
+   *   wait       nothing decisive yet
+   * `newText` is what appeared after Submit, kept in the job's history.
+   */
+  function judgeAfterSubmit(before, after) {
+    const seen = new Set(before.lines || []);
+    const added = (after.lines || []).filter((line) => !seen.has(line));
+    const newText = added.join(' · ').slice(0, 400);
+    const base = { newText, errors: after.errors || [] };
+    if (after.navigating) return { ...base, verdict: 'wait' };
+    if (SPAM_TEXT_RE.test(newText)) return { ...base, verdict: 'spam' };
+    if (after.captcha) return { ...base, verdict: 'captcha' };
+    const urlChanged = (after.hrefs || []).join('|') !== (before.hrefs || []).join('|');
+    if (urlChanged && (after.hrefs || []).some((href) => CONFIRM_PATH_RE.test(pathOf(href)))) {
+      return { ...base, verdict: 'confirmed', by: 'address' };
+    }
+    if (CONFIRM_TEXT_RE.test(newText)) return { ...base, verdict: 'confirmed', by: 'message' };
+    if (FAILURE_TEXT_RE.test(newText)) return { ...base, verdict: 'failed' };
+    if ((after.errors || []).length) return { ...base, verdict: 'errors' };
+    // Some sites (Ashby) let each company write its own message: the form is
+    // simply replaced by it. The caller wants this on two looks in a row.
+    if (before.formPresent && !after.formPresent && added.length > 0) {
+      return { ...base, verdict: 'confirmed', by: 'form_replaced' };
+    }
+    return { ...base, verdict: 'wait' };
   }
 
   function rowLabel(row) {
@@ -443,6 +509,10 @@
 
       setStep('Submitting…');
       const before = await probeOutcome(tabId);
+      if (before.navigating || !before.formPresent) {
+        // Nothing to compare the page with after Submit: not pressed.
+        throw new Stop('needs_you', 'Filled, but the form could not be read just before Submit. Review the tab and submit it by hand.', meta);
+      }
       const [click] = await chrome.scripting.executeScript({
         target: { tabId, frameIds: [autofillFrameId || 0] },
         func: clickSubmitButton,
@@ -454,27 +524,56 @@
 
       setStep('Waiting for the confirmation…');
       const until = Date.now() + CONFIRM_WAIT_MS;
-      let outcome = null;
+      let judged = null;
       let errorPolls = 0;
+      let confirmPolls = 0;
       while (Date.now() < until) {
         await sleep(CONFIRM_POLL_MS);
-        outcome = await probeOutcome(tabId);
-        // Boilerplate like "thank you for applying" in the posting itself is not a confirmation.
-        const newlyConfirmed =
-          outcome.confirmed && (!before.confirmed || outcome.hrefs.join('|') !== before.hrefs.join('|'));
-        if (newlyConfirmed) break;
-        if (outcome.captcha) {
+        const outcome = await probeOutcome(tabId);
+        judged = judgeAfterSubmit(before, outcome);
+        if (!outcome.navigating) {
+          // What the page showed after Submit, kept with the job either way.
+          meta.afterSubmit = { hrefs: outcome.hrefs, newText: judged.newText, formPresent: outcome.formPresent };
+        }
+        const shown = judged.newText ? ` The page shows: “${judged.newText.slice(0, 200)}”.` : '';
+        if (judged.verdict === 'confirmed') {
+          // A replaced form must still be gone on the next look (not a re-render).
+          confirmPolls = judged.by === 'form_replaced' ? confirmPolls + 1 : 2;
+          if (confirmPolls >= 2) break;
+          continue;
+        }
+        confirmPolls = 0;
+        if (judged.verdict === 'spam') {
+          throw new Stop('needs_you', `The site refused the application as possible spam, so it was most likely not sent.${shown}`, meta);
+        }
+        if (judged.verdict === 'captcha') {
           throw new Stop('needs_you', 'A CAPTCHA appeared after Submit. Solve it in the tab, submit, then Register.', meta);
         }
-        errorPolls = outcome.errors.length ? errorPolls + 1 : 0;
+        if (judged.verdict === 'failed') {
+          throw new Stop('needs_you', `The site showed an error after Submit, so it was most likely not sent.${shown}`, meta);
+        }
+        errorPolls = judged.verdict === 'errors' ? errorPolls + 1 : 0;
         if (errorPolls >= 2) {
-          meta.pageErrors = outcome.errors;
-          throw new Stop('needs_you', `The site rejected the form: ${outcome.errors.slice(0, 3).join('; ')}`, meta);
+          meta.pageErrors = judged.errors;
+          throw new Stop('needs_you', `The site rejected the form: ${judged.errors.slice(0, 3).join('; ')}`, meta);
         }
       }
-      if (!outcome?.confirmed || (before.confirmed && outcome.hrefs.join('|') === before.hrefs.join('|'))) {
-        throw new Stop('needs_you', 'Submit was clicked but no confirmation appeared. Check the tab before doing anything else.', meta);
+      if (judged?.verdict !== 'confirmed' || confirmPolls < 2) {
+        const shown = judged?.newText
+          ? `The page shows: “${judged.newText.slice(0, 200)}”.`
+          : 'Nothing new appeared on the page.';
+        throw new Stop(
+          'needs_you',
+          `Submit was clicked but no confirmation was recognised. ${shown} Check the tab before doing anything else.`,
+          meta
+        );
       }
+      meta.confirmedBy = judged.by;
+      setStep(
+        `Confirmed (${judged.by === 'form_replaced' ? 'the form was replaced' : `by the ${judged.by}`}): ${
+          judged.newText.slice(0, 160) || 'confirmation page'
+        }`
+      );
 
       // Recorded first: whatever happens to Register, this job is never sent again.
       meta.confirmedAt = new Date().toISOString();
@@ -819,5 +918,5 @@
 
   window.addEventListener('DOMContentLoaded', () => void init());
 
-  window.SmartJobAutoBid = { applicationFormUrl, clickSubmitButton, probeApplicationOutcome };
+  window.SmartJobAutoBid = { applicationFormUrl, clickSubmitButton, probeApplicationOutcome, judgeAfterSubmit };
 })();
