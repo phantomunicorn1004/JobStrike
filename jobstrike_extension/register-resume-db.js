@@ -4014,6 +4014,18 @@
     return option ? { id: option.value, name: String(option.textContent || '').trim() } : null;
   }
 
+  /** Every profile in the Bid tab's list (the signed-in user's), as { id, name }. */
+  function listRegisterProfiles() {
+    return [...(document.getElementById('regProfileId')?.options || [])]
+      .filter((o) => o.value)
+      .map((o) => ({ id: o.value, name: String(o.textContent || '').trim() }));
+  }
+
+  /** The JobStrike site this panel is signed in to. */
+  async function backendBaseUrl() {
+    return (await getBackendConfig()).baseUrl;
+  }
+
   /** The profile chosen in the Bid tab: the one queued jobs are generated for. */
   function getSelectedRegisterProfile() {
     const select = document.getElementById('regProfileId');
@@ -5257,6 +5269,9 @@
     syncJobLinkBlockButton,
     setRegisterFieldValue,
     getSelectedRegisterProfile,
+    profileById,
+    listRegisterProfiles,
+    backendBaseUrl,
     queueJobLinkForAutogen,
     generateFilesFromResumeJson,
     registerForAutobid,

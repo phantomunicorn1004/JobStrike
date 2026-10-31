@@ -19,7 +19,8 @@
     "tabs",
     "identity",
     "cookies",
-    "notifications"
+    "notifications",
+    "management"
   ],
   "host_permissions": [
     "<all_urls>",

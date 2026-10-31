@@ -141,11 +141,19 @@ The extension does not submit the application. You must review the page and subm
 ## Auto-bid (hands-free)
 
 The whole hand flow, run by itself on a dedicated machine (e.g. the VPS).
-**Full auto** (Job Scraper tab, top card) turns it all on with one switch for
-the profile chosen in the Bid tab: Live, queueing new Greenhouse / Lever /
-Ashby jobs for AutoGen, and Auto-bid with Press Submit. Its checklist shows
-what is missing (json2docx offline, AI autofill off, a site check pausing
-Live). Off stops queueing and sending; Live keeps checking and alerting.
+Everything is in the panel's **Auto-bid** tab, with one **Start / Stop** and
+one setup: profile, mode (dry run: fill one job and stop, or Submit), daily
+limit, ChatGPT windows, working hours, HiringCafe interval and sources. The
+setup is saved on the server (`scripts/add-autobid-config-to-app-users.sql`),
+so the website's Auto-bid page shows and changes the same one; the panel
+follows it within 20 seconds. **Start** runs Live with that setup and queues
+its new Greenhouse / Lever / Ashby jobs for AutoGen, tells the AutoGen
+extension to keep that many ChatGPT windows generating (it reuses idle
+ChatGPT windows and opens the rest itself), and applies. **Stop** undoes all
+three (Live is switched off only if Start switched it on). A dry run stops the
+whole setup after its one job. The checklist shows what is missing (AutoGen
+not installed or signed in, json2docx offline, AI autofill off, a site check
+pausing Live).
 
 1. **Live** finds jobs. With *Live settings → Queue new jobs for AutoGen
    automatically*, each new job is read in a background tab and queued for the
@@ -176,7 +184,7 @@ the applications sent.
 The site's **Auto-bid** page follows each job from any computer: Queued →
 Resume → Apply → Sent → Registered with the time of each step, what the runner
 is doing now, why a job stopped (with Retry), and the runner's step history.
-Above the jobs it shows this panel (Auto-bid state, Full auto checklist, Live)
+Above the jobs it has the same Start / Stop and setup, then this panel (Auto-bid state, checklist, Live)
 and the AutoGen windows, from the reports both extensions send every minute;
 a part that stops reporting is shown as not running. Needs
 `scripts/add-runner-status-to-app-users.sql` run once in Supabase.

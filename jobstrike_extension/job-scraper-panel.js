@@ -199,6 +199,8 @@
     liveAutoQueueProfileId: '',
     liveAutoQueueProfileName: '',
     liveAutoQueueSupported: true,
+    /** Live was switched on by the all-in-one Auto-bid: its Stop switches it off again. */
+    liveByWorkflow: false,
     liveHideOpened: false,
   };
 
@@ -2689,6 +2691,43 @@ ${groupSheetStyles()}
     if (profile) autoQueueNewJobs();
   }
 
+  /**
+   * The all-in-one Auto-bid (autobid-runner.js) runs Live with its setup:
+   * hours, HiringCafe interval, sources, and new Greenhouse / Lever / Ashby
+   * jobs queued for AutoGen for `profile`. null = stop queueing, and switch
+   * Live off again if Auto-bid had switched it on.
+   */
+  async function applyWorkflow(setup) {
+    if (setup) {
+      state.prefs.liveHours = setup.hours;
+      state.prefs.liveHcMinutes = setup.everyMinutes;
+      state.prefs.useHiringCafe = Boolean(setup.hiringCafe);
+      state.prefs.useJobright = Boolean(setup.jobright);
+      state.prefs.liveAutoQueue = true;
+      state.prefs.liveAutoQueueProfileId = setup.profile.id;
+      state.prefs.liveAutoQueueProfileName = setup.profile.name;
+      state.prefs.liveAutoQueueSupported = true;
+      if (!state.prefs.liveEnabled) state.prefs.liveByWorkflow = true;
+      await persistPrefs();
+      syncControlsFromState();
+      if (!state.prefs.liveEnabled) await setLiveEnabled(true);
+      else {
+        renderLiveCard();
+        void liveTick();
+      }
+      autoQueueNewJobs();
+      return;
+    }
+    const switchOff = state.prefs.liveByWorkflow && state.prefs.liveEnabled;
+    state.prefs.liveAutoQueue = false;
+    state.prefs.liveAutoQueueProfileId = '';
+    state.prefs.liveAutoQueueProfileName = '';
+    state.prefs.liveByWorkflow = false;
+    await persistPrefs();
+    if (switchOff) await setLiveEnabled(false);
+    else renderLiveCard();
+  }
+
   function liveNewJobs() {
     return state.filteredJobs.filter((job) => job.live_new && !job.opened_at);
   }
@@ -3111,7 +3150,7 @@ ${groupSheetStyles()}
       renderLiveQueue();
     });
     document.addEventListener('jobstrike-registered', onJobRegistered);
-    window.SmartJobLive = { autoState, setAutoQueue };
+    window.SmartJobLive = { autoState, setAutoQueue, applyWorkflow };
     startLiveTimer();
     renderLiveCard();
     updateLiveBadge();

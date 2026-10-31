@@ -13,6 +13,9 @@ type Check = { label: string; ok: boolean | null; note?: string };
 export type AutobidReport = {
   reportedAt?: string;
   version?: string;
+  /** The Auto-bid setup version the panel last applied. */
+  configVersion?: number;
+  setupError?: string;
   state?: "off" | "waiting" | "applying" | "paused" | "limit";
   fullAuto?: boolean;
   enabled?: boolean;
@@ -173,6 +176,9 @@ function AutobidCard({
               </span>
             )}
           </div>
+          {report.setupError && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">{report.setupError}</p>
+          )}
           {report.step && report.state !== "off" && (
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               {report.state === "applying" && online && <Loader2 className="h-3 w-3 animate-spin" />}

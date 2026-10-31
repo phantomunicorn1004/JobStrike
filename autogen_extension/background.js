@@ -404,6 +404,107 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
+// ───────────── Driven by JobStrike's all-in-one Auto-bid ─────────────
+// The JobStrike extension's Auto-bid Start/Stop keeps N windows generating
+// here, so AutoGen never needs a hand. Only these commands are accepted from
+// another extension; nothing else of AutoGen is reachable from outside.
+
+const OWNED_WINDOWS_KEY = "autogenOwnedWindows";
+const CHATGPT_START_URL = "https://chatgpt.com/";
+
+async function autogenWindowSummary() {
+  const settings = await autogenGetSettings();
+  const windows = [];
+  for (const [key, worker] of Object.entries(windowWorkers)) {
+    if (!worker.running) continue;
+    const win = await chrome.windows.get(Number(key), { populate: true }).catch(() => null);
+    if (!win) continue;
+    const active = (win.tabs || []).find((tab) => tab.active);
+    windows.push({
+      windowId: win.id,
+      busy: Boolean(worker.busy),
+      minimized: win.state === "minimized",
+      chatGptActive: isChatGptUrl(active?.url || active?.pendingUrl || ""),
+    });
+  }
+  return {
+    ok: true,
+    version: chrome.runtime.getManifest().version,
+    signedIn: Boolean(settings.serverBaseUrl && settings.username),
+    server: settings.serverBaseUrl || "",
+    engine: settings.engine === "api" ? "api" : "chatgpt",
+    windows,
+  };
+}
+
+/**
+ * Keeps exactly `count` windows generating: running ones are kept, then idle
+ * windows already on ChatGPT are started, then new ChatGPT windows are opened.
+ * Extra windows beyond `count` are stopped (the ones AutoGen opened first).
+ */
+async function ensureGeneratingWindows(count) {
+  const want = Math.max(0, Math.min(6, Math.round(Number(count) || 0)));
+  const settings = await autogenGetSettings();
+  const api = settings.engine === "api";
+  const owned = new Set(((await chrome.storage.local.get({ [OWNED_WINDOWS_KEY]: [] }))[OWNED_WINDOWS_KEY] || []).map(Number));
+
+  const all = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] }).catch(() => []);
+  const isChat = (win) => isChatGptUrl(((win.tabs || []).find((tab) => tab.active) || {}).url || "");
+  let running = all.filter((win) => windowWorkers[win.id]?.running);
+
+  // Too many: stop the extra ones, AutoGen's own windows first.
+  if (running.length > want) {
+    const extra = [...running].sort((a, b) => Number(owned.has(b.id)) - Number(owned.has(a.id))).slice(0, running.length - want);
+    for (const win of extra) await stopWindow(win.id, "stopped by JobStrike Auto-bid (fewer windows wanted)");
+    running = running.filter((win) => !extra.includes(win));
+  }
+
+  // Idle windows already showing ChatGPT (any window will do with the API engine).
+  for (const win of all) {
+    if (running.length >= want) break;
+    if (windowWorkers[win.id]?.running || win.state === "minimized") continue;
+    if (!api && !isChat(win)) continue;
+    await startWindow(win.id);
+    running.push(win);
+  }
+
+  // Still short: open new ChatGPT windows (not focused, so they do not cover JobStrike).
+  while (running.length < want) {
+    const win = await chrome.windows.create({ url: CHATGPT_START_URL, focused: false, state: "normal", width: 1100, height: 850 });
+    const tabId = win.tabs?.[0]?.id;
+    if (tabId) await waitForTabReady(tabId, 30000);
+    owned.add(win.id);
+    await appendActivityLog(win.id, null, "opened by JobStrike Auto-bid");
+    await startWindow(win.id);
+    running.push(win);
+  }
+
+  const alive = new Set((await chrome.windows.getAll().catch(() => [])).map((win) => win.id));
+  await chrome.storage.local.set({ [OWNED_WINDOWS_KEY]: [...owned].filter((id) => alive.has(id)) });
+  void reportStatusToWebsite();
+  return autogenWindowSummary();
+}
+
+async function stopAllGeneratingWindows(reason) {
+  for (const [key, worker] of Object.entries(windowWorkers)) {
+    if (worker.running) await stopWindow(Number(key), reason);
+  }
+  return autogenWindowSummary();
+}
+
+chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) => {
+  if (!message || typeof message.type !== "string") return;
+  const reply = (promise) => {
+    promise.then(sendResponse).catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+    return true; // async response
+  };
+  if (message.type === "AUTOGEN_EXT_STATUS") return reply(autogenWindowSummary());
+  if (message.type === "AUTOGEN_EXT_ENSURE_WINDOWS") return reply(ensureGeneratingWindows(message.count));
+  if (message.type === "AUTOGEN_EXT_STOP_ALL") {
+    return reply(stopAllGeneratingWindows("stopped by JobStrike Auto-bid (Stop)"));
+  }
+});
+
 chrome.windows.onRemoved.addListener(async (windowId) => {
   delete windowWorkers[windowId];
   await persistRunningWindows();

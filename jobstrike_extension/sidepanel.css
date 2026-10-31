@@ -4526,7 +4526,60 @@ textarea.js-input {
   margin: 0;
 }
 
-/* Full auto card (autobid-runner.js): one switch, and a checklist of what it needs. */
+/* Auto-bid tab (autobid-runner.js): one Start/Stop, the setup, a checklist of what it needs. */
+.wf-start {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.wf-start.is-stop {
+  background: #dc2626;
+}
+.wf-start:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.wf-note {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #d97706 12%, transparent);
+  color: var(--text);
+  font-size: 12px;
+}
+.wf-summary.is-error {
+  color: #dc2626;
+}
+.wf-setup .js-live-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+.wf-setup .js-live-field span,
+.wf-setup .js-live-field .js-input {
+  flex: none;
+}
+.wf-setup .js-live-field span {
+  color: var(--muted);
+}
+.wf-website {
+  display: block;
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--brand);
+  text-decoration: none;
+}
+.wf-website:hover {
+  text-decoration: underline;
+}
+
+/* Checklist rows (Auto-bid tab). */
 .fa-checks {
   list-style: none;
   margin: 0;

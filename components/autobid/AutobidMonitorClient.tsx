@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { AutobidControlPanel } from "@/components/autobid/AutobidControlPanel";
 import {
   RunnerStatusPanel,
   type AutobidReport,
@@ -343,6 +344,13 @@ export function AutobidMonitorClient() {
           </Button>
         </div>
       </div>
+
+      <AutobidControlPanel
+        appliedVersion={typeof runners?.autobid?.configVersion === "number" ? runners.autobid.configVersion : null}
+        panelOnline={Boolean(
+          runners?.autobid?.reportedAt && now - new Date(runners.autobid.reportedAt).getTime() < 3 * 60 * 1000,
+        )}
+      />
 
       {runners && (
         <RunnerStatusPanel

@@ -92,13 +92,7 @@
   }
 
   function render() {
-    const toggle = document.getElementById('abToggle');
-    if (toggle) toggle.checked = Boolean(state.prefs.enabled);
     document.getElementById('abCard')?.classList.toggle('is-on', Boolean(state.prefs.enabled));
-    const submit = document.getElementById('abSubmit');
-    if (submit) submit.checked = Boolean(state.prefs.submit);
-    const limit = document.getElementById('abDailyLimit');
-    if (limit && document.activeElement !== limit) limit.value = String(state.prefs.dailyLimit);
 
     const status = document.getElementById('abStatus');
     if (status) {
@@ -114,7 +108,7 @@
     if (step) {
       step.textContent = state.job
         ? `${state.job.company || 'Job'} · ${state.job.job_title || ''} — ${state.step}`
-        : state.step || (state.prefs.enabled ? 'Waiting for generated resumes…' : 'Applies to jobs whose resume AutoGen generated.');
+        : state.step || (state.prefs.enabled ? 'Waiting for generated resumes…' : 'Not running. Press Start above.');
     }
 
     const counts = document.getElementById('abCounts');
@@ -149,7 +143,7 @@
 
     const log = document.getElementById('abLog');
     if (log) log.textContent = state.log.join('\n');
-    renderFullAuto();
+    renderWorkflow();
   }
 
   function localMidnightIso() {
@@ -673,8 +667,9 @@
         // One form at a time to review, not a window full of them.
         state.prefs.enabled = false;
         await savePrefs();
-        setStep(`Dry run done for #${job.id}: review the open tab. Turn on "Press Submit" to apply by itself.`);
+        setStep(`Dry run done for #${job.id}: review the open tab. Choose Submit and press Start to apply by itself.`);
         toast('Dry run finished one job: review the filled form in the open tab.', 'info');
+        void stopAfterDryRun(job);
       }
     } catch (error) {
       setStep(error?.message || String(error));
@@ -724,79 +719,356 @@
     }
   }
 
-  // ───────────────────────────── Full auto ─────────────────────────────
-  // One switch for the whole chain: Live finds jobs → they are queued for
-  // AutoGen → Auto-bid applies and presses Submit. AutoGen itself runs in its
-  // own extension; its windows only need "Run in background" once.
+  // ───────────────────────────── All-in-one workflow ─────────────────────────────
+  // One Start/Stop and one setup for the whole chain, saved on the server: the
+  // website's Auto-bid page and this panel's Auto-bid tab edit the same setup,
+  // and this panel runs it. Start: Live finds jobs and queues the Greenhouse /
+  // Lever / Ashby ones for AutoGen, AutoGen keeps N ChatGPT windows generating,
+  // and the runner above applies and registers. Stop undoes all three.
 
+  const CONFIG_POLL_MS = 20 * 1000;
+  const AUTOGEN_CHECK_MS = 2 * 60 * 1000;
+  /** Opening several ChatGPT windows can take a while. */
+  const AUTOGEN_REPLY_MS = 3 * 60 * 1000;
   const HEALTH_EVERY_MS = 2 * 60 * 1000;
-  const fullAuto = { json2docx: null, checkedAt: 0, busy: false };
+  const APPLIED_KEY = 'autobid_workflow_applied';
+
+  const wf = {
+    config: null,
+    appliedVersion: -1,
+    /** The last setup applied here was running: Stop must also stop AutoGen. */
+    appliedRunning: false,
+    applying: false,
+    saving: false,
+    error: '',
+    configError: '',
+    json2docx: null,
+    checkedAt: 0,
+    autogen: null,
+    autogenId: '',
+    autogenCheckedAt: 0,
+  };
 
   function live() {
     return window.SmartJobLive || null;
   }
 
-  function isFullAuto() {
-    const l = live()?.autoState?.();
-    return Boolean(l?.live && l?.autoQueue && state.prefs.enabled && state.prefs.submit);
+  function isRunning() {
+    return Boolean(wf.config?.running);
   }
 
   async function checkJson2docx(force = false) {
-    if (!force && Date.now() - fullAuto.checkedAt < HEALTH_EVERY_MS) return;
-    fullAuto.checkedAt = Date.now();
+    if (!force && Date.now() - wf.checkedAt < HEALTH_EVERY_MS) return;
+    wf.checkedAt = Date.now();
     const health = await window.SmartJobJson2Docx?.checkJson2docxHealth?.({ updateUi: false }).catch(() => null);
-    fullAuto.json2docx = health ? Boolean(health.ok) : null;
+    wf.json2docx = health ? Boolean(health.ok) : null;
+  }
+
+  // AutoGen is its own extension: found by name, driven by message.
+
+  async function findAutogen() {
+    if (wf.autogenId) return wf.autogenId;
+    const all = (await chrome.management?.getAll?.().catch(() => [])) || [];
+    const ext = all.find((e) => e.enabled && e.type === 'extension' && e.id !== chrome.runtime.id && /autogen/i.test(e.name));
+    wf.autogenId = ext?.id || '';
+    return wf.autogenId;
+  }
+
+  async function askAutogen(message) {
+    const id = await findAutogen();
+    if (!id) return { ok: false, missing: true };
+    try {
+      const reply = await Promise.race([
+        chrome.runtime.sendMessage(id, message),
+        sleep(AUTOGEN_REPLY_MS).then(() => null),
+      ]);
+      return reply || { ok: false, error: 'AutoGen did not answer.' };
+    } catch (error) {
+      wf.autogenId = ''; // reloaded or removed: looked up again next time
+      return { ok: false, error: error?.message || String(error) };
+    }
+  }
+
+  /** While running, AutoGen is asked to keep the set number of windows (a closed one is replaced). */
+  async function syncAutogen(force = false) {
+    if (!force && Date.now() - wf.autogenCheckedAt < AUTOGEN_CHECK_MS) return;
+    wf.autogenCheckedAt = Date.now();
+    wf.autogen = isRunning()
+      ? await askAutogen({ type: 'AUTOGEN_EXT_ENSURE_WINDOWS', count: wf.config.windows })
+      : await askAutogen({ type: 'AUTOGEN_EXT_STATUS' });
+    renderWorkflow();
+  }
+
+  /**
+   * Makes this panel do what the setup says. A version is applied once; one
+   * that cannot be applied yet (profile list still loading) is tried again on
+   * the next poll.
+   */
+  async function applyConfig(config, { force = false } = {}) {
+    wf.config = config;
+    if ((!force && config.version === wf.appliedVersion) || wf.applying) {
+      renderWorkflow();
+      return;
+    }
+    wf.applying = true;
+    try {
+      if (config.running) {
+        const profile = bid()?.profileById?.(config.profileId);
+        if (!profile) {
+          wf.error = `Profile ${config.profileName || `#${config.profileId}`} is not in this panel's list yet (sign in as the same user).`;
+          return;
+        }
+        if (!live()?.applyWorkflow) {
+          wf.error = 'The Job Scraper part of the panel has not loaded yet.';
+          return;
+        }
+        await live().applyWorkflow({
+          profile,
+          hours: config.hours,
+          everyMinutes: config.everyMinutes,
+          hiringCafe: config.hiringCafe,
+          jobright: config.jobright,
+        });
+        state.prefs.submit = Boolean(config.submit);
+        state.prefs.dailyLimit = config.dailyLimit;
+        await savePrefs();
+        if (!state.prefs.enabled) await setEnabled(true);
+        else {
+          render();
+          schedule(1000);
+        }
+        void checkJson2docx(true);
+        void syncAutogen(true);
+      } else {
+        await live()?.applyWorkflow?.(null);
+        if (state.prefs.enabled) await setEnabled(false);
+        if (wf.appliedRunning) wf.autogen = await askAutogen({ type: 'AUTOGEN_EXT_STOP_ALL' });
+      }
+      wf.error = '';
+      wf.appliedVersion = config.version;
+      wf.appliedRunning = Boolean(config.running);
+      await chrome.storage.local.set({ [APPLIED_KEY]: { version: wf.appliedVersion, running: wf.appliedRunning } });
+    } finally {
+      wf.applying = false;
+      renderWorkflow();
+    }
+  }
+
+  async function pollConfig() {
+    try {
+      const { config } = await bid().autobidFetch('/api/autobid/config');
+      wf.configError = '';
+      await applyConfig(config);
+    } catch (error) {
+      wf.configError = error?.message || String(error);
+      renderWorkflow();
+    }
+  }
+
+  /** Saves a change to the shared setup, then applies the result here. */
+  async function saveConfig(edit) {
+    wf.saving = true;
+    renderWorkflow();
+    try {
+      const { config } = await bid().autobidFetch('/api/autobid/config', { method: 'PUT', body: { ...edit, by: 'panel' } });
+      wf.configError = '';
+      await applyConfig(config);
+      return true;
+    } catch (error) {
+      toast(error?.message || String(error), 'error');
+      return false;
+    } finally {
+      wf.saving = false;
+      renderWorkflow();
+    }
+  }
+
+  async function stopAfterDryRun(job) {
+    if (!isRunning()) return;
+    await saveConfig({
+      running: false,
+      note: `Dry run done for #${job.id} ${job.company || ''}: review the filled form in the open tab. To apply for real, choose Submit and press Start.`,
+    });
+  }
+
+  function formSetup() {
+    const value = (id) => document.getElementById(id)?.value ?? '';
+    const checked = (id) => Boolean(document.getElementById(id)?.checked);
+    const profileId = value('wfProfile');
+    const profile = profileId ? bid()?.profileById?.(profileId) : null;
+    return {
+      profileId: profileId ? Number(profileId) : null,
+      profileName: profile?.name || '',
+      submit: value('wfMode') === 'submit',
+      dailyLimit: Number(value('wfDailyLimit')),
+      windows: Number(value('wfWindows')),
+      hours: value('wfHours'),
+      everyMinutes: Number(value('wfEvery')),
+      hiringCafe: checked('wfHc'),
+      jobright: checked('wfJr'),
+    };
+  }
+
+  async function onStartClick() {
+    if (isRunning()) {
+      await saveConfig({ running: false, note: '' });
+      toast('Auto-bid stopped: nothing is found, generated or sent.', 'info');
+      return;
+    }
+    const setup = formSetup();
+    if (!setup.profileId) {
+      toast('Choose the profile first.', 'warn');
+      return;
+    }
+    if (await saveConfig({ ...setup, running: true })) {
+      toast(
+        setup.submit
+          ? `Auto-bid started for ${setup.profileName}: new jobs are found, generated and applied to by themselves.`
+          : `Auto-bid dry run for ${setup.profileName}: it fills one job, leaves it open for you, then stops.`,
+        'success'
+      );
+    }
+  }
+
+  /** A setting changed in the form: saved at once (and applied while running). */
+  async function onSetupChange(event) {
+    const id = event.target?.id || '';
+    const fields = {
+      wfProfile: ['profileId', 'profileName'],
+      wfMode: ['submit'],
+      wfDailyLimit: ['dailyLimit'],
+      wfWindows: ['windows'],
+      wfHours: ['hours'],
+      wfEvery: ['everyMinutes'],
+      wfHc: ['hiringCafe'],
+      wfJr: ['jobright'],
+    }[id];
+    if (!fields) return;
+    const setup = formSetup();
+    const edit = Object.fromEntries(fields.map((key) => [key, setup[key]]));
+    if (!(await saveConfig(edit))) fillSetupForm(true);
   }
 
   /** What the whole chain needs, as [label, ok (true / false / null = unknown), note]. */
-  function fullAutoChecks() {
+  function workflowChecks() {
     const l = live()?.autoState?.() || {};
+    const c = wf.config;
+    const running = isRunning();
     const aiOn = typeof isAiModeEnabled === 'function' && isAiModeEnabled();
+    const ag = wf.autogen;
+    const agWindows = ag?.windows || [];
+    const want = c?.windows || 0;
+    const agNote = !ag
+      ? 'checking…'
+      : ag.missing
+        ? 'AutoGen extension not found: install and enable it in this Chrome'
+        : ag.ok === false
+          ? ag.error || 'AutoGen did not answer'
+          : !ag.signedIn
+            ? 'Sign AutoGen in to the same JobStrike site (AutoGen → Settings)'
+            : `${agWindows.length}${running ? ` of ${want}` : ''} ChatGPT window${agWindows.length === 1 ? '' : 's'} generating${
+                agWindows.some((w) => w.minimized) ? ' · one is minimized (it cannot generate)' : ''
+              }`;
+    const agOk = !ag ? null : ag.missing || ag.ok === false || !ag.signedIn ? false : running ? agWindows.length >= want : null;
     return [
-      ['Live checks for new jobs', l.live, l.challenge ? 'Paused: a site asked for a check (Job Scraper tab)' : l.status || ''],
-      ['New Greenhouse, Lever and Ashby jobs queued for AutoGen', l.autoQueue, l.profileName ? `for ${l.profileName}` : ''],
+      ['Live finds new jobs and queues them for AutoGen', running ? Boolean(l.live && l.autoQueue) : null,
+        l.challenge ? 'Paused: a site asked for a check (Job Scraper tab)' : l.live ? l.status || '' : 'off'],
+      ['AutoGen generates resumes', agOk, agNote],
       [
-        'Auto-bid applies and presses Submit',
-        state.prefs.enabled && state.prefs.submit,
-        state.prefs.enabled && !state.prefs.submit
-          ? 'Dry run: Press Submit is off'
-          : state.pauseReason
-            ? `Paused: ${state.pauseReason}`
-            : '',
+        state.prefs.submit ? 'Auto-bid applies and presses Submit' : 'Auto-bid fills one job (dry run)',
+        running ? Boolean(state.prefs.enabled) : null,
+        state.pauseReason ? `Paused: ${state.pauseReason}` : '',
       ],
-      ['json2docx running', fullAuto.json2docx, fullAuto.json2docx === false ? 'Start it on this machine (start_server.bat)' : ''],
+      ['json2docx running', wf.json2docx, wf.json2docx === false ? 'Start it on this machine (start_server.bat)' : ''],
       ['AI answers custom questions', aiOn, aiOn ? '' : 'Settings → Autofill with AI, with an OpenAI key'],
     ];
   }
 
-  function renderFullAuto() {
-    const card = document.getElementById('faCard');
+  function fillProfileOptions() {
+    const select = document.getElementById('wfProfile');
+    if (!select) return;
+    const profiles = bid()?.listRegisterProfiles?.() || [];
+    const signature = profiles.map((p) => `${p.id}:${p.name}`).join('|');
+    if (select.dataset.signature === signature) return;
+    select.dataset.signature = signature;
+    select.innerHTML =
+      `<option value="">Choose a profile…</option>` +
+      profiles.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+  }
+
+  /** The form shows the saved setup (not while the user is typing in a field). */
+  function fillSetupForm(force = false) {
+    const c = wf.config;
+    if (!c) return;
+    fillProfileOptions();
+    const set = (id, value) => {
+      const el = document.getElementById(id);
+      if (!el || (!force && document.activeElement === el)) return;
+      if (el.type === 'checkbox') el.checked = Boolean(value);
+      else el.value = value == null ? '' : String(value);
+    };
+    set('wfProfile', c.profileId || '');
+    set('wfMode', c.submit ? 'submit' : 'dry');
+    set('wfDailyLimit', c.dailyLimit);
+    set('wfWindows', c.windows);
+    set('wfHours', c.hours);
+    set('wfEvery', c.everyMinutes);
+    set('wfHc', c.hiringCafe);
+    set('wfJr', c.jobright);
+  }
+
+  function renderWorkflow() {
+    const card = document.getElementById('wfCard');
     if (!card) return;
-    const on = isFullAuto();
-    card.classList.toggle('is-on', on);
-    const toggle = document.getElementById('faToggle');
-    if (toggle && !fullAuto.busy) toggle.checked = on;
-    const checks = fullAutoChecks();
-    const list = document.getElementById('faChecks');
+    const running = isRunning();
+    card.classList.toggle('is-on', running);
+    fillSetupForm();
+
+    const start = document.getElementById('wfStart');
+    if (start) {
+      start.textContent = wf.saving ? 'Saving…' : running ? 'Stop' : 'Start';
+      start.disabled = wf.saving || !wf.config;
+      start.classList.toggle('is-stop', running);
+    }
+    const status = document.getElementById('wfStatus');
+    if (status) {
+      const s = state.summary;
+      status.textContent = !wf.config
+        ? 'Not connected'
+        : !running
+          ? 'Stopped'
+          : `${wf.config.submit ? 'Running' : 'Dry run'}${s ? ` · ${s.submittedSince} sent today of ${state.prefs.dailyLimit}` : ''}`;
+    }
+    const summary = document.getElementById('wfSummary');
+    if (summary) {
+      const c = wf.config;
+      summary.textContent = wf.configError
+        ? wf.configError
+        : wf.error
+          ? wf.error
+          : c?.updatedAt
+            ? `Changed ${new Date(c.updatedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} from the ${
+                c.updatedBy === 'web' ? 'website' : 'panel'
+              }. The website's Auto-bid page shows and changes the same setup.`
+            : 'The website’s Auto-bid page shows and changes the same setup.';
+      summary.classList.toggle('is-error', Boolean(wf.configError || wf.error));
+    }
+    const note = document.getElementById('wfNote');
+    if (note) {
+      note.hidden = !wf.config?.note || running;
+      note.textContent = wf.config?.note || '';
+    }
+    const list = document.getElementById('wfChecks');
     if (list) {
-      list.innerHTML = checks
-        .map(([label, ok, note]) => {
+      list.innerHTML = workflowChecks()
+        .map(([label, ok, text]) => {
           const mark = ok ? 'ok' : ok === null || ok === undefined ? 'unknown' : 'off';
-          const sign = mark === 'ok' ? '✓' : mark === 'off' ? '✗' : '?';
+          const sign = mark === 'ok' ? '✓' : mark === 'off' ? '✗' : '·';
           return `<li class="fa-check" data-state="${mark}"><span class="fa-mark" aria-hidden="true">${sign}</span><span class="fa-label">${escapeHtml(label)}${
-            note ? ` <em>${escapeHtml(note)}</em>` : ''
+            text ? ` <em>${escapeHtml(text)}</em>` : ''
           }</span></li>`;
         })
         .join('');
-    }
-    const status = document.getElementById('faStatus');
-    if (status) {
-      const s = state.summary;
-      status.textContent = !on
-        ? 'Off'
-        : s
-          ? `${s.submittedSince} sent today of ${state.prefs.dailyLimit} · ${s.needsYou.length} need you`
-          : 'On';
     }
   }
 
@@ -821,7 +1093,9 @@
     return {
       version: chrome.runtime?.getManifest?.().version || '',
       state: runnerState(),
-      fullAuto: isFullAuto(),
+      fullAuto: isRunning(),
+      configVersion: wf.appliedVersion,
+      setupError: wf.configError || wf.error || '',
       enabled: Boolean(state.prefs.enabled),
       submit: Boolean(state.prefs.submit),
       dailyLimit: state.prefs.dailyLimit,
@@ -829,7 +1103,7 @@
       pauseReason: state.pauseReason || '',
       job: state.job ? { id: state.job.id, company: state.job.company, jobTitle: state.job.job_title } : null,
       summary: s ? { ready: s.ready, sentToday: s.submittedSince, needsYou: s.needsYou.length } : null,
-      checks: fullAutoChecks().map(([label, ok, note]) => ({ label, ok: ok === undefined ? null : ok, note })),
+      checks: workflowChecks().map(([label, ok, note]) => ({ label, ok: ok === undefined ? null : ok, note })),
       live: l,
       log: state.log.slice(0, 15),
     };
@@ -853,61 +1127,35 @@
     }
   }
 
-  async function setFullAuto(on) {
-    if (fullAuto.busy) return;
-    fullAuto.busy = true;
-    try {
-      if (!live()?.setAutoQueue) {
-        toast('Open the Job Scraper tab once, then turn Full auto on.', 'warn');
-        return;
-      }
-      if (on) {
-        const profile = bid()?.getSelectedRegisterProfile?.();
-        if (!profile) {
-          toast('Choose the profile in the Bid tab first: new jobs are applied to for it.', 'warn');
-          return;
-        }
-        await live().setAutoQueue(profile);
-        state.prefs.submit = true;
-        await savePrefs();
-        await setEnabled(true);
-        await checkJson2docx(true);
-        toast(`Full auto on for ${profile.name}: new jobs are found, generated and applied to by themselves.`, 'success');
-      } else {
-        await live().setAutoQueue(null);
-        await setEnabled(false);
-        toast('Full auto off. Live keeps checking and alerting; nothing is queued or sent.', 'info');
-      }
-    } finally {
-      fullAuto.busy = false;
-      renderFullAuto();
-    }
+  async function openWebsitePage(event) {
+    event.preventDefault();
+    const base = await bid()?.backendBaseUrl?.().catch(() => '');
+    if (base) await chrome.tabs.create({ url: `${base}/autobid`, active: true });
   }
 
   async function init() {
     if (!document.getElementById('abCard')) return;
     await loadPrefs();
-    document.getElementById('abToggle')?.addEventListener('change', (event) => void setEnabled(event.target.checked));
-    document.getElementById('abSubmit')?.addEventListener('change', async (event) => {
-      state.prefs.submit = Boolean(event.target.checked);
-      await savePrefs();
-      if (state.prefs.submit) toast('Auto-bid will press Submit on Greenhouse, Lever and Ashby forms it filled completely.', 'info');
-      render();
-    });
-    document.getElementById('abDailyLimit')?.addEventListener('change', async (event) => {
-      state.prefs.dailyLimit = Math.max(1, Math.min(Number(event.target.value) || DEFAULT_PREFS.dailyLimit, 200));
-      await savePrefs();
-      render();
-    });
+    const applied = (await chrome.storage.local.get(APPLIED_KEY).catch(() => ({})))?.[APPLIED_KEY];
+    // A fresh panel applies the setup once, whatever version it last saw.
+    wf.appliedRunning = Boolean(applied?.running);
     document.getElementById('abRefresh')?.addEventListener('click', () => void refreshSummary());
     document.getElementById('abNeedsYou')?.addEventListener('click', (event) => void onNeedsYouClick(event));
-    document.getElementById('faToggle')?.addEventListener('change', (event) => void setFullAuto(event.target.checked));
+    document.getElementById('wfStart')?.addEventListener('click', () => void onStartClick());
+    document.getElementById('wfSetup')?.addEventListener('change', (event) => void onSetupChange(event));
+    document.getElementById('wfWebsite')?.addEventListener('click', (event) => void openWebsitePage(event));
     setInterval(() => {
       void checkJson2docx()
-        .then(renderFullAuto)
+        .then(() => (isRunning() ? syncAutogen() : null))
+        .then(renderWorkflow)
         .then(reportStatus);
     }, 5000);
+    setInterval(() => void pollConfig(), CONFIG_POLL_MS);
     render();
+    // Profiles and the sign-in load first; then the setup is read and applied.
+    setTimeout(() => {
+      void pollConfig().then(() => syncAutogen(true));
+    }, 3000);
     if (state.prefs.enabled) {
       setStep('Starting…');
       schedule(8000);
