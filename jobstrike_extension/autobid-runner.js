@@ -3,12 +3,14 @@
  * the Bid tab is used by hand, one job at a time in this panel's window:
  *
  *   open the job's form → profile + generated resume JSON → Generate files
- *   (json2docx) → Autofill (AI when a key is set) → check every required field
- *   → Submit → wait for the site's confirmation → Register in Resume DB.
+ *   (json2docx) → Autofill with AI → check every required field (as Autofill
+ *   reported it, then on the page) → Submit (Greenhouse, Lever) → wait for the
+ *   site's confirmation → Register in Resume DB.
  *
  * Anything it cannot finish safely stops before (or at) Submit and is listed
  * under Needs you, with the tab left open: a CAPTCHA, a required field it has
- * no answer for, a site it does not submit on, no confirmation after Submit.
+ * no answer for, a site it does not submit on (Ashby: ready for your click),
+ * no confirmation after Submit.
  * A job is never taken again once attempted, so nothing is sent twice.
  *
  * Loaded after sidepanel.js: it drives that file's Autofill (autofillThisPage,
@@ -31,6 +33,14 @@
   const MAX_TABS_LEFT_OPEN = 8;
   /** Sites Auto-bid presses Submit on. Others are filled and left for the user. */
   const SUBMIT_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com)$/i;
+  /**
+   * Ashby has not taken one Submit pressed by Auto-bid (7 of 7 left the form
+   * as it was): its forms are filled, checked and left for one click.
+   */
+  const CLICK_YOURSELF_HOST_RE = /(^|\.)ashbyhq\.com$/i;
+  /** Another panel's report newer than this means it is open now (reports go out at least every minute). */
+  const OTHER_PANEL_MS = 150 * 1000;
+  const INSTANCE_KEY = 'autobid_instance';
   /** Problems with this machine, not the job: the job goes back and the runner pauses. */
   const ENVIRONMENT_ERROR_RE =
     /json2docx|Not signed in|Unauthorized|did not answer|Could not reach|api key|OPENAI|columns are missing/i;
@@ -45,6 +55,7 @@
     summary: null,
     log: [],
     stepPost: Promise.resolve(),
+    lastDetail: '', // why the last job stopped, for the one-job notes
     tabsLeftOpen: [],
   };
 
@@ -254,6 +265,66 @@
       }
     }
     return { clicked: false };
+  }
+
+  /**
+   * Runs in the form's frame. Labels of required fields that are empty on the
+   * page, whatever Autofill reported: a dropdown (Greenhouse's react-select)
+   * has a value only once an option is chosen, not when text was typed in it.
+   */
+  function findEmptyRequired() {
+    const visible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const labelOf = (el) => {
+      const byIds = String(el.getAttribute('aria-labelledby') || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((id) => document.getElementById(id)?.textContent || '')
+        .join(' ');
+      const text = byIds || el.labels?.[0]?.textContent || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.name || el.id;
+      return String(text || 'a required field').replace(/\s+/g, ' ').replace(/\s*\*$/, '').trim().slice(0, 80);
+    };
+    const empty = [];
+    for (const el of document.querySelectorAll('input, select, textarea')) {
+      // aria-hidden: react-select's own stand-in, there while its dropdown has no value.
+      if (el.disabled || el.getAttribute('aria-hidden') === 'true' || !el.matches('[required], [aria-required="true"]')) continue;
+      if (/^(hidden|file|checkbox|radio|submit|button)$/i.test(el.type || '')) continue;
+      // react-select: the input holds only search text; a choice is shown beside it.
+      const choices = el.closest('[class*="value-container"], [class*="ValueContainer"]');
+      if (choices) {
+        const chosen = choices.querySelector('[class*="single-value"], [class*="singleValue"], [class*="multi-value"], [class*="multiValue"]');
+        if (visible(choices) && !chosen) empty.push(labelOf(el));
+        continue;
+      }
+      if (visible(el) && !String(el.value || '').trim()) empty.push(labelOf(el));
+    }
+    return empty;
+  }
+
+  async function emptyRequiredOnPage(tabId) {
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [autofillFrameId || 0] },
+        func: findEmptyRequired,
+      });
+      return Array.isArray(result?.result) ? result.result : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /** json2docx's health, asked up to 3 times: one slow answer (Word busy making a PDF) is not "offline". */
+  async function json2docxHealth() {
+    let health = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt) await sleep(3000);
+      health = await window.SmartJobJson2Docx?.checkJson2docxHealth?.({ updateUi: true }).catch(() => null);
+      if (!health || health.ok || health.error === 'disabled') break;
+    }
+    return health;
   }
 
   /**
@@ -472,16 +543,19 @@
 
       setStep('Generating Word files (json2docx)…');
       // Generate trusts the connection dot: make it current first.
-      const health = await window.SmartJobJson2Docx?.checkJson2docxHealth?.({ updateUi: true }).catch(() => null);
+      const health = await json2docxHealth();
       if (health && !health.ok) {
         throw new Stop('pause', `json2docx is ${health.error === 'disabled' ? 'disabled in Settings' : 'offline'}: start it on this machine (start_server.bat).`);
       }
       await bid().generateFilesFromResumeJson(null);
       checkStop();
 
-      const useAi = Boolean(typeof isAiModeEnabled === 'function' && isAiModeEnabled());
-      setStep(useAi ? 'Filling the form (AI)…' : 'Filling the form…');
-      await autofillThisPage({ useAi });
+      // Without AI most forms stop at their own questions: the job waits for it instead.
+      if (!(typeof isAiModeEnabled === 'function' && isAiModeEnabled())) {
+        throw new Stop('pause', 'AI answers are off: turn on Settings → Autofill with AI, with an OpenAI key.');
+      }
+      setStep('Filling the form (AI)…');
+      await autofillThisPage({ useAi: true });
       checkStop();
 
       if (!currentFields.length) {
@@ -491,14 +565,19 @@
       meta.fields = currentPlan.length;
       meta.filled = currentPlan.filter((row) => row.fillOutcome === 'filled').length;
       meta.aiAnswers = currentPlan.filter((row) => row.source === 'ai' && row.fillOutcome === 'filled').length;
-      if (!useAi) meta.noAiKey = true;
+      const notFilled = (labels) =>
+        `Required ${labels.length === 1 ? 'field' : 'fields'} not filled: ${labels.slice(0, 5).join('; ')}${labels.length > 5 ? '…' : ''}`;
       if (open.length) {
         meta.openFields = open.map(rowLabel);
-        throw new Stop(
-          'needs_you',
-          `Required ${open.length === 1 ? 'field' : 'fields'} not filled: ${meta.openFields.slice(0, 5).join('; ')}${open.length > 5 ? '…' : ''}`,
-          meta
-        );
+        throw new Stop('needs_you', notFilled(meta.openFields), meta);
+      }
+      // What Autofill counted as filled, read back from the page (a dropdown
+      // with typed text but no option chosen is still empty).
+      await sleep(1000);
+      const emptyOnPage = await emptyRequiredOnPage(tabId);
+      if (emptyOnPage.length) {
+        meta.openFields = emptyOnPage;
+        throw new Stop('needs_you', notFilled(emptyOnPage), meta);
       }
 
       const formHref = (await frameHref(tabId, autofillFrameId)) || url;
@@ -506,12 +585,20 @@
       if (!SUBMIT_HOST_RE.test(meta.formHost)) {
         throw new Stop(
           'needs_you',
-          `Filled. Auto-submit covers Greenhouse, Lever and Ashby; this form is on ${meta.formHost || 'another site'}. Review it, submit, then Register.`,
+          `Filled. Auto-submit covers Greenhouse and Lever; this form is on ${meta.formHost || 'another site'}. Review it, submit, then Register.`,
           meta
         );
       }
       if (!state.prefs.submit) {
         throw new Stop('needs_you', 'Dry run: filled and checked, not submitted. Review the tab, submit, then Register.', meta);
+      }
+      if (CLICK_YOURSELF_HOST_RE.test(meta.formHost)) {
+        meta.readyForClick = true;
+        throw new Stop(
+          'needs_you',
+          'Ready for your click: filled and checked. Ashby does not take a Submit pressed by Auto-bid, so press Submit in the tab yourself.',
+          meta
+        );
       }
       checkStop();
 
@@ -603,6 +690,7 @@
             ? new Stop('pause', error?.message || String(error))
             : new Stop(submitClicked ? 'needs_you' : 'failed', error?.message || String(error));
       const detail = stop.message;
+      state.lastDetail = detail;
       if (stop.outcome === 'release' || stop.outcome === 'pause') {
         // Nothing was sent: the job waits for the next run, untouched.
         if (submitClicked) {
@@ -665,6 +753,7 @@
       }
       const win = await chrome.windows.getCurrent().catch(() => null);
       state.job = job;
+      state.lastDetail = '';
       const dryRun = !state.prefs.submit;
       // A test run of the whole chain on one job (the setup's "one job" mode).
       const once = !dryRun && Boolean(isRunning() && wf.config?.once);
@@ -685,11 +774,13 @@
         await savePrefs();
         setStep(`Dry run done for #${job.id}: review the open tab. Choose Submit and press Start to apply by itself.`);
         toast('Dry run finished one job: review the filled form in the open tab.', 'info');
-        void stopAfterOneJob(job, 'dry');
+        void stopAfterOneJob(job, 'dry', state.lastDetail);
       }
       // A test run stops once a job was sent or needs you; a job that could not
-      // be applied to at all (closed posting) does not count, the next one is tried.
-      if (once && (outcome === 'submitted' || outcome === 'needs_you')) {
+      // be applied to at all (closed posting), or an Ashby form left for your
+      // click, does not count: the next one is tried.
+      const leftForClick = /^Ready for your click/.test(state.lastDetail);
+      if (once && (outcome === 'submitted' || (outcome === 'needs_you' && !leftForClick))) {
         state.prefs.enabled = false;
         await savePrefs();
         setStep(
@@ -698,7 +789,7 @@
             : `Test run stopped at #${job.id}: it needs you (see Needs you). Nothing else was applied to.`
         );
         toast(outcome === 'submitted' ? 'Test run: one job sent and registered.' : 'Test run: the job needs you.', outcome === 'submitted' ? 'success' : 'warn');
-        void stopAfterOneJob(job, outcome);
+        void stopAfterOneJob(job, outcome, state.lastDetail);
       }
     } catch (error) {
       setStep(error?.message || String(error));
@@ -738,7 +829,13 @@
     }
     btn.disabled = true;
     try {
-      await bid().autobidFetch('/api/autobid/retry', { method: 'POST', body: { ids: [id] } });
+      const { retried } = (await bid().autobidFetch('/api/autobid/retry', { method: 'POST', body: { ids: [id] } })) || {};
+      if (!retried) {
+        // The server keeps a job where Submit was pressed: it may already be sent.
+        toast('Not retried: Submit was already pressed on this job. Check the site, and register it by hand if it was sent.', 'warn');
+        btn.disabled = false;
+        return;
+      }
       logLine(`#${id} given back to Auto-bid.`);
       await refreshSummary();
       schedule(1000);
@@ -782,6 +879,11 @@
     autogenCheckedAt: 0,
     autogenSync: null,
     autogenResync: false,
+    /** This panel, across reloads; another Chrome profile or computer has its own. */
+    instanceId: '',
+    /** When another panel's report was last seen (each report replaces the one before). */
+    otherPanelAt: 0,
+    openedAt: Date.now(),
   };
 
   function live() {
@@ -882,7 +984,54 @@
     return wf.applying;
   }
 
+  /** Why this machine cannot start the setup, or '' when it can. */
+  async function startBlocker() {
+    if (!(typeof isAiModeEnabled === 'function' && isAiModeEnabled())) {
+      return 'AI answers are off in this panel. Turn on Settings → Autofill with AI, with an OpenAI key, then press Start.';
+    }
+    const health = await json2docxHealth();
+    wf.json2docx = health ? Boolean(health.ok) : wf.json2docx;
+    if (health && !health.ok) return 'json2docx is not running on this machine. Start it (start_server.bat), then press Start.';
+    try {
+      const { autobid: report } = (await bid().autobidFetch('/api/autobid/status')) || {};
+      noteReport(report);
+    } catch (_) {
+      /* the status columns are optional: only the duplicate check is skipped */
+    }
+    if (otherPanelOpen()) {
+      return 'Another JobStrike panel is open (another Chrome profile or computer, e.g. the VPS) and would apply too. Close it, wait 2 minutes, then press Start.';
+    }
+    return '';
+  }
+
+  /**
+   * Remembers a report written by another panel. An older panel sends no
+   * instanceId, so one without it counts only if written after this panel
+   * opened: before that it may be this panel's own, from before an update.
+   */
+  function noteReport(report) {
+    const at = Date.parse(report?.reportedAt || '');
+    if (!report || !at || report.instanceId === wf.instanceId) return;
+    if (!report.instanceId && at <= wf.openedAt) return;
+    wf.otherPanelAt = Math.max(wf.otherPanelAt, at);
+  }
+
+  function otherPanelOpen() {
+    return Date.now() - wf.otherPanelAt < OTHER_PANEL_MS;
+  }
+
   async function applyOneConfig(config) {
+    if (config.running && !wf.appliedRunning) {
+      // Only on Start: a panel reopened while the setup runs carries on.
+      const blocker = await startBlocker();
+      if (blocker) {
+        wf.error = blocker;
+        wf.appliedVersion = config.version; // handled: nothing was started for it
+        // Not awaited: the saved (stopped) setup is applied after this apply ends.
+        void saveConfig({ running: false, note: `Not started: ${blocker}` });
+        return;
+      }
+    }
     if (config.running) {
       const profile = bid()?.profileById?.(config.profileId);
       if (!profile) {
@@ -916,6 +1065,9 @@
       // auto-queue, set by hand while Auto-bid is stopped, is left alone.
       if (wf.appliedRunning || wf.active) await live()?.applyWorkflow?.(null);
       if (state.prefs.enabled) await setEnabled(false);
+      state.prefs.submit = Boolean(config.submit);
+      state.prefs.dailyLimit = config.dailyLimit;
+      await savePrefs();
       const stopAutogen = wf.appliedRunning || wf.active;
       wf.active = false;
       if (stopAutogen) wf.autogen = await askAutogen({ type: 'AUTOGEN_EXT_STOP_ALL' });
@@ -955,13 +1107,18 @@
     }
   }
 
-  async function stopAfterOneJob(job, outcome) {
+  async function stopAfterOneJob(job, outcome, detail = '') {
     if (!isRunning()) return;
     const name = `#${job.id} ${job.company || ''}`.trim();
+    // A clean dry run ends with "Dry run: filled and checked…"; anything else
+    // is what would have stopped this job with Submit on.
+    const clean = /^Dry run:/.test(detail);
     const note = {
-      dry: `Dry run done for ${name}: review the filled form in the open tab. To apply for real, choose Submit and press Start.`,
+      dry: clean || !detail
+        ? `Dry run done for ${name}: every field was filled and checked. Review the open tab; to apply for real, choose Test run or Submit and press Start.`
+        : `Dry run stopped at ${name}: ${detail} With Submit on, this job would go to Needs you. The form is left open.`,
       submitted: `Test run done: ${name} was sent, confirmed and registered (see Resume DB). To keep going, choose Submit and press Start.`,
-      needs_you: `Test run stopped: ${name} needs you (see Needs you on the Auto-bid page). Nothing else was applied to.`,
+      needs_you: `Test run stopped: ${name} needs you${detail ? ` (${detail})` : ''}. Nothing else was applied to.`,
     }[outcome];
     await saveConfig({ running: false, note });
   }
@@ -1071,6 +1228,8 @@
       ],
       ['json2docx running', wf.json2docx, wf.json2docx === false ? 'Start it on this machine (start_server.bat)' : ''],
       ['AI answers custom questions', aiOn, aiOn ? '' : 'Settings → Autofill with AI, with an OpenAI key'],
+      ['Only this JobStrike panel is open', !otherPanelOpen(),
+        otherPanelOpen() ? 'Another panel (another Chrome profile or computer) reported in the last 2 minutes: close it' : ''],
     ];
   }
 
@@ -1182,6 +1341,7 @@
     const s = state.summary;
     return {
       version: chrome.runtime?.getManifest?.().version || '',
+      instanceId: wf.instanceId,
       state: runnerState(),
       fullAuto: wf.active,
       configVersion: wf.appliedVersion,
@@ -1206,7 +1366,9 @@
     if (text === report.last && Date.now() - report.at < REPORT_EVERY_MS) return;
     report.sending = true;
     try {
-      await bid().autobidFetch('/api/autobid/status', { method: 'POST', body: { kind: 'autobid', status: body } });
+      const saved = await bid().autobidFetch('/api/autobid/status', { method: 'POST', body: { kind: 'autobid', status: body } });
+      // The report this one replaced: another panel's means two are open.
+      noteReport(saved?.previous);
       report.last = text;
       report.at = Date.now();
     } catch (_) {
@@ -1226,6 +1388,11 @@
   async function init() {
     if (!document.getElementById('abCard')) return;
     await loadPrefs();
+    wf.instanceId = (await chrome.storage.local.get(INSTANCE_KEY).catch(() => ({})))?.[INSTANCE_KEY] || '';
+    if (!wf.instanceId) {
+      wf.instanceId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      await chrome.storage.local.set({ [INSTANCE_KEY]: wf.instanceId }).catch(() => {});
+    }
     const applied = (await chrome.storage.local.get(APPLIED_KEY).catch(() => ({})))?.[APPLIED_KEY];
     // A fresh panel applies the setup once, whatever version it last saw.
     wf.appliedRunning = Boolean(applied?.running);

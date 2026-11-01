@@ -15,6 +15,8 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/autobid/status — body { kind: "autobid" | "autogen", status }.
  * The JobStrike panel (Auto-bid, Live) and AutoGen report what they are doing.
+ * Answers { ok, previous: { instanceId, reportedAt } | null }: who wrote the
+ * report this one replaced, so a panel can tell another one is open.
  */
 export async function POST(request: NextRequest) {
   return autogenRoute(request, "runner status", async (user) => {
@@ -24,7 +26,7 @@ export async function POST(request: NextRequest) {
     if (!kind || !status || typeof status !== "object" || Array.isArray(status)) {
       return corsJson({ ok: false, error: "kind and status are required." }, { status: 400 });
     }
-    await saveRunnerStatus(user.id, kind, status as Record<string, unknown>);
-    return corsJson({ ok: true });
+    const previous = await saveRunnerStatus(user.id, kind, status as Record<string, unknown>);
+    return corsJson({ ok: true, previous });
   });
 }

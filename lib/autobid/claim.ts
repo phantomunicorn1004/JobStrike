@@ -269,7 +269,10 @@ export async function noteBidRegistered(userId: string, id: number): Promise<voi
   if (updateError) rethrow(updateError.message);
 }
 
-/** Needs-you and failed rows, still not sent, go back to the runner. Submitted ones never do. */
+/**
+ * Needs-you and failed rows, still not sent, go back to the runner. Submitted
+ * ones never do, nor ones where Submit was pressed without a confirmation.
+ */
 export async function retryBids(userId: string, ids: number[]): Promise<number> {
   if (!ids.length) return 0;
   const { data, error } = await getSupabaseAdminClient()
@@ -279,6 +282,8 @@ export async function retryBids(userId: string, ids: number[]): Promise<number> 
     .in("id", ids)
     .in("bid_state", ["needs_you", "failed"])
     .eq("apply", QUEUED_APPLY)
+    // Once Submit was pressed the site may have the application: never again.
+    .or("bid_meta->>submitClicked.is.null,bid_meta->>submitClicked.neq.true")
     .select("id");
   if (error) rethrow(error.message);
   return (data ?? []).length;

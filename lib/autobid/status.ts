@@ -21,15 +21,34 @@ function explain(message: string): string {
   return /autobid_status|autogen_status/i.test(message) ? MISSING_COLUMNS : message;
 }
 
-/** Saves an extension's latest report, stamped with the server's time. */
-export async function saveRunnerStatus(userId: string, kind: RunnerKind, report: Record<string, unknown>): Promise<void> {
+/** Who wrote a report and when: a panel sees from it that another one is open. */
+export type ReportStamp = { instanceId: string | null; reportedAt: string | null };
+
+/**
+ * Saves an extension's latest report, stamped with the server's time, and
+ * returns the stamp of the report it replaced (null when there was none).
+ */
+export async function saveRunnerStatus(
+  userId: string,
+  kind: RunnerKind,
+  report: Record<string, unknown>,
+): Promise<ReportStamp | null> {
   const value = { ...report, reportedAt: new Date().toISOString() };
   if (JSON.stringify(value).length > MAX_REPORT_CHARS) throw new Error("Status report is too large.");
-  const { error } = await getSupabaseAdminClient()
+  const supabase = getSupabaseAdminClient();
+  const before = await supabase.from("app_users").select(COLUMN[kind]).eq("id", userId).maybeSingle();
+  if (before.error) throw new Error(explain(before.error.message));
+  const { error } = await supabase
     .from("app_users")
     .update({ [COLUMN[kind]]: value } as never)
     .eq("id", userId);
   if (error) throw new Error(explain(error.message));
+  const previous = (before.data as Record<string, unknown> | null)?.[COLUMN[kind]] as Record<string, unknown> | null | undefined;
+  if (!previous || typeof previous !== "object") return null;
+  return {
+    instanceId: typeof previous.instanceId === "string" ? previous.instanceId : null,
+    reportedAt: typeof previous.reportedAt === "string" ? previous.reportedAt : null,
+  };
 }
 
 export async function readRunnerStatuses(userId: string): Promise<RunnerStatuses> {

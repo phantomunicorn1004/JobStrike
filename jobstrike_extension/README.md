@@ -154,9 +154,16 @@ ChatGPT windows and opens the rest itself), and applies. **Stop** undoes all
 three (Live is switched off only if Start switched it on; jobs Live had lined up
 but not yet queued are dropped). A dry run stops the whole setup after its one
 job; a test run once a job is sent or needs you (a job that cannot be applied
-to at all, like a closed posting, does not count and the next one is tried). The checklist shows what is missing (AutoGen
-not installed or signed in, json2docx offline, AI autofill off, a site check
-pausing Live).
+to at all, like a closed posting, or an Ashby form left for your click, does
+not count and the next one is tried). The checklist shows what is missing
+(AutoGen not installed or signed in, json2docx offline, AI autofill off, a site
+check pausing Live, another JobStrike panel open).
+
+**Start is refused**, with the reason saved as the setup's note, while AI
+answers are off, json2docx is not running, or another JobStrike panel (another
+Chrome profile or computer) reported in the last 2 minutes: every open panel
+follows the setup, so two would apply at once. A panel reopened while the
+setup runs carries on without these checks.
 
 1. **Live** finds jobs. With *Live settings → Queue new jobs for AutoGen
    automatically*, each new job is read in a background tab and queued for the
@@ -165,21 +172,29 @@ pausing Live).
 2. **AutoGen** (`autogen_extension`) generates and checks the resume JSON.
 3. **Auto-bid** (card under Live, `autobid-runner.js`) takes each generated job,
    one at a time in this window: opens its form, applies the resume JSON,
-   generates the Word files with json2docx, runs Autofill (with AI when it is
-   on in Settings), checks every required field, presses Submit, waits for the
-   site's confirmation and registers it in Resume DB.
+   generates the Word files with json2docx, runs Autofill with AI, checks every
+   required field (Autofill's own report, then the page itself: a dropdown with
+   text typed in it but no option chosen is still empty), presses Submit on
+   Greenhouse and Lever, waits for the site's confirmation and registers it in
+   Resume DB.
+
+**Ashby** forms are filled, checked and left open as *Ready for your click*
+under Needs you: none of the 7 Submits Auto-bid pressed on Ashby went through
+(the form stayed as it was), so you press Submit yourself.
 
 It stops a job before (or at) Submit and lists it under **Needs you**, with the
 tab left open, for: a CAPTCHA, a required field it has no answer for, a form
-on a site other than Greenhouse / Lever / Ashby, no confirmation after Submit,
-or the site rejecting the form (only the newest 8 of those tabs stay open).
+on a site other than Greenhouse / Lever, an Ashby form (ready for your click),
+no confirmation after Submit, or the site rejecting the form (only the newest 8
+of those tabs stay open). Retry gives a job back to Auto-bid only if Submit was
+never pressed on it: the site may already have that application.
 After Submit it compares the page with the one before: a success message or
 confirmation address, or (Ashby, where each company writes its own message)
 the form replaced by new text, counts as sent; a spam/bot refusal, an error or
 a closed job does not. What appeared after Submit is kept in the job's history
 on the Auto-bid page either way.
-A problem with the machine (json2docx down, signed out) gives the job back and
-tries again every 5 minutes. A job is recorded as sent before Register runs
+A problem with the machine (json2docx down after 3 tries, signed out, AI
+answers switched off) gives the job back and tries again every 5 minutes. A job is recorded as sent before Register runs
 and is never attempted twice. *Press Submit* off = dry run: one job is filled
 and left open for review, then Auto-bid turns itself off. A daily limit caps
 the applications sent.
