@@ -142,7 +142,8 @@ The extension does not submit the application. You must review the page and subm
 
 The whole hand flow, run by itself on a dedicated machine (e.g. the VPS).
 Everything is in the panel's **Auto-bid** tab, with one **Start / Stop** and
-one setup: profile, mode (dry run: fill one job and stop, or Submit), daily
+one setup: profile, mode (dry run: fill one job and stop; test run: apply to
+one job with Submit, confirmation and Register, then stop; or Submit), daily
 limit, ChatGPT windows, working hours, HiringCafe interval and sources. The
 setup is saved on the server (`scripts/add-autobid-config-to-app-users.sql`),
 so the website's Auto-bid page shows and changes the same one; the panel
@@ -150,8 +151,10 @@ follows it within 20 seconds. **Start** runs Live with that setup and queues
 its new Greenhouse / Lever / Ashby jobs for AutoGen, tells the AutoGen
 extension to keep that many ChatGPT windows generating (it reuses idle
 ChatGPT windows and opens the rest itself), and applies. **Stop** undoes all
-three (Live is switched off only if Start switched it on). A dry run stops the
-whole setup after its one job. The checklist shows what is missing (AutoGen
+three (Live is switched off only if Start switched it on; jobs Live had lined up
+but not yet queued are dropped). A dry run stops the whole setup after its one
+job; a test run once a job is sent or needs you (a job that cannot be applied
+to at all, like a closed posting, does not count and the next one is tried). The checklist shows what is missing (AutoGen
 not installed or signed in, json2docx offline, AI autofill off, a site check
 pausing Live).
 

@@ -275,7 +275,7 @@
           .filter((line) => line.length > 1)
           .map((line) => line.slice(0, 200))
       ),
-    ].slice(0, 400);
+    ].slice(0, 1500);
     const submitButton = [
       ...document.querySelectorAll('button, input[type="submit"], [data-qa="btn-submit"], #submit_app'),
     ].some((el) => visible(el) && /submit|send application/i.test(String(el.innerText || el.value || el.getAttribute('aria-label') || '')));
@@ -327,7 +327,13 @@
   const SPAM_TEXT_RE =
     /flagged as (possible |potential )?spam|possible spam|suspicious activity|unusual activity|automated (submission|traffic|activity)|verify (that )?you('re| are) (a )?human|bot detected/i;
   const FAILURE_TEXT_RE =
-    /something went wrong|an error occurred|could not be submitted|couldn't be submitted|failed to submit|unable to submit|there (was|were) (an |a )?(error|problem)|no longer (accepting|available)|(job|position) (has been |is )?(closed|filled)|page not found|job not found/i;
+    /something went wrong|an error occurred|could not be submitted|couldn't be submitted|failed to submit|unable to submit|there (was|were) (an |a )?(error|problem)|no longer (accepting|available)|(job|position|role|opening) (has been |is |was )?(closed|filled)|page not found|job not found|(session|link) (has )?expired|too many requests|try again later|access denied/i;
+  /**
+   * Text that means the page after Submit is not a confirmation, even though
+   * the form is gone: a sign-in wall, an error or a rate limit.
+   */
+  const NOT_CONFIRMATION_RE =
+    /\b(sign|log) ?in\b|password|\berror\b|\boops\b|try again|expired|denied|forbidden|not found|unavailable|\b(403|404|429|500|502|503)\b/i;
 
   function pathOf(href) {
     try {
@@ -336,6 +342,7 @@
       return '';
     }
   }
+
 
   /**
    * Compares the page before Submit with the page now. Only what appeared after
@@ -353,21 +360,28 @@
   function judgeAfterSubmit(before, after) {
     const seen = new Set(before.lines || []);
     const added = (after.lines || []).filter((line) => !seen.has(line));
-    const newText = added.join(' · ').slice(0, 400);
+    // Every new line is judged; the lines that decided come first in newText.
+    const text = added.join(' · ');
+    const telling = added.filter((line) => SPAM_TEXT_RE.test(line) || FAILURE_TEXT_RE.test(line) || CONFIRM_TEXT_RE.test(line));
+    const newText = [...telling, ...added.filter((line) => !telling.includes(line))].join(' · ').slice(0, 400);
     const base = { newText, errors: after.errors || [] };
     if (after.navigating) return { ...base, verdict: 'wait' };
-    if (SPAM_TEXT_RE.test(newText)) return { ...base, verdict: 'spam' };
+    if (SPAM_TEXT_RE.test(text)) return { ...base, verdict: 'spam' };
     if (after.captcha) return { ...base, verdict: 'captcha' };
     const urlChanged = (after.hrefs || []).join('|') !== (before.hrefs || []).join('|');
     if (urlChanged && (after.hrefs || []).some((href) => CONFIRM_PATH_RE.test(pathOf(href)))) {
       return { ...base, verdict: 'confirmed', by: 'address' };
     }
-    if (CONFIRM_TEXT_RE.test(newText)) return { ...base, verdict: 'confirmed', by: 'message' };
-    if (FAILURE_TEXT_RE.test(newText)) return { ...base, verdict: 'failed' };
+    // An error beats a thank-you: "Thank you for your interest. This position
+    // has been filled." was not sent.
+    if (FAILURE_TEXT_RE.test(text)) return { ...base, verdict: 'failed' };
+    if (CONFIRM_TEXT_RE.test(text)) return { ...base, verdict: 'confirmed', by: 'message' };
     if ((after.errors || []).length) return { ...base, verdict: 'errors' };
     // Some sites (Ashby) let each company write its own message: the form is
-    // simply replaced by it. The caller wants this on two looks in a row.
-    if (before.formPresent && !after.formPresent && added.length > 0) {
+    // simply replaced by it, on the same site. Not when the new text looks like
+    // a sign-in wall or an error page. The caller wants this on two looks in a row.
+    const sameSite = hostOf((before.hrefs || [])[0]) === hostOf((after.hrefs || [])[0]);
+    if (before.formPresent && !after.formPresent && added.length > 0 && sameSite && !NOT_CONFIRMATION_RE.test(text)) {
       return { ...base, verdict: 'confirmed', by: 'form_replaced' };
     }
     return { ...base, verdict: 'wait' };
@@ -652,7 +666,9 @@
       const win = await chrome.windows.getCurrent().catch(() => null);
       state.job = job;
       const dryRun = !state.prefs.submit;
-      logLine(`${dryRun ? 'Dry run' : 'Applying'}: ${job.company} · ${job.job_title} (#${job.id}).`);
+      // A test run of the whole chain on one job (the setup's "one job" mode).
+      const once = !dryRun && Boolean(isRunning() && wf.config?.once);
+      logLine(`${dryRun ? 'Dry run' : once ? 'Test run (one job)' : 'Applying'}: ${job.company} · ${job.job_title} (#${job.id}).`);
       const outcome = await applyToJob(job, win?.id);
       next = Math.max(5, Number(state.prefs.gapSeconds) || 30) * 1000;
       if (outcome === 'pause') {
@@ -669,7 +685,20 @@
         await savePrefs();
         setStep(`Dry run done for #${job.id}: review the open tab. Choose Submit and press Start to apply by itself.`);
         toast('Dry run finished one job: review the filled form in the open tab.', 'info');
-        void stopAfterDryRun(job);
+        void stopAfterOneJob(job, 'dry');
+      }
+      // A test run stops once a job was sent or needs you; a job that could not
+      // be applied to at all (closed posting) does not count, the next one is tried.
+      if (once && (outcome === 'submitted' || outcome === 'needs_you')) {
+        state.prefs.enabled = false;
+        await savePrefs();
+        setStep(
+          outcome === 'submitted'
+            ? `Test run done: #${job.id} was sent, confirmed and registered. Choose Submit and press Start to keep going.`
+            : `Test run stopped at #${job.id}: it needs you (see Needs you). Nothing else was applied to.`
+        );
+        toast(outcome === 'submitted' ? 'Test run: one job sent and registered.' : 'Test run: the job needs you.', outcome === 'submitted' ? 'success' : 'warn');
+        void stopAfterOneJob(job, outcome);
       }
     } catch (error) {
       setStep(error?.message || String(error));
@@ -738,7 +767,11 @@
     appliedVersion: -1,
     /** The last setup applied here was running: Stop must also stop AutoGen. */
     appliedRunning: false,
-    applying: false,
+    /** This panel has started the running setup in this session (Live, runner, AutoGen are on). */
+    active: false,
+    /** The apply in progress; a setup that arrives meanwhile is applied right after it. */
+    applying: null,
+    reapply: false,
     saving: false,
     error: '',
     configError: '',
@@ -747,6 +780,8 @@
     autogen: null,
     autogenId: '',
     autogenCheckedAt: 0,
+    autogenSync: null,
+    autogenResync: false,
   };
 
   function live() {
@@ -789,69 +824,106 @@
     }
   }
 
-  /** While running, AutoGen is asked to keep the set number of windows (a closed one is replaced). */
-  async function syncAutogen(force = false) {
-    if (!force && Date.now() - wf.autogenCheckedAt < AUTOGEN_CHECK_MS) return;
-    wf.autogenCheckedAt = Date.now();
-    wf.autogen = isRunning()
-      ? await askAutogen({ type: 'AUTOGEN_EXT_ENSURE_WINDOWS', count: wf.config.windows })
-      : await askAutogen({ type: 'AUTOGEN_EXT_STATUS' });
-    renderWorkflow();
+  /**
+   * While the setup runs here, AutoGen is asked to keep the set number of
+   * windows (a closed one is replaced). One request at a time: a forced one
+   * that arrives meanwhile is sent after it, so windows are never opened twice.
+   */
+  function syncAutogen(force = false) {
+    if (wf.autogenSync) {
+      if (force) wf.autogenResync = true;
+      return wf.autogenSync;
+    }
+    if (!force && Date.now() - wf.autogenCheckedAt < AUTOGEN_CHECK_MS) return Promise.resolve();
+    wf.autogenSync = (async () => {
+      do {
+        wf.autogenResync = false;
+        wf.autogenCheckedAt = Date.now();
+        wf.autogen =
+          wf.active && isRunning()
+            ? await askAutogen({ type: 'AUTOGEN_EXT_ENSURE_WINDOWS', count: wf.config.windows })
+            : await askAutogen({ type: 'AUTOGEN_EXT_STATUS' });
+      } while (wf.autogenResync);
+    })().finally(() => {
+      wf.autogenSync = null;
+      renderWorkflow();
+    });
+    return wf.autogenSync;
   }
 
   /**
    * Makes this panel do what the setup says. A version is applied once; one
    * that cannot be applied yet (profile list still loading) is tried again on
-   * the next poll.
+   * the next poll. A setup older than the one already known (a slow poll that
+   * started before a save) is ignored. While an apply runs, a newer setup is
+   * applied right after it, and the caller waits for that too.
    */
-  async function applyConfig(config, { force = false } = {}) {
+  function applyConfig(config, { force = false } = {}) {
+    if (wf.config && config.version < wf.config.version) return wf.applying || Promise.resolve();
     wf.config = config;
-    if ((!force && config.version === wf.appliedVersion) || wf.applying) {
+    if (wf.applying) {
+      wf.reapply = true;
       renderWorkflow();
-      return;
+      return wf.applying;
     }
-    wf.applying = true;
-    try {
-      if (config.running) {
-        const profile = bid()?.profileById?.(config.profileId);
-        if (!profile) {
-          wf.error = `Profile ${config.profileName || `#${config.profileId}`} is not in this panel's list yet (sign in as the same user).`;
-          return;
-        }
-        if (!live()?.applyWorkflow) {
-          wf.error = 'The Job Scraper part of the panel has not loaded yet.';
-          return;
-        }
-        await live().applyWorkflow({
-          profile,
-          hours: config.hours,
-          everyMinutes: config.everyMinutes,
-          hiringCafe: config.hiringCafe,
-          jobright: config.jobright,
-        });
-        state.prefs.submit = Boolean(config.submit);
-        state.prefs.dailyLimit = config.dailyLimit;
-        await savePrefs();
-        if (!state.prefs.enabled) await setEnabled(true);
-        else {
-          render();
-          schedule(1000);
-        }
-        void checkJson2docx(true);
-        void syncAutogen(true);
-      } else {
-        await live()?.applyWorkflow?.(null);
-        if (state.prefs.enabled) await setEnabled(false);
-        if (wf.appliedRunning) wf.autogen = await askAutogen({ type: 'AUTOGEN_EXT_STOP_ALL' });
+    if (!force && config.version === wf.appliedVersion) {
+      renderWorkflow();
+      return Promise.resolve();
+    }
+    wf.applying = (async () => {
+      do {
+        wf.reapply = false;
+        await applyOneConfig(wf.config);
+      } while (wf.reapply && wf.config.version !== wf.appliedVersion);
+    })().finally(() => {
+      wf.applying = null;
+      renderWorkflow();
+    });
+    return wf.applying;
+  }
+
+  async function applyOneConfig(config) {
+    if (config.running) {
+      const profile = bid()?.profileById?.(config.profileId);
+      if (!profile) {
+        wf.error = `Profile ${config.profileName || `#${config.profileId}`} is not in this panel's list yet (sign in as the same user).`;
+        return;
       }
-      wf.error = '';
-      wf.appliedVersion = config.version;
-      wf.appliedRunning = Boolean(config.running);
-      await chrome.storage.local.set({ [APPLIED_KEY]: { version: wf.appliedVersion, running: wf.appliedRunning } });
-    } finally {
-      wf.applying = false;
-      renderWorkflow();
+      if (!live()?.applyWorkflow) {
+        wf.error = 'The Job Scraper part of the panel has not loaded yet.';
+        return;
+      }
+      await live().applyWorkflow({
+        profile,
+        hours: config.hours,
+        everyMinutes: config.everyMinutes,
+        hiringCafe: config.hiringCafe,
+        jobright: config.jobright,
+      });
+      state.prefs.submit = Boolean(config.submit);
+      state.prefs.dailyLimit = config.dailyLimit;
+      await savePrefs();
+      if (!state.prefs.enabled) await setEnabled(true);
+      else {
+        render();
+        schedule(1000);
+      }
+      wf.active = true;
+      void checkJson2docx(true);
+      void syncAutogen(true);
+    } else {
+      // Only what a running setup switched on is switched off: Live's own
+      // auto-queue, set by hand while Auto-bid is stopped, is left alone.
+      if (wf.appliedRunning || wf.active) await live()?.applyWorkflow?.(null);
+      if (state.prefs.enabled) await setEnabled(false);
+      const stopAutogen = wf.appliedRunning || wf.active;
+      wf.active = false;
+      if (stopAutogen) wf.autogen = await askAutogen({ type: 'AUTOGEN_EXT_STOP_ALL' });
     }
+    wf.error = '';
+    wf.appliedVersion = config.version;
+    wf.appliedRunning = Boolean(config.running);
+    await chrome.storage.local.set({ [APPLIED_KEY]: { version: wf.appliedVersion, running: wf.appliedRunning } });
   }
 
   async function pollConfig() {
@@ -883,12 +955,15 @@
     }
   }
 
-  async function stopAfterDryRun(job) {
+  async function stopAfterOneJob(job, outcome) {
     if (!isRunning()) return;
-    await saveConfig({
-      running: false,
-      note: `Dry run done for #${job.id} ${job.company || ''}: review the filled form in the open tab. To apply for real, choose Submit and press Start.`,
-    });
+    const name = `#${job.id} ${job.company || ''}`.trim();
+    const note = {
+      dry: `Dry run done for ${name}: review the filled form in the open tab. To apply for real, choose Submit and press Start.`,
+      submitted: `Test run done: ${name} was sent, confirmed and registered (see Resume DB). To keep going, choose Submit and press Start.`,
+      needs_you: `Test run stopped: ${name} needs you (see Needs you on the Auto-bid page). Nothing else was applied to.`,
+    }[outcome];
+    await saveConfig({ running: false, note });
   }
 
   function formSetup() {
@@ -896,14 +971,17 @@
     const checked = (id) => Boolean(document.getElementById(id)?.checked);
     const profileId = value('wfProfile');
     const profile = profileId ? bid()?.profileById?.(profileId) : null;
+    // An emptied number is sent as '': the server keeps the current value.
+    const number = (id) => (String(value(id)).trim() === '' ? '' : Number(value(id)));
     return {
       profileId: profileId ? Number(profileId) : null,
       profileName: profile?.name || '',
-      submit: value('wfMode') === 'submit',
-      dailyLimit: Number(value('wfDailyLimit')),
-      windows: Number(value('wfWindows')),
+      submit: value('wfMode') !== 'dry',
+      once: value('wfMode') === 'once',
+      dailyLimit: number('wfDailyLimit'),
+      windows: number('wfWindows'),
       hours: value('wfHours'),
-      everyMinutes: Number(value('wfEvery')),
+      everyMinutes: number('wfEvery'),
       hiringCafe: checked('wfHc'),
       jobright: checked('wfJr'),
     };
@@ -922,9 +1000,11 @@
     }
     if (await saveConfig({ ...setup, running: true })) {
       toast(
-        setup.submit
-          ? `Auto-bid started for ${setup.profileName}: new jobs are found, generated and applied to by themselves.`
-          : `Auto-bid dry run for ${setup.profileName}: it fills one job, leaves it open for you, then stops.`,
+        !setup.submit
+          ? `Auto-bid dry run for ${setup.profileName}: it fills one job, leaves it open for you, then stops.`
+          : setup.once
+            ? `Auto-bid test run for ${setup.profileName}: it applies to one job (Submit, confirmation, Register), then stops.`
+            : `Auto-bid started for ${setup.profileName}: new jobs are found, generated and applied to by themselves.`,
         'success'
       );
     }
@@ -935,7 +1015,7 @@
     const id = event.target?.id || '';
     const fields = {
       wfProfile: ['profileId', 'profileName'],
-      wfMode: ['submit'],
+      wfMode: ['submit', 'once'],
       wfDailyLimit: ['dailyLimit'],
       wfWindows: ['windows'],
       wfHours: ['hours'],
@@ -946,6 +1026,10 @@
     if (!fields) return;
     const setup = formSetup();
     const edit = Object.fromEntries(fields.map((key) => [key, setup[key]]));
+    if (Object.values(edit).some((v) => v === '') && event.target.type === 'number') {
+      fillSetupForm(true); // emptied: the current value comes back, nothing is saved
+      return;
+    }
     if (!(await saveConfig(edit))) fillSetupForm(true);
   }
 
@@ -963,7 +1047,9 @@
       : ag.missing
         ? 'AutoGen extension not found: install and enable it in this Chrome'
         : ag.ok === false
-          ? ag.error || 'AutoGen did not answer'
+          ? /receiving end does not exist/i.test(ag.error || '')
+            ? 'This AutoGen is an older version: reload it in chrome://extensions after updating its folder'
+            : ag.error || 'AutoGen did not answer'
           : !ag.signedIn
             ? 'Sign AutoGen in to the same JobStrike site (AutoGen → Settings)'
             : `${agWindows.length}${running ? ` of ${want}` : ''} ChatGPT window${agWindows.length === 1 ? '' : 's'} generating${
@@ -975,7 +1061,11 @@
         l.challenge ? 'Paused: a site asked for a check (Job Scraper tab)' : l.live ? l.status || '' : 'off'],
       ['AutoGen generates resumes', agOk, agNote],
       [
-        state.prefs.submit ? 'Auto-bid applies and presses Submit' : 'Auto-bid fills one job (dry run)',
+        !state.prefs.submit
+          ? 'Auto-bid fills one job (dry run)'
+          : c?.once
+            ? 'Auto-bid applies to one job and presses Submit (test run)'
+            : 'Auto-bid applies and presses Submit',
         running ? Boolean(state.prefs.enabled) : null,
         state.pauseReason ? `Paused: ${state.pauseReason}` : '',
       ],
@@ -1008,7 +1098,7 @@
       else el.value = value == null ? '' : String(value);
     };
     set('wfProfile', c.profileId || '');
-    set('wfMode', c.submit ? 'submit' : 'dry');
+    set('wfMode', !c.submit ? 'dry' : c.once ? 'once' : 'submit');
     set('wfDailyLimit', c.dailyLimit);
     set('wfWindows', c.windows);
     set('wfHours', c.hours);
@@ -1037,7 +1127,7 @@
         ? 'Not connected'
         : !running
           ? 'Stopped'
-          : `${wf.config.submit ? 'Running' : 'Dry run'}${s ? ` · ${s.submittedSince} sent today of ${state.prefs.dailyLimit}` : ''}`;
+          : `${!wf.config.submit ? 'Dry run' : wf.config.once ? 'Test run' : 'Running'}${s ? ` · ${s.submittedSince} sent today of ${state.prefs.dailyLimit}` : ''}`;
     }
     const summary = document.getElementById('wfSummary');
     if (summary) {
@@ -1093,7 +1183,7 @@
     return {
       version: chrome.runtime?.getManifest?.().version || '',
       state: runnerState(),
-      fullAuto: isRunning(),
+      fullAuto: wf.active,
       configVersion: wf.appliedVersion,
       setupError: wf.configError || wf.error || '',
       enabled: Boolean(state.prefs.enabled),
@@ -1146,7 +1236,7 @@
     document.getElementById('wfWebsite')?.addEventListener('click', (event) => void openWebsitePage(event));
     setInterval(() => {
       void checkJson2docx()
-        .then(() => (isRunning() ? syncAutogen() : null))
+        .then(() => (wf.active ? syncAutogen() : null))
         .then(renderWorkflow)
         .then(reportStatus);
     }, 5000);

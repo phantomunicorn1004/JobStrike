@@ -499,11 +499,24 @@ chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) =>
     return true; // async response
   };
   if (message.type === "AUTOGEN_EXT_STATUS") return reply(autogenWindowSummary());
-  if (message.type === "AUTOGEN_EXT_ENSURE_WINDOWS") return reply(ensureGeneratingWindows(message.count));
+  if (message.type === "AUTOGEN_EXT_ENSURE_WINDOWS") {
+    return reply(oneWindowCommandAtATime(() => ensureGeneratingWindows(message.count)));
+  }
   if (message.type === "AUTOGEN_EXT_STOP_ALL") {
-    return reply(stopAllGeneratingWindows("stopped by JobStrike Auto-bid (Stop)"));
+    return reply(oneWindowCommandAtATime(() => stopAllGeneratingWindows("stopped by JobStrike Auto-bid (Stop)")));
   }
 });
+
+/**
+ * Window commands run in order: two "keep N windows" arriving together would
+ * otherwise both count the same windows and both open the missing ones.
+ */
+let windowCommands = Promise.resolve();
+function oneWindowCommandAtATime(command) {
+  const run = windowCommands.then(command, command);
+  windowCommands = run.catch(() => {});
+  return run;
+}
 
 chrome.windows.onRemoved.addListener(async (windowId) => {
   delete windowWorkers[windowId];

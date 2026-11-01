@@ -10,6 +10,20 @@ import { LIMITS, type AutobidConfig } from "@/lib/autobid/config-shape";
 
 type Profile = { id: number; full_name: string };
 
+/** What a Start sends: the form's fields only (not the note, version or who saved it). */
+const SETUP_FIELDS = [
+  "profileId",
+  "profileName",
+  "submit",
+  "once",
+  "dailyLimit",
+  "windows",
+  "hours",
+  "everyMinutes",
+  "hiringCafe",
+  "jobright",
+] as const satisfies ReadonlyArray<keyof AutobidConfig>;
+
 /**
  * Start/Stop and the setup for the whole chain, from any computer. The
  * JobStrike panel on the VPS reads the same setup every 20 seconds and runs it.
@@ -87,6 +101,15 @@ export function AutobidControlPanel({
   const running = config.running;
   const applied = appliedVersion !== null && appliedVersion >= config.version;
 
+  /** A number field left: an emptied one goes back to the saved value. */
+  const changeNumber = (key: "dailyLimit" | "windows" | "everyMinutes", text: string) => {
+    if (text.trim() === "") {
+      setDraft(({ [key]: _dropped, ...rest }) => rest);
+      return;
+    }
+    change({ [key]: Number(text) });
+  };
+
   /** A field changed: kept as a draft while stopped, saved at once while running. */
   const change = (edit: Partial<AutobidConfig>) => {
     if (running) void save(edit);
@@ -99,12 +122,15 @@ export function AutobidControlPanel({
       return;
     }
     const profile = profiles.find((p) => p.id === view.profileId);
-    const saved = await save({ ...view, profileName: profile?.full_name ?? view.profileName, running: true });
+    const setup = Object.fromEntries(SETUP_FIELDS.map((key) => [key, view[key]])) as Partial<AutobidConfig>;
+    const saved = await save({ ...setup, profileName: profile?.full_name ?? view.profileName, running: true });
     if (saved) {
       toast.success(
-        saved.submit
-          ? `Starting for ${saved.profileName}. The VPS picks it up within about 20 seconds.`
-          : `Starting a dry run for ${saved.profileName}: one job is filled and left open, then it stops.`,
+        !saved.submit
+          ? `Starting a dry run for ${saved.profileName}: one job is filled and left open, then it stops.`
+          : saved.once
+            ? `Starting a test run for ${saved.profileName}: one job is applied to and registered, then it stops.`
+            : `Starting for ${saved.profileName}. The VPS picks it up within about 20 seconds.`,
       );
     }
   };
@@ -116,7 +142,7 @@ export function AutobidControlPanel({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-base font-semibold">
-            {running ? (config.submit ? "Running" : "Dry run") : "Stopped"}
+            {running ? (!config.submit ? "Dry run" : config.once ? "Test run" : "Running") : "Stopped"}
             {running && config.profileName ? <span className="font-normal text-muted-foreground"> · {config.profileName}</span> : null}
           </h2>
           <p className="text-xs text-muted-foreground">
@@ -174,10 +200,11 @@ export function AutobidControlPanel({
           Mode
           <select
             className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-            value={view.submit ? "submit" : "dry"}
-            onChange={(e) => change({ submit: e.target.value === "submit" })}
+            value={!view.submit ? "dry" : view.once ? "once" : "submit"}
+            onChange={(e) => change({ submit: e.target.value !== "dry", once: e.target.value === "once" })}
           >
             <option value="dry">Dry run: fill one job, then stop</option>
+            <option value="once">Test run: apply to one job with Submit, then stop</option>
             <option value="submit">Submit: apply by itself</option>
           </select>
         </label>
@@ -188,8 +215,8 @@ export function AutobidControlPanel({
             min={LIMITS.dailyLimit[0]}
             max={LIMITS.dailyLimit[1]}
             value={view.dailyLimit}
-            onChange={(e) => setDraft((d) => ({ ...d, dailyLimit: Number(e.target.value) }))}
-            onBlur={(e) => change({ dailyLimit: Number(e.target.value) })}
+            onChange={(e) => setDraft((d) => ({ ...d, dailyLimit: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
+            onBlur={(e) => changeNumber("dailyLimit", e.target.value)}
           />
         </label>
         <label className={field}>
@@ -199,8 +226,8 @@ export function AutobidControlPanel({
             min={LIMITS.windows[0]}
             max={LIMITS.windows[1]}
             value={view.windows}
-            onChange={(e) => setDraft((d) => ({ ...d, windows: Number(e.target.value) }))}
-            onBlur={(e) => change({ windows: Number(e.target.value) })}
+            onChange={(e) => setDraft((d) => ({ ...d, windows: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
+            onBlur={(e) => changeNumber("windows", e.target.value)}
           />
         </label>
         <label className={cn(field, "sm:col-span-2")}>
@@ -220,8 +247,8 @@ export function AutobidControlPanel({
             max={LIMITS.everyMinutes[1]}
             step={5}
             value={view.everyMinutes}
-            onChange={(e) => setDraft((d) => ({ ...d, everyMinutes: Number(e.target.value) }))}
-            onBlur={(e) => change({ everyMinutes: Number(e.target.value) })}
+            onChange={(e) => setDraft((d) => ({ ...d, everyMinutes: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
+            onBlur={(e) => changeNumber("everyMinutes", e.target.value)}
           />
         </label>
         <div className={field}>

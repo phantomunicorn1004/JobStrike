@@ -7,6 +7,23 @@ import {
 } from "@/lib/autobid/config-shape";
 
 describe("mergeAutobidConfig", () => {
+  it("keeps the current number when a field is emptied", () => {
+    const current = { ...DEFAULT_AUTOBID_CONFIG, dailyLimit: 40, windows: 3, everyMinutes: 45 };
+    const result = mergeAutobidConfig(current, { dailyLimit: "", windows: null, everyMinutes: " " });
+    expect("config" in result && result.config).toMatchObject({ dailyLimit: 40, windows: 3, everyMinutes: 45 });
+  });
+
+  it("saves the one-job test run mode, and reads older setups as not a test run", () => {
+    const result = mergeAutobidConfig(DEFAULT_AUTOBID_CONFIG, { submit: true, once: true });
+    expect("config" in result && result.config).toMatchObject({ submit: true, once: true });
+    expect(toAutobidConfig({ submit: true, version: 4 }).once).toBe(false);
+  });
+
+  it("still clamps an explicit 0 to the minimum", () => {
+    const result = mergeAutobidConfig(DEFAULT_AUTOBID_CONFIG, { dailyLimit: 0 });
+    expect("config" in result && result.config.dailyLimit).toBe(1);
+  });
+
   it("refuses to start without a profile", () => {
     expect(mergeAutobidConfig(DEFAULT_AUTOBID_CONFIG, { running: true })).toEqual({
       error: "Choose a profile before starting.",

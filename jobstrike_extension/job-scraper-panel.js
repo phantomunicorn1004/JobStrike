@@ -2653,7 +2653,7 @@ ${groupSheetStyles()}
         !autogenStates.has(liveKey(job)) &&
         (!state.prefs.liveAutoQueueSupported || AUTO_SUBMIT_SITE_RE.test(`${job.application_site || ''} ${job.apply_url}`))
     );
-    if (jobs.length) void queueJobsForAutogen(jobs, { profileId: state.prefs.liveAutoQueueProfileId });
+    if (jobs.length) void queueJobsForAutogen(jobs, { profileId: state.prefs.liveAutoQueueProfileId, auto: true });
   }
 
   /** For Full auto (autobid-runner.js): what Live is set to do. */
@@ -2905,7 +2905,7 @@ ${groupSheetStyles()}
   }
 
   /** profileId: a fixed profile (Live auto-queue); otherwise the Bid tab's, read per job. */
-  async function queueJobsForAutogen(jobs, { profileId = '' } = {}) {
+  async function queueJobsForAutogen(jobs, { profileId = '', auto = false } = {}) {
     const api = window.SmartJobRegisterResumeDb;
     if (!api?.queueJobLinkForAutogen) {
       showToast('The Bid tab is not loaded yet. Open it once, then try again.', 'warn');
@@ -2919,7 +2919,7 @@ ${groupSheetStyles()}
       const entry = autogenStates.get(liveKey(job));
       if (entry && entry.state !== 'error') continue;
       autogenStates.set(liveKey(job), { state: 'waiting' });
-      autogenRun.pending.push({ job, profileId });
+      autogenRun.pending.push({ job, profileId, auto });
     }
     renderLiveQueue();
     if (autogenRun.running) return;
@@ -2930,7 +2930,12 @@ ${groupSheetStyles()}
     let stoppedBy = '';
     try {
       while (autogenRun.pending.length && !autogenRun.stop) {
-        const { job, profileId: forProfile } = autogenRun.pending.shift();
+        const { job, profileId: forProfile, auto: byAutoQueue } = autogenRun.pending.shift();
+        if (byAutoQueue && !state.prefs.liveAutoQueue) {
+          // Auto-queue was switched off (Auto-bid stopped): its backlog is dropped, not queued.
+          autogenStates.delete(liveKey(job));
+          continue;
+        }
         autogenStates.set(liveKey(job), { state: 'reading' });
         renderLiveQueue();
         try {

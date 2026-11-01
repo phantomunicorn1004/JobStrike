@@ -976,8 +976,9 @@ async function autogenSelfTest() {
   const blocked = autogenDetectBlock();
   if (blocked) return { ok: true, blocked, missing: [], model: "" };
   const missing = [];
-  // The composer can take a few seconds to mount after a navigation.
-  if (!(await autogenWaitForPromptBox(10000))) missing.push("the prompt box");
+  // The composer can take a while to mount after a navigation, much longer in
+  // a window that is in the background (10 s failed most first attempts).
+  if (!(await autogenWaitForPromptBox(30000))) missing.push("the prompt box");
   return {
     ok: true,
     blocked: autogenDetectBlock(),

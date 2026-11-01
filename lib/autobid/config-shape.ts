@@ -13,6 +13,8 @@ export type AutobidConfig = {
   profileName: string;
   /** false = dry run: fill one job, leave it open for review, then stop. */
   submit: boolean;
+  /** With submit: apply to one job (sent, or left for you), then stop. A test run. */
+  once: boolean;
   dailyLimit: number;
   /** ChatGPT windows AutoGen keeps generating in. */
   windows: number;
@@ -35,6 +37,7 @@ export const DEFAULT_AUTOBID_CONFIG: AutobidConfig = {
   profileId: null,
   profileName: "",
   submit: false,
+  once: false,
   dailyLimit: 25,
   windows: 2,
   hours: "10:00-20:30, 01:00-07:30",
@@ -54,6 +57,8 @@ export const LIMITS = {
 } as const;
 
 function clampInt(value: unknown, [min, max]: readonly [number, number], fallback: number): number {
+  // An emptied field keeps the current value (Number("") would be 0).
+  if (value === null || value === undefined || String(value).trim() === "") return fallback;
   const n = Math.round(Number(value));
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 }
@@ -86,6 +91,7 @@ export function mergeAutobidConfig(
   }
   if ("profileName" in edit) next.profileName = String(edit.profileName ?? "").slice(0, 120);
   if ("submit" in edit) next.submit = Boolean(edit.submit);
+  if ("once" in edit) next.once = Boolean(edit.once);
   if ("dailyLimit" in edit) next.dailyLimit = clampInt(edit.dailyLimit, LIMITS.dailyLimit, current.dailyLimit);
   if ("windows" in edit) next.windows = clampInt(edit.windows, LIMITS.windows, current.windows);
   if ("everyMinutes" in edit) next.everyMinutes = clampInt(edit.everyMinutes, LIMITS.everyMinutes, current.everyMinutes);
