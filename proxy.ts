@@ -28,7 +28,7 @@ function isProtectedApi(pathname: string): boolean {
   return pathname.startsWith("/api/admin/");
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const session = await getSessionFromRequest(request);
 

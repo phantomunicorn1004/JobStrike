@@ -7,19 +7,40 @@ import {
 } from "@/lib/auth/resolve-request-user";
 import {
   getUserGoogleDriveConnection,
-  getUserGoogleDriveSettings,
   getUserGoogleOAuthCredentials,
   updateUserGoogleOAuthCredentials,
 } from "@/lib/auth/google-drive-repository";
 import { isGoogleDriveConfigured } from "@/lib/google-drive/config";
 import {
   getGoogleOAuthRedirectUri,
-  isGoogleOAuthConfiguredForUser,
   isGoogleOAuthWebConfigured,
 } from "@/lib/google-drive/oauth-web";
 
 export function OPTIONS() {
   return corsOptions();
+}
+
+/**
+ * The Drive connection and the user's OAuth client, read once each. OAuth is ready when the
+ * server's client is set or the user's own client is complete.
+ */
+async function readDriveStatus(userId: string, origin: string) {
+  const [connection, oauthCreds] = await Promise.all([
+    getUserGoogleDriveConnection(userId),
+    getUserGoogleOAuthCredentials(userId),
+  ]);
+  return {
+    connected: Boolean(connection?.refreshToken),
+    googleEmail: connection?.googleEmail ?? null,
+    folderId: connection?.folderId ?? "",
+    defaultResumeUrl: connection?.defaultResumeUrl ?? "",
+    defaultCoverUrl: connection?.defaultCoverUrl ?? "",
+    oauthReady:
+      isGoogleOAuthWebConfigured() || Boolean(oauthCreds.clientId && oauthCreds.clientSecret),
+    hasOAuthClientId: Boolean(oauthCreds.clientId),
+    oauthClientId: oauthCreds.clientId,
+    redirectUri: getGoogleOAuthRedirectUri(origin),
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -30,26 +51,9 @@ export async function GET(request: NextRequest) {
     }
 
     const origin = new URL(request.url).origin;
-    const [settings, connection, oauthCreds, oauthReady] = await Promise.all([
-      getUserGoogleDriveSettings(user.id),
-      getUserGoogleDriveConnection(user.id),
-      getUserGoogleOAuthCredentials(user.id),
-      isGoogleOAuthConfiguredForUser(user.id, origin),
-    ]);
-
     return corsJson({
-      connected: Boolean(settings?.refreshToken),
-      googleEmail: settings?.googleEmail ?? connection?.googleEmail ?? null,
-      folderId: settings?.folderId ?? connection?.folderId ?? "",
-      defaultResumeUrl:
-        settings?.defaultResumeUrl ?? connection?.defaultResumeUrl ?? "",
-      defaultCoverUrl:
-        settings?.defaultCoverUrl ?? connection?.defaultCoverUrl ?? "",
-      oauthReady,
+      ...(await readDriveStatus(user.id, origin)),
       oauthWebConfigured: isGoogleOAuthWebConfigured(),
-      hasOAuthClientId: Boolean(oauthCreds.clientId),
-      oauthClientId: oauthCreds.clientId,
-      redirectUri: getGoogleOAuthRedirectUri(origin),
       serviceAccountConfigured: isGoogleDriveConfigured(),
     });
   } catch (error) {
@@ -104,27 +108,7 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    const [settings, connection, oauthCreds, oauthReady] = await Promise.all([
-      getUserGoogleDriveSettings(user.id),
-      getUserGoogleDriveConnection(user.id),
-      getUserGoogleOAuthCredentials(user.id),
-      isGoogleOAuthConfiguredForUser(user.id, origin),
-    ]);
-
-    return corsJson({
-      ok: true,
-      connected: Boolean(settings?.refreshToken),
-      googleEmail: settings?.googleEmail ?? connection?.googleEmail ?? null,
-      folderId: settings?.folderId ?? connection?.folderId ?? "",
-      defaultResumeUrl:
-        settings?.defaultResumeUrl ?? connection?.defaultResumeUrl ?? "",
-      defaultCoverUrl:
-        settings?.defaultCoverUrl ?? connection?.defaultCoverUrl ?? "",
-      oauthReady,
-      hasOAuthClientId: Boolean(oauthCreds.clientId),
-      oauthClientId: oauthCreds.clientId,
-      redirectUri: getGoogleOAuthRedirectUri(origin),
-    });
+    return corsJson({ ok: true, ...(await readDriveStatus(user.id, origin)) });
   } catch (error) {
     console.error("Google Drive preferences error:", error);
     const message = error instanceof Error ? error.message : "Update failed.";

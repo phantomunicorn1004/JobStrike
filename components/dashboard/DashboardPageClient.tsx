@@ -6,15 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import {
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import dynamic from "next/dynamic";
+import type { ChartConfig } from "@/components/ui/chart";
 import { CalendarDays, Database, Loader2, MessageCircle, RefreshCw, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { colorForCandidateKey } from "@/lib/dashboard/candidate-colors";
@@ -35,6 +28,12 @@ type HourlyActivityPoint = { hour: number; count: number };
 type RangeMode = "week" | "month" | "custom";
 
 type DashboardData = ServerDashboardData;
+
+// recharts is the dashboard's largest library: load the chart after the rest of the page.
+const BidsChart = dynamic(() => import("@/components/dashboard/BidsChart"), {
+  ssr: false,
+  loading: () => <div className="h-[240px] w-full animate-pulse rounded-md bg-muted/40" />,
+});
 
 function formatChartDate(ymd: string, timeZone: string): string {
   return formatYmdInTimeZone(ymd, timeZone, { month: "short", day: "numeric" });
@@ -717,53 +716,21 @@ export function DashboardPageClient({
               ) : chartCandidates.length === 0 ? (
                 <EmptyState text="No bids in this range for the selected profiles." />
               ) : (
-                <ChartContainer config={bidChartConfig} className="aspect-auto h-[240px] w-full">
-                  <BarChart
-                    data={bidBars}
-                    margin={{ left: 0, right: 8, top: 8, bottom: 0 }}
-                    barCategoryGap={bidBars.length > 20 ? 2 : "20%"}
-                    onClick={(state) => focusDay(state?.activeLabel)}
-                    className={weeklyChart ? undefined : "cursor-pointer"}
-                  >
-                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="date"
-                      tickLine={false}
-                      axisLine={false}
-                      tickMargin={8}
-                      minTickGap={16}
-                      tickFormatter={(value) => formatChartDate(String(value), timezone)}
-                      className="text-[10px]"
-                    />
-                    <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={30} className="text-[10px]" />
-                    <ChartTooltip
-                      cursor={{ fill: "var(--muted)", opacity: 0.5 }}
-                      content={
-                        <ChartTooltipContent
-                          labelFormatter={(value) =>
-                            weeklyChart
-                              ? `Week of ${formatChartDate(String(value), timezone)}`
-                              : formatLongDate(String(value), timezone)
-                          }
-                        />
-                      }
-                    />
-                    {chartCandidates.length > 1 ? (
-                      <ChartLegend content={<ChartLegendContent className="pt-2 text-[11px]" />} />
-                    ) : null}
-                    {chartCandidates.map((candidate, index) => (
-                      <Bar
-                        key={candidate.key}
-                        dataKey={safeCssKey(candidate.key)}
-                        name={candidate.label}
-                        stackId="bids"
-                        fill={candidateColor(candidate)}
-                        maxBarSize={40}
-                        radius={index === chartCandidates.length - 1 ? [3, 3, 0, 0] : 0}
-                      />
-                    ))}
-                  </BarChart>
-                </ChartContainer>
+                <BidsChart
+                  config={bidChartConfig}
+                  data={bidBars}
+                  series={chartCandidates.map((candidate) => ({
+                    dataKey: safeCssKey(candidate.key),
+                    name: candidate.label,
+                    fill: candidateColor(candidate),
+                  }))}
+                  clickable={!weeklyChart}
+                  tickLabel={(date) => formatChartDate(date, timezone)}
+                  tooltipLabel={(date) =>
+                    weeklyChart ? `Week of ${formatChartDate(date, timezone)}` : formatLongDate(date, timezone)
+                  }
+                  onBarClick={focusDay}
+                />
               )}
               {dayBreakdown.length > 0 ? (
                 <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">

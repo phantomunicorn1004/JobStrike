@@ -3,7 +3,7 @@ import type { SessionUser } from "@/lib/auth/types";
 import { SESSION_COOKIE } from "@/lib/auth/constants";
 import { verifySessionToken } from "@/lib/auth/session-core";
 
-/** Edge-safe session lookup for middleware (no next/headers). */
+/** Session lookup for the proxy (proxy.ts), which has no next/headers. */
 export async function getSessionFromRequest(
   request: NextRequest,
 ): Promise<SessionUser | null> {
