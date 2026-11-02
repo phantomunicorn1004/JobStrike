@@ -158,10 +158,11 @@ export async function GET(request: NextRequest) {
     // The extension pages through every application to check for duplicates. It
     // needs the rows only: no total, pipeline stages or filter options.
     if (searchParams.get("lite") === "1") {
-      const entries = await listApplicationsWithFilters(userId, { page, pageSize });
-      // Notes hold whole job descriptions; the duplicate check never reads them.
+      // Notes hold whole job descriptions; the duplicate check never reads them,
+      // so they are not even read from the database.
+      const entries = await listApplicationsWithFilters(userId, { page, pageSize, withoutNote: true });
       return corsJson({
-        resumes: entries.map((entry) => ({ ...mapForList(entry, timeZone), note: "" })),
+        resumes: entries.map((entry) => mapForList(entry, timeZone)),
         page,
         pageSize,
       });

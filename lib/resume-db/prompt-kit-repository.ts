@@ -32,9 +32,13 @@ export type ProfilePromptKitResult = {
   exists: boolean;
 };
 
+/** What generation reads; the Resume Builder's last job description and output are left behind. */
+const GENERATION_COLUMNS = "profile_id, user_id, prompt_template, resume_template_json, updated_at";
+
 export async function getProfilePromptKit(
   userId: string,
   profileId: number,
+  options: { forGeneration?: boolean } = {},
 ): Promise<ProfilePromptKitResult> {
   const profile = await getProfileById(userId, profileId);
   if (!profile) {
@@ -44,7 +48,7 @@ export async function getProfilePromptKit(
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("profile_prompt_kits")
-    .select("*")
+    .select(options.forGeneration ? GENERATION_COLUMNS : "*")
     .eq("profile_id", profileId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -78,12 +82,13 @@ export async function upsertProfilePromptKit(
   };
 
   const supabase = getSupabaseAdminClient();
+  // Only the stamp comes back: the kit itself is what was just sent.
   const { data, error } = await supabase
     .from("profile_prompt_kits")
     .upsert(row as never, { onConflict: "profile_id" })
-    .select("*")
+    .select("created_at, updated_at")
     .single();
 
   if (error) throw new Error(error.message);
-  return mapRow(data as PromptKitRow);
+  return mapRow({ ...row, ...(data as Pick<PromptKitRow, "created_at" | "updated_at">) });
 }

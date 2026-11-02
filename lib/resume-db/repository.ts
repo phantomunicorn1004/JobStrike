@@ -304,6 +304,8 @@ export type ResumeDbApplicationsListQuery = {
   sortDir?: "asc" | "desc";
   page?: number; // 1-based
   pageSize?: number;
+  /** Leave out the Note (whole job descriptions), for callers that never show it. */
+  withoutNote?: boolean;
 };
 
 function parseCandidateFilter(
@@ -461,11 +463,12 @@ export async function listApplicationsWithFilters(
   const start = (page - 1) * pageSize;
   const end = start + pageSize - 1;
 
+  const listColumns = query.withoutNote
+    ? RESUME_DB_LIST_COLUMNS.replace("note, ", "")
+    : RESUME_DB_LIST_COLUMNS;
   let builder = supabase
     .from("resume_db_applications")
-    .select(
-      atsPlatformColumnMissing ? RESUME_DB_LIST_COLUMNS : `${RESUME_DB_LIST_COLUMNS}, ats_platform`,
-    );
+    .select(atsPlatformColumnMissing ? listColumns : `${listColumns}, ats_platform`);
 
   builder = applyCommonFilters(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -505,9 +508,7 @@ export async function listApplicationsWithFilters(
     }
     let fallback = supabase
       .from("resume_db_applications")
-      .select(
-        "id, entry_id, profile_id, user_id, candidate_name, job_link, job_title, company, note, apply, resume_url, cover_letter_url, applied_at, created_at, pipeline_job_id",
-      );
+      .select(listColumns.replace(", pipeline_stage_id", ""));
     fallback = applyCommonFilters(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       supabase as any,

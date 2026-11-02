@@ -32,7 +32,7 @@ export async function loadReadyKit(userId: string, profileId: number | null): Pr
   if (profileId == null) {
     return { ok: false, reason: "no_profile", detail: "The application has no profile." };
   }
-  const { kit, exists } = await getProfilePromptKit(userId, profileId);
+  const { kit, exists } = await getProfilePromptKit(userId, profileId, { forGeneration: true });
   if (!exists) {
     return {
       ok: false,
