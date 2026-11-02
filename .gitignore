@@ -26,3 +26,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# credentials: never commit (Google OAuth client files and pasted secrets)
+client_secret_*.json
+GoogleDrive.txt

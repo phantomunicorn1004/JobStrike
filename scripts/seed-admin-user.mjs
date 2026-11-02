@@ -6,7 +6,8 @@
  *   node scripts/seed-admin-user.mjs --reset-password
  *
  * Reads Supabase vars from `.env.local` / `.env` (same as Next.js).
- * Override password with DEFAULT_ADMIN_PASSWORD env var.
+ * The password comes from DEFAULT_ADMIN_PASSWORD; without it a random one is made and printed once.
+ * Never write a password in this file: the repository can be read by others.
  */
 import { createClient } from "@supabase/supabase-js";
 import { scrypt, randomBytes } from "node:crypto";
@@ -17,7 +18,8 @@ loadEnvFiles();
 
 const scryptAsync = promisify(scrypt);
 const USERNAME = "ideapulse@remote.helper.com";
-const DEFAULT_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || "xvcsfdWRE@$#234";
+const givenPassword = process.env.DEFAULT_ADMIN_PASSWORD?.trim();
+const DEFAULT_PASSWORD = givenPassword || randomBytes(18).toString("base64url");
 
 async function hashPassword(password) {
   const salt = randomBytes(16);
@@ -71,6 +73,7 @@ if (existing) {
   }
 
   console.log("Reset default admin password:", username);
+  if (!givenPassword) console.log("New password (shown once, keep it safe):", DEFAULT_PASSWORD);
   process.exit(0);
 }
 
@@ -87,3 +90,4 @@ if (error) {
 }
 
 console.log("Created default admin:", username);
+if (!givenPassword) console.log("Password (shown once, keep it safe):", DEFAULT_PASSWORD);

@@ -174,14 +174,15 @@ export async function deleteAppUser(id: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Ensures default administrator exists (idempotent). */
+/**
+ * Ensures default administrator exists (idempotent). Only with DEFAULT_ADMIN_PASSWORD set: a
+ * password written in the code would be readable by anyone who can read the repository.
+ */
 export async function ensureDefaultAdmin(): Promise<void> {
   const existing = await findUserByUsername(DEFAULT_ADMIN_USERNAME);
   if (existing) return;
 
-  const password =
-    process.env.DEFAULT_ADMIN_PASSWORD?.trim() ||
-    (process.env.NODE_ENV !== "production" ? "xvcsfdWRE@$#234" : "");
+  const password = process.env.DEFAULT_ADMIN_PASSWORD?.trim() || "";
   if (!password) {
     console.warn(
       "DEFAULT_ADMIN_PASSWORD not set; skipping auto-create of default admin.",
