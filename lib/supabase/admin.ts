@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
+import { fetchWithConnectRetry } from "@/lib/supabase/connect-retry";
 
 let adminClient: ReturnType<typeof createClient> | null = null;
 let serviceRoleClient: ReturnType<typeof createClient> | null = null;
@@ -34,6 +35,7 @@ export function getSupabaseAdminClient() {
 
   adminClient = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: fetchWithConnectRetry() },
   });
 
   return adminClient;
@@ -53,6 +55,7 @@ export function getSupabaseServiceRoleClient() {
 
   serviceRoleClient = createClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: fetchWithConnectRetry() },
   });
 
   return serviceRoleClient;
