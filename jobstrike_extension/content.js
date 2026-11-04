@@ -4383,6 +4383,19 @@
     const started = Date.now();
     const inputs = Array.from(document.querySelectorAll('input[role="combobox"]'))
       .filter((el) => isReactSelectCombobox(el) && !el.disabled && isVisible(el));
+    // Opening a dropdown scrolls it into view. The scan counts a field scrolled
+    // above the screen as hidden, so the page goes back to where it was.
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    try {
+      return await primeEach(inputs, started, maxMs);
+    } finally {
+      try { window.scrollTo(scrollX, scrollY); } catch (_) {}
+      await delay(80);
+    }
+  }
+
+  async function primeEach(inputs, started, maxMs) {
     let primed = 0;
     for (const el of inputs) {
       if (Date.now() - started > maxMs) break;

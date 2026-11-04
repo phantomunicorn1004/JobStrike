@@ -38,11 +38,13 @@ export async function readAutobidConfig(userId: string): Promise<AutobidConfig> 
  * and no two saves share a version).
  */
 /**
- * JobStrike 4.41 and older refused to start when another panel was open and
- * saved the setup as stopped with this note. Any number of panels may run now
- * (each job goes to one of them), so a forgotten old panel must not stop the run.
+ * Panels up to JobStrike 4.42.5 that could not start (another panel open, AI
+ * answers off, json2docx not running) saved the shared setup as stopped with a
+ * "Not started: …" note. One panel's own problem must not stop the run for the
+ * panels that can work: each job goes to one panel, and a panel that cannot
+ * work shows why in its own status instead.
  */
-const OLD_PANEL_REFUSAL = /^Not started: Another JobStrike panel is open/;
+const OLD_PANEL_REFUSAL = /^Not started: /;
 
 export function isOldPanelRefusal(edit: Record<string, unknown>, by: "web" | "panel"): boolean {
   return by === "panel" && edit.running === false && OLD_PANEL_REFUSAL.test(String(edit.note ?? ""));

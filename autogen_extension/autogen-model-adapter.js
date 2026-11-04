@@ -1,4 +1,4 @@
-/* AutoGen ChatGPT model adapter v0.2.27
+/* AutoGen ChatGPT model adapter v0.2.28
    Finds the model/reasoning trigger using stable semantic signals before content-code fallbacks. */
 (function(){
  function visible(el){
@@ -20,7 +20,10 @@
   if(testid.includes('model')) score+=50;
   if(effort) score+=70;
   if(/thinking effort|reasoning effort/.test(text)) score+=35;
-  if(!/model|thinking|reasoning|gpt|instant|medium|high|pro/.test(`${aria} ${testid} ${effort} ${text}`)) return -1;
+  const all=`${aria} ${testid} ${effort} ${text}`;
+  // Whole words: the account menu ("Loading profile ... Plus") has "pro" inside "profile".
+  if(/\b(profile|account|user menu|settings)\b/.test(`${aria} ${testid}`) || /^\s*(loading profile|open profile)/.test(text)) return -1;
+  if(!/\b(model|thinking|reasoning|gpt|instant|medium|high|pro)\b/.test(all)) return -1;
   if(visible(el)) score+=10;
   return score;
  }

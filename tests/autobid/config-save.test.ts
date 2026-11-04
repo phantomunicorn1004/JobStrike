@@ -101,6 +101,13 @@ describe("saveAutobidConfig", () => {
     );
     expect("config" in refusal && refusal.config).toMatchObject({ running: true, version: 1 });
     expect(db.row.autobid_config).toMatchObject({ running: true, version: 1 });
+    // Nor a panel that cannot work itself (AI off, not signed in).
+    const aiOff = await saveAutobidConfig(
+      "u1",
+      { running: false, note: "Not started: AI answers are off in this panel. Turn on Settings → Autofill with AI, with an OpenAI key, then press Start." },
+      "panel",
+    );
+    expect("config" in aiOff && aiOff.config).toMatchObject({ running: true, version: 1 });
     // Any other stop from a panel (a dry run done) still stops it.
     const done = await saveAutobidConfig("u1", { running: false, note: "Dry run done" }, "panel");
     expect("config" in done && done.config).toMatchObject({ running: false, version: 2 });

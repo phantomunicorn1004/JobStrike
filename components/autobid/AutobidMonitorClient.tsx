@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { AutobidControlPanel } from "@/components/autobid/AutobidControlPanel";
 import { FoundJobsList } from "@/components/autobid/FoundJobsList";
 import { FieldReport } from "@/components/autobid/FieldReport";
+import { PanelList, type WorkerEntry } from "@/components/autobid/PanelList";
 import {
   RunnerStatusPanel,
   type AutobidReport,
@@ -251,6 +252,7 @@ export function AutobidMonitorClient() {
   const [runners, setRunners] = useState<{
     autobid: AutobidReport | null;
     autogen: AutogenReport | null;
+    workers?: WorkerEntry[];
     setupError?: string;
   } | null>(null);
 
@@ -367,6 +369,9 @@ export function AutobidMonitorClient() {
           ago={(iso) => formatAgo(iso, now)}
           time={formatTime}
         />
+      )}
+      {runners?.workers && (
+        <PanelList workers={runners.workers} now={now} ago={(iso) => formatAgo(iso, now)} />
       )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

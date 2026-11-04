@@ -1132,10 +1132,11 @@
       // Only on Start: a panel reopened while the setup runs carries on.
       const blocker = await startBlocker();
       if (blocker) {
-        wf.error = blocker;
+        // This panel stays idle and says why in its own status. The setup is
+        // not stopped: other panels that can work carry on (each job goes to one).
+        wf.error = `This panel is not working: ${blocker}`;
         wf.appliedVersion = config.version; // handled: nothing was started for it
-        // Not awaited: the saved (stopped) setup is applied after this apply ends.
-        void saveConfig({ running: false, note: `Not started: ${blocker}` });
+        render();
         return;
       }
     }
