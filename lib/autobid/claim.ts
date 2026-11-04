@@ -4,6 +4,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { QUEUED_APPLY } from "@/lib/resume-db/types";
 import { toAutobidJob, type AutobidJob, type AutobidRowInput } from "@/lib/autobid/stages";
 import { freshCutoffIso } from "@/lib/autobid/queue-rules";
+import { jobAnswers, type JobAnswers } from "@/lib/autobid/job-answers";
 
 /** A claim this old is abandoned (panel closed, crash): the row can be taken again. */
 export const BID_STALE_MS = 20 * 60 * 1000;
@@ -36,6 +37,8 @@ export type BidJob = {
   job_description: string;
   built_resume_json: string;
   claimed_at: string;
+  /** Per-job form answers (current company and title from the resume, desired salary from the posting). */
+  answers: JobAnswers;
 };
 
 type BidRow = {
@@ -53,6 +56,7 @@ type BidRow = {
 };
 
 function toBidJob(row: BidRow): BidJob {
+  const jobDescription = String(row.job_description || row.note || "");
   return {
     id: Number(row.id),
     profile_id: row.profile_id ?? null,
@@ -60,9 +64,10 @@ function toBidJob(row: BidRow): BidJob {
     job_link: row.job_link ?? "",
     job_title: row.job_title ?? "",
     company: row.company ?? "",
-    job_description: String(row.job_description || row.note || ""),
+    job_description: jobDescription,
     built_resume_json: row.built_resume_json ?? "",
     claimed_at: row.bid_claimed_at ?? "",
+    answers: jobAnswers(row.built_resume_json ?? "", jobDescription),
   };
 }
 

@@ -555,7 +555,14 @@
         throw new Stop('pause', 'AI answers are off: turn on Settings → Autofill with AI, with an OpenAI key.');
       }
       setStep('Filling the form (AI)…');
-      await autofillThisPage({ useAi: true });
+      // This job's own answers (from its resume and posting) over the profile's.
+      if (job.answers && Object.keys(job.answers).length) meta.answers = job.answers;
+      setAutofillJobAnswers(job.answers || null);
+      try {
+        await autofillThisPage({ useAi: true });
+      } finally {
+        setAutofillJobAnswers(null);
+      }
       checkStop();
 
       if (!currentFields.length) {

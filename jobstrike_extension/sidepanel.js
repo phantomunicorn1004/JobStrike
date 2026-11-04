@@ -730,6 +730,29 @@ function websiteProfileToAutofillProfile(record) {
   return normalizeProfile(profile);
 }
 
+/**
+ * Answers the website worked out for the Auto-bid job being applied to
+ * (current company and title from its resume, desired salary from its
+ * posting). They win over the profile for that one form; autobid-runner.js
+ * sets them before Autofill and clears them after.
+ */
+let autofillJobAnswers = null;
+const JOB_ANSWER_KEYS = ['currentCompany', 'currentTitle', 'desiredSalary'];
+
+function setAutofillJobAnswers(answers) {
+  autofillJobAnswers = answers && typeof answers === 'object' ? answers : null;
+}
+
+function withJobAnswers(profile) {
+  if (!autofillJobAnswers) return profile;
+  const out = { ...profile };
+  for (const key of JOB_ANSWER_KEYS) {
+    const value = String(autofillJobAnswers[key] || '').trim();
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
 async function loadWebsiteProfileForAutofill() {
   const api = window.SmartJobRegisterResumeDb;
   const profileId = document.getElementById('regProfileId')?.value?.trim();
@@ -748,7 +771,7 @@ async function loadWebsiteProfileForAutofill() {
     showStatus('Selected profile was not found on the website.', 'error');
     return false;
   }
-  currentProfile = websiteProfileToAutofillProfile(record);
+  currentProfile = withJobAnswers(websiteProfileToAutofillProfile(record));
   return true;
 }
 
