@@ -4057,6 +4057,21 @@
     return { ...out, jobLink: job.jobLink, profileName: profile.name };
   }
 
+  /**
+   * Auto-bid: a job the server asked for (/api/autobid/found's wantJd). Reads
+   * its description in a background tab and sends it to the server, which
+   * checks it and queues it when it fits. The link is the one Live posted, so
+   * the server finds its row. Resolves { status, reason, score? }.
+   */
+  async function describeForAutobid({ url, profileId }) {
+    const job = await readJobInBackgroundTab(url).catch(() => null);
+    const body = job
+      ? { profileId: Number(profileId), jobLink: url, jobDescription: job.jobDescription }
+      : { profileId: Number(profileId), jobLink: url, unreadable: true };
+    const out = await autobidFetch('/api/autobid/found/describe', { method: 'POST', body });
+    return { ...out, jobLink: job?.jobLink || url };
+  }
+
   const AHEAD_ORDER = { skip: 0, review: 1, ok: 2, checking: 3 };
   const AHEAD_TAG = { skip: 'Skip', review: 'Review', ok: 'OK', checking: 'Checking…' };
 
@@ -5273,6 +5288,7 @@
     listRegisterProfiles,
     backendBaseUrl,
     queueJobLinkForAutogen,
+    describeForAutobid,
     generateFilesFromResumeJson,
     registerForAutobid,
     autobidFetch,

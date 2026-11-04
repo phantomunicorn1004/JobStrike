@@ -2641,19 +2641,111 @@ ${groupSheetStyles()}
     renderLiveCard();
   }
 
-  /** Sites Auto-bid submits on: other jobs would only be filled and left for the user. */
-  const AUTO_SUBMIT_SITE_RE = /greenhouse|lever|ashby/i;
-
-  /** Live "Queue new jobs for AutoGen automatically": the new, unopened jobs, as Queue all would. */
+  /**
+   * Live "Queue new jobs for AutoGen automatically": the new, unopened jobs go
+   * to the website, which decides (site, title, freshness, then an AI fit check
+   * on the description) and queues the ones that fit, freshest first, within
+   * the day's room. See postFoundJobs.
+   */
   function autoQueueNewJobs() {
     if (!state.prefs.liveAutoQueue || !state.prefs.liveAutoQueueProfileId) return;
     const jobs = liveNewJobs().filter(
-      (job) =>
-        job.apply_url &&
-        !autogenStates.has(liveKey(job)) &&
-        (!state.prefs.liveAutoQueueSupported || AUTO_SUBMIT_SITE_RE.test(`${job.application_site || ''} ${job.apply_url}`))
+      (job) => job.apply_url && !autogenStates.has(liveKey(job)) && !postedToServer.has(liveKey(job))
     );
-    if (jobs.length) void queueJobsForAutogen(jobs, { profileId: state.prefs.liveAutoQueueProfileId, auto: true });
+    if (jobs.length) void postFoundJobs(jobs, state.prefs.liveAutoQueueProfileId);
+  }
+
+  /** Jobs this panel already sent to /api/autobid/found (the server keeps its own record too). */
+  const postedToServer = new Set();
+  const foundRun = { running: false, pending: [] };
+
+  function postedAtIso(job) {
+    const posted = jobPostedTimes(job);
+    return posted ? new Date(posted.ms).toISOString() : null;
+  }
+
+  /**
+   * Sends found jobs to the server, then reads the description of each job it
+   * asks for (one background tab at a time) and sends that too. Each job ends
+   * as queued (it leaves the list), skipped (with the server's reason; Queue
+   * still queues it by hand) or passed (waiting for room in today's queue).
+   */
+  async function postFoundJobs(jobs, profileId) {
+    const api = window.SmartJobRegisterResumeDb;
+    if (!api?.autobidFetch || !api?.describeForAutobid) return;
+    for (const job of jobs) postedToServer.add(liveKey(job));
+    let answer;
+    try {
+      answer = await api.autobidFetch('/api/autobid/found', {
+        method: 'POST',
+        body: {
+          profileId: Number(profileId),
+          jobs: jobs.map((job) => ({
+            jobLink: job.apply_url,
+            jobTitle: job.title || '',
+            company: job.company_name || '',
+            source: jobOriginKey(job),
+            postedAt: postedAtIso(job),
+          })),
+        },
+      });
+    } catch (error) {
+      // Sent again after the next check.
+      for (const job of jobs) postedToServer.delete(liveKey(job));
+      setLiveStatus(`Could not send new jobs to Auto-bid: ${error?.message || error}`);
+      return;
+    }
+    const byLink = new Map(jobs.map((job) => [job.apply_url, job]));
+    for (const { jobLink, reason } of answer?.skipped || []) {
+      const job = byLink.get(jobLink);
+      if (job) autogenStates.set(liveKey(job), { state: 'skipped', error: reason });
+    }
+    for (const jobLink of answer?.wantJd || []) {
+      const job = byLink.get(jobLink);
+      if (!job) continue;
+      autogenStates.set(liveKey(job), { state: 'waiting' });
+      foundRun.pending.push({ job, profileId });
+    }
+    renderLiveQueue();
+    if (foundRun.running) return;
+
+    foundRun.running = true;
+    try {
+      while (foundRun.pending.length) {
+        const { job, profileId: forProfile } = foundRun.pending.shift();
+        const key = liveKey(job);
+        if (!state.prefs.liveAutoQueue) {
+          // Auto-queue was switched off (Auto-bid stopped): the rest is checked after the next Start.
+          autogenStates.delete(key);
+          postedToServer.delete(key);
+          continue;
+        }
+        autogenStates.set(key, { state: 'reading' });
+        renderLiveQueue();
+        try {
+          const out = await api.describeForAutobid({ url: job.apply_url, profileId: forProfile });
+          if (out.status === 'queued') dropQueuedJob(job, out.jobLink);
+          else autogenStates.set(key, { state: out.status === 'passed' ? 'passed' : 'skipped', error: out.reason || '' });
+        } catch (error) {
+          const message = error?.message || String(error);
+          autogenStates.set(key, { state: 'error', error: message });
+          postedToServer.delete(key);
+          if (AUTOGEN_STOP_RE.test(message) || /OPENAI_API_KEY|rate limit/i.test(message)) {
+            // Every later job would fail the same way: they are tried again after the next check.
+            for (const rest of foundRun.pending) {
+              autogenStates.delete(liveKey(rest.job));
+              postedToServer.delete(liveKey(rest.job));
+            }
+            foundRun.pending = [];
+            setLiveStatus(`Auto-bid check stopped: ${message}`);
+          }
+        }
+        renderLiveQueue();
+      }
+    } finally {
+      foundRun.running = false;
+      renderLiveQueue();
+    }
   }
 
   /** For Full auto (autobid-runner.js): what Live is set to do. */
@@ -2703,6 +2795,8 @@ ${groupSheetStyles()}
       state.prefs.liveHcMinutes = setup.everyMinutes;
       state.prefs.useHiringCafe = Boolean(setup.hiringCafe);
       state.prefs.useJobright = Boolean(setup.jobright);
+      // HiringCafe gives exact posting times: only the freshest jobs (Jobright dates by day).
+      if (Number(setup.freshnessHours) > 0) state.prefs.freshnessWindowHc = `${Math.round(setup.freshnessHours)}h`;
       state.prefs.liveAutoQueue = true;
       state.prefs.liveAutoQueueProfileId = setup.profile.id;
       state.prefs.liveAutoQueueProfileName = setup.profile.name;
@@ -2889,6 +2983,15 @@ ${groupSheetStyles()}
     if (entry?.state === 'waiting') {
       return '<button type="button" class="js-q-gen" disabled title="Waiting its turn">Waiting</button>';
     }
+    if (entry?.state === 'passed') {
+      return `<button type="button" class="js-q-gen" disabled title="${escapeHtml(
+        `Fits (${entry.error || 'passed the checks'}). Queued when today's queue has room.`
+      )}">Fits</button>`;
+    }
+    if (entry?.state === 'skipped') {
+      const title = `Skipped by Auto-bid: ${entry.error || 'did not pass the checks'}. Click to queue it anyway.`;
+      return `<button type="button" class="js-q-gen is-skipped" data-q-action="autogen" title="${escapeHtml(title)}">Skipped</button>`;
+    }
     const failed = entry?.state === 'error';
     const title = failed
       ? `Not queued: ${entry.error}. Click to try again.`
@@ -2917,7 +3020,8 @@ ${groupSheetStyles()}
     }
     for (const job of jobs) {
       const entry = autogenStates.get(liveKey(job));
-      if (entry && entry.state !== 'error') continue;
+      // A failed or Auto-bid-skipped job can be queued by hand; one in progress cannot.
+      if (entry && entry.state !== 'error' && entry.state !== 'skipped') continue;
       autogenStates.set(liveKey(job), { state: 'waiting' });
       autogenRun.pending.push({ job, profileId, auto });
     }

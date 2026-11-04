@@ -4500,6 +4500,10 @@ textarea.js-input {
   border-color: #ef4444;
   color: #ef4444;
 }
+.js-q-gen.is-skipped {
+  color: var(--muted);
+  border-style: dashed;
+}
 .js-q-gen-all {
   padding: 3px 8px;
   white-space: nowrap;

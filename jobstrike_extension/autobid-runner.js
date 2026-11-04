@@ -746,9 +746,10 @@
         setStep('Waiting for generated resumes…');
         return;
       }
-      const { job } = await bid().autobidFetch('/api/autobid/next', { method: 'POST' });
+      // The server picks the freshest job and enforces the day's limit for every panel.
+      const { job, reason } = await bid().autobidFetch('/api/autobid/next', { method: 'POST' });
       if (!job) {
-        setStep('Waiting for generated resumes…');
+        setStep(reason || 'Waiting for generated resumes…');
         return;
       }
       const win = await chrome.windows.getCurrent().catch(() => null);
@@ -759,7 +760,7 @@
       const once = !dryRun && Boolean(isRunning() && wf.config?.once);
       logLine(`${dryRun ? 'Dry run' : once ? 'Test run (one job)' : 'Applying'}: ${job.company} · ${job.job_title} (#${job.id}).`);
       const outcome = await applyToJob(job, win?.id);
-      next = Math.max(5, Number(state.prefs.gapSeconds) || 30) * 1000;
+      next = outcome === 'submitted' ? gapAfterSubmitMs() : Math.max(5, Number(state.prefs.gapSeconds) || 30) * 1000;
       if (outcome === 'pause') {
         next = PAUSE_RETRY_MS;
         const at = new Date(Date.now() + next).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -801,6 +802,17 @@
       render();
       schedule(next);
     }
+  }
+
+  /**
+   * After a sent application, a pause picked at random in the setup's range
+   * (2–5 minutes by default): a person's pace, not 30 applications an hour.
+   */
+  function gapAfterSubmitMs() {
+    const min = Math.max(0, Number(wf.config?.gapMin ?? 2));
+    const max = Math.max(min, Number(wf.config?.gapMax ?? 5));
+    const minutes = min + Math.random() * (max - min);
+    return Math.max(5000, Math.round(minutes * 60 * 1000));
   }
 
   async function setEnabled(on) {
@@ -998,9 +1010,8 @@
     } catch (_) {
       /* the status columns are optional: only the duplicate check is skipped */
     }
-    if (otherPanelOpen()) {
-      return 'Another JobStrike panel is open (another Chrome profile or computer, e.g. the VPS) and would apply too. Close it, wait 2 minutes, then press Start.';
-    }
+    // Another open panel no longer blocks Start: the server hands each job to
+    // one panel only and counts the day's limit for all of them.
     return '';
   }
 
@@ -1048,6 +1059,7 @@
         everyMinutes: config.everyMinutes,
         hiringCafe: config.hiringCafe,
         jobright: config.jobright,
+        freshnessHours: config.freshnessHours,
       });
       state.prefs.submit = Boolean(config.submit);
       state.prefs.dailyLimit = config.dailyLimit;
@@ -1228,8 +1240,10 @@
       ],
       ['json2docx running', wf.json2docx, wf.json2docx === false ? 'Start it on this machine (start_server.bat)' : ''],
       ['AI answers custom questions', aiOn, aiOn ? '' : 'Settings → Autofill with AI, with an OpenAI key'],
-      ['Only this JobStrike panel is open', !otherPanelOpen(),
-        otherPanelOpen() ? 'Another panel (another Chrome profile or computer) reported in the last 2 minutes: close it' : ''],
+      ['Only this JobStrike panel is open', otherPanelOpen() ? null : true,
+        otherPanelOpen()
+          ? 'Another panel (another Chrome profile or computer) is open too. Safe: each job goes to one panel. But both read Jobright, which doubles its requests.'
+          : ''],
     ];
   }
 
