@@ -22,6 +22,10 @@ const SETUP_FIELDS = [
   "everyMinutes",
   "hiringCafe",
   "jobright",
+  "freshnessHours",
+  "ashby",
+  "gapMin",
+  "gapMax",
 ] as const satisfies ReadonlyArray<keyof AutobidConfig>;
 
 /**
@@ -102,7 +106,10 @@ export function AutobidControlPanel({
   const applied = appliedVersion !== null && appliedVersion >= config.version;
 
   /** A number field left: an emptied one goes back to the saved value. */
-  const changeNumber = (key: "dailyLimit" | "windows" | "everyMinutes", text: string) => {
+  const changeNumber = (
+    key: "dailyLimit" | "windows" | "everyMinutes" | "freshnessHours" | "gapMin" | "gapMax",
+    text: string,
+  ) => {
     if (text.trim() === "") {
       setDraft(({ [key]: _dropped, ...rest }) => rest);
       return;
@@ -230,15 +237,6 @@ export function AutobidControlPanel({
             onBlur={(e) => changeNumber("windows", e.target.value)}
           />
         </label>
-        <label className={cn(field, "sm:col-span-2")}>
-          Working hours on the VPS clock (empty = all day)
-          <Input
-            value={view.hours}
-            placeholder="10:00-20:30, 01:00-07:30"
-            onChange={(e) => setDraft((d) => ({ ...d, hours: e.target.value }))}
-            onBlur={(e) => change({ hours: e.target.value })}
-          />
-        </label>
         <label className={field}>
           Check HiringCafe every (minutes)
           <Input
@@ -251,6 +249,41 @@ export function AutobidControlPanel({
             onBlur={(e) => changeNumber("everyMinutes", e.target.value)}
           />
         </label>
+        <label className={field}>
+          HiringCafe: posted within (hours)
+          <Input
+            type="number"
+            min={LIMITS.freshnessHours[0]}
+            max={LIMITS.freshnessHours[1]}
+            value={view.freshnessHours}
+            onChange={(e) => setDraft((d) => ({ ...d, freshnessHours: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
+            onBlur={(e) => changeNumber("freshnessHours", e.target.value)}
+          />
+        </label>
+        <div className={field}>
+          Minutes between applications
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              aria-label="At least (minutes)"
+              min={LIMITS.gap[0]}
+              max={LIMITS.gap[1]}
+              value={view.gapMin}
+              onChange={(e) => setDraft((d) => ({ ...d, gapMin: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
+              onBlur={(e) => changeNumber("gapMin", e.target.value)}
+            />
+            <span className="text-foreground">–</span>
+            <Input
+              type="number"
+              aria-label="At most (minutes)"
+              min={LIMITS.gap[0]}
+              max={LIMITS.gap[1]}
+              value={view.gapMax}
+              onChange={(e) => setDraft((d) => ({ ...d, gapMax: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
+              onBlur={(e) => changeNumber("gapMax", e.target.value)}
+            />
+          </div>
+        </div>
         <div className={field}>
           Sources
           <div className="flex h-9 items-center gap-4 text-sm text-foreground">
@@ -264,6 +297,21 @@ export function AutobidControlPanel({
             </label>
           </div>
         </div>
+        <label className={cn(field, "sm:col-span-2")}>
+          Look for jobs only between (VPS clock; empty = all day)
+          <Input
+            value={view.hours}
+            placeholder="All day"
+            onChange={(e) => setDraft((d) => ({ ...d, hours: e.target.value }))}
+            onBlur={(e) => change({ hours: e.target.value })}
+          />
+        </label>
+        <label className={cn(field, "sm:col-span-2 justify-end")}>
+          <span className="flex h-9 items-center gap-1.5 text-sm text-foreground">
+            <input type="checkbox" checked={view.ashby} onChange={(e) => change({ ashby: e.target.checked })} />
+            Queue Ashby jobs too (filled, then left for you to press Submit)
+          </span>
+        </label>
       </div>
       {!running && Object.keys(draft).length > 0 && (
         <p className="text-xs text-muted-foreground">Changes are saved when you press Start.</p>

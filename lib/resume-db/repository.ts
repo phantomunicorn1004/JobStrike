@@ -574,6 +574,7 @@ export async function createApplication(
     cover_drive_file_id: input.coverDriveFileId ?? null,
     ...(input.jobDescription !== undefined && { job_description: input.jobDescription }),
     ...(input.generationStatus !== undefined && { generation_status: input.generationStatus }),
+    ...(input.postedAt !== undefined && { posted_at: input.postedAt }),
   };
 
   const atsPlatform = input.atsPlatform?.trim() || atsPlatformFromLink(input.jobLink);

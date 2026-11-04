@@ -14,6 +14,7 @@ export type AutobidStage =
   | "needs_you"
   | "failed"
   | "sent" // confirmed by the site, Register did not save it
+  | "expired" // not sent within 24 h of posting: no longer worth it
   | "registered";
 
 /** The page's tabs. */
@@ -28,6 +29,7 @@ export const STAGE_GROUP: Record<AutobidStage, AutobidGroup> = {
   needs_you: "attention",
   failed: "attention",
   sent: "attention",
+  expired: "done",
   registered: "done",
 };
 
@@ -103,6 +105,8 @@ export function stageOf(row: Pick<AutobidRowInput, "apply" | "generation_status"
       return "needs_you";
     case "failed":
       return "failed";
+    case "expired":
+      return "expired";
   }
   switch (row.generation_status) {
     case "generating":
@@ -166,6 +170,7 @@ export function toAutobidJob(row: AutobidRowInput): AutobidJob {
   if (stage === "gen_failed") reason = text(row.generation_error) || "Resume generation failed.";
   else if (stage === "needs_you" || stage === "failed") reason = text(row.bid_error) || "Stopped for you.";
   else if (stage === "sent") reason = "Sent and confirmed, but Register did not save it. Register it from the Bid tab.";
+  else if (stage === "expired") reason = text(row.bid_error) || "Not sent within 24 h of posting.";
 
   const times = [row.created_at, generatedAt, startedAt, finishedAt, registeredAt, log.at(-1)?.at]
     .map(iso)

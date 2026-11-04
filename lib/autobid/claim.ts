@@ -3,6 +3,7 @@ import "server-only";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { QUEUED_APPLY } from "@/lib/resume-db/types";
 import { toAutobidJob, type AutobidJob, type AutobidRowInput } from "@/lib/autobid/stages";
+import { freshCutoffIso } from "@/lib/autobid/queue-rules";
 
 /** A claim this old is abandoned (panel closed, crash): the row can be taken again. */
 export const BID_STALE_MS = 20 * 60 * 1000;
@@ -10,7 +11,7 @@ export const BID_STALE_MS = 20 * 60 * 1000;
 const TABLE = "resume_db_applications";
 const MISSING_COLUMNS = "Auto-bid columns are missing. Run scripts/add-autobid-to-resume-db.sql in Supabase.";
 
-export const BID_STATES = ["none", "bidding", "submitted", "needs_you", "failed"] as const;
+export const BID_STATES = ["none", "bidding", "submitted", "needs_you", "failed", "expired"] as const;
 export type BidState = (typeof BID_STATES)[number];
 /** What the runner reports when it is done with a row. */
 export type BidOutcome = "submitted" | "needs_you" | "failed";
@@ -127,9 +128,49 @@ async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
   return data ? toBidJob(data as BidRow) : null;
 }
 
-/** Claims the oldest ready row (then the oldest abandoned claim); null when there is none. */
+/**
+ * Rows Auto-bid queued (they carry the posting time) that were not sent within
+ * 24 hours of posting: no longer worth a resume or an application. A row being
+ * generated or applied to is never interrupted, and rows queued by hand (no
+ * posting time) never expire.
+ */
+export async function expireStaleQueued(userId: string): Promise<number> {
+  const { data, error } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .update({ bid_state: "expired", bid_error: "Not sent within 24 h of posting." } as never)
+    .eq("user_id", userId)
+    .eq("apply", QUEUED_APPLY)
+    .eq("bid_state", "none")
+    .in("generation_status", ["queue", "completed"])
+    .lt("posted_at", freshCutoffIso())
+    .select("id");
+  if (error) rethrow(error.message);
+  return (data ?? []).length;
+}
+
+/** Applications sent (and confirmed) since `sinceIso`. */
+export async function countSentSince(userId: string, sinceIso: string): Promise<number> {
+  const { count, error } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("bid_state", "submitted")
+    .gte("bid_meta->>finishedAt", sinceIso);
+  if (error) rethrow(error.message);
+  return count ?? 0;
+}
+
+/**
+ * Claims the freshest ready row (newest posting first; rows queued by hand,
+ * which have no posting time, after them, newest first), then the oldest
+ * abandoned claim; null when there is none.
+ */
 export async function claimNextBid(userId: string): Promise<BidJob | null> {
-  const { data: ready, error } = await readyRows(userId).order("id", { ascending: true }).limit(10);
+  await expireStaleQueued(userId);
+  const { data: ready, error } = await readyRows(userId)
+    .order("posted_at", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: false })
+    .limit(10);
   if (error) rethrow(error.message);
   const { data: stale, error: staleError } = await getSupabaseAdminClient()
     .from(TABLE)
@@ -298,7 +339,7 @@ export type BidSummary = {
 /** For the runner's card: how many are waiting, sent since `sinceIso`, and what needs the user. */
 export async function bidSummary(userId: string, sinceIso: string): Promise<BidSummary> {
   const supabase = getSupabaseAdminClient();
-  const [ready, submitted, needs] = await Promise.all([
+  const [ready, submittedSince, needs] = await Promise.all([
     getSupabaseAdminClient()
       .from(TABLE)
       .select("id", { count: "exact", head: true })
@@ -306,12 +347,7 @@ export async function bidSummary(userId: string, sinceIso: string): Promise<BidS
       .eq("generation_status", "completed")
       .eq("apply", QUEUED_APPLY)
       .eq("bid_state", "none"),
-    supabase
-      .from(TABLE)
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("bid_state", "submitted")
-      .gte("bid_meta->>finishedAt", sinceIso),
+    countSentSince(userId, sinceIso),
     supabase
       .from(TABLE)
       .select("id, candidate_name, job_title, company, job_link, bid_error")
@@ -321,10 +357,10 @@ export async function bidSummary(userId: string, sinceIso: string): Promise<BidS
       .order("id", { ascending: false })
       .limit(50),
   ]);
-  for (const result of [ready, submitted, needs]) if (result.error) rethrow(result.error.message);
+  for (const result of [ready, needs]) if (result.error) rethrow(result.error.message);
   return {
     ready: ready.count ?? 0,
-    submittedSince: submitted.count ?? 0,
+    submittedSince,
     needsYou: ((needs.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
       id: Number(row.id),
       candidate: String(row.candidate_name ?? ""),

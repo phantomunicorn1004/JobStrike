@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { AutobidControlPanel } from "@/components/autobid/AutobidControlPanel";
+import { FoundJobsList } from "@/components/autobid/FoundJobsList";
 import {
   RunnerStatusPanel,
   type AutobidReport,
@@ -34,13 +35,14 @@ const REFRESH_MS = 20_000;
 /** Matches the server's BID_STALE_MS: past this, the runner's claim can be taken again. */
 const STALE_MS = 20 * 60 * 1000;
 
-type View = AutobidGroup | "all";
+type View = AutobidGroup | "all" | "found";
 
 const VIEW_LABEL: Record<View, string> = {
   active: "In progress",
   attention: "Needs you",
-  done: "Registered",
+  done: "Done",
   all: "All",
+  found: "Found (24 h)",
 };
 
 const STAGE_LABEL: Record<AutobidStage, string> = {
@@ -52,6 +54,7 @@ const STAGE_LABEL: Record<AutobidStage, string> = {
   needs_you: "Needs you",
   failed: "Failed",
   sent: "Sent · not registered",
+  expired: "Expired · too old",
   registered: "Registered",
 };
 
@@ -64,6 +67,7 @@ const STAGE_STYLE: Record<AutobidStage, string> = {
   needs_you: "text-amber-700 dark:text-amber-400",
   failed: "text-rose-600 dark:text-rose-400",
   sent: "text-amber-700 dark:text-amber-400",
+  expired: "text-muted-foreground",
   registered: "text-emerald-700 dark:text-emerald-400",
 };
 
@@ -378,7 +382,7 @@ export function AutobidMonitorClient() {
         <TabsList>
           {(Object.keys(VIEW_LABEL) as View[]).map((key) => (
             <TabsTrigger key={key} value={key}>
-              {VIEW_LABEL[key]} ({counts[key]})
+              {key === "found" ? VIEW_LABEL[key] : `${VIEW_LABEL[key]} (${counts[key]})`}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -389,7 +393,9 @@ export function AutobidMonitorClient() {
           {error}
         </p>
       )}
-      {jobs === null && !error ? (
+      {view === "found" ? (
+        <FoundJobsList refreshKey={loadedAt} />
+      ) : jobs === null && !error ? (
         <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading…
         </div>

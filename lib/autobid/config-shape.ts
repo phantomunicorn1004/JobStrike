@@ -18,12 +18,19 @@ export type AutobidConfig = {
   dailyLimit: number;
   /** ChatGPT windows AutoGen keeps generating in. */
   windows: number;
-  /** Live's working hours, e.g. "10:00-20:30, 01:00-07:30"; empty = always. */
+  /** Live's working hours, e.g. "10:00-20:30, 01:00-07:30"; empty = all day (the default). */
   hours: string;
   /** Minutes between HiringCafe checks. */
   everyMinutes: number;
   hiringCafe: boolean;
   jobright: boolean;
+  /** HiringCafe: only jobs posted within this many hours (Jobright dates by day: 1 day). */
+  freshnessHours: number;
+  /** Queue Ashby jobs too: they are filled and left for your click (Ashby drops an automated Submit). */
+  ashby: boolean;
+  /** Minutes between two applications, picked at random in this range: a person's pace. */
+  gapMin: number;
+  gapMax: number;
   /** Raised by the server on every save; the panel applies a version once. */
   version: number;
   updatedAt: string | null;
@@ -40,10 +47,14 @@ export const DEFAULT_AUTOBID_CONFIG: AutobidConfig = {
   once: false,
   dailyLimit: 25,
   windows: 2,
-  hours: "10:00-20:30, 01:00-07:30",
-  everyMinutes: 30,
+  hours: "",
+  everyMinutes: 15,
   hiringCafe: true,
   jobright: true,
+  freshnessHours: 3,
+  ashby: false,
+  gapMin: 2,
+  gapMax: 5,
   version: 0,
   updatedAt: null,
   updatedBy: "",
@@ -54,6 +65,8 @@ export const LIMITS = {
   dailyLimit: [1, 200],
   windows: [1, 6],
   everyMinutes: [15, 120],
+  freshnessHours: [1, 24],
+  gap: [0, 30],
 } as const;
 
 function clampInt(value: unknown, [min, max]: readonly [number, number], fallback: number): number {
@@ -97,6 +110,13 @@ export function mergeAutobidConfig(
   if ("everyMinutes" in edit) next.everyMinutes = clampInt(edit.everyMinutes, LIMITS.everyMinutes, current.everyMinutes);
   if ("hiringCafe" in edit) next.hiringCafe = Boolean(edit.hiringCafe);
   if ("jobright" in edit) next.jobright = Boolean(edit.jobright);
+  if ("freshnessHours" in edit) {
+    next.freshnessHours = clampInt(edit.freshnessHours, LIMITS.freshnessHours, current.freshnessHours);
+  }
+  if ("ashby" in edit) next.ashby = Boolean(edit.ashby);
+  if ("gapMin" in edit) next.gapMin = clampInt(edit.gapMin, LIMITS.gap, current.gapMin);
+  if ("gapMax" in edit) next.gapMax = clampInt(edit.gapMax, LIMITS.gap, current.gapMax);
+  if (next.gapMax < next.gapMin) next.gapMax = next.gapMin;
   if ("note" in edit) next.note = String(edit.note ?? "").slice(0, 300);
   if ("hours" in edit) {
     const hours = String(edit.hours ?? "").trim();

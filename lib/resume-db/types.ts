@@ -60,6 +60,8 @@ export type ResumeDbApplicationInput = {
   /** Written only when given (needs scripts/add-autogen-to-resume-db.sql). */
   jobDescription?: string;
   generationStatus?: GenerationStatus;
+  /** When the job was posted, for Auto-bid's newest-first order (needs scripts/add-autobid-candidates.sql). */
+  postedAt?: string | null;
 };
 
 export type ResumeDbJobExport = {

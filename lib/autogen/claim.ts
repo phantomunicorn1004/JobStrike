@@ -1,5 +1,6 @@
 import "server-only";
 
+import { expireStaleQueued } from "@/lib/autobid/claim";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { mapApplicationRow } from "@/lib/resume-db/repository";
 import type { ResumeDbApplication } from "@/lib/resume-db/types";
@@ -95,15 +96,23 @@ export async function tryClaimApplication(userId: string, applicationId: number)
   return { ok: true, application: mapApplicationRow(data as Record<string, unknown>) };
 }
 
-/** Claims the oldest queued row, else the oldest abandoned claim; null when there is none. */
+/**
+ * Claims the freshest queued row (newest posting first; rows queued by hand,
+ * which have no posting time, after them, newest first), else the oldest
+ * abandoned claim; null when there is none. Rows past Auto-bid's 24 hours are
+ * expired first, so no resume is written for them.
+ */
 export async function claimNextApplication(userId: string): Promise<ResumeDbApplication | null> {
   const supabase = getSupabaseAdminClient();
+  await expireStaleQueued(userId);
   const { data: queued, error } = await supabase
     .from(TABLE)
     .select("id")
     .eq("user_id", userId)
     .eq("generation_status", "queue")
-    .order("id", { ascending: true })
+    .eq("bid_state", "none")
+    .order("posted_at", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: false })
     .limit(20);
   if (error) rethrow(error.message);
 
