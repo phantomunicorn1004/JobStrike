@@ -466,6 +466,61 @@
       .slice(0, 80);
   }
 
+  /** The field's whole question, for matching (rowLabel is cut to 80 characters). */
+  function rowText(row) {
+    const field = row?.field || {};
+    return [field.questionText, field.labelText].filter(Boolean).join(' ').replace(/\s+/g, ' ');
+  }
+
+  /** "I confirm that I am a real human being and not an automated bot…" */
+  const BOT_CHECK_RE =
+    /\b(real human|human being|i am not a (?:bot|robot)|not (?:an? )?(?:automated|bot|robot)\b|not (?:using|submitted by) (?:an? )?(?:automated|ai|bot))/i;
+  const BOT_CHECK_STOP =
+    'This company asks you to confirm you are a person, not an automated tool, so Auto-bid does not apply here. Apply by hand if you want this job.';
+
+  /**
+   * Every field of the form as Autofill planned and filled it: what was
+   * entered, where the value came from, and how filling went. Saved with the
+   * job's result and shown on the website's Auto-bid page.
+   */
+  function fieldReport() {
+    return currentPlan.map((row) => {
+      const field = row.field || {};
+      const value = String(row.suggestedValue ?? '').replace(/\s+/g, ' ').trim();
+      const entry = {
+        label: rowLabel(row),
+        type: String(field.fieldType || ''),
+        category: String(field.fieldCategory || ''),
+        required: Boolean(field.required),
+        source: String(row.source || ''),
+        value: value.slice(0, 120),
+        outcome: String(row.fillOutcome || ''),
+        status: String(row.status || '').slice(0, 120),
+        error: String(row.fillError || '').slice(0, 200),
+      };
+      const options = Array.isArray(field.options) ? field.options : [];
+      if (options.length && row.fillOutcome !== 'filled') {
+        // A dropdown that did not take the value: its first options show why.
+        entry.optionCount = options.length;
+        entry.options = options.slice(0, 8).map((o) => String(o?.text ?? o?.label ?? o ?? '').slice(0, 60));
+      }
+      return entry;
+    });
+  }
+
+  /** Fields Autofill counted as filled but that are empty on the page. */
+  function markEmptyOnPage(report, labels) {
+    if (!Array.isArray(report)) return;
+    for (const label of labels) {
+      const key = String(label || '').slice(0, 40).toLowerCase();
+      const entry = report.find((e) => e.label.toLowerCase().startsWith(key) || key.startsWith(e.label.slice(0, 40).toLowerCase()));
+      if (entry) {
+        entry.outcome = 'empty on page';
+        entry.error = entry.error || 'Counted as filled, but the page shows it empty (no option was chosen).';
+      }
+    }
+  }
+
   // ───────────────────────────── One job ─────────────────────────────
 
   class Stop extends Error {
@@ -568,6 +623,18 @@
       if (!currentFields.length) {
         throw new Stop('needs_you', 'No application form found on the page (it may need a login or an Apply click).', meta);
       }
+      meta.fieldReport = fieldReport();
+      // A form that asks the applicant to confirm they are a person, not an
+      // automated tool: answering it would be untrue, so Auto-bid stops here.
+      const botCheck = currentPlan.find((row) => BOT_CHECK_RE.test(rowText(row)));
+      if (botCheck) {
+        meta.botCheck = rowLabel(botCheck);
+        throw new Stop(
+          'needs_you',
+          `${BOT_CHECK_STOP} ("${rowLabel(botCheck)}")`,
+          meta
+        );
+      }
       const open = currentPlan.filter((row) => row.field?.required && row.fillOutcome !== 'filled');
       meta.fields = currentPlan.length;
       meta.filled = currentPlan.filter((row) => row.fillOutcome === 'filled').length;
@@ -584,6 +651,7 @@
       const emptyOnPage = await emptyRequiredOnPage(tabId);
       if (emptyOnPage.length) {
         meta.openFields = emptyOnPage;
+        markEmptyOnPage(meta.fieldReport, emptyOnPage);
         throw new Stop('needs_you', notFilled(emptyOnPage), meta);
       }
 

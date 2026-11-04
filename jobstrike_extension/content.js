@@ -7571,9 +7571,13 @@
   }
 
   function bestOptionMatch(options, value, category) {
+    // A state stored as "FL" must find "Florida" (and the other way round).
+    const state = category === 'state' ? usStateForms(value) : null;
     const candidates = isDemographicCategory(category)
       ? getDemographicCandidates(category, value)
-      : [String(value || '').trim()];
+      : state
+        ? [state.name.replace(/\b[a-z]/g, (c) => c.toUpperCase()), state.abbr.toUpperCase()]
+        : [String(value || '').trim()];
     let best = null;
     let bestScore = 0;
     let matchedTarget = candidates[0] || '';
@@ -7741,7 +7745,63 @@
     return { success: true, best, target };
   }
 
+  /** Greenhouse's phone field has its own "Country" picker (the dialling code); the form requires it. */
+  function isGreenhousePhoneCountry(el) {
+    return Boolean(
+      el && el.tagName === 'INPUT' &&
+      (el.getAttribute('role') || '').toLowerCase() === 'combobox' &&
+      el.closest('.phone-input__country, fieldset.phone-input')
+    );
+  }
+
+  const US_COUNTRY_NAMES = /^(united states|united states of america|usa|us|u s|u s a)$/;
+
+  /**
+   * Types the country into the picker's filter, then picks the country itself:
+   * "United States +1", never "United States Minor Outlying Islands". Checks
+   * the form kept the choice, since a typed name without a pick is empty to it.
+   */
+  async function fillGreenhousePhoneCountry(el, value) {
+    let country = coerceSingleProfileValue(value) || '';
+    // A dialling code or nothing: the candidate is in the US (the profile's phone is a US number).
+    if (!/[a-z]/i.test(country)) country = 'United States';
+    const want = normalizeText(country);
+    const isUs = US_COUNTRY_NAMES.test(want);
+    primeAutocompleteInput(el);
+    await typeIntoComboboxFilter(el, isUs ? 'United States' : country);
+    const found = await waitForReactSelectLocationOptions(el, 3000);
+    const items = found.items || [];
+    const nameOf = (item) => normalizeText(item.textContent || '').replace(/\s*\d+$/, '').trim();
+    const score = (item) => {
+      const name = nameOf(item);
+      if (name === want || (isUs && US_COUNTRY_NAMES.test(name))) return 1;
+      return optionScore(name, country) * 0.9;
+    };
+    let best = null;
+    let bestScore = 0;
+    for (const item of items) {
+      const sc = score(item);
+      if (sc > bestScore) {
+        best = item;
+        bestScore = sc;
+      }
+    }
+    if (!best || bestScore < 0.75) {
+      closeComboboxMenu(el);
+      const seen = items.slice(0, 3).map((item) => trim(item.textContent || '')).join(', ');
+      return { success: false, error: `"${country}" not found in the phone country list${seen ? ` (showed: ${seen}…)` : ''}.` };
+    }
+    dispatchPointerSequence(best);
+    try { best.click(); } catch (_) {}
+    await delay(150);
+    if (!verifyGreenhouseLocationSelection(el)) {
+      return { success: false, error: `Picked "${trim(best.textContent || '')}", but the form did not keep it.` };
+    }
+    return { success: true };
+  }
+
   async function fillCombobox(el, value, threshold, fieldCategory) {
+    if (isGreenhousePhoneCountry(el)) return fillGreenhousePhoneCountry(el, value);
     const pickValue = coerceSingleProfileValue(value);
     if (!pickValue) return { success: false, error: 'No value to fill into combobox.' };
 
