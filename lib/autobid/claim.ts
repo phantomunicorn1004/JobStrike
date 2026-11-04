@@ -5,6 +5,7 @@ import { QUEUED_APPLY } from "@/lib/resume-db/types";
 import { toAutobidJob, type AutobidJob, type AutobidRowInput } from "@/lib/autobid/stages";
 import { freshCutoffIso } from "@/lib/autobid/queue-rules";
 import { jobAnswers, type JobAnswers } from "@/lib/autobid/job-answers";
+import { livesInUs, nonUsLocation } from "@/lib/autobid/screen";
 
 /** A claim this old is abandoned (panel closed, crash): the row can be taken again. */
 export const BID_STALE_MS = 20 * 60 * 1000;
@@ -90,17 +91,44 @@ function readyRows(userId: string) {
  * Compare-and-swap: a ready row, or a bidding row whose claim went stale,
  * becomes bidding with a fresh claim. Two runners can never both win.
  */
+/** Marks a ready row open only outside the U.S. as not applied; true when it did. */
+async function setAsideAbroad(userId: string, id: number, profileId: number | null, jobDescription: string): Promise<boolean> {
+  const abroad = nonUsLocation(jobDescription);
+  if (!abroad) return false;
+  const supabase = getSupabaseAdminClient();
+  if (profileId) {
+    const { data } = await supabase.from("profiles").select("autofill").eq("id", profileId).maybeSingle();
+    const autofill = ((data as { autofill?: Record<string, unknown> } | null)?.autofill ?? {}) as Record<string, string>;
+    if (!livesInUs(autofill)) return false;
+  }
+  const { error } = await supabase
+    .from(TABLE)
+    .update({ bid_state: "expired", bid_error: `Not applied: the posting is open only outside the U.S. (${abroad}).` } as never)
+    .eq("id", id)
+    .eq("user_id", userId)
+    .eq("bid_state", "none");
+  if (error) rethrow(error.message);
+  return true;
+}
+
 async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
   const supabase = getSupabaseAdminClient();
   const { data: current, error: readError } = await supabase
     .from(TABLE)
-    .select("id, bid_state, bid_claimed_at, generation_status, apply")
+    .select("id, profile_id, bid_state, bid_claimed_at, generation_status, apply, job_description")
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
   if (readError) rethrow(readError.message);
   const row = current as
-    | { bid_state: string; bid_claimed_at: string | null; generation_status: string; apply: string }
+    | {
+        profile_id: number | null;
+        bid_state: string;
+        bid_claimed_at: string | null;
+        generation_status: string;
+        apply: string;
+        job_description: string | null;
+      }
     | null;
   if (!row || row.generation_status !== "completed" || row.apply !== QUEUED_APPLY) return null;
   const ready = row.bid_state === "none";
@@ -108,6 +136,9 @@ async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
     row.bid_state === "bidding" &&
     (!row.bid_claimed_at || Date.now() - new Date(row.bid_claimed_at).getTime() >= BID_STALE_MS);
   if (!ready && !abandoned) return null;
+  // A job queued again by hand skipped the screen Live's jobs get: one open only
+  // outside the U.S. is not applied for a candidate in the U.S.
+  if (ready && (await setAsideAbroad(userId, id, row.profile_id, row.job_description ?? ""))) return null;
 
   const now = new Date().toISOString();
   let update = supabase

@@ -157,15 +157,27 @@
         const dates = [trim(role.start_date), trim(role.end_date || (role.is_current ? 'Present' : ''))]
           .filter(Boolean)
           .join(' – ');
-        const bullets = (role.role_bullets || role.bullets || [])
+        const bullets = (Array.isArray(role.role_bullets) ? role.role_bullets : Array.isArray(role.bullets) ? role.bullets : [])
           .map((b) => trim(b))
           .filter(Boolean)
-          .slice(0, 6);
+          .slice(0, 8);
         const lines = [header + (dates ? ` (${dates})` : '')];
+        if (trim(role.role_summary)) lines.push(`  ${trim(role.role_summary)}`);
+        if (trim(role.technologies)) lines.push(`  Technologies: ${trim(role.technologies)}`);
         if (bullets.length) lines.push(...bullets.map((b) => `  - ${b}`));
         return lines.join('\n');
       })
       .join('\n\n');
+  }
+
+  /** The resume's summary, competencies and skills, above its roles. */
+  function summarizeResumeOverview(kit) {
+    const o = kit?.overview || {};
+    return [
+      trim(o.summary) ? `Summary: ${trim(o.summary)}` : '',
+      trim(o.competencies) ? `Core competencies: ${trim(o.competencies)}` : '',
+      trim(o.skills) ? `Skills: ${trim(o.skills)}` : '',
+    ].filter(Boolean).join('\n');
   }
 
   function summarizeCustomQuestions(questions, limit) {
@@ -240,7 +252,9 @@
     push('How they heard about the job', p.howDidYouHear);
     const extraFacts = trim(p.extraFacts);
 
-    const work = summarizeWorkExperience(kit);
+    const overview = summarizeResumeOverview(kit);
+    const roles = summarizeWorkExperience(kit);
+    const work = [overview, roles].filter(Boolean).join('\n\n');
     const experienceLabel = trim(kit?.sourceLabel) || 'Work experience';
     const custom = summarizeCustomQuestions(questions);
     const job = jobInfo || {};

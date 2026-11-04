@@ -74,6 +74,38 @@
    * @param {object} data
    * @returns {Array<{role_title:string,employer_name:string,role_bullets:string[],start_date:string,end_date:string,is_current:boolean}>}
    */
+  /** Keys matching `pattern`, in their number order (bullet_2 before bullet_10). */
+  function numberedKeys(obj, pattern) {
+    const num = (k) => Number((k.match(/\d+/) || ['0'])[0]);
+    return Object.keys(obj || {}).filter((k) => pattern.test(k)).sort((a, b) => num(a) - num(b));
+  }
+
+  /**
+   * The resume's own overview for AI answers: summary, core competencies and
+   * skills, as the generated resume for this job states them.
+   * @returns {{ summary: string, competencies: string, skills: string }}
+   */
+  function extractResumeOverviewForAi(data) {
+    const summary = extractTextField(data?.summary);
+    const competencies = extractTextField(data?.core_competencies);
+    const stack = data?.technology_stack;
+    let skills = '';
+    if (stack && typeof stack === 'object') {
+      skills = numberedKeys(stack, /^skill_group_\d+$/i)
+        .map((k) => {
+          const n = (k.match(/\d+/) || [''])[0];
+          const group = extractTextField(stack[k]);
+          const items = extractTextField(stack[`skill_items_${n}`]);
+          return items ? (group ? `${group}: ${items}` : items) : '';
+        })
+        .filter(Boolean)
+        .join('; ');
+    } else if (typeof stack === 'string') {
+      skills = trim(stack);
+    }
+    return { summary, competencies, skills };
+  }
+
   function extractWorkExperienceForAi(data) {
     const we = data?.work_experience;
     if (!we || typeof we !== 'object') return [];
@@ -112,15 +144,25 @@
           .split(/\n+/)
           .map((b) => trim(b).replace(/^[-•*]\s*/, ''))
           .filter(Boolean);
+      } else if (rawBullets && typeof rawBullets === 'object') {
+        // The generated resume: { bullet_1: { text }, bullet_2: { text }, ... }.
+        bullets = numberedKeys(rawBullets, /^bullet_?\d*$/i).map((k) => extractTextField(rawBullets[k])).filter(Boolean);
       }
+      // "role_summary_1", "technologies_1", "extra_role_title" (the role's focus).
+      const summary = numberedKeys(exp, /^role_summary(?:_\d+)?$/i).map((k) => extractTextField(exp[k])).filter(Boolean).join(' ');
+      const technologies = numberedKeys(exp, /^technologies(?:_\d+)?$/i).map((k) => extractTextField(exp[k])).filter(Boolean).join(', ');
+      const focus = extractTextField(exp.extra_role_title);
 
       if (!title && !company && !bullets.length) continue;
 
-      const displayTitle = title && company ? `${title} at ${company}` : title || company;
+      const titled = focus && title ? `${title} (${focus})` : title;
+      const displayTitle = titled && company ? `${titled} at ${company}` : titled || company;
       roles.push({
         role_title: displayTitle,
         employer_name: company,
-        role_bullets: bullets.slice(0, 6),
+        role_summary: summary,
+        technologies,
+        role_bullets: bullets.slice(0, 8),
         start_date: extractTextField(exp.start_date) || extractTextField(exp.startDate),
         end_date: extractTextField(exp.end_date) || extractTextField(exp.endDate),
         is_current: Boolean(exp.is_current || exp.isCurrent),
@@ -311,5 +353,6 @@
     mergeRegisterDraftFromResumeJson,
     validateRegisterDraft,
     extractWorkExperienceForAi,
+    extractResumeOverviewForAi,
   };
 });

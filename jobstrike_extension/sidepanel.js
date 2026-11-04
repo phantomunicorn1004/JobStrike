@@ -4502,7 +4502,8 @@ function resolveAiExperienceKit() {
         if (roles.length) {
           return {
             workExperience: roles,
-            sourceLabel: 'Work experience (built resume JSON)'
+            overview: mapper.extractResumeOverviewForAi ? mapper.extractResumeOverviewForAi(parsed.data) : null,
+            sourceLabel: "Work experience (this job's generated resume)"
           };
         }
       }

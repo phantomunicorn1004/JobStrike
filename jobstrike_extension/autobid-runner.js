@@ -395,6 +395,13 @@
     /thank(s| you)( so much)? for (applying|your application|submitting|your interest)|application (has been |was )?(successfully )?(submitted|received|sent|complete)|we('ve| have) received your application|successfully (applied|submitted)|you('ve| have) (successfully )?applied|submission (received|successful)/i;
   const CONFIRM_PATH_RE = /\/(confirmation|thanks|thank-you|thank_you|submitted|success)(\/|$)/i;
   /** A refusal of the whole application (not one field): it was not sent. */
+  /**
+   * Greenhouse's "A verification code was sent to … enter the 8-character code to
+   * confirm you're a human": a person check, so Auto-bid leaves it to the user.
+   */
+  const VERIFY_CODE_RE =
+    /\b(verification code (?:was|has been) sent|enter the \d+-character code|security code)\b/i;
+
   const SPAM_TEXT_RE =
     /flagged as (possible |potential )?spam|possible spam|suspicious activity|unusual activity|automated (submission|traffic|activity)|verify (that )?you('re| are) (a )?human|bot detected/i;
   const FAILURE_TEXT_RE =
@@ -438,6 +445,7 @@
     const base = { newText, errors: after.errors || [] };
     if (after.navigating) return { ...base, verdict: 'wait' };
     if (SPAM_TEXT_RE.test(text)) return { ...base, verdict: 'spam' };
+    if (VERIFY_CODE_RE.test(text)) return { ...base, verdict: 'verify' };
     if (after.captcha) return { ...base, verdict: 'captcha' };
     const urlChanged = (after.hrefs || []).join('|') !== (before.hrefs || []).join('|');
     if (urlChanged && (after.hrefs || []).some((href) => CONFIRM_PATH_RE.test(pathOf(href)))) {
@@ -736,6 +744,14 @@
         confirmPolls = 0;
         if (judged.verdict === 'spam') {
           throw new Stop('needs_you', `The site refused the application as possible spam, so it was most likely not sent.${shown}`, meta);
+        }
+        if (judged.verdict === 'verify') {
+          toast(`${job.company}: enter the emailed verification code in its tab to finish the application.`, 'error');
+          throw new Stop(
+            'needs_you',
+            `Not sent yet: the site emailed a verification code to confirm a person is applying.${shown} Enter the code from the mailbox in the open tab (it expires), press Submit, then Register.`,
+            meta
+          );
         }
         if (judged.verdict === 'captcha') {
           throw new Stop('needs_you', 'A CAPTCHA appeared after Submit. Solve it in the tab, submit, then Register.', meta);

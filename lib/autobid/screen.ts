@@ -114,7 +114,7 @@ export function nonUsLocation(jobDescription: string): string {
   return NON_US_PLACE_RE.test(location) ? location.slice(0, 80) : "";
 }
 
-function livesInUs(profile: ScreenOptions["profile"]): boolean {
+export function livesInUs(profile: ScreenOptions["profile"]): boolean {
   const country = String(profile.country || "").trim();
   return !country || /^(us|usa|u\.s\.a?\.?|united states(?: of america)?|america)$/i.test(country);
 }
