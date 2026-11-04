@@ -30,7 +30,8 @@
   /** A problem with this machine (json2docx down, signed out): wait this long, then try again. */
   const PAUSE_RETRY_MS = 5 * 60 * 1000;
   /** Needs-you tabs kept open for the user; older ones are closed (the job stays listed). */
-  const MAX_TABS_LEFT_OPEN = 8;
+  const MAX_TABS_LEFT_OPEN = 6;
+  const MAX_PERSON_TABS_OPEN = 12;
   /** Sites Auto-bid presses Submit on. Others are filled and left for the user. */
   const SUBMIT_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com)$/i;
   /**
@@ -57,6 +58,10 @@
     stepPost: Promise.resolve(),
     lastDetail: '', // why the last job stopped, for the one-job notes
     tabsLeftOpen: [],
+    /** Tabs waiting for the user to finish a person check (code, CAPTCHA, Ashby's Submit). */
+    personTabs: [],
+    /** Whether the last job's Submit was pressed, sent or not: the gap after it applies either way. */
+    lastSubmitClicked: false,
   };
 
   const bid = () => window.SmartJobRegisterResumeDb;
@@ -642,7 +647,15 @@
       }
       checkStop();
 
-      if (!currentFields.length) {
+      // Fields the form shows only after an answer (Lever's disability
+      // signature, Greenhouse's race question): scanned and filled in a second pass.
+      if (currentFields.length && typeof fillFieldsShownAfterFill === 'function') {
+        const shown = await fillFieldsShownAfterFill();
+        if (shown) meta.shownAfterFill = shown;
+        checkStop();
+      }
+      const formFound = typeof scanFoundApplicationForm === 'function' ? scanFoundApplicationForm() : currentFields.length > 0;
+      if (!formFound) {
         // The scan's own error, when it had one, says more than "no form".
         const why = typeof lastAutofillError === 'string' && lastAutofillError ? ` Scan: ${lastAutofillError.slice(0, 160)}` : '';
         throw new Stop('needs_you', `No application form found on the page (it may need a login or an Apply click).${why}`, meta);
@@ -793,8 +806,10 @@
         logLine(`Sent #${job.id}, but Register failed: ${error?.message || error}. Register it from Resume DB / the Bid tab.`);
       }
       await chrome.tabs.remove(tabId).catch(() => {});
+      state.lastSubmitClicked = true;
       return 'submitted';
     } catch (error) {
+      state.lastSubmitClicked = submitClicked;
       const stop =
         error instanceof Stop
           ? error
@@ -822,16 +837,27 @@
       await finish(job, stop.outcome, detail, { ...meta, ...stop.meta, submitClicked: submitClicked || undefined });
       logLine(`Needs you — ${job.company} · ${job.job_title} (#${job.id}): ${detail}`);
       // Left open for the user (a failed one too: it shows what happened).
-      if (tabId) keepTabOpen(tabId);
+      if (tabId) keepTabOpen(tabId, PERSON_CHECK_RE.test(detail));
       return stop.outcome;
     }
   }
 
-  /** Running all day, stopped jobs would fill the window: only the newest few stay open. */
-  function keepTabOpen(tabId) {
-    state.tabsLeftOpen = [...state.tabsLeftOpen.filter((id) => id !== tabId), tabId];
-    while (state.tabsLeftOpen.length > MAX_TABS_LEFT_OPEN) {
-      chrome.tabs.remove(state.tabsLeftOpen.shift()).catch(() => {});
+  /** A stop the user finishes in the tab: a code to enter, a CAPTCHA, Ashby's Submit. */
+  const PERSON_CHECK_RE = /verification code|CAPTCHA|Ready for your click/i;
+
+  /**
+   * Running all day, stopped jobs would fill the window: only the newest few
+   * stay open. Tabs waiting for a person check are kept apart and longer: the
+   * code or CAPTCHA can only be finished there.
+   */
+  function keepTabOpen(tabId, person = false) {
+    const list = person ? 'personTabs' : 'tabsLeftOpen';
+    const other = person ? 'tabsLeftOpen' : 'personTabs';
+    state[other] = state[other].filter((id) => id !== tabId);
+    state[list] = [...state[list].filter((id) => id !== tabId), tabId];
+    const limit = person ? MAX_PERSON_TABS_OPEN : MAX_TABS_LEFT_OPEN;
+    while (state[list].length > limit) {
+      chrome.tabs.remove(state[list].shift()).catch(() => {});
     }
   }
 
@@ -872,7 +898,11 @@
       const once = !dryRun && Boolean(isRunning() && wf.config?.once);
       logLine(`${dryRun ? 'Dry run' : once ? 'Test run (one job)' : 'Applying'}: ${job.company} · ${job.job_title} (#${job.id}).`);
       const outcome = await applyToJob(job, win?.id);
-      next = outcome === 'submitted' ? gapAfterSubmitMs() : Math.max(5, Number(state.prefs.gapSeconds) || 30) * 1000;
+      // The gap follows every pressed Submit, sent or not: six Submits in
+      // fourteen minutes had Greenhouse asking for an emailed code each time.
+      next = outcome === 'submitted' || state.lastSubmitClicked
+        ? gapAfterSubmitMs()
+        : Math.max(5, Number(state.prefs.gapSeconds) || 30) * 1000;
       if (outcome === 'pause') {
         next = PAUSE_RETRY_MS;
         const at = new Date(Date.now() + next).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

@@ -3513,9 +3513,20 @@ async function scanCurrentPage({ silent = false } = {}) {
   }
 }
 
-/** How long Autofill waits for a late-loading form: 6 tries, 1.5 s apart. */
-const FORM_LOAD_RETRIES = 6;
+/** How long Autofill waits for a late-loading form: 10 tries, 1.5 s apart. */
+const FORM_LOAD_RETRIES = 10;
 const FORM_LOAD_RETRY_MS = 1500;
+
+/**
+ * The scan found the application form, not a stray field seen before it
+ * loaded (a careers page's search box, a newsletter sign-up): three fields
+ * or more, or one of the fields every form has.
+ */
+function scanFoundApplicationForm() {
+  if (!currentFields.length) return false;
+  if (currentFields.length >= 3) return true;
+  return currentFields.some((f) => /^(email|first_name|last_name|full_name|phone|resume_upload)$/.test(f.fieldCategory || ''));
+}
 
 /** The tab generation an Autofill run started on (null when none is running). */
 let autofillRunToken = null;
@@ -3572,7 +3583,7 @@ async function autofillThisPage({ useAi = false } = {}) {
     let scanResponse = await scanCurrentPage({ silent: true });
     // Some boards fetch the form after the page loads (Ashby shows "Fetching
     // application form" for several seconds). Give it time before giving up.
-    for (let attempt = 0; attempt < FORM_LOAD_RETRIES && !currentFields.length; attempt += 1) {
+    for (let attempt = 0; attempt < FORM_LOAD_RETRIES && !scanFoundApplicationForm(); attempt += 1) {
       if (autofillTabChanged(runToken)) break;
       showStatus('Waiting for the application form to load…', 'info', 0);
       await delay(FORM_LOAD_RETRY_MS);
@@ -5447,7 +5458,45 @@ async function refillFromOptions(row, rowEl, thresholds, runToken) {
   return result;
 }
 
-async function fillSelectedFieldsWithAi() {
+/**
+ * Fields a form shows only after an answer are not on the page at scan time:
+ * Lever's disability signature (Name, Date) once Disability is answered,
+ * Greenhouse's race question after Hispanic/Latino. Scans again, keeps every
+ * row already done, and fills only the rows that are new. Returns their count.
+ */
+async function fillFieldsShownAfterFill() {
+  const keyOf = (field) => field?.elementPath || field?.id || '';
+  const known = new Map(currentPlan.map((row) => [keyOf(row.field), row]));
+  if (!known.size) return 0;
+  const token = autofillRunToken ?? window.SmartJobTabSession?.getGeneration?.() ?? null;
+  const previous = currentPlan;
+  try {
+    await scanCurrentPage({ silent: true });
+  } catch (_) {
+    currentPlan = previous;
+    return 0;
+  }
+  if (autofillTabChanged(token)) return 0;
+  // The scan rebuilt the plan: the rows already done take their places back.
+  let fresh = 0;
+  currentPlan = currentPlan.map((row) => {
+    const done = known.get(keyOf(row.field));
+    if (done) return done;
+    fresh += 1;
+    return row;
+  });
+  for (const [key, done] of known) {
+    if (!currentPlan.some((row) => keyOf(row.field) === key)) currentPlan.push(done);
+  }
+  renderFieldPlan();
+  saveScanState();
+  if (!fresh) return 0;
+  await fillSelectedFieldsWithAi({ only: (row) => !known.has(keyOf(row.field)) });
+  return fresh;
+}
+
+/** @param {{ only?: (row: object) => boolean }} [opts] `only` limits the run to some rows. */
+async function fillSelectedFieldsWithAi({ only = null } = {}) {
   if (!requireOpenAiApiKey()) return;
 
   invalidateAiContextCache();
@@ -5457,6 +5506,7 @@ async function fillSelectedFieldsWithAi() {
   // the profile or the kit); only rows without one are left out of the AI run.
   const targets = currentPlan
     .map((row, index) => ({ row, index }))
+    .filter(({ row }) => !only || only(row))
     .filter(
       ({ row }) =>
         isRowFillable(row) ||

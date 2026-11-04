@@ -22,6 +22,9 @@ export function canonicalJobUrl(value: string | null | undefined): string {
     path = path.toLowerCase();
     if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
 
+    // A Greenhouse embed (/embed/job_app?for=acme&token=123) is the board's own
+    // page for that job (/acme/jobs/123): one key for both.
+    path = greenhouseEmbedPath(host, path, parsed.searchParams) || path;
     ({ host, path } = normalizeAtsHostPath(host, path));
 
     return `${host}${path}${jobIdQuery(parsed.searchParams, host, path)}`;
@@ -36,6 +39,13 @@ const JOB_ID_PARAM_RE =
   /^(?:gh_jid|ashby_jid|jid|job_?id|job|req_?id|requisition_?id|career_job_req_id|posting_?id|position_?id|opening_?id|opportunity_?id|vacancy_?id|currentjobid|jk|jvi|pid|id)$/;
 // A long number or a UUID in the path already names the job.
 const PATH_HAS_JOB_ID_RE = /\d{4,}|[0-9a-f]{8}-[0-9a-f]{4}-/;
+
+function greenhouseEmbedPath(host: string, path: string, params: URLSearchParams): string {
+  if (!/(^|\.)greenhouse\.io$/.test(host) || path !== "/embed/job_app") return "";
+  const board = String(params.get("for") || "").trim().toLowerCase();
+  const token = String(params.get("token") || "").trim().toLowerCase();
+  return board && /^\d+$/.test(token) ? `/${board}/jobs/${token}` : "";
+}
 
 function jobIdQuery(searchParams: URLSearchParams, host: string, path: string): string {
   // Then the query adds nothing, and ?gh_jid=123 on /jobs/123 must not split one job in two.

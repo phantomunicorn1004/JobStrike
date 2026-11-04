@@ -41,10 +41,11 @@ export function siteOf(jobLink: string): ScreenSite | "" {
   return "";
 }
 
-/** Greenhouse's European board: roles there are for Europe. */
+/** Greenhouse's and Lever's European boards: roles there are for Europe. */
 function isNonUsBoard(jobLink: string): boolean {
   try {
-    return /(^|\.)eu\.greenhouse\.io$/i.test(new URL(jobLink).hostname);
+    const host = new URL(jobLink).hostname;
+    return /(^|\.)eu\.greenhouse\.io$/i.test(host) || /^jobs\.eu\.lever\.co$/i.test(host);
   } catch {
     return false;
   }
@@ -102,7 +103,7 @@ const US_PLACE_RE = new RegExp(
 
 /** Countries and regions outside the U.S. ("Georgia" is left out: it is also a state). */
 const NON_US_PLACE_RE =
-  /\b(canada|mexico|brazil|argentina|colombia|chile|peru|latam|united kingdom|uk|england|scotland|ireland|europe|emea|eu|germany|france|spain|portugal|italy|poland|netherlands|belgium|switzerland|austria|sweden|norway|denmark|finland|estonia|latvia|lithuania|czech\w*|slovakia|slovenia|croatia|serbia|montenegro|albania|bosnia|romania|bulgaria|greece|cyprus|hungary|ukraine|moldova|armenia|azerbaijan|turkey|t[uü]rkiye|israel|egypt|morocco|nigeria|kenya|uganda|tanzania|ghana|south africa|uae|dubai|saudi arabia|qatar|india|pakistan|bangladesh|sri lanka|philippines|vietnam|thailand|malaysia|singapore|indonesia|japan|china|hong kong|taiwan|korea|australia|new zealand|apac|london|berlin|paris|madrid|barcelona|lisbon|amsterdam|dublin|warsaw|krakow|bucharest|tirana|nairobi|kampala|ontario|quebec|alberta|british columbia|toronto|vancouver|montreal|bangalore|bengaluru|hyderabad|pune|manila|tel aviv)\b/i;
+  /\b(canada|mexico|brazil|argentina|colombia|chile|peru|latam|united kingdom|uk|england|scotland|ireland|europe|emea|eu|germany|france|spain|portugal|italy|poland|netherlands|belgium|switzerland|austria|sweden|norway|denmark|finland|estonia|latvia|lithuania|czech\w*|slovakia|slovenia|croatia|serbia|montenegro|albania|bosnia|romania|bulgaria|greece|cyprus|hungary|ukraine|moldova|armenia|azerbaijan|turkey|t[uü]rkiye|israel|egypt|morocco|nigeria|kenya|uganda|tanzania|ghana|south africa|uae|dubai|saudi arabia|qatar|india|pakistan|bangladesh|sri lanka|philippines|vietnam|thailand|malaysia|singapore|indonesia|japan|china|hong kong|taiwan|korea|australia|new zealand|apac|london|berlin|paris|madrid|barcelona|lisbon|amsterdam|dublin|warsaw|krakow|bucharest|tirana|athens|thessaloniki|nicosia|limassol|larnaca|nairobi|kampala|ontario|quebec|alberta|british columbia|toronto|vancouver|montreal|bangalore|bengaluru|hyderabad|pune|manila|tel aviv)\b/i;
 
 /** Working hours stated in a European or Asian time zone: a role for those time zones. */
 const NON_US_HOURS_RE =

@@ -177,3 +177,13 @@ describe("nonUsLocation: working hours abroad", () => {
     expect(nonUsLocation("Location: Georgia\nOffice in Atlanta.")).toBe("");
   });
 });
+
+describe("screenCandidate: European boards", () => {
+  it("skips Lever's EU board like Greenhouse's", () => {
+    expect(screenCandidate({ jobLink: "https://jobs.eu.lever.co/xm/709e495a", jobTitle: "Senior Angular Developer" }, citizen)).toEqual({
+      ok: false,
+      reason: "European job board",
+    });
+    expect(nonUsLocation("Location: Nicosia; Athens; Remote; Thessaloniki; Limassol")).toMatch(/^Nicosia/);
+  });
+});
