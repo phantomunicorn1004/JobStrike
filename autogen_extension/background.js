@@ -1063,6 +1063,12 @@ function createClaimGuard(applicationId, initialClaimedAt, onRefresh = () => {})
 /** ChatGPT cannot be used right now (usage limit, signed out, verification). Not a failed attempt. */
 class ChatGptBlockedError extends Error {}
 
+/** The ChatGPT page has no prompt box yet (still loading, just opened): the job is not at fault. */
+class ChatGptNotReadyError extends Error {}
+
+/** How long a window waits after giving a job back because its ChatGPT page was not ready. */
+const NOT_READY_PAUSE_MS = 60 * 1000;
+
 /** Abandons an application whose claim was taken over by another window
  * mid-run. Deliberately does NOT call report-failure/release-claim - we no
  * longer hold this claim, so touching its status here could clobber whatever
@@ -1141,6 +1147,7 @@ async function processApplication(windowId, application, settings) {
   });
 
   let lastError = "";
+  let lastNotReady = false;
   for (let attempt = 1; attempt <= settings.maxTryCount; attempt += 1) {
     if (stopped()) return stopEntry(windowId, entry);
     try {
@@ -1202,6 +1209,7 @@ async function processApplication(windowId, application, settings) {
       return claimLostEntry(windowId, entry, new ClaimLostError(outcome.detail || "claim lost"));
     }
     lastError = outcome.detail || "The server reported an error.";
+    lastNotReady = Boolean(outcome.notReady);
     await appendActivityLog(windowId, tabLabel, `attempt ${attempt} failed: ${lastError}`);
     if (outcome.retryable === false) break;
     entry.status = `Retrying (${attempt}/${settings.maxTryCount})`;
@@ -1209,6 +1217,24 @@ async function processApplication(windowId, application, settings) {
     await setWindowStatus(windowId, entry);
   }
 
+  if (lastNotReady) {
+    // Every attempt found the ChatGPT page unusable (it was still opening, as
+    // right after Start): the job goes back to the queue for the next window
+    // that is ready, and this one waits a minute before taking another.
+    await releaseApplicationClaim(application.id, guard.claimedAt, windowId);
+    await appendActivityLog(
+      windowId,
+      tabLabel,
+      `ChatGPT page not ready - application_id ${application.id} went back to the queue; trying again in a minute`,
+    );
+    entry.status = "Waiting for ChatGPT";
+    entry.error = lastError;
+    await setWindowStatus(windowId, entry);
+    await setQueueStatus(application.id, "skipped", { error: lastError });
+    const until = Date.now() + NOT_READY_PAUSE_MS;
+    while (Date.now() < until && !stopped()) await new Promise((resolve) => setTimeout(resolve, 1000));
+    return;
+  }
   await appendActivityLog(windowId, tabLabel, `giving up on application_id ${application.id}: ${lastError}`);
   await autogenReportFailure(settings, application.id, guard.claimedAt, lastError).catch(() => {});
   entry.status = "Error";
@@ -1237,6 +1263,9 @@ async function runChatGptEngineAttempt(windowId, tab, application, settings, gua
   if (run.stopped) return { stopped: true };
   if (run.error instanceof ClaimLostError) return { claimLost: run.error };
   if (run.error instanceof ChatGptBlockedError) return { blocked: true, detail: run.error.message };
+  if (run.error instanceof ChatGptNotReadyError) {
+    return { status: "Error", detail: run.error.message, retryable: true, notReady: true };
+  }
   if (run.error) return { status: "Error", detail: String(run.error?.message || run.error), retryable: true };
 
   await appendActivityLog(windowId, tab.title || null, "sending ChatGPT's answer to JobStrike for checking…");
@@ -1284,7 +1313,7 @@ async function assertChatGptUsable(tabId) {
   const check = await sendMessageToTabWithRetry(tabId, { type: "AUTOGEN_SELF_TEST" });
   if (check?.blocked) throw new ChatGptBlockedError(check.blocked);
   if (check?.missing?.length) {
-    throw new Error(
+    throw new ChatGptNotReadyError(
       `ChatGPT page is missing: ${check.missing.join(", ")} (the page may still be loading, or ChatGPT changed its layout).`,
     );
   }

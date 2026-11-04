@@ -4610,6 +4610,26 @@ function resolveDeterministicValueForRow(row) {
   return null;
 }
 
+/** "Please explain your answer to the previous question", "If yes, please describe": it refers to the field before. */
+const FOLLOW_UP_QUESTION_RE =
+  /\b(previous question|question above|answer above|your answer|explain (?:your|why)|if (?:yes|no|so)\b|please (?:explain|describe|elaborate)(?: (?:it|this|that))?\s*[.?]?$)/i;
+
+/** The question before a follow-up and its answer on this form, or null. */
+function previousAnsweredRow(row) {
+  const field = row?.field || {};
+  const text = String(field.questionText || field.labelText || '');
+  if (!FOLLOW_UP_QUESTION_RE.test(text)) return null;
+  const index = currentPlan.indexOf(row);
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const before = currentPlan[i];
+    const answer = String(before?.suggestedValue || '').trim();
+    if (!answer || before?.field?.fieldType === 'file') continue;
+    const question = String(before.field?.questionText || before.field?.labelText || '').trim();
+    return question ? { question: question.slice(0, 400), answer: answer.slice(0, 400) } : null;
+  }
+  return null;
+}
+
 async function generateAiValueForRow(row) {
   const deterministic = resolveDeterministicValueForRow(row);
   if (deterministic) return deterministic;
@@ -4624,7 +4644,11 @@ async function generateAiValueForRow(row) {
   if (isAiBlockedField(row)) {
     throw new Error('Upload the file in Profile → Application kits, then use regular Fill.');
   }
-  const contextBlock = await getAiContextBlock();
+  const baseContext = await getAiContextBlock();
+  const previous = previousAnsweredRow(row);
+  const contextBlock = previous
+    ? `${baseContext}\n\n## The question just before this one on the form\nQ: ${previous.question}\nA (as answered on this form): ${previous.answer}`
+    : baseContext;
   const result = await window.SmartJobAiFill.suggestFieldValue(
     apiKey,
     currentSettings.openaiModel,
