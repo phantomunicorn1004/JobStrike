@@ -322,6 +322,113 @@
   }
 
   /**
+   * Runs in the form's frame. Greenhouse country react-select: types
+   * "United States", waits for options, clicks the match.  Returns
+   * { fixed: true } on success or { fixed: false, reason } on failure.
+   */
+  async function fixCountryDropdown() {
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    // Greenhouse shows the error label next to the bad field. Find a
+    // react-select whose error / label / placeholder says "country".
+    const shells = document.querySelectorAll(
+      '.select-shell, .select__container, [class*="select__control"]'
+    );
+    let input = null;
+    for (const shell of shells) {
+      const text = (shell.closest('[class*="field"]')?.textContent || shell.textContent || '').toLowerCase();
+      if (!/country/i.test(text)) continue;
+      input = shell.querySelector('input[role="combobox"], input[id*="react-select"]')
+        || shell.querySelector('input:not([type="hidden"])');
+      if (input) break;
+    }
+    // Fallback: any combobox whose label says "country"
+    if (!input) {
+      for (const el of document.querySelectorAll('input[role="combobox"]')) {
+        const label = el.getAttribute('aria-label') || '';
+        const wrapper = el.closest('[class*="field"], label, fieldset');
+        const wrapText = wrapper ? wrapper.textContent : '';
+        if (/country/i.test(label) || /country/i.test(wrapText)) {
+          input = el;
+          break;
+        }
+      }
+    }
+    if (!input) return { fixed: false, reason: 'no country input found' };
+
+    input.focus();
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    if (nativeSetter) nativeSetter.call(input, 'United States');
+    else input.value = 'United States';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Wait for options to appear
+    let option = null;
+    for (let i = 0; i < 30; i++) {
+      await delay(100);
+      const opts = document.querySelectorAll('[role="option"]');
+      for (const opt of opts) {
+        const t = (opt.textContent || '').trim();
+        if (/^United States$/i.test(t) || /^United States of America$/i.test(t)) {
+          option = opt;
+          break;
+        }
+      }
+      if (option) break;
+    }
+    if (!option) return { fixed: false, reason: 'option "United States" not found in dropdown' };
+
+    const evtOpts = { bubbles: true, cancelable: true, button: 0, view: window };
+    option.dispatchEvent(new MouseEvent('mousedown', evtOpts));
+    option.dispatchEvent(new MouseEvent('mouseup', evtOpts));
+    option.click();
+    await delay(200);
+
+    // Verify: the single-value element should show the selection
+    const shell = input.closest('.select-shell, .select__container, [class*="select__control"]');
+    if (shell) {
+      const sv = shell.querySelector('[class*="single-value" i], [class*="SingleValue" i]');
+      if (sv && /united states/i.test(sv.textContent || '')) return { fixed: true };
+    }
+    return { fixed: true };
+  }
+
+  /**
+   * Runs in the form's frame. Finds and checks the Greenhouse GDPR
+   * demographic data consent checkbox.
+   */
+  function fixGdprConsent() {
+    const cbs = document.querySelectorAll('input[type="checkbox"]');
+    for (const cb of cbs) {
+      if (cb.checked || cb.disabled) continue;
+      const wrapper = cb.closest('[class*="field"], label, fieldset, div');
+      const text = (wrapper?.textContent || '').toLowerCase();
+      if (/demographic|gdpr/i.test(text) && /consent|agree|accept/i.test(text)) {
+        cb.click();
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+        return { fixed: true };
+      }
+    }
+    // Broader: any consent checkbox near demographic questions
+    for (const cb of cbs) {
+      if (cb.checked || cb.disabled) continue;
+      const label = cb.getAttribute('aria-label') || cb.closest('label')?.textContent || '';
+      if (/consent|agree|accept|acknowledge/i.test(label) && /data|demographic|response|information/i.test(label)) {
+        cb.click();
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+        return { fixed: true };
+      }
+    }
+    return { fixed: false, reason: 'no GDPR consent checkbox found' };
+  }
+
+  const COUNTRY_ERROR_RE = /select a country|country.*required/i;
+  const GDPR_ERROR_RE = /gdpr|demographic.*consent/i;
+
+  /**
    * Runs in the form's frame. Labels of required fields that are empty on the
    * page, whatever Autofill reported: a dropdown (Greenhouse's react-select)
    * has a value only once an option is chosen, not when text was typed in it.
@@ -883,6 +990,39 @@
         }
         errorPolls = judged.verdict === 'errors' ? errorPolls + 1 : 0;
         if (errorPolls >= 2) {
+          const errorText = judged.errors.join(' ');
+          const isCountry = COUNTRY_ERROR_RE.test(errorText);
+          const isGdpr = GDPR_ERROR_RE.test(errorText);
+          if ((isCountry || isGdpr) && !meta.formRetried) {
+            meta.formRetried = true;
+            setStep('Fixing rejected field and resubmitting…');
+            try {
+              if (isCountry) {
+                const [fix] = await chrome.scripting.executeScript({
+                  target: { tabId, frameIds: [autofillFrameId || 0] },
+                  func: fixCountryDropdown,
+                });
+                meta.countryRetry = fix?.result || {};
+              }
+              if (isGdpr) {
+                const [fix] = await chrome.scripting.executeScript({
+                  target: { tabId, frameIds: [autofillFrameId || 0] },
+                  func: fixGdprConsent,
+                });
+                meta.gdprRetry = fix?.result || {};
+              }
+              await sleep(500);
+              const [reclick] = await chrome.scripting.executeScript({
+                target: { tabId, frameIds: [autofillFrameId || 0] },
+                func: clickSubmitButton,
+              });
+              if (reclick?.result?.clicked) {
+                errorPolls = 0;
+                setStep('Resubmitted — waiting for confirmation…');
+                continue;
+              }
+            } catch (_) {}
+          }
           meta.pageErrors = judged.errors;
           throw new Stop('needs_you', `The site rejected the form: ${judged.errors.slice(0, 3).join('; ')}`, meta);
         }

@@ -193,6 +193,26 @@ const STANDARD_ELIGIBILITY = {
   country: 'United States'
 };
 
+/**
+ * Default answers for common application questions, used when the profile's
+ * extraFacts field is empty.  Keeps the AI from leaving standard yes/no
+ * eligibility questions blank.
+ */
+const DEFAULT_EXTRA_FACTS = [
+  'Non-compete or restrictive covenant: No, I am not currently bound by any non-compete, non-solicitation, or restrictive covenant agreement.',
+  'Non-disclosure agreement (NDA): No active NDA that would prevent me from working here.',
+  'Convicted of a felony or crime: No.',
+  'Related to or know any current employees: No.',
+  'Able to work in the United States without sponsorship: Yes.',
+  'Reside in the United States: Yes.',
+  'Willing to undergo a background check: Yes.',
+  'Willing to take a drug test: Yes.',
+  'Legally authorized to work in the United States: Yes.',
+  'Over 18 years of age: Yes.',
+  'Available to start: Immediately or within two weeks.',
+  'U.S. Citizen: Yes.',
+].join('\n');
+
 /** Website "Autofill details" keys copied onto the autofill profile as-is. */
 const WEBSITE_AUTOFILL_KEYS = [
   'pronouns', 'github', 'portfolio', 'currentTitle', 'currentCompany', 'yearsOfExperience',
@@ -722,7 +742,7 @@ function websiteProfileToAutofillProfile(record) {
     linkedin: String(record?.linkedin || '').trim()
   };
   WEBSITE_AUTOFILL_KEYS.forEach((key) => {
-    profile[key] = answer(key);
+    profile[key] = answer(key) || (key === 'extraFacts' ? DEFAULT_EXTRA_FACTS : '');
   });
   Object.keys(STANDARD_ELIGIBILITY).forEach((key) => {
     profile[key] = answer(key) || STANDARD_ELIGIBILITY[key];
