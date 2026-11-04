@@ -453,40 +453,58 @@
     return single;
   }
 
+  /** Self-ID questions answered Yes / No / Decline: matched by meaning, never by letters. */
+  const YES_NO_DEMOGRAPHIC_CATEGORIES = new Set([
+    'veteran_status', 'disability_status', 'hispanic_latino', 'transgender', 'lgbtq_identity'
+  ]);
+
+  /** "Decline to self-identify", "I don't wish to answer", "Prefer not to say". */
+  function isDeclineText(text) {
+    return /\b(decline|prefer not|do not wish|don t wish|not wish to|do not want|don t want|choose not|rather not|not to (?:say|answer|disclose|self identify))\b/.test(normalizeText(text));
+  }
+
+  /**
+   * How well an option says the same as the profile's Yes / No / Decline.
+   * "No" is a real answer: a "Decline to self-identify" option never stands in
+   * for it (Greenhouse lists Yes / No / Decline To Self Identify), and neither
+   * does "Hispanic or Latino", which only has "no" inside "Latino".
+   * Returns -1 when the target is not a Yes / No / Decline answer.
+   */
   function demographicYesNoOptionScore(optionText, targetText, category) {
     const opt = normalizeText(optionText);
     if (!opt) return 0;
-    const neg = isNegativeDemographicAnswer(targetText);
-    const pos = isPositiveDemographicAnswer(targetText);
+    const target = normalizeText(targetText);
+    const decline = isDeclineText(target);
+    // "I am not a protected veteran" is a No, though it starts like "I am…".
+    const neg = !decline && (isNegativeDemographicAnswer(target) || /\b(not|don t|do not|never|non)\b/.test(target));
+    const pos = !decline && !neg && isPositiveDemographicAnswer(target);
+    if (!decline && !neg && !pos) return -1;
 
-    if (category === 'veteran_status') {
-      if (neg) {
-        if (/not a protected veteran|not a veteran|i am not|no i am not|non veteran/.test(opt)) return 0.95;
-        if (opt === 'no' || opt.startsWith('no ') || opt.startsWith('no,')) return 0.88;
-      }
-      if (pos && !neg) {
-        if (/protected veteran|i am a veteran/.test(opt) && !/not/.test(opt)) return 0.92;
-        if (opt === 'yes' || opt.startsWith('yes ')) return 0.88;
-      }
+    const optDecline = isDeclineText(opt);
+    if (decline) return optDecline ? 0.97 : 0;
+    if (optDecline) return 0;
+
+    const optSaysNo =
+      /^no\b/.test(opt) ||
+      /\b(i am not|i m not|am not|is not|not a|not an|not hispanic|not latino|do not have|don t have|not have|do not identify|don t identify|not identify|non veteran|none of the above)\b/.test(opt);
+    const optSaysYes = !optSaysNo && (/^yes\b/.test(opt) || /\b(i am|i have|i identify|identify as|i m)\b/.test(opt) || opt.length > 3);
+
+    if (neg) {
+      if (opt === 'no') return 1;
+      return optSaysNo ? 0.95 : 0;
     }
-
-    if (category === 'disability_status' || category === 'hispanic_latino' || category === 'transgender' || category === 'lgbtq_identity') {
-      if (neg) {
-        if (/do not have|don t have|not have|i am not|not identify|decline/.test(opt)) return 0.95;
-        if (opt === 'no' || opt.startsWith('no ') || opt.startsWith('no,')) return 0.88;
-      }
-      if (pos && !neg) {
-        if ((/i have|identify as|yes/.test(opt)) && !/do not|don t|not /.test(opt)) return 0.9;
-      }
-      if (/decline|prefer not/.test(normalizeText(targetText)) && /decline|prefer not/.test(opt)) return 0.94;
-    }
-
-    return 0;
+    // pos
+    if (opt === 'yes') return 1;
+    if (category === 'veteran_status' && /protected veteran|i am a veteran|identify as one or more/.test(opt) && !optSaysNo) return 0.92;
+    return optSaysYes ? 0.9 : 0;
   }
 
   function demographicOptionScore(optionText, targetText, category) {
-    const yesNo = category ? demographicYesNoOptionScore(optionText, targetText, category) : 0;
-    if (yesNo > 0) return yesNo;
+    if (YES_NO_DEMOGRAPHIC_CATEGORIES.has(category)) {
+      const yesNo = demographicYesNoOptionScore(optionText, targetText, category);
+      // A Yes / No / Decline answer is matched by meaning only.
+      if (yesNo >= 0) return yesNo;
+    }
 
     const a = normalizeText(optionText);
     const b = normalizeText(targetText);
@@ -540,7 +558,7 @@
     }
 
     if (category === 'hispanic_latino' || category === 'transgender' || category === 'lgbtq_identity') {
-      if (isNegativeDemographicAnswer(single)) candidates.add('No');
+      if (isNegativeDemographicAnswer(single) && !isDeclineText(single)) candidates.add('No');
       if (isPositiveDemographicAnswer(single)) candidates.add('Yes');
       if (/decline|prefer\s*not/i.test(single)) {
         ['Decline to state', 'Prefer not to answer', 'I do not wish to answer'].forEach((c) => candidates.add(c));
