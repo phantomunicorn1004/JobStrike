@@ -68,7 +68,9 @@ const CITIZEN_REQUIRED_RE = [
 const NO_SPONSORSHIP_RE =
   /\b(?:not|unable to|cannot|can't|won't|will not)\b[^.\n]{0,30}\bsponsor/i;
 
-const NIGHT_SHIFT_RE = /\bnight shift\b/i;
+/** "Night shift", "overnight shift", or hours that run through the night ("Work hours will be 11 PM-8am EST"). */
+const NIGHT_SHIFT_RE =
+  /\b(?:night|overnight|graveyard|third) shift\b|\b(?:9|10|11|12)(?::[0-5]0)?\s*(?:pm|p\.m\.)\s*(?:-|–|—|to|until)\s*(?:[4-9])(?::[0-5]0)?\s*(?:am|a\.m\.)/i;
 
 /**
  * The posting's own "Location:" line (the scrapers write it at the top of every

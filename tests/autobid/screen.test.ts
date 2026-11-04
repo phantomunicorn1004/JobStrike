@@ -137,3 +137,28 @@ describe("screenCandidate: location", () => {
     ).toMatchObject({ ok: true });
   });
 });
+
+describe("screenCandidate: overnight hours", () => {
+  const job = (jobDescription: string) => ({ jobLink: GH, jobTitle: "Cloud Engineer", jobDescription });
+
+  it("skips night shifts and hours that run through the night", () => {
+    for (const jd of [
+      "Location: US\nWork hours will be 11 PM-8am EST",
+      "Location: US\nThis is a night shift role.",
+      "Location: US\nOvernight shift, 10:00 p.m. to 6:30 a.m.",
+      "Location: US\nSchedule: 11pm to 7am",
+    ]) {
+      expect(screenCandidate(job(jd), citizen), jd).toEqual({ ok: false, reason: "Night shift" });
+    }
+  });
+
+  it("passes day hours and evening meetups", () => {
+    for (const jd of [
+      "Location: US\nCore hours 9am-5pm ET",
+      "Location: US\nOccasional calls until 9 PM with the APAC team.",
+      "Location: US\nOn-call rotation one week a month.",
+    ]) {
+      expect(screenCandidate(job(jd), citizen), jd).toMatchObject({ ok: true });
+    }
+  });
+});

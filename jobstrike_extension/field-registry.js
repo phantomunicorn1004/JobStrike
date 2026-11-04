@@ -547,6 +547,12 @@
       }
     }
 
+    // "Man" in the profile, "Male" on the form (and the other way round).
+    if (category === 'gender' || category === 'gender_identity') {
+      if (key === 'man' || key === 'male') ['Male', 'Man', 'Cisgender man', 'Cis man'].forEach((c) => candidates.add(c));
+      if (key === 'woman' || key === 'female') ['Female', 'Woman', 'Cisgender woman', 'Cis woman'].forEach((c) => candidates.add(c));
+    }
+
     if (category === 'race' && /decline|prefer\s*not/i.test(single)) {
       ['Decline to state', 'Prefer not to answer', 'I do not wish to answer'].forEach((c) => candidates.add(c));
     }

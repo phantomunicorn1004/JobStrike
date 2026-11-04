@@ -3877,7 +3877,9 @@
     if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
     const rect = el.getBoundingClientRect();
     if (rect.width <= 1 && rect.height <= 1) return false;
-    if (rect.bottom < 0 || rect.right < 0) return false;
+    // Placed above or left of the page itself (a hiding trick), not merely
+    // scrolled past: a field above the screen is still on the form.
+    if (rect.bottom + window.scrollY < 0 || rect.right + window.scrollX < 0) return false;
     return rect.width > 0 && rect.height > 0;
   }
 
@@ -4390,7 +4392,7 @@
     try {
       return await primeEach(inputs, started, maxMs);
     } finally {
-      try { window.scrollTo(scrollX, scrollY); } catch (_) {}
+      try { window.scrollTo({ left: scrollX, top: scrollY, behavior: 'instant' }); } catch (_) {}
       await delay(80);
     }
   }
