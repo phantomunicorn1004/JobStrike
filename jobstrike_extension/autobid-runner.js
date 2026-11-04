@@ -865,6 +865,7 @@
           }
           if (codeJudged?.verdict === 'confirmed' && codeConfirmPolls >= 2) {
             judged = codeJudged;
+            confirmPolls = codeConfirmPolls;
             break;
           }
           toast(`${job.company}: code entered but confirmation not seen. Check the tab.`, 'warn');
