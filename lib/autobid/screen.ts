@@ -104,6 +104,10 @@ const US_PLACE_RE = new RegExp(
 const NON_US_PLACE_RE =
   /\b(canada|mexico|brazil|argentina|colombia|chile|peru|latam|united kingdom|uk|england|scotland|ireland|europe|emea|eu|germany|france|spain|portugal|italy|poland|netherlands|belgium|switzerland|austria|sweden|norway|denmark|finland|estonia|latvia|lithuania|czech\w*|slovakia|slovenia|croatia|serbia|montenegro|albania|bosnia|romania|bulgaria|greece|cyprus|hungary|ukraine|moldova|armenia|azerbaijan|turkey|t[uü]rkiye|israel|egypt|morocco|nigeria|kenya|uganda|tanzania|ghana|south africa|uae|dubai|saudi arabia|qatar|india|pakistan|bangladesh|sri lanka|philippines|vietnam|thailand|malaysia|singapore|indonesia|japan|china|hong kong|taiwan|korea|australia|new zealand|apac|london|berlin|paris|madrid|barcelona|lisbon|amsterdam|dublin|warsaw|krakow|bucharest|tirana|nairobi|kampala|ontario|quebec|alberta|british columbia|toronto|vancouver|montreal|bangalore|bengaluru|hyderabad|pune|manila|tel aviv)\b/i;
 
+/** Working hours stated in a European or Asian time zone: a role for those time zones. */
+const NON_US_HOURS_RE =
+  /\b(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?|hours|time|timezone|time zone)\s*\(?\s*(EET|EEST|CET|CEST|WET|GMT\s?\+\s?\d{1,2}|UTC\s?\+\s?\d{1,2}|IST|PKT|PHT|SGT|AEST)\b/i;
+
 /**
  * The posting is only for places outside the U.S. ("Cyprus; Spain; Poland",
  * "Canada - Remote"): a U.S. candidate cannot take it. "Remote" alone, or a
@@ -113,7 +117,10 @@ export function nonUsLocation(jobDescription: string): string {
   const location = postedLocation(jobDescription);
   if (!location) return "";
   if (US_PLACE_RE.test(location)) return "";
-  return NON_US_PLACE_RE.test(location) ? location.slice(0, 80) : "";
+  if (NON_US_PLACE_RE.test(location)) return location.slice(0, 80);
+  // "Georgia" or "Remote" with working hours set in Europe or Asia ("2 PM to 11 PM EET").
+  const zone = NON_US_HOURS_RE.exec(String(jobDescription || ""));
+  return zone ? `${location.slice(0, 60)}, hours in ${zone[1].toUpperCase()}` : "";
 }
 
 export function livesInUs(profile: ScreenOptions["profile"]): boolean {

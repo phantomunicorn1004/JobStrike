@@ -162,3 +162,18 @@ describe("screenCandidate: overnight hours", () => {
     }
   });
 });
+
+describe("nonUsLocation: working hours abroad", () => {
+  it("flags an unclear location whose hours are set in Europe or Asia", () => {
+    expect(
+      nonUsLocation("Location: Georgia\nAre you available to work from 2 PM to 11 PM EET (Eastern European Time)?"),
+    ).toBe("Georgia, hours in EET");
+    expect(nonUsLocation("Location: Remote\nWorking hours: 9:00-18:00 CET")).toBe("Remote, hours in CET");
+  });
+
+  it("leaves U.S. locations and U.S. time zones alone", () => {
+    expect(nonUsLocation("Location: Remote - US\nOverlap with our team in CET for one hour a day.")).toBe("");
+    expect(nonUsLocation("Location: Remote\nCore hours 9am-5pm EST")).toBe("");
+    expect(nonUsLocation("Location: Georgia\nOffice in Atlanta.")).toBe("");
+  });
+});
