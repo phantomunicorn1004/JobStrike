@@ -240,7 +240,14 @@ const OUTCOME_STEP: Record<BidOutcome, string> = {
   failed: "Failed",
 };
 
-/** Records the outcome, only while the caller still holds the claim. Keeps the step history. */
+/** A form rarely has more; the report is cut here (scripts/add-autobid-field-report.sql). */
+const MAX_REPORTED_FIELDS = 80;
+
+/**
+ * Records the outcome, only while the caller still holds the claim. Keeps the
+ * step history. The per-field report (meta.fieldReport) goes to its own
+ * column, read only when the job is opened on the Auto-bid page.
+ */
 export async function finishBid(
   userId: string,
   id: number,
@@ -252,10 +259,12 @@ export async function finishBid(
   const current = await heldBidMeta(userId, id, claimedAt);
   if (!current) return false;
   const at = new Date().toISOString();
-  const { steps: _ignored, step: _current, ...reported } = meta;
+  const { steps: _ignored, step: _current, fieldReport, ...reported } = meta;
+  const fields = Array.isArray(fieldReport) ? fieldReport.slice(0, MAX_REPORTED_FIELDS) : null;
   const { data, error } = await getSupabaseAdminClient()
     .from(TABLE)
     .update({
+      ...(fields && { bid_fields: fields }),
       bid_state: outcome,
       bid_claimed_at: null,
       bid_error: outcome === "submitted" ? "" : String(detail || "Stopped.").slice(0, 4000),
@@ -427,4 +436,17 @@ export async function listAutobidJobs(userId: string): Promise<AutobidJob[]> {
     .limit(MONITOR_LIMIT);
   if (error) rethrow(error.message);
   return ((data ?? []) as AutobidRowInput[]).map(toAutobidJob);
+}
+
+/** One job's per-field report from its last attempt; [] when there is none. */
+export async function readBidFields(userId: string, id: number): Promise<unknown[]> {
+  const { data, error } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .select("bid_fields")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) rethrow(error.message);
+  const fields = (data as { bid_fields?: unknown } | null)?.bid_fields;
+  return Array.isArray(fields) ? fields : [];
 }

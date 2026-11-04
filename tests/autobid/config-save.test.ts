@@ -92,6 +92,20 @@ describe("saveAutobidConfig", () => {
     expect(db.row.autobid_config).toMatchObject({ version: 3, windows: 4, running: false });
   });
 
+  it("ignores an old panel's refusal to start, so it cannot stop the run", async () => {
+    await saveAutobidConfig("u1", { profileId: 1, profileName: "Donald", running: true }, "web");
+    const refusal = await saveAutobidConfig(
+      "u1",
+      { running: false, note: "Not started: Another JobStrike panel is open (another Chrome profile or computer, e.g. the VPS) and would apply too." },
+      "panel",
+    );
+    expect("config" in refusal && refusal.config).toMatchObject({ running: true, version: 1 });
+    expect(db.row.autobid_config).toMatchObject({ running: true, version: 1 });
+    // Any other stop from a panel (a dry run done) still stops it.
+    const done = await saveAutobidConfig("u1", { running: false, note: "Dry run done" }, "panel");
+    expect("config" in done && done.config).toMatchObject({ running: false, version: 2 });
+  });
+
   it("returns the merge error without writing", async () => {
     const result = await saveAutobidConfig("u1", { running: true }, "web");
     expect(result).toEqual({ error: "Choose a profile before starting." });

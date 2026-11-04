@@ -37,11 +37,23 @@ export async function readAutobidConfig(userId: string): Promise<AutobidConfig> 
  * got there first, the edit is merged onto that one instead (last edit wins,
  * and no two saves share a version).
  */
+/**
+ * JobStrike 4.41 and older refused to start when another panel was open and
+ * saved the setup as stopped with this note. Any number of panels may run now
+ * (each job goes to one of them), so a forgotten old panel must not stop the run.
+ */
+const OLD_PANEL_REFUSAL = /^Not started: Another JobStrike panel is open/;
+
+export function isOldPanelRefusal(edit: Record<string, unknown>, by: "web" | "panel"): boolean {
+  return by === "panel" && edit.running === false && OLD_PANEL_REFUSAL.test(String(edit.note ?? ""));
+}
+
 export async function saveAutobidConfig(
   userId: string,
   edit: Record<string, unknown>,
   by: "web" | "panel",
 ): Promise<{ config: AutobidConfig } | { error: string }> {
+  if (isOldPanelRefusal(edit, by)) return { config: toAutobidConfig(await readStored(userId)) };
   for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt += 1) {
     const stored = await readStored(userId);
     const current = toAutobidConfig(stored);

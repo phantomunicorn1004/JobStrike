@@ -18,6 +18,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { AutobidControlPanel } from "@/components/autobid/AutobidControlPanel";
 import { FoundJobsList } from "@/components/autobid/FoundJobsList";
+import { FieldReport } from "@/components/autobid/FieldReport";
 import {
   RunnerStatusPanel,
   type AutobidReport,
@@ -225,6 +226,7 @@ function JobRow({
           </ol>
         </details>
       )}
+      {job.log.length > 1 && <FieldReport jobId={job.id} />}
     </li>
   );
 }
