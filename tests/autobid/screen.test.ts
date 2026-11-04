@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screenCandidate, siteOf, type ScreenOptions } from "@/lib/autobid/screen";
+import { nonUsLocation, screenCandidate, siteOf, type ScreenOptions } from "@/lib/autobid/screen";
 
 const citizen: ScreenOptions = {
   ashby: false,
@@ -85,5 +85,55 @@ describe("screenCandidate: with the job description", () => {
 
   it("skips night shifts", () => {
     expect(withJd("This position requires working a night shift from 12:00 AM.")).toEqual({ ok: false, reason: "Night shift" });
+  });
+});
+
+describe("nonUsLocation", () => {
+  const jd = (location: string) => `## Job details Location: ${location} Employment Type: Remote\n## Description ...`;
+
+  it("flags postings open only outside the U.S.", () => {
+    expect(nonUsLocation(jd("Cyprus; Montenegro; Georgia; Serbia; Armenia; Italy; Portugal; Poland; Spain"))).toMatch(/^Cyprus/);
+    expect(nonUsLocation(jd("Canada - Remote"))).toBe("Canada - Remote");
+    expect(nonUsLocation(jd("Canada (Remote)"))).toBe("Canada (Remote)");
+    expect(nonUsLocation(jd("Turkey; Tirana; remote; Nairobi, Kenya; Kampala, Uganda"))).not.toBe("");
+    expect(nonUsLocation("Location: United Kingdom\nAbout us")).toBe("United Kingdom");
+  });
+
+  it("passes anything open to the U.S., and what it cannot tell", () => {
+    for (const location of [
+      "Remote - US",
+      "United States (Remote)",
+      "Remote, Canada; Remote, United States",
+      "San Francisco, CA, New York, NY, Portland, OR, or Remote within Canada or United States",
+      "Home Based - Americas",
+      "Billings, MT",
+      "Missouri - Kansas City",
+      "New York, NY; USA Remote",
+      "Remote (US)",
+      "Remote",
+      "Georgia",
+      "Chicago, IL or Remote",
+    ]) {
+      expect(nonUsLocation(jd(location)), location).toBe("");
+    }
+    expect(nonUsLocation("No location line here. We have an office in London.")).toBe("");
+  });
+});
+
+describe("screenCandidate: location", () => {
+  it("skips a Europe-only remote role for a U.S. candidate", () => {
+    const result = screenCandidate(
+      { jobLink: "https://jobs.lever.co/truv/1", jobTitle: "FrontEnd Engineer", jobDescription: "Location: Spain / Cyprus / Poland\nRemote" },
+      citizen,
+    );
+    expect(result).toMatchObject({ ok: false });
+    expect(!result.ok && result.reason).toMatch(/^Outside the U\.S\./);
+  });
+
+  it("does not apply the rule to a candidate abroad", () => {
+    const abroad: ScreenOptions = { ...citizen, profile: { ...citizen.profile, country: "Spain" } };
+    expect(
+      screenCandidate({ jobLink: GH, jobTitle: "Engineer", jobDescription: "Location: Spain; Portugal" }, abroad),
+    ).toMatchObject({ ok: true });
   });
 });

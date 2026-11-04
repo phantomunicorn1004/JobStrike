@@ -2872,8 +2872,11 @@
 
   function isLeverFormContext() {
     if (activeAdapter?.name === 'lever') return true;
+    // Greenhouse's form is also form#application-form (class "application--form"):
+    // a page another adapter claimed is not a Lever form.
+    if (activeAdapter && activeAdapter.name !== 'default') return false;
     if (isLeverHost()) return true;
-    return Boolean(document.querySelector('#application-form.application-form, form#application-form'));
+    return Boolean(document.querySelector('#application-form.application-form'));
   }
 
   function shouldSkipLeverScanElement(el) {
@@ -4358,9 +4361,52 @@
       if (selected.length) return selected;
     }
     const listbox = findListboxFor(el);
-    if (!listbox) return [];
-    const optionEls = listbox.querySelectorAll('[role="option"], option');
-    return Array.from(optionEls).map((option) => trim(option.textContent || option.value)).filter(Boolean);
+    const live = listbox
+      ? Array.from(listbox.querySelectorAll('[role="option"], option')).map((option) => trim(option.textContent || option.value)).filter(Boolean)
+      : [];
+    if (live.length) return live;
+    // React-select (Greenhouse) renders its options only while open: read at scan time by primeComboboxOptions.
+    return primedComboboxOptions.get(el) || [];
+  }
+
+  /** Options of closed react-select dropdowns, read by opening each one before the scan. */
+  const primedComboboxOptions = new WeakMap();
+  const PRIME_NOT_AN_OPTION_RE = /^(no options?|no results?( found)?|no matches( found)?|loading\W*|searching\W*|type to search\W*|start typing .*)$/i;
+
+  /**
+   * Greenhouse dropdowns put their choices on the page only while the list is open,
+   * so a plain scan sees none and the AI writes free text no option matches.
+   * Opens each closed react-select once, reads its options and closes it again.
+   * Search boxes (location, phone country) are left alone: they list nothing until typed into.
+   */
+  async function primeComboboxOptions(maxMs = 20000) {
+    const started = Date.now();
+    const inputs = Array.from(document.querySelectorAll('input[role="combobox"]'))
+      .filter((el) => isReactSelectCombobox(el) && !el.disabled && isVisible(el));
+    let primed = 0;
+    for (const el of inputs) {
+      if (Date.now() - started > maxMs) break;
+      if (primedComboboxOptions.has(el)) continue;
+      if (el.closest('.phone-input, fieldset.phone-input')) continue;
+      if (isGreenhouseLocationCombobox(el)) continue;
+      const listbox = findListboxFor(el);
+      if (listbox && listbox.querySelector('[role="option"]')) continue;
+      let options = [];
+      try {
+        const opened = await openComboboxMenu(el);
+        if (opened) {
+          options = Array.from(opened.querySelectorAll('[role="option"]'))
+            .map((o) => trim(o.textContent || ''))
+            .filter((t) => t && !PRIME_NOT_AN_OPTION_RE.test(t));
+        }
+      } catch (_) {}
+      closeComboboxMenu(el);
+      try { el.blur(); } catch (_) {}
+      await delay(40);
+      primedComboboxOptions.set(el, options.slice(0, 200));
+      if (options.length) primed += 1;
+    }
+    return primed;
   }
 
   function findVisibleOpenListbox(el, knownListboxId) {
@@ -4906,8 +4952,13 @@
     // the country …?" ask a question; they are not an address, city, state, zip
     // or country to copy from the profile.
     const asksQuestion = /^(are|do|does|did|have|has|had|will|would|is|was|were|can|could|should)\b/.test(text);
-    if (type === 'email' || has('email', 'e mail')) return { category: 'email', confidence: 0.96 };
-    if (type === 'tel' || has('phone', 'mobile', 'cell')) return { category: 'phone', confidence: 0.92 };
+    // "By providing your phone number you may receive text messages" is a consent
+    // with choices, and "Can we email you about other roles?" a question: neither
+    // is the number or address itself.
+    const choiceControl = tagName === 'SELECT' || type === 'radio' || type === 'checkbox' || Boolean(el && isComboboxLike(el));
+    const contactSentence = asksQuestion || choiceControl || text.length > 60;
+    if (type === 'email' || (!contactSentence && has('email', 'e mail'))) return { category: 'email', confidence: 0.96 };
+    if (type === 'tel' || (!contactSentence && has('phone', 'mobile', 'cell'))) return { category: 'phone', confidence: 0.92 };
     if (!asksQuestion && (has('street address', 'address line', 'mailing address') || (hasWord('street') && !has('wall street', 'email address')))) {
       return { category: 'address', confidence: 0.92 };
     }
@@ -9714,7 +9765,10 @@
       }
 
       if (request.action === 'scanApplicationForm') {
-        sendResponse(scanApplicationForm());
+        primeComboboxOptions()
+          .catch(() => 0)
+          .then(() => sendResponse(scanApplicationForm()))
+          .catch((error) => sendResponse({ success: false, error: error?.message || String(error) }));
         return true;
       }
 

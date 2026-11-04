@@ -3528,7 +3528,11 @@ function autofillTabChanged(token) {
 
 const AUTOFILL_SWITCHED_MSG = 'Autofill stopped: you switched tabs. Click Autofill again on the tab you want to fill.';
 
+/** Why the last Autofill stopped with an error ('' when it did not): Auto-bid reports it. */
+let lastAutofillError = '';
+
 async function autofillThisPage({ useAi = false } = {}) {
+  lastAutofillError = '';
   autofillRunToken = window.SmartJobTabSession?.getGeneration?.() ?? null;
   const runToken = autofillRunToken;
   const fillBtn = document.getElementById(useAi ? 'fillSelectedAiBtn' : 'regAutofillBtn')
@@ -3585,6 +3589,7 @@ async function autofillThisPage({ useAi = false } = {}) {
       : '';
 
     if (!currentFields.length) {
+      lastAutofillError = `No application fields detected${adapterInfo}${skippedInfo}.`;
       showStatus(`No application fields detected on this page${adapterInfo}${skippedInfo}.`, 'error', 5000);
       return;
     }
@@ -3602,6 +3607,7 @@ async function autofillThisPage({ useAi = false } = {}) {
 
     await fillSelectedFields({ useAi: false });
   } catch (error) {
+    lastAutofillError = error.message || String(error);
     showStatus(error.message || String(error), 'error');
   } finally {
     if (fillBtn) {
@@ -3666,6 +3672,59 @@ function isSkillYearsField(field) {
   return Boolean(m && !GENERIC_EXPERIENCE_WORD_RE.test(m[1]));
 }
 
+/** The option that agrees ("I agree", "Acknowledge/Confirm", "Yes", "By clicking this box…"), or ''. */
+const AGREE_OPTION_RE =
+  /^(yes\b|i (?:agree|acknowledge|accept|consent|confirm|understand|have read|certify|attest)|agree|acknowledge|accept|consent|confirm|understood|by (?:clicking|checking|selecting|submitting|providing))/i;
+const DISAGREE_OPTION_RE = /^(no\b|not\b|i (?:do not|don't|decline|disagree|refuse)|decline|disagree)/i;
+
+function agreeingOption(options) {
+  const list = (Array.isArray(options) ? options : []).map((o) => String(o || '').trim()).filter(Boolean);
+  return list.find((o) => AGREE_OPTION_RE.test(o) && !DISAGREE_OPTION_RE.test(o)) || '';
+}
+
+function fullNameForForms() {
+  return String(
+    currentProfile.fullName || [currentProfile.firstName, currentProfile.lastName].filter(Boolean).join(' ')
+  ).trim();
+}
+
+/** Today as a form expects it: YYYY-MM-DD for a date input, MM/DD/YYYY typed. */
+function todayForForm(field) {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return String(field?.fieldType || '') === 'date' ? `${d.getFullYear()}-${mm}-${dd}` : `${mm}/${dd}/${d.getFullYear()}`;
+}
+
+/**
+ * A required consent the candidate agrees to on every application (privacy
+ * notice, background check, AI or recording consent, e-signature): agreed to,
+ * as the user decided. Signature lines get the candidate's name and today's
+ * date (Lever's disability form asks for them once Disability is answered).
+ * Returns the plan row's value, or '' when the field is not one of these.
+ */
+function consentAnswer(field) {
+  const name = String(field?.name || '');
+  const type = String(field?.fieldType || '');
+  const label = String(field?.questionText || field?.labelText || '');
+  const typed = /^(text|textarea|date|email|)$/.test(type);
+  // Lever's disability form: its signature is required only once Disability is answered.
+  const disabilitySignature = /disabilitySignature/i.test(name);
+  if (disabilitySignature && !String(currentProfile.disabilityStatus || '').trim()) return '';
+  // A short label only: "Describe your signature project" is a question, not a signature line.
+  const signatureLine = typed && label.length <= 60 && /\b(?:e-?|electronic |digital )?signature\b/i.test(label);
+  if (/signatureDate\]?$/i.test(name) || (signatureLine && /\bdate\b/i.test(label))) {
+    return todayForForm(field);
+  }
+  if (/signature\]?$/i.test(name) || signatureLine) {
+    return fullNameForForms();
+  }
+  if (!field?.required || typed) return '';
+  if (!isConsentQuestion({ field }) || isSelfIdQuestion({ field })) return '';
+  const options = Array.isArray(field.options) ? field.options : [];
+  return agreeingOption(options) || (/checkbox|yes-no/.test(type) ? 'Yes' : '');
+}
+
 function createPlanRow(field) {
   let category = field.fieldCategory || 'unknown';
   // "Do you have at least 5 years of AWS experience?" or "How many years of
@@ -3693,8 +3752,22 @@ function createPlanRow(field) {
     };
   }
 
+  const consent = category === 'acknowledgment' ? '' : consentAnswer(field);
+  if (consent) {
+    return {
+      field,
+      suggestedValue: consent,
+      source: 'acknowledgment',
+      status: 'Ready — agreed (consent)',
+      fillOutcome: null,
+      fillError: '',
+      confidence: field.confidence || 0.9,
+      customQuestionId: ''
+    };
+  }
+
   if (category === 'acknowledgment') {
-    const ackValue = (field.options && field.options[0]) || 'I have read this';
+    const ackValue = agreeingOption(field.options) || (field.options && field.options[0]) || 'I have read this';
     return {
       field,
       suggestedValue: ackValue,
@@ -4271,7 +4344,7 @@ function applyFillResultToPlanRow(row, result, { usedAi = false } = {}) {
 
 /** Questions that grant permission or attest to something: only the applicant may answer. */
 const CONSENT_QUESTION_RE =
-  /\b(consent\w*|i agree|agree to|acknowledg\w*|certify|certifies|certifying|attest\w*|authori[sz]e (?:us|the company|[a-z]+ to)|terms (?:and|&) conditions|privacy (?:policy|notice)|background check|e-?signature|signature|recorded|recording|notetakers?|transcrib\w*)\b/i;
+  /\b(consent\w*|i agree|agree to|acknowledg\w*|certify|certifies|certifying|attest\w*|authori[sz]e (?:us|the company|[a-z]+ to)|terms (?:and|&) conditions|privacy (?:policy|notice|statement)|background check|e-?signature|signature|recorded|recording|notetakers?|transcrib\w*)\b/i;
 
 const SELF_ID_CATEGORIES = new Set([
   'gender', 'gender_identity', 'sexual_orientation', 'race', 'hispanic_latino', 'transgender',
@@ -4630,11 +4703,18 @@ function previousAnsweredRow(row) {
   return null;
 }
 
-async function generateAiValueForRow(row) {
-  const deterministic = resolveDeterministicValueForRow(row);
-  if (deterministic) return deterministic;
-  if (!rowNeedsAi(row)) {
-    throw new Error('This field comes from the profile. Add the value under Autofill details on the website.');
+/**
+ * @param {object} [opts]
+ * @param {string} [opts.closestTo] an answer no option matched word for word:
+ *   the AI picks the listed option that means the same (or the closest one).
+ */
+async function generateAiValueForRow(row, { closestTo = '' } = {}) {
+  if (!closestTo) {
+    const deterministic = resolveDeterministicValueForRow(row);
+    if (deterministic) return deterministic;
+    if (!rowNeedsAi(row)) {
+      throw new Error('This field comes from the profile. Add the value under Autofill details on the website.');
+    }
   }
 
   const apiKey = getOpenAiApiKey() || String(document.getElementById('openaiApiKeySetting')?.value || '').trim();
@@ -4646,9 +4726,12 @@ async function generateAiValueForRow(row) {
   }
   const baseContext = await getAiContextBlock();
   const previous = previousAnsweredRow(row);
-  const contextBlock = previous
+  let contextBlock = previous
     ? `${baseContext}\n\n## The question just before this one on the form\nQ: ${previous.question}\nA (as answered on this form): ${previous.answer}`
     : baseContext;
+  if (closestTo) {
+    contextBlock += `\n\n## The candidate's answer for this field\n${closestTo}\nNo listed option says this word for word: answer with the listed option that means the same, or the closest one.`;
+  }
   const result = await window.SmartJobAiFill.suggestFieldValue(
     apiKey,
     currentSettings.openaiModel,
@@ -4779,7 +4862,11 @@ function buildFillPayloadFromRow(row) {
     elementPath: row.field.elementPath,
     signature: row.field.signature,
     value,
-    fieldCategory: row.field.fieldCategory,
+    // An agreed consent is filled as an acknowledgment: the filler skips consent boxes otherwise.
+    fieldCategory:
+      row.source === 'acknowledgment' && !/^(text|textarea|date|email|)$/.test(String(row.field.fieldType || ''))
+        ? 'acknowledgment'
+        : row.field.fieldCategory,
     fieldType: row.field.fieldType,
     uploadKitKind: hasKitFile ? uploadKitKind : null,
     jobUploadKey: getRegisterFieldValue('regJobLink'),
@@ -5334,6 +5421,31 @@ async function fillSelectedFields({ useAi = false } = {}) {
   }
 }
 
+/** A choice field that refused its value because no option matched it. */
+function optionMismatch(row, result) {
+  const options = Array.isArray(row?.field?.options) ? row.field.options : [];
+  if (options.length < 2 || isSelfIdQuestion(row)) return false;
+  if (row.field.fieldType === 'file') return false;
+  return /no matching .*option|acknowledgment option not found/i.test(String(result?.error || ''));
+}
+
+/** Ask the AI for the listed option closest to the row's value and fill it; the fill result, or null. */
+async function refillFromOptions(row, rowEl, thresholds, runToken) {
+  if (!getOpenAiApiKey()) return null;
+  const original = String(row.suggestedValue || '').trim();
+  try {
+    const resolved = await generateAiValueForRow(row, { closestTo: original || '(no answer)' });
+    if (autofillTabChanged(runToken)) return null;
+    applyAiValueToRow(row, { ...resolved, status: `Ready (AI picked the option for "${original.slice(0, 40)}")` }, rowEl);
+  } catch (_) {
+    return null;
+  }
+  const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: [buildFillPayloadFromRow(row)], thresholds });
+  const result = (response?.results || [])[0] || { success: false, error: 'No result returned.' };
+  applyFillResultToPlanRow(row, result, { usedAi: true });
+  return result;
+}
+
 async function fillSelectedFieldsWithAi() {
   if (!requireOpenAiApiKey()) return;
 
@@ -5417,8 +5529,14 @@ async function fillSelectedFieldsWithAi() {
           radioMatchThreshold: currentSettings.radioMatchThreshold ?? defaultSettings.radioMatchThreshold
         };
         const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: payload, thresholds });
-        const result = (response?.results || [])[0] || { success: false, error: 'No result returned.' };
+        let result = (response?.results || [])[0] || { success: false, error: 'No result returned.' };
         applyFillResultToPlanRow(row, result, { usedAi: false });
+        // "How did you hear?" = "Company Website" when the list says "Careers page":
+        // the AI picks the option that means the same.
+        if (!result.success && optionMismatch(row, result)) {
+          const retried = await refillFromOptions(row, rowEl, thresholds, aiRunToken);
+          if (retried) result = retried;
+        }
         updateFieldRowAppearance(rowEl, row);
         if (result.success) filled += 1;
         else failed += 1;
@@ -5468,8 +5586,12 @@ async function fillSelectedFieldsWithAi() {
         radioMatchThreshold: currentSettings.radioMatchThreshold ?? defaultSettings.radioMatchThreshold
       };
       const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: payload, thresholds });
-      const result = (response?.results || [])[0] || { success: false, error: 'No result returned.' };
+      let result = (response?.results || [])[0] || { success: false, error: 'No result returned.' };
       applyFillResultToPlanRow(row, result, { usedAi: row.source === 'ai' });
+      if (!result.success && optionMismatch(row, result)) {
+        const retried = await refillFromOptions(row, rowEl, thresholds, aiRunToken);
+        if (retried) result = retried;
+      }
       updateFieldRowAppearance(rowEl, row);
       if (result.success) filled += 1;
       else failed += 1;

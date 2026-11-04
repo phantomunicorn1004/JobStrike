@@ -479,6 +479,17 @@
     'This company asks you to confirm you are a person, not an automated tool, so Auto-bid does not apply here. Apply by hand if you want this job.';
 
   /**
+   * "During this application process I agree to use only my own words … the use
+   * of AI will disqualify my application" (Canonical): Auto-bid's answers are
+   * written with AI, so agreeing would be untrue. A rule about later interviews
+   * (Airbnb's AI attestation) is a promise the candidate can keep and is agreed to.
+   */
+  const OWN_WORDS_RE =
+    /\b(?:only my own words|in my own words|plagiari\w*)\b[\s\S]{0,240}\b(?:AI|artificial intelligence|generated)\b|\b(?:AI|artificial intelligence|generated content)\b[\s\S]{0,240}\b(?:only my own words|in my own words)\b/i;
+  const OWN_WORDS_STOP =
+    'This company asks you to confirm the application is in your own words, without AI. Auto-bid writes its answers with AI, so it does not apply here. Apply by hand if you want this job.';
+
+  /**
    * Every field of the form as Autofill planned and filled it: what was
    * entered, where the value came from, and how filling went. Saved with the
    * job's result and shown on the website's Auto-bid page.
@@ -624,7 +635,9 @@
       checkStop();
 
       if (!currentFields.length) {
-        throw new Stop('needs_you', 'No application form found on the page (it may need a login or an Apply click).', meta);
+        // The scan's own error, when it had one, says more than "no form".
+        const why = typeof lastAutofillError === 'string' && lastAutofillError ? ` Scan: ${lastAutofillError.slice(0, 160)}` : '';
+        throw new Stop('needs_you', `No application form found on the page (it may need a login or an Apply click).${why}`, meta);
       }
       meta.fieldReport = fieldReport();
       // A form that asks the applicant to confirm they are a person, not an
@@ -637,6 +650,11 @@
           `${BOT_CHECK_STOP} ("${rowLabel(botCheck)}")`,
           meta
         );
+      }
+      const ownWords = currentPlan.find((row) => OWN_WORDS_RE.test(rowText(row)));
+      if (ownWords) {
+        meta.botCheck = rowLabel(ownWords);
+        throw new Stop('needs_you', `${OWN_WORDS_STOP} ("${rowLabel(ownWords)}")`, meta);
       }
       const open = currentPlan.filter((row) => row.field?.required && row.fillOutcome !== 'filled');
       meta.fields = currentPlan.length;

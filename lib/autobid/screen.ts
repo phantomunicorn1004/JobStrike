@@ -3,8 +3,9 @@ import type { ProfileAutofill } from "@/lib/resume-db/profile-autofill";
 /**
  * The free first check on a job Live found, before any AI or ChatGPT time is spent
  * on it. Runs twice: on the lite row (site, title) and again once the job
- * description is known (clearance, citizenship, sponsorship, night shift).
- * Anything subtler (location, seniority, occupation) is left to the AI fit check.
+ * description is known (a location only outside the U.S., clearance,
+ * citizenship, sponsorship, night shift). Anything subtler (seniority,
+ * occupation, a location it cannot tell) is left to the AI fit check.
  */
 
 export type ScreenSite = "Greenhouse" | "Lever" | "Ashby";
@@ -69,6 +70,55 @@ const NO_SPONSORSHIP_RE =
 
 const NIGHT_SHIFT_RE = /\bnight shift\b/i;
 
+/**
+ * The posting's own "Location:" line (the scrapers write it at the top of every
+ * description), cut before the next detail on the same line.
+ */
+export function postedLocation(jobDescription: string): string {
+  const match = /\bLocations?:\s*([^\n#]{1,300})/i.exec(String(jobDescription || ""));
+  if (!match) return "";
+  return match[1]
+    .split(/\b(?:Employment Type|Department|Workplace|Compensation|Salary|Team|Job Type|Remote Type)\s*:/i)[0]
+    .trim();
+}
+
+/** Words that put a location in the U.S. (or open it to the U.S.). */
+const US_PLACE_RE = new RegExp(
+  [
+    String.raw`united states`,
+    String.raw`\bU\.?\s?S\.?A?\.?(?![a-z])`,
+    String.raw`\bamericas?\b`,
+    String.raw`north america`,
+    String.raw`\b(?:anywhere|worldwide|global(?:ly)?)\b`,
+    // "Austin, TX", "Billings, MT"
+    String.raw`,\s*(?:A[KLRZ]|C[AOT]|D[CE]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\b`,
+    String.raw`\b(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|wisconsin|wyoming)\b`,
+    String.raw`\b(?:san francisco|los angeles|seattle|boston|chicago|austin|denver|atlanta|miami|dallas|houston|portland|pittsburgh|detroit|palo alto|bellevue|sunnyvale|nyc|bay area|silicon valley)\b`,
+  ].join("|"),
+  "i",
+);
+
+/** Countries and regions outside the U.S. ("Georgia" is left out: it is also a state). */
+const NON_US_PLACE_RE =
+  /\b(canada|mexico|brazil|argentina|colombia|chile|peru|latam|united kingdom|uk|england|scotland|ireland|europe|emea|eu|germany|france|spain|portugal|italy|poland|netherlands|belgium|switzerland|austria|sweden|norway|denmark|finland|estonia|latvia|lithuania|czech\w*|slovakia|slovenia|croatia|serbia|montenegro|albania|bosnia|romania|bulgaria|greece|cyprus|hungary|ukraine|moldova|armenia|azerbaijan|turkey|t[uü]rkiye|israel|egypt|morocco|nigeria|kenya|uganda|tanzania|ghana|south africa|uae|dubai|saudi arabia|qatar|india|pakistan|bangladesh|sri lanka|philippines|vietnam|thailand|malaysia|singapore|indonesia|japan|china|hong kong|taiwan|korea|australia|new zealand|apac|london|berlin|paris|madrid|barcelona|lisbon|amsterdam|dublin|warsaw|krakow|bucharest|tirana|nairobi|kampala|ontario|quebec|alberta|british columbia|toronto|vancouver|montreal|bangalore|bengaluru|hyderabad|pune|manila|tel aviv)\b/i;
+
+/**
+ * The posting is only for places outside the U.S. ("Cyprus; Spain; Poland",
+ * "Canada - Remote"): a U.S. candidate cannot take it. "Remote" alone, or a
+ * place this cannot tell, is left to the AI fit check.
+ */
+export function nonUsLocation(jobDescription: string): string {
+  const location = postedLocation(jobDescription);
+  if (!location) return "";
+  if (US_PLACE_RE.test(location)) return "";
+  return NON_US_PLACE_RE.test(location) ? location.slice(0, 80) : "";
+}
+
+function livesInUs(profile: ScreenOptions["profile"]): boolean {
+  const country = String(profile.country || "").trim();
+  return !country || /^(us|usa|u\.s\.a?\.?|united states(?: of america)?|america)$/i.test(country);
+}
+
 function holdsClearance(profile: ScreenOptions["profile"]): boolean {
   const value = String(profile.securityClearance || "").trim();
   return Boolean(value) && !/^(no|none|n\/a)$/i.test(value);
@@ -104,6 +154,10 @@ export function screenCandidate(job: ScreenInput, options: ScreenOptions): Scree
   if (!jd) return { ok: true, site };
 
   const profile = options.profile;
+  if (livesInUs(profile)) {
+    const abroad = nonUsLocation(jd);
+    if (abroad) return { ok: false, reason: `Outside the U.S.: "${abroad}"` };
+  }
   if (!holdsClearance(profile)) {
     const hit = quote(jd, CLEARANCE_RE);
     if (hit) return { ok: false, reason: `Needs a clearance: "${hit}"` };
