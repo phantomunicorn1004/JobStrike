@@ -27,6 +27,8 @@
   const BIND_WAIT_MS = 25 * 1000;
   const CONFIRM_WAIT_MS = 45 * 1000;
   const CONFIRM_POLL_MS = 2000;
+  const VERIFY_CODE_POLL_MS = 5000;
+  const VERIFY_CODE_WAIT_MS = 3 * 60 * 1000;
   /** A problem with this machine (json2docx down, signed out): wait this long, then try again. */
   const PAUSE_RETRY_MS = 5 * 60 * 1000;
   /** Needs-you tabs kept open for the user; older ones are closed (the job stays listed). */
@@ -270,6 +272,53 @@
       }
     }
     return { clicked: false };
+  }
+
+  /**
+   * Runs in the form's frame. Finds the verification code input, types the
+   * code, and clicks the submit/verify button. Returns { entered: true } on
+   * success, { entered: false, reason } otherwise.
+   */
+  function enterVerificationCode(code) {
+    const inputs = [...document.querySelectorAll('input[type="text"], input[type="tel"], input[type="number"], input:not([type])')];
+    const field = inputs.find((el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      const label = (el.getAttribute('aria-label') || el.placeholder || el.name || '').toLowerCase();
+      return /code|verif|security/i.test(label) || el.maxLength === 8 || el.closest('[class*="verification"], [class*="security"]');
+    }) || inputs.find((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !el.value && !el.readOnly && !el.disabled;
+    });
+    if (!field) return { entered: false, reason: 'no input field found' };
+    field.focus();
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    if (nativeSetter) nativeSetter.call(field, code);
+    else field.value = code;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const visible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const text = (el) => String(el.innerText || el.value || '').trim().toLowerCase();
+    for (const btn of document.querySelectorAll('button, input[type="submit"]')) {
+      if (!visible(btn) || btn.disabled) continue;
+      const t = text(btn);
+      if (/submit|verify|confirm|continue/i.test(t)) {
+        btn.click();
+        return { entered: true };
+      }
+    }
+    for (const btn of document.querySelectorAll('button[type="submit"], form button')) {
+      if (visible(btn) && !btn.disabled) {
+        btn.click();
+        return { entered: true };
+      }
+    }
+    return { entered: true };
   }
 
   /**
@@ -759,10 +808,69 @@
           throw new Stop('needs_you', `The site refused the application as possible spam, so it was most likely not sent.${shown}`, meta);
         }
         if (judged.verdict === 'verify') {
-          toast(`${job.company}: enter the emailed verification code in its tab to finish the application.`, 'error');
+          setStep('Verification code requested — checking mailbox…');
+          meta.verifyCodeRequested = true;
+          let codeEntered = false;
+          const codeUntil = Date.now() + VERIFY_CODE_WAIT_MS;
+          while (Date.now() < codeUntil) {
+            await sleep(VERIFY_CODE_POLL_MS);
+            checkStop();
+            try {
+              const { code } = await bid().autobidFetch(
+                `/api/autobid/verify-code?profileId=${encodeURIComponent(job.profile_id)}`
+              );
+              if (!code) continue;
+              setStep(`Entering verification code ${code}…`);
+              const [entry] = await chrome.scripting.executeScript({
+                target: { tabId, allFrames: true },
+                func: enterVerificationCode,
+                args: [code],
+              });
+              if (entry?.result?.entered) {
+                meta.verifyCodeEntered = code;
+                codeEntered = true;
+                break;
+              }
+              logLine(`#${job.id}: code ${code} fetched but could not be entered: ${entry?.result?.reason || 'unknown'}.`);
+              break;
+            } catch (fetchError) {
+              // API unreachable or no mailbox connected: fall through to manual.
+              if (Date.now() + VERIFY_CODE_POLL_MS >= codeUntil) break;
+            }
+          }
+          if (!codeEntered) {
+            toast(`${job.company}: enter the emailed verification code in its tab to finish the application.`, 'error');
+            throw new Stop(
+              'needs_you',
+              `Not sent yet: the site emailed a verification code. Auto-entry did not find it in the mailbox.${shown}`,
+              meta
+            );
+          }
+          // Code entered — wait for the confirmation like a normal Submit.
+          setStep('Code entered — waiting for confirmation…');
+          const codeConfirmUntil = Date.now() + CONFIRM_WAIT_MS;
+          let codeJudged = null;
+          let codeConfirmPolls = 0;
+          while (Date.now() < codeConfirmUntil) {
+            await sleep(CONFIRM_POLL_MS);
+            const outcome = await probeOutcome(tabId);
+            codeJudged = judgeAfterSubmit(before, outcome);
+            if (codeJudged.verdict === 'confirmed') {
+              codeConfirmPolls = codeJudged.by === 'form_replaced' ? codeConfirmPolls + 1 : 2;
+              if (codeConfirmPolls >= 2) break;
+              continue;
+            }
+            codeConfirmPolls = 0;
+            if (codeJudged.verdict === 'verify') continue;
+          }
+          if (codeJudged?.verdict === 'confirmed' && codeConfirmPolls >= 2) {
+            judged = codeJudged;
+            break;
+          }
+          toast(`${job.company}: code entered but confirmation not seen. Check the tab.`, 'warn');
           throw new Stop(
             'needs_you',
-            `Not sent yet: the site emailed a verification code to confirm a person is applying.${shown} Enter the code from the mailbox in the open tab (it expires), press Submit, then Register.`,
+            `Verification code entered but the application was not confirmed. Check the tab.`,
             meta
           );
         }
@@ -1580,5 +1688,5 @@
 
   window.addEventListener('DOMContentLoaded', () => void init());
 
-  window.SmartJobAutoBid = { applicationFormUrl, clickSubmitButton, probeApplicationOutcome, judgeAfterSubmit };
+  window.SmartJobAutoBid = { applicationFormUrl, clickSubmitButton, enterVerificationCode, probeApplicationOutcome, judgeAfterSubmit };
 })();
