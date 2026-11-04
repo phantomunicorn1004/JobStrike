@@ -613,6 +613,9 @@
       // This job's own answers (from its resume and posting) over the profile's.
       if (job.answers && Object.keys(job.answers).length) meta.answers = job.answers;
       setAutofillJobAnswers(job.answers || null);
+      // The posting and resume were just set by code, which does not clear the AI's
+      // cached context: without this, a job right after another is answered from the last one.
+      if (typeof invalidateAiContextCache === 'function') invalidateAiContextCache();
       try {
         await autofillThisPage({ useAi: true });
       } finally {

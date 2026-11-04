@@ -421,6 +421,10 @@
       'For yes/no questions, answer with Yes or No unless options specify otherwise.',
       'If the context does not contain enough facts to answer honestly, set "needs_input": true and "value": "".',
       'Never guess just to fill a blank.',
+      // Skill questions are answered from the resume, not left for the user.
+      'Questions about experience with a skill, tool or kind of work ("Do you have 2+ years of …?", "How many years of …?", "Are you comfortable working in …?") are answered from Work experience:',
+      'a skill named in a role (its title, summary, bullets or technologies) counts for that role\'s dates; add those years up and pick the matching option.',
+      'Answer No (or the lowest range) when the work experience does not show it; use needs_input for these only when there is no work experience at all.',
     ];
 
     if (qType === 'behavioral') {

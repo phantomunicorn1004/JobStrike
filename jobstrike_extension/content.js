@@ -4603,7 +4603,10 @@
     if (!isReactSelectCombobox(el)) return false;
     const id = (el.id || '').toLowerCase();
     if (id === 'candidate-location' || /candidate[-_]?location/.test(id)) return true;
-    const ql = normalizeText(el.__questionTextHint || getQuestionText(el));
+    const rawQuestion = String(el.__questionTextHint || getQuestionText(el) || '');
+    // "Do you currently live in the US or Canada?" is a question with choices, not the city search box.
+    if (/\?/.test(rawQuestion)) return false;
+    const ql = normalizeText(rawQuestion);
     if (/location\s*\(\s*city\s*\)/i.test(ql)) return true;
     if (/\blocation\b/.test(ql) && /\bcity\b/.test(ql)) return true;
     if (activeAdapter && activeAdapter.name === 'greenhouse' && /\blocation\b/.test(ql)) return true;
@@ -4899,17 +4902,21 @@
     ) {
       return { category: 'full_name', confidence: 0.82 };
     }
+    // "Have you ever worked for … State Farm?" or "Are you authorized to work in
+    // the country …?" ask a question; they are not an address, city, state, zip
+    // or country to copy from the profile.
+    const asksQuestion = /^(are|do|does|did|have|has|had|will|would|is|was|were|can|could|should)\b/.test(text);
     if (type === 'email' || has('email', 'e mail')) return { category: 'email', confidence: 0.96 };
     if (type === 'tel' || has('phone', 'mobile', 'cell')) return { category: 'phone', confidence: 0.92 };
-    if (has('street address', 'address line', 'mailing address') || (hasWord('street') && !has('wall street', 'email address'))) {
+    if (!asksQuestion && (has('street address', 'address line', 'mailing address') || (hasWord('street') && !has('wall street', 'email address')))) {
       return { category: 'address', confidence: 0.92 };
     }
-    if (hasWord('address') && !has('email address', 'company address', 'ip address')) {
+    if (!asksQuestion && hasWord('address') && !has('email address', 'company address', 'ip address')) {
       return { category: 'address', confidence: 0.84 };
     }
-    if (hasWord('city')) return { category: 'city', confidence: 0.9 };
-    if (has('state province', 'province') || hasWord('state')) return { category: 'state', confidence: 0.86 };
-    if (has('zip code', 'postal code', 'postcode') || hasWord('zip')) return { category: 'zip', confidence: 0.9 };
+    if (!asksQuestion && hasWord('city')) return { category: 'city', confidence: 0.9 };
+    if (!asksQuestion && (has('state province', 'province') || hasWord('state'))) return { category: 'state', confidence: 0.86 };
+    if (!asksQuestion && (has('zip code', 'postal code', 'postcode') || hasWord('zip'))) return { category: 'zip', confidence: 0.9 };
     const eligibility = classifyEligibilityQuestion(text);
     if (eligibility === 'ambiguous') return { category: 'custom_question', confidence: 0.6 };
     if (eligibility === 'sponsorship' || (!eligibility && has('require visa'))) {
@@ -4919,7 +4926,7 @@
       return { category: workAuthorizationCategory(text), confidence: 0.92 };
     }
     if (has('lgbtq', 'lgbtq+', 'lgbt')) return { category: 'lgbtq_identity', confidence: 0.94 };
-    if (hasWord('country') && !has('country of birth', 'country of citizenship', 'home country', 'origin country', 'country of origin')) return { category: 'country', confidence: 0.9 };
+    if (!asksQuestion && hasWord('country') && !has('country of birth', 'country of citizenship', 'home country', 'origin country', 'country of origin')) return { category: 'country', confidence: 0.9 };
     // Not bare "employer": that also appears in questions about agreements with a former employer.
     if (
       has('current company', 'current employer', 'present employer', 'most recent employer', 'most recent company') &&
@@ -7409,6 +7416,18 @@
     return overlap / Math.max(aTokens.size, bTokens.size);
   }
 
+  /** A native dropdown for a self-identification answer, matched with the same wording variants as other dropdowns. */
+  function fillDemographicSelect(select, value, category, threshold) {
+    const options = Array.from(select.options || []).filter((option) => option.value);
+    const { best, bestScore } = bestOptionMatch(options, value, category);
+    const cutoff = Math.min(typeof threshold === 'number' ? threshold : 0.5, 0.45);
+    if (!best || bestScore < cutoff) return null;
+    select.value = best.value;
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return { success: true };
+  }
+
   function fillSelect(select, value, threshold) {
     const cutoff = typeof threshold === 'number' ? threshold : 0.5;
     const options = Array.from(select.options || []);
@@ -8613,6 +8632,21 @@
     if (fieldCategory === 'state' && tag === 'SELECT') {
       const picked = fillStateSelect(el, value);
       if (picked) return picked;
+    }
+    // "No" for veteran status must find "I am not a protected veteran", as in type-and-pick dropdowns.
+    if (tag === 'SELECT' && isDemographicCategory(fieldCategory)) {
+      const picked = fillDemographicSelect(el, value, fieldCategory, thresholds?.selectMatchThreshold);
+      if (picked) return picked;
+    }
+    // Greenhouse's phone has its own required country picker, which the scan
+    // does not list: with a US number, it is set to the United States first.
+    if ((declaredType === 'phone' || fieldCategory === 'phone') && el.closest('fieldset.phone-input')) {
+      const country = el.closest('fieldset.phone-input').querySelector('.phone-input__country input[role="combobox"]');
+      const usNumber = /^\d{10}$/.test(String(normalizePhoneForField(rawValue) || ''));
+      if (country && usNumber && !verifyGreenhouseLocationSelection(country)) {
+        const picked = await fillGreenhousePhoneCountry(country, 'United States');
+        if (!picked.success) return { success: false, error: `Phone country: ${picked.error}` };
+      }
     }
     const payload = fillPayload && typeof fillPayload === 'object'
       ? fillPayload
