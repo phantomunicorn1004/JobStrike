@@ -4752,6 +4752,7 @@ ${groupSheetStyles()}
         inWindow: part.inWindow.length,
         outWindow: part.outWindow.length,
         undated: part.undated.length,
+        allSeen: part.inWindow.length > 0 && part.inWindow.every((job) => isSeenJob(job, 'jobright')),
       };
     };
 
@@ -5173,6 +5174,9 @@ ${groupSheetStyles()}
         }
 
         if (jobs.length === before && stagnantBatches >= 2) break;
+        // Live check, newest-first: a page with nothing not seen before means caught up
+        // (as HiringCafe does). Saves most of the day's request budget.
+        if (state.liveRun && feedSorted && pushResult.allSeen) break;
         if (batch < maxScrollBatches - 1) {
           await sleep(delayMs + Math.floor(Math.random() * 3000));
           if ((batch + 1) % 10 === 0) await sleep(8000 + Math.floor(Math.random() * 7000));
