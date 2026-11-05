@@ -433,6 +433,7 @@ async function autogenWindowSummary() {
     signedIn: Boolean(settings.serverBaseUrl && settings.username),
     server: settings.serverBaseUrl || "",
     engine: settings.engine === "api" ? "api" : "chatgpt",
+    autoClaim: Boolean(settings.autoClaim),
     windows,
   };
 }
@@ -444,6 +445,9 @@ async function autogenWindowSummary() {
  */
 async function ensureGeneratingWindows(count) {
   const want = Math.max(0, Math.min(6, Math.round(Number(count) || 0)));
+  // A running window only drains "Run selected" picks unless autoClaim is on;
+  // the panel's Run button turns both on together, so Auto-bid must too.
+  if (want > 0) await autogenSaveSettings({ autoClaim: true });
   const settings = await autogenGetSettings();
   const api = settings.engine === "api";
   const owned = new Set(((await chrome.storage.local.get({ [OWNED_WINDOWS_KEY]: [] }))[OWNED_WINDOWS_KEY] || []).map(Number));

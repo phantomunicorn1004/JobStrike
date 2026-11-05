@@ -378,6 +378,20 @@ public sealed class ChatBridge
         }
     }
 
+    /// <summary>The text selected on the chat page ("" when none or the page cannot be read).</summary>
+    public async Task<string> ReadSelectionAsync()
+    {
+        try
+        {
+            return await EvalString("(() => String(window.getSelection() || '').trim())()") ?? "";
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"[{Provider}] reading the selection failed: {ex.Message}");
+            return "";
+        }
+    }
+
     async Task<string?> EvalString(string script) => JsonSerializer.Deserialize<string?>(await Eval(script));
 
     Task<string> Eval(string script) => _core.ExecuteScriptAsync(script).WaitAsync(StepTimeout);

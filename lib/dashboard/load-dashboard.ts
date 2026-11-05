@@ -28,7 +28,7 @@ import {
   type PipelineStageRow,
   type ResumeApplicationRow,
 } from "@/lib/dashboard/stats";
-import { normalizeTimeZone } from "@/lib/timezone";
+import { endOfDayUtcIso, normalizeTimeZone, startOfDayUtcIso } from "@/lib/timezone";
 
 export type DashboardRangeMode = "week" | "month" | "custom";
 
@@ -110,6 +110,21 @@ function mergeApplicationRows(
   return [...byId.values(), ...withoutId];
 }
 
+/** Same bounds as listApplicationsForDashboardRange, applied to rows already read. */
+function applicationsInDayRange<T extends ResumeApplicationRow>(
+  rows: T[],
+  dateFrom: string,
+  dateTo: string,
+  timeZone: string,
+): T[] {
+  const from = Date.parse(startOfDayUtcIso(dateFrom, timeZone));
+  const to = Date.parse(endOfDayUtcIso(dateTo, timeZone));
+  return rows.filter((row) => {
+    const at = Date.parse(row.applied_at);
+    return at >= from && at <= to;
+  });
+}
+
 /** Shared dashboard payload for RSC pages and /api/dashboard. */
 export async function loadDashboardData(
   user: SessionUser,
@@ -143,14 +158,12 @@ export async function loadDashboardData(
 
   const supabase = getSupabaseAdminClient();
   const [
-    applicationsInRange,
     jobs,
     techJobs,
     stagesRes,
     candidates,
     responseRows,
   ] = await Promise.all([
-    listApplicationsForDashboardRange(user.id, bidFrom, bidTo, timezone),
     listPipelineJobsForDashboard(user.id),
     listTechnicalJobsForDashboard(user.id),
     supabase
@@ -166,8 +179,11 @@ export async function loadDashboardData(
   ]);
 
   // Every application is read once (with its link and stage) and serves the
-  // profile counts, the total and the statistics; the profile columns alone are
-  // read only if that read failed.
+  // range, the profile counts, the total and the statistics; narrower reads run
+  // only if that read failed.
+  const applicationsInRange: ResumeApplicationRow[] = responseRows
+    ? applicationsInDayRange(responseRows, bidFrom, bidTo, timezone)
+    : await listApplicationsForDashboardRange(user.id, bidFrom, bidTo, timezone);
   const allCandidateRows: ResumeApplicationRow[] =
     responseRows ?? (await listApplicationCandidateKeysForDashboard(user.id));
   const totalApplicationsAll = responseRows
@@ -222,12 +238,9 @@ export async function loadDashboardData(
   if (needExtraDays.length) {
     const extraFrom = needExtraDays.reduce((a, b) => (a < b ? a : b));
     const extraTo = needExtraDays.reduce((a, b) => (a > b ? a : b));
-    const extra = await listApplicationsForDashboardRange(
-      user.id,
-      extraFrom,
-      extraTo,
-      timezone,
-    );
+    const extra = responseRows
+      ? applicationsInDayRange(responseRows, extraFrom, extraTo, timezone)
+      : await listApplicationsForDashboardRange(user.id, extraFrom, extraTo, timezone);
     applicationsForCharts = mergeApplicationRows(applicationsInRange, extra);
   }
 

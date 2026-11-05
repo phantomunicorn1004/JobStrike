@@ -42,7 +42,7 @@ function titleWords(title: string | null | undefined): Set<string> {
 }
 
 /** Share of the shorter title's words found in the other (0–1). */
-export function titleSimilarity(a: string | null | undefined, b: string | null | undefined): number {
+function titleSimilarity(a: string | null | undefined, b: string | null | undefined): number {
   const x = titleWords(a);
   const y = titleWords(b);
   if (x.size === 0 || y.size === 0) return 0;

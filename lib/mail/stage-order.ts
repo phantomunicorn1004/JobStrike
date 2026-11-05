@@ -12,9 +12,9 @@ import { INTERVIEW_STAGES, normalizeRound, type InterviewStage } from "@/lib/int
  */
 
 /** Without any scheduled interview, the emails of the first week are about the first call. */
-export const FIRST_CALL_WITHOUT_DATE_MS = 7 * 86_400_000;
+const FIRST_CALL_WITHOUT_DATE_MS = 7 * 86_400_000;
 /** The first call is over this long after it starts. */
-export const FIRST_CALL_AFTER_START_MS = 12 * 3_600_000;
+const FIRST_CALL_AFTER_START_MS = 12 * 3_600_000;
 
 export type StageEmail = {
   id: string;

@@ -1,9 +1,6 @@
 import { atsPlatformFromLink } from "@/lib/ats-platform";
 import { getDayKeyInTimeZone } from "@/lib/timezone";
 
-/** The board's Applied column: cards in the `jobs` table, whatever the column order. */
-export const APPLIED_STAGE_ID = "applied";
-
 /**
  * One registered application, reduced to what the stage statistics need. Sent to
  * the browser once, so any period, grouping or filter is computed instantly there.
@@ -64,7 +61,7 @@ export function responseStageIds(stages: Array<{ id: string; name: string }>): S
 }
 
 /** Platform name; employers' own careers sites are counted together. */
-export function stageStatPlatform(link: string | null | undefined): string {
+function stageStatPlatform(link: string | null | undefined): string {
   const name = atsPlatformFromLink(link);
   if (!name) return "No link";
   return name.includes(".") ? "Company sites" : name;

@@ -2,7 +2,8 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <!-- The Windows 10 2004 API set gives the app Windows' speech voices and audio output devices. -->
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
@@ -14,8 +15,6 @@
 
   <ItemGroup>
     <Resource Include="Assets\AppIcon.png" />
-    <!-- Nunito, SIL Open Font License (Assets\Fonts\Nunito-OFL.txt) -->
-    <Resource Include="Assets\Fonts\*.ttf" />
   </ItemGroup>
 
   <ItemGroup>

@@ -26,7 +26,7 @@ export function isSecretEncryptionConfigured(): boolean {
   return encryptionKey() !== null;
 }
 
-export function isEncryptedSecret(value: string | null | undefined): boolean {
+function isEncryptedSecret(value: string | null | undefined): boolean {
   return typeof value === "string" && value.startsWith(`${VERSION}:`);
 }
 

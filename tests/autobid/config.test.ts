@@ -62,13 +62,13 @@ describe("mergeAutobidConfig", () => {
     expect(mergeAutobidConfig(DEFAULT_AUTOBID_CONFIG, { hours: "9-5pm" })).toHaveProperty("error");
   });
 
-  it("runs all day on HiringCafe's freshest jobs at a person's pace by default, Ashby off", () => {
-    expect(DEFAULT_AUTOBID_CONFIG).toMatchObject({ hours: "", everyMinutes: 15, freshnessHours: 3, ashby: false, gapMin: 2, gapMax: 5 });
+  it("runs all day on HiringCafe's freshest jobs at a person's pace by default, Ashby on", () => {
+    expect(DEFAULT_AUTOBID_CONFIG).toMatchObject({ hours: "", everyMinutes: 15, freshnessHours: 3, ashby: true, gapMin: 2, gapMax: 5 });
   });
 
   it("clamps freshness and the gap, and keeps the gap range in order", () => {
-    const result = mergeAutobidConfig(DEFAULT_AUTOBID_CONFIG, { freshnessHours: 99, gapMin: 8, gapMax: 3, ashby: 1 });
-    expect("config" in result && result.config).toMatchObject({ freshnessHours: 24, gapMin: 8, gapMax: 8, ashby: true });
+    const result = mergeAutobidConfig(DEFAULT_AUTOBID_CONFIG, { freshnessHours: 99, gapMin: 8, gapMax: 3, ashby: 0 });
+    expect("config" in result && result.config).toMatchObject({ freshnessHours: 24, gapMin: 8, gapMax: 8, ashby: false });
   });
 
   it("stops even when the setup is incomplete", () => {

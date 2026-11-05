@@ -1,5 +1,5 @@
 /** Stable per-candidate colors shared across dashboard charts. */
-export const CANDIDATE_COLOR_PALETTE = [
+const CANDIDATE_COLOR_PALETTE = [
   "#2563eb",
   "#22c55e",
   "#f59e0b",
@@ -15,6 +15,9 @@ export const CANDIDATE_COLOR_PALETTE = [
 ] as const;
 
 export function colorForCandidateKey(key: string): string {
+  // Profiles take colours in id order so the first few are always distinct; other keys hash.
+  const profile = /^profile-(\d+)$/.exec(key);
+  if (profile) return CANDIDATE_COLOR_PALETTE[(Number(profile[1]) - 1) % CANDIDATE_COLOR_PALETTE.length];
   let hash = 2166136261;
   for (let i = 0; i < key.length; i += 1) {
     hash ^= key.charCodeAt(i);

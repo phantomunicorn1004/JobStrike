@@ -34,6 +34,25 @@ public readonly record struct Hotkey(ModifierKeys Modifiers, Key Key)
         return string.Join("+", parts);
     }
 
+    /// <summary>
+    /// Combinations other programs commonly use (and what for). As hotkeys they only work where
+    /// HotkeyScope allows, so they keep their normal job everywhere else.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> CommonShortcuts = new Dictionary<string, string>
+    {
+        ["Ctrl+X"] = "Cut", ["Ctrl+C"] = "Copy", ["Ctrl+V"] = "Paste", ["Ctrl+Z"] = "Undo", ["Ctrl+Y"] = "Redo",
+        ["Ctrl+A"] = "Select all", ["Ctrl+S"] = "Save", ["Ctrl+F"] = "Find", ["Ctrl+P"] = "Print", ["Ctrl+N"] = "New",
+        ["Ctrl+T"] = "New tab", ["Ctrl+W"] = "Close tab", ["Ctrl+R"] = "Reload", ["Ctrl+L"] = "the address bar",
+        ["Ctrl+B"] = "Bold", ["Ctrl+I"] = "Italic", ["Ctrl+U"] = "Underline", ["Ctrl+E"] = "Search / camera in meeting apps",
+        ["Ctrl+D"] = "Mute in Google Meet", ["Ctrl+Space"] = "Autocomplete and switching input languages",
+        ["Ctrl+Enter"] = "Send in chat apps", ["Ctrl+="] = "Zoom in", ["Ctrl+-"] = "Zoom out", ["Ctrl+0"] = "Reset zoom",
+        ["Ctrl+Shift+M"] = "Mute in Teams", ["Alt+A"] = "Mute in Zoom", ["Alt+V"] = "Camera in Zoom",
+        ["Ctrl+Shift+O"] = "Camera in Teams", ["Ctrl+Shift+E"] = "Share screen in Teams",
+    };
+
+    /// <summary>True when other programs commonly use this combination (Ctrl+X, Ctrl+Space, …).</summary>
+    public bool IsCommonShortcut => CommonShortcuts.ContainsKey(ToString());
+
     public static bool TryParse(string? text, out Hotkey hotkey)
     {
         hotkey = default;

@@ -4,7 +4,7 @@ import type { ReasoningEffort } from "openai/resources/shared";
 import { serverOpenAI } from "@/lib/ai/server-openai";
 
 /** OPENAI_RESUME_MODEL, else this. */
-export const DEFAULT_RESUME_MODEL = "gpt-6.1-sol";
+const DEFAULT_RESUME_MODEL = "gpt-6.1-sol";
 
 const EFFORTS: ReadonlyArray<NonNullable<ReasoningEffort>> = ["none", "minimal", "low", "medium", "high", "xhigh"];
 
@@ -15,7 +15,7 @@ export type OpenAIGeneration = {
   ms: number;
 };
 
-export function resumeModel(): string {
+function resumeModel(): string {
   return process.env.OPENAI_RESUME_MODEL?.trim() || DEFAULT_RESUME_MODEL;
 }
 

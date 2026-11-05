@@ -7,7 +7,7 @@ It combines two features:
 1. Saved job tracking with JSON export.
 2. Job application autofill with a user profile and custom question answer bank.
 
-The extension is intentionally review-first. It does **not** auto-submit applications.
+The Bid tab is review-first: it fills the form and you submit. Auto-bid (started from the website) submits Greenhouse, Lever and Ashby applications on its own and stops for you when a form needs a person.
 
 ## Main Features
 

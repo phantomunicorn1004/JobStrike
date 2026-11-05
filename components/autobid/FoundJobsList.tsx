@@ -1,25 +1,26 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, Loader2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import React, { useMemo, useState } from "react";
+import { ExternalLink, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TONE_PILL } from "@/lib/ui/tone";
+import { CompanyAvatar } from "@/components/autobid/CompanyAvatar";
 import type { CandidateStatus, FoundListEntry } from "@/lib/autobid/candidates";
 
 const STATUS_LABEL: Record<CandidateStatus, string> = {
   queued: "Queued",
-  passed: "Fits · waiting for room",
+  passed: "Fits · waiting",
   found: "Checking",
   skipped: "Skipped",
   expired: "Expired",
 };
 
-const STATUS_STYLE: Record<CandidateStatus, string> = {
-  queued: "text-emerald-700 dark:text-emerald-400",
-  passed: "text-primary",
-  found: "text-muted-foreground",
-  skipped: "text-muted-foreground",
-  expired: "text-muted-foreground",
+const STATUS_PILL: Record<CandidateStatus, string> = {
+  queued: TONE_PILL.success,
+  passed: TONE_PILL.progress,
+  found: TONE_PILL.idle,
+  skipped: TONE_PILL.idle,
+  expired: TONE_PILL.idle,
 };
 
 const FILTERS: Array<CandidateStatus | "all"> = ["all", "queued", "passed", "found", "skipped", "expired"];
@@ -27,119 +28,123 @@ const FILTERS: Array<CandidateStatus | "all"> = ["all", "queued", "passed", "fou
 function ago(iso: string | null, now: number): string {
   if (!iso) return "";
   const minutes = Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return `${minutes}m`;
   const hours = Math.round(minutes / 60);
-  return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`;
+  return hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
 }
 
-/**
- * Every job Live found in the last 24 hours and what the server decided:
- * queued, fits but waiting for room, skipped (with the reason), or expired.
- */
-export function FoundJobsList({ refreshKey }: { refreshKey: number }) {
-  const [found, setFound] = useState<FoundListEntry[] | null>(null);
-  const [error, setError] = useState("");
+function fitTone(score: number): string {
+  if (score >= 75) return "text-emerald-700 dark:text-emerald-400";
+  if (score >= 50) return "text-foreground";
+  return "text-muted-foreground";
+}
+
+/** Every job Live found in the last 24 hours and what the server decided about it. */
+export function FoundJobsList({ found, query, now }: { found: FoundListEntry[]; query: string; now: number }) {
   const [filter, setFilter] = useState<CandidateStatus | "all">("all");
-  const [now, setNow] = useState(() => Date.now());
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/autobid/found", { credentials: "same-origin", cache: "no-store" });
-      const data = (await res.json().catch(() => ({}))) as { found?: FoundListEntry[]; error?: string };
-      if (!res.ok) throw new Error(data.error || "Could not load the found jobs.");
-      setFound(data.found ?? []);
-      setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load the found jobs.");
-    } finally {
-      setNow(Date.now());
-    }
-  }, []);
+  const matching = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? found.filter((job) => `${job.company} ${job.jobTitle}`.toLowerCase().includes(q)) : found;
+  }, [found, query]);
 
-  useEffect(() => {
-    void load();
-  }, [load, refreshKey]);
+  const counts = useMemo(
+    () =>
+      Object.fromEntries(
+        FILTERS.map((key) => [key, key === "all" ? matching.length : matching.filter((job) => job.status === key).length]),
+      ) as Record<CandidateStatus | "all", number>,
+    [matching],
+  );
 
-  const counts = useMemo(() => {
-    const list = found ?? [];
-    return Object.fromEntries(
-      FILTERS.map((key) => [key, key === "all" ? list.length : list.filter((job) => job.status === key).length]),
-    ) as Record<CandidateStatus | "all", number>;
-  }, [found]);
-
-  const shown = (found ?? []).filter((job) => filter === "all" || job.status === filter);
-
-  if (error) {
-    return (
-      <p className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">
-        {error}
-      </p>
-    );
-  }
-  if (found === null) {
-    return (
-      <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-      </div>
-    );
-  }
+  const shown = matching.filter((job) => filter === "all" || job.status === filter);
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-1.5">
-        {FILTERS.filter((key) => key === "all" || counts[key] > 0).map((key) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setFilter(key)}
-            className={cn(
-              "rounded-full border px-2.5 py-0.5 text-xs",
-              filter === key ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted",
-            )}
-          >
-            {key === "all" ? "All" : STATUS_LABEL[key]} ({counts[key]})
-          </button>
-        ))}
-      </div>
+    <div>
+      {found.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 border-b border-border/60 px-4 py-2.5">
+          {FILTERS.filter((key) => key === "all" || counts[key] > 0).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+              className={cn(
+                "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                filter === key ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {key === "all" ? "All" : STATUS_LABEL[key]}
+              <span className="ml-1 tabular-nums opacity-70">{counts[key]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {shown.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-          No jobs found in the last 24 hours. Live sends what it finds here while Auto-bid runs.
-        </p>
+        <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
+            <Search className="h-5 w-5 text-muted-foreground" />
+          </span>
+          <div>
+            <p className="font-medium">{query ? "No matching jobs" : "No jobs found yet"}</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+              {query
+                ? "Try another company or title."
+                : "Jobs found in the last 24 hours show up here, with whether each one was queued or skipped and why."}
+            </p>
+          </div>
+        </div>
       ) : (
-        <ul className="divide-y rounded-lg border bg-card">
+        <ul className="divide-y divide-border/60">
           {shown.map((job) => (
-            <li key={job.id} className="flex flex-col gap-0.5 px-3 py-2 sm:flex-row sm:items-center sm:gap-3">
+            <li key={job.id} className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/30">
+              <CompanyAvatar name={job.company} />
               <div className="min-w-0 flex-1">
-                <a
-                  href={job.jobLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex max-w-full items-center gap-1 truncate text-sm font-medium hover:underline"
-                >
-                  <span className="truncate">
-                    {job.company ? `${job.company} · ` : ""}
-                    {job.jobTitle}
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium">{job.company || "Unknown company"}</span>
+                  <span className={cn("shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium sm:hidden", STATUS_PILL[job.status])}>
+                    {STATUS_LABEL[job.status]}
                   </span>
-                  <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-                </a>
-                <p className="truncate text-xs text-muted-foreground">
-                  {[job.site || "Other site", job.source, job.postedAt ? `posted ${ago(job.postedAt, now)} ago` : "", `found ${ago(job.foundAt, now)} ago`]
+                </div>
+                <p className="truncate text-xs text-muted-foreground" title={job.jobTitle}>{job.jobTitle}</p>
+                <p className="mt-0.5 truncate text-[11px] text-muted-foreground/70">
+                  {[job.site || "Other site", job.source, job.postedAt ? `posted ${ago(job.postedAt, now)} ago` : ""]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
                 {job.reason && (job.status === "skipped" || job.status === "expired" || job.status === "passed") && (
-                  <p className="text-xs text-muted-foreground" title={job.reason}>
-                    {job.reason.length > 180 ? `${job.reason.slice(0, 180)}…` : job.reason}
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={job.reason}>
+                    {job.reason}
                   </p>
                 )}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex shrink-0 items-center gap-3 self-center">
                 {job.fitScore !== null && (
-                  <Badge variant="outline" title="Role fit from the AI check (0–100)">
-                    Fit {Math.round(job.fitScore)}
-                  </Badge>
+                  <span className="hidden text-right sm:block" title="Role fit from the AI check (0–100)">
+                    <span className={cn("block text-sm font-semibold tabular-nums", fitTone(job.fitScore))}>
+                      {Math.round(job.fitScore)}
+                    </span>
+                    <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Fit</span>
+                  </span>
                 )}
-                <span className={cn("text-xs font-medium", STATUS_STYLE[job.status])}>{STATUS_LABEL[job.status]}</span>
+                <span
+                  className={cn("hidden w-[104px] rounded-md px-2 py-1 text-center text-[11px] font-medium sm:inline-block", STATUS_PILL[job.status])}
+                >
+                  {STATUS_LABEL[job.status]}
+                </span>
+                <span className="hidden w-8 text-right text-xs tabular-nums text-muted-foreground md:block">
+                  {ago(job.foundAt, now)}
+                </span>
+                {job.jobLink && (
+                  <a
+                    href={job.jobLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open the job posting"
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
               </div>
             </li>
           ))}

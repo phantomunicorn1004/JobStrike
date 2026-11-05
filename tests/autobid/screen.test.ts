@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { nonUsLocation, screenCandidate, siteOf, type ScreenOptions } from "@/lib/autobid/screen";
 
 const citizen: ScreenOptions = {
-  ashby: false,
   profile: { citizenship: "US citizen", securityClearance: "No", sponsorshipRequirement: "No" },
 };
 
@@ -28,14 +27,10 @@ describe("screenCandidate: lite pass", () => {
     });
   });
 
-  it("skips other sites, Ashby unless asked, and the European board", () => {
+  it("skips other sites and the European board, passes Ashby", () => {
     expect(screenCandidate({ jobLink: "https://x.icims.com/jobs/1", jobTitle: "Engineer" }, citizen)).toMatchObject({ ok: false });
-    expect(screenCandidate({ jobLink: "https://jobs.ashbyhq.com/x/1", jobTitle: "Engineer" }, citizen)).toEqual({
-      ok: false,
-      reason: "Ashby: queued only by hand",
-    });
     expect(
-      screenCandidate({ jobLink: "https://jobs.ashbyhq.com/x/1", jobTitle: "Engineer" }, { ...citizen, ashby: true }),
+      screenCandidate({ jobLink: "https://jobs.ashbyhq.com/x/1", jobTitle: "Engineer" }, citizen),
     ).toMatchObject({ ok: true, site: "Ashby" });
     expect(
       screenCandidate({ jobLink: "https://job-boards.eu.greenhouse.io/x/jobs/1", jobTitle: "Engineer" }, citizen),

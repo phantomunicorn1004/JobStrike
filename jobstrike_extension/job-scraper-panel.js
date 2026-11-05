@@ -227,7 +227,7 @@
   const state = {
     mode: 'us',
     /** Live mode: when HiringCafe was last read, the status line, and whether a live check runs. */
-    live: { lastHcAt: 0, lastCheckAt: 0, lastAdded: 0, status: '', running: false },
+    live: { lastHcAt: 0, lastCheckAt: 0, lastAdded: 0, status: '', running: false, pausedAt: 0, pauseCount: 0, pauseLabel: '' },
     /** Set for one run: which sources it reads (Live decides), and that it is a live check. */
     runSources: null,
     liveRun: false,
@@ -779,6 +779,9 @@
       lastAdded: Number(savedLive?.lastAdded) || 0,
       status: '',
       running: false,
+      pausedAt: 0,
+      pauseCount: 0,
+      pauseLabel: '',
     };
 
     const custom = result[STORAGE.customSearch];
@@ -2550,6 +2553,10 @@ ${groupSheetStyles()}
   // ───────────────────────────── Live mode ─────────────────────────────
 
   const LIVE_TICK_MS = 30 * 1000;
+  /** A live check parked on a site check / sign-in is given up after this, and retried at the next interval. */
+  const LIVE_CHALLENGE_WAIT_MS = 10 * 60 * 1000;
+  /** This many parked live checks in a row: the site really wants a person; stay paused. */
+  const LIVE_CHALLENGE_MAX = 3;
   /** Jobright: a full read at most this often (also its own 3-hour safety gap). */
   const LIVE_JR_EVERY_MS = 3 * 60 * 60 * 1000;
   /** Jobs posted longer ago than this leave the Live list. */
@@ -2757,6 +2764,10 @@ ${groupSheetStyles()}
       supportedOnly: state.prefs.liveAutoQueueSupported !== false,
       status: state.live.status || '',
       challenge: Boolean(state.pausedForChallenge),
+      challengeRetryAt:
+        state.pausedForChallenge && state.live.pausedAt && state.live.pauseCount < LIVE_CHALLENGE_MAX
+          ? new Date(state.live.pausedAt + LIVE_CHALLENGE_WAIT_MS).toISOString()
+          : null,
       hours: state.prefs.liveHours || '',
       lastCheckAt: state.live.lastCheckAt ? new Date(state.live.lastCheckAt).toISOString() : null,
       lastAdded: Number(state.live.lastAdded) || 0,
@@ -2829,7 +2840,7 @@ ${groupSheetStyles()}
   function updateLiveBadge() {
     try {
       const count = state.prefs.liveEnabled ? liveNewJobs().length : 0;
-      chrome.action?.setBadgeBackgroundColor?.({ color: '#3b6fd4' });
+      chrome.action?.setBadgeBackgroundColor?.({ color: '#1a62f0' });
       chrome.action?.setBadgeText?.({ text: count ? String(Math.min(count, 999)) : '' });
     } catch (_) {
       /* no badge: the queue still shows them */
@@ -2859,7 +2870,7 @@ ${groupSheetStyles()}
       return;
     }
     if (state.pausedForChallenge) {
-      setLiveStatus('Paused: a site asked for a check. Complete it in the scrape tab, then click Resume.');
+      await liveChallengeTick();
       return;
     }
     if (state.runActive || state.scraping || state.live.running) return;
@@ -2897,6 +2908,39 @@ ${groupSheetStyles()}
       state.live.running = false;
       renderLiveCard();
     }
+  }
+
+  /**
+   * A check is parked on a site check or sign-in. A person's run waits for
+   * Resume. A live check waits LIVE_CHALLENGE_WAIT_MS (the check often clears
+   * by itself), then is settled so the next interval starts a fresh tab; after
+   * LIVE_CHALLENGE_MAX in a row it stays parked for a person.
+   */
+  async function liveChallengeTick() {
+    const label = state.live.pauseLabel || 'a site';
+    if (!state.live.pausedAt) {
+      setLiveStatus('Paused: a site asked for a check. Complete it in the scrape tab, then click Resume.');
+      return;
+    }
+    if (state.live.pauseCount >= LIVE_CHALLENGE_MAX) {
+      setLiveStatus(`Paused: ${label} keeps asking for a browser check or sign-in. Complete it in the scrape tab on this computer, then click Resume.`);
+      return;
+    }
+    const retryAt = state.live.pausedAt + LIVE_CHALLENGE_WAIT_MS;
+    if (Date.now() < retryAt) {
+      setLiveStatus(`Paused: site check on ${label} — retrying at ${clockLabel(retryAt)}`);
+      return;
+    }
+    if (state.runActive) return;
+    setLiveStatus(`Giving up on the ${label} check; trying again at the next interval.`);
+    state.stopRequested = true;
+    await commitPausedRun();
+    state.live.pausedAt = 0;
+    renderLiveCard();
+  }
+
+  function clockLabel(ms) {
+    return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
   function startLiveTimer() {
@@ -5385,6 +5429,14 @@ ${groupSheetStyles()}
     try {
       await dispatchScrape({ resume });
     } finally {
+      if (!state.pausedForChallenge) {
+        state.live.pausedAt = 0;
+        state.live.pauseCount = 0;
+      } else if (state.liveRun) {
+        state.live.pausedAt = Date.now();
+        state.live.pauseCount += 1;
+        state.live.pauseLabel = sourceLabel(scrapePhaseSource());
+      }
       state.runSources = null;
       state.liveRun = false;
       state.live.running = false;

@@ -18,8 +18,6 @@ export type ScreenInput = {
 };
 
 export type ScreenOptions = {
-  /** Ashby drops a Submit pressed by Auto-bid, so its jobs are only queued when asked. */
-  ashby: boolean;
   /** The profile's answers: what the candidate can and cannot satisfy. */
   profile: Pick<ProfileAutofill, string>;
 };
@@ -154,7 +152,6 @@ function quote(text: string, patterns: RegExp[]): string {
 export function screenCandidate(job: ScreenInput, options: ScreenOptions): ScreenResult {
   const site = siteOf(job.jobLink);
   if (!site) return { ok: false, reason: "Not a site Auto-bid applies on" };
-  if (site === "Ashby" && !options.ashby) return { ok: false, reason: "Ashby: queued only by hand" };
   if (isNonUsBoard(job.jobLink)) return { ok: false, reason: "European job board" };
 
   const titleWord = EXCLUDED_TITLE_RE.exec(job.jobTitle || "");

@@ -9,7 +9,7 @@ export const DEFAULT_ADMIN_USERNAME = "ideapulse@remote.helper.com";
 export const DEFAULT_RESUME_DB_OWNER_USERNAME = "stevenspiethdev@gmail.com";
 
 /** App pages for regular members (admins are redirected away). */
-export const MEMBER_ROUTE_PREFIXES = [
+const MEMBER_ROUTE_PREFIXES = [
   "/dashboard",
   "/resume-db",
   "/autobid",
@@ -18,9 +18,6 @@ export const MEMBER_ROUTE_PREFIXES = [
   "/prompt-builder",
   "/job-scraper",
   "/jobs",
-  "/jobs-applied",
-  "/jobs-technical",
-  "/jobs-final",
   "/inbox",
   "/calendar",
   "/profile",
@@ -28,9 +25,9 @@ export const MEMBER_ROUTE_PREFIXES = [
 ] as const;
 
 /** Admin-only routes. */
-export const ADMIN_ROUTE_PREFIXES = ["/admin"] as const;
+const ADMIN_ROUTE_PREFIXES = ["/admin"] as const;
 
-export const PUBLIC_PATHS = ["/login"] as const;
+const PUBLIC_PATHS = ["/login"] as const;
 
 export function normalizeUsername(username: string): string {
   return username.trim().toLowerCase();

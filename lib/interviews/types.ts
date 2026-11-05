@@ -27,7 +27,7 @@ export function normalizeRound(value: string | null | undefined): InterviewRound
   return INTERVIEW_ROUNDS.includes(value as InterviewRound) ? (value as InterviewRound) : "other";
 }
 
-export type InterviewStatus = "scheduled" | "done" | "cancelled";
+type InterviewStatus = "scheduled" | "done" | "cancelled";
 export type InterviewResult = "passed" | "waiting" | "rejected";
 
 export type InterviewView = {

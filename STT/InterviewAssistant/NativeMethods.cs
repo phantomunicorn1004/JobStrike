@@ -8,6 +8,85 @@ static partial class NativeMethods
     public const int WmHotkey = 0x0312;
     public const uint ModNoRepeat = 0x4000;
 
+    const uint CfUnicodeText = 13;
+    const uint GmemMoveable = 0x0002;
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool OpenClipboard(IntPtr owner);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CloseClipboard();
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool EmptyClipboard();
+
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr SetClipboardData(uint format, IntPtr data);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial IntPtr GlobalAlloc(uint flags, nuint bytes);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial IntPtr GlobalLock(IntPtr memory);
+
+    [LibraryImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GlobalUnlock(IntPtr memory);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial IntPtr GlobalFree(IntPtr memory);
+
+    /// <summary>
+    /// Puts text on the clipboard with the plain Windows calls. WPF's Clipboard also "flushes" the
+    /// data afterwards, which fails (after blocking for seconds) when clipboard history or a
+    /// clipboard manager opens the clipboard right after the change, although the text is already in.
+    /// Only opening the clipboard is retried, briefly, if another app holds it at that moment.
+    /// </summary>
+    public static bool SetClipboardText(IntPtr owner, string text)
+    {
+        bool opened = false;
+        for (int attempt = 0; attempt < 10 && !(opened = OpenClipboard(owner)); attempt++)
+        {
+            Thread.Sleep(20);
+        }
+        if (!opened)
+        {
+            return false;
+        }
+        try
+        {
+            EmptyClipboard();
+            nuint bytes = (nuint)((text.Length + 1) * 2);
+            IntPtr memory = GlobalAlloc(GmemMoveable, bytes);
+            if (memory == IntPtr.Zero)
+            {
+                return false;
+            }
+            IntPtr target = GlobalLock(memory);
+            if (target == IntPtr.Zero)
+            {
+                GlobalFree(memory);
+                return false;
+            }
+            Marshal.Copy(text.ToCharArray(), 0, target, text.Length);
+            Marshal.WriteInt16(target, text.Length * 2, 0);
+            GlobalUnlock(memory);
+            if (SetClipboardData(CfUnicodeText, memory) == IntPtr.Zero)
+            {
+                GlobalFree(memory); // still ours only when Windows did not take it
+                return false;
+            }
+            return true;
+        }
+        finally
+        {
+            CloseClipboard();
+        }
+    }
+
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint vk);
@@ -106,16 +185,33 @@ static partial class NativeMethods
     public static partial uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 
     /// <summary>Process name of the window in front, for the log.</summary>
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int GetWindowText(IntPtr hWnd, [Out] char[] text, int maxCount);
+
+    /// <summary>A window's title (for another process's window this reads the stored title, no message is sent).</summary>
+    public static string WindowTitle(IntPtr hwnd)
+    {
+        var buffer = new char[256];
+        int length = GetWindowText(hwnd, buffer, buffer.Length);
+        return length > 0 ? new string(buffer, 0, length) : "";
+    }
+
     public static string ForegroundAppName()
+    {
+        GetWindowThreadProcessId(GetForegroundWindow(), out uint pid);
+        return ProcessName(pid) is { Length: > 0 } name ? name : "an unknown app";
+    }
+
+    /// <summary>A process's name such as "chrome", or "" when it cannot be read.</summary>
+    public static string ProcessName(uint pid)
     {
         try
         {
-            GetWindowThreadProcessId(GetForegroundWindow(), out uint pid);
             return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName;
         }
         catch (Exception)
         {
-            return "an unknown app";
+            return "";
         }
     }
 
@@ -157,7 +253,7 @@ static partial class NativeMethods
 sealed class GlobalHotkeys : IDisposable
 {
     readonly HwndSource _source;
-    readonly Dictionary<int, (Hotkey Hotkey, Action Action, bool Activates)> _actions = [];
+    readonly Dictionary<int, (Hotkey Hotkey, Action Action, bool Activates, bool Scoped)> _actions = [];
     readonly KeyboardHook _hook;
     int _nextId = 0x5100;
 
@@ -168,19 +264,30 @@ sealed class GlobalHotkeys : IDisposable
         _hook = new KeyboardHook(id => _source.Dispatcher.BeginInvoke(() => Fire(id, "keyboard")));
     }
 
+    /// <summary>Words (app names or window titles) where scoped hotkeys work; see <see cref="Register"/>.</summary>
+    public void SetScope(string words) => _hook.SetScope(words);
+
     /// <summary>
     /// Returns false if another app already owns the combination. <paramref name="activates"/> marks an
     /// action that brings a window to the front: Windows only allows that after a real WM_HOTKEY, so
-    /// such a combination is left to RegisterHotKey alone.
+    /// such a combination is left to RegisterHotKey alone. A <paramref name="scoped"/> hotkey (an
+    /// everyday shortcut such as Ctrl+X) is handled by the keyboard hook only, and only while Interview
+    /// Assistant or an app in the scope is in front; everywhere else the key keeps its normal job.
+    /// (Registered with Windows it would be taken from every app.)
     /// </summary>
-    public bool Register(Hotkey hotkey, Action action, bool activates = false)
+    public bool Register(Hotkey hotkey, Action action, bool activates = false, bool scoped = false)
     {
+        scoped &= !activates && !_hook.Failed;
         int id = _nextId++;
         bool ok = NativeMethods.RegisterHotKey(
             _source.Handle, id, hotkey.NativeModifiers | NativeMethods.ModNoRepeat, hotkey.VirtualKey);
         if (ok)
         {
-            _actions[id] = (hotkey, action, activates);
+            if (scoped)
+            {
+                NativeMethods.UnregisterHotKey(_source.Handle, id); // registered only to see that no other app owns it
+            }
+            _actions[id] = (hotkey, action, activates, scoped);
             UpdateHook();
         }
         return ok;
@@ -188,16 +295,19 @@ sealed class GlobalHotkeys : IDisposable
 
     public void UnregisterAll()
     {
-        foreach (int id in _actions.Keys)
+        foreach (var (id, entry) in _actions)
         {
-            NativeMethods.UnregisterHotKey(_source.Handle, id);
+            if (!entry.Scoped)
+            {
+                NativeMethods.UnregisterHotKey(_source.Handle, id);
+            }
         }
         _actions.Clear();
         UpdateHook();
     }
 
     void UpdateHook() => _hook.Combos = _actions.Where(a => !a.Value.Activates)
-        .Select(a => (a.Value.Hotkey.NativeModifiers, a.Value.Hotkey.VirtualKey, a.Key)).ToArray();
+        .Select(a => (a.Value.Hotkey.NativeModifiers, a.Value.Hotkey.VirtualKey, a.Key, a.Value.Scoped)).ToArray();
 
     IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
@@ -243,8 +353,60 @@ sealed class KeyboardHook : IDisposable
     readonly HashSet<uint> _swallowed = [];
     volatile uint _threadId;
 
-    /// <summary>(modifiers as RegisterHotKey takes them, virtual key, id); replaced as a whole.</summary>
-    public volatile (uint Modifiers, uint Key, int Id)[] Combos = [];
+    /// <summary>(modifiers as RegisterHotKey takes them, virtual key, id, scoped); replaced as a whole.</summary>
+    public volatile (uint Modifiers, uint Key, int Id, bool Scoped)[] Combos = [];
+
+    /// <summary>
+    /// True when Windows refused the hook; hotkeys then rely on RegisterHotKey alone. Waits (briefly)
+    /// until the hook thread has tried, so hotkeys registered right after start-up see the outcome.
+    /// </summary>
+    public bool Failed
+    {
+        get
+        {
+            _tried.Wait(TimeSpan.FromSeconds(2));
+            return _failed;
+        }
+    }
+
+    readonly ManualResetEventSlim _tried = new();
+    volatile bool _failed;
+
+    // Where scoped combinations act as hotkeys: this app, Live Captions, and apps whose name or
+    // window title contains one of the user's words (whole words, so "Meet" is not "Meeting notes").
+    static readonly uint OwnProcessId = (uint)Environment.ProcessId;
+    volatile System.Text.RegularExpressions.Regex? _scope;
+    readonly Dictionary<uint, string> _processNames = [];
+
+    public void SetScope(string words)
+    {
+        var parts = (words ?? "").Split([',', ';', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Append("LiveCaptions").Select(System.Text.RegularExpressions.Regex.Escape);
+        _scope = new System.Text.RegularExpressions.Regex($@"\b(?:{string.Join("|", parts)})\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
+    /// <summary>Runs on the hook thread for every scoped combination pressed, so it stays quick.</summary>
+    bool InScope()
+    {
+        IntPtr window = NativeMethods.GetForegroundWindow();
+        NativeMethods.GetWindowThreadProcessId(window, out uint pid);
+        if (pid == OwnProcessId)
+        {
+            return true;
+        }
+        if (!_processNames.TryGetValue(pid, out string? name))
+        {
+            name = NativeMethods.ProcessName(pid);
+            if (_processNames.Count > 200)
+            {
+                _processNames.Clear();
+            }
+            _processNames[pid] = name;
+        }
+        var scope = _scope;
+        return scope != null && (scope.IsMatch(name) || scope.IsMatch(NativeMethods.WindowTitle(window)));
+    }
 
     public KeyboardHook(Action<int> pressed)
     {
@@ -262,9 +424,12 @@ sealed class KeyboardHook : IDisposable
             NativeMethods.GetModuleHandle(null), 0);
         if (hook == IntPtr.Zero)
         {
+            _failed = true;
+            _tried.Set();
             Log.Write($"Keyboard hook unavailable (error {Marshal.GetLastPInvokeError()}); hotkeys use Windows' hotkey list only.");
             return;
         }
+        _tried.Set();
         while (NativeMethods.GetMessage(out _, IntPtr.Zero, 0, 0) > 0)
         {
         }
@@ -295,7 +460,7 @@ sealed class KeyboardHook : IDisposable
                 {
                     uint modifiers = CurrentModifiers();
                     uint vk = NormalizeKey(info.VkCode);
-                    foreach (var (mods, key, id) in Combos)
+                    foreach (var (mods, key, id, scoped) in Combos)
                     {
                         // "+" and "-" can be typed several ways: the keys next to Backspace (with or
                         // without Shift, since "+" is Shift+=) or the numeric keypad. All of them count.
@@ -304,6 +469,10 @@ sealed class KeyboardHook : IDisposable
                         uint pressed = plusMinus ? modifiers & ~ShiftBit : modifiers;
                         if (key == vk && wanted == pressed)
                         {
+                            if (scoped && !InScope())
+                            {
+                                break; // an everyday shortcut outside the meeting: the app in front gets it
+                            }
                             _swallowed.Add(info.VkCode);
                             if ((modifiers & 0x2) == 0 && (modifiers & 0x9) != 0)
                             {

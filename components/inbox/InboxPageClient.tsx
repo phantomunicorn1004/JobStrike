@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useActiveProfile } from "@/components/active-profile";
+import { TONE_PILL } from "@/lib/ui/tone";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -219,7 +221,9 @@ export function InboxPageClient() {
   const view: InboxView = WIDE.includes(folder) ? "inbox" : (folder as InboxView);
   const wide = WIDE.includes(folder);
   const [stage, setStage] = useState<string | null>(null);
-  const [profileId, setProfileId] = useState("all");
+  const { profileId: activeProfileId, setProfileId: setActiveProfileId } = useActiveProfile();
+  const profileId = activeProfileId === null ? "all" : String(activeProfileId);
+  const setProfileId = (value: string) => setActiveProfileId(value === "all" ? null : Number(value));
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [data, setData] = useState<InboxResponse | null>(null);
@@ -497,7 +501,7 @@ export function InboxPageClient() {
   const moreTitle = FOLDER_TITLES[folder];
 
   return (
-    <div className="-m-3 flex h-[calc(100dvh-3rem)] min-h-0 sm:-m-4 md:h-dvh">
+    <div className="-m-4 flex h-[calc(100dvh-3rem)] min-h-0 lg:-m-6">
       <section
         className={cn(
           "flex min-h-0 w-full shrink-0 flex-col border-r",
@@ -1348,10 +1352,10 @@ function AddDialog({ item, onClose, onAdded }: { item: InboxItem | null; onClose
 }
 
 const STATUS_STYLE: Record<ResponseStatus, string> = {
-  not_responded: "bg-muted text-muted-foreground",
-  interviewing: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
-  rejected: "bg-rose-500/10 text-rose-700 dark:text-rose-300",
-  offer: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  not_responded: TONE_PILL.idle,
+  interviewing: TONE_PILL.progress,
+  rejected: TONE_PILL.danger,
+  offer: TONE_PILL.success,
 };
 
 function statusText(a: ApplicationResponse): string {

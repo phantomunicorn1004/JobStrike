@@ -16,6 +16,8 @@ import { DEFAULT_TIMEZONE, formatYmdInTimeZone, getHourInTimeZone, todayInTimeZo
 import { toast } from "sonner";
 import { ResponseStatsCards } from "@/components/dashboard/ResponseStatsCards";
 import { StageStatsCard } from "@/components/dashboard/StageStatsCard";
+import { TodayPanel } from "@/components/dashboard/TodayPanel";
+import { useActiveProfile } from "@/components/active-profile";
 import { InsightsCard } from "@/components/dashboard/InsightsCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { computeStageStats } from "@/lib/dashboard/stage-stats";
@@ -359,6 +361,17 @@ export function DashboardPageClient({
 
   const clearCandidates = () => setSelectedKeys(new Set());
 
+  // The top-bar candidate narrows the charts; "All candidates" brings everyone back.
+  const { profileId: activeProfileId, ready: activeReady } = useActiveProfile();
+  const syncedProfileRef = useRef<number | null | undefined>(undefined);
+  useEffect(() => {
+    if (!activeReady || !data || syncedProfileRef.current === activeProfileId) return;
+    const first = syncedProfileRef.current === undefined;
+    syncedProfileRef.current = activeProfileId;
+    if (activeProfileId !== null) setSelectedKeys(new Set([`profile-${activeProfileId}`]));
+    else if (!first) selectAllCandidates();
+  }, [activeReady, activeProfileId, data]);
+
   const rangeDays = data ? dayCount(data.bidFrom, data.bidTo) : 1;
 
   // Headline figures for the selected profiles: this period, and the period of
@@ -512,7 +525,7 @@ export function DashboardPageClient({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground">
             Your bids, pipeline and response rates{rangeLabel ? ` · ${rangeLabel}` : ""}
           </p>
         </div>
@@ -572,6 +585,8 @@ export function DashboardPageClient({
           </Button>
         </div>
       </div>
+
+      <TodayPanel />
 
       {/* Profile filter: applies to every section below */}
       {candidateOptions.length > 0 ? (

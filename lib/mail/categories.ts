@@ -80,7 +80,7 @@ export type InboxItem = {
   actionStatus: "none" | "suggested" | "applied" | "dismissed";
 };
 
-export type InboxAction = { kind: "move"; toStage: string; fromStage: string | null; reason: string; eventId?: number | null };
+type InboxAction = { kind: "move"; toStage: string; fromStage: string | null; reason: string; eventId?: number | null };
 
 /** One logged board move, for the Activity tab. */
 export type ActivityEntry = {

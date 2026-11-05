@@ -75,7 +75,7 @@ export function setMailOAuthCookie(response: NextResponse, cookieValue: string) 
   });
 }
 
-export function clearMailOAuthCookie(response: NextResponse) {
+function clearMailOAuthCookie(response: NextResponse) {
   response.cookies.set(COOKIE_NAME, "", { path: COOKIE_PATH, maxAge: 0 });
 }
 

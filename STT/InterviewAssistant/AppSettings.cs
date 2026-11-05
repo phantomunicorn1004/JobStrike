@@ -47,6 +47,20 @@ public sealed class AppSettings
     public string JobStrikeKeyProtected { get; set; } = "";
 
     public ChatProvider Provider { get; set; } = ChatProvider.ChatGpt;
+
+    /// <summary>
+    /// Where answers come from: the chat page (Provider above), or an AI API with the user's key
+    /// (encrypted for this Windows account) and the model picked for it.
+    /// </summary>
+    public AnswerEngine AnswerEngine { get; set; } = AnswerEngine.ChatPage;
+    public string OpenAiKeyProtected { get; set; } = "";
+    public string OpenAiModel { get; set; } = "";
+    public string DeepSeekKeyProtected { get; set; } = "";
+    public string DeepSeekModel { get; set; } = "";
+
+    /// <summary>The kind of round (sets what answers focus on) and how long answers are.</summary>
+    public InterviewType InterviewType { get; set; } = InterviewType.Screening;
+    public AnswerLength AnswerLength { get; set; } = AnswerLength.Normal;
     public bool AutoSend { get; set; }
     public double PauseSeconds { get; set; } = 1.6;
     public int MinWords { get; set; } = 3;
@@ -54,16 +68,39 @@ public sealed class AppSettings
     public bool HideLiveCaptionsWindow { get; set; }
     public double CaptionFontSize { get; set; } = 15;
 
+    // Reading the answer aloud: the service (Google with the user's API key, encrypted for this
+    // Windows account, or the Windows voices), the voice of each ("" = default), speed (1 = normal),
+    // output device id ("" = default speaker), and whether captions heard while it speaks are skipped.
+    public bool SpeakAnswers { get; set; }
+    public VoiceService VoiceService { get; set; } = VoiceService.Google;
+    public string GoogleKeyProtected { get; set; } = "";
+    public string GoogleVoice { get; set; } = GoogleSpeech.DefaultVoice;
+    public string VoiceId { get; set; } = "";
+    public double VoiceRate { get; set; } = 1.1;
+    public string VoiceDeviceId { get; set; } = "";
+    public bool VoiceSkipsCaptions { get; set; } = true;
+
     // Where the captions go in each layout, and their size when docked left/right (width) or
     // above/below (height) the chat.
     public CaptionDock NormalCaptionDock { get; set; } = CaptionDock.Left;
-    public CaptionDock CompactCaptionDock { get; set; } = CaptionDock.Top;
+    // Interview view: the answer on top (near the camera, read like a teleprompter), captions below.
+    public CaptionDock CompactCaptionDock { get; set; } = CaptionDock.Bottom;
     public double CaptionPanelWidth { get; set; } = 400;
     public double CaptionPanelHeight { get; set; } = 240;
     public double CompactCaptionWidth { get; set; } = 200;
     public WindowBounds? FloatingCaptionBounds { get; set; }
 
     public HotkeySettings Hotkeys { get; set; } = new();
+
+    /// <summary>
+    /// Hotkeys that are also everyday shortcuts (Ctrl+X, Ctrl+Space, …) act as hotkeys only while
+    /// Interview Assistant or an app matching one of these words (name or window title) is in front,
+    /// and keep their normal job everywhere else, unless CommonHotkeysEverywhere is set.
+    /// </summary>
+    public string HotkeyApps { get; set; } = DefaultHotkeyApps;
+    public bool CommonHotkeysEverywhere { get; set; }
+
+    public const string DefaultHotkeyApps = "Zoom, Teams, Webex, Meet, Slack, Discord, Skype, Whereby, Jitsi, GoTo, AnyDesk";
 
     /// <summary>True: interviewer messages are submitted. False: they are only put in the chat box.</summary>
     public bool SubmitAutomatically { get; set; } = true;
@@ -72,6 +109,8 @@ public sealed class AppSettings
     public bool CompactMode { get; set; }
     /// <summary>In interview view, show the real chat page instead of the answer reader.</summary>
     public bool CompactShowsChatPage { get; set; }
+    /// <summary>Interview view shows the message box under the captions (it can be hidden).</summary>
+    public bool CompactMessageBox { get; set; } = true;
     public double AnswerFontSize { get; set; } = 18;
 
     public AppTheme Theme { get; set; } = AppTheme.Dark;
@@ -82,6 +121,11 @@ public sealed class AppSettings
     public double OverlayOpacity { get; set; } = 0.6;
     public WindowBounds? OverlayBounds { get; set; }
     public double OverlayCaptionHeight { get; set; } = 120;
+    /// <summary>
+    /// Bumped when a layout change needs older saved settings adjusted (1: the interview view's caption
+    /// area also holds the message box, so it grew by the box's height; 2: captions below the answer).
+    /// </summary>
+    public int LayoutVersion { get; set; }
     public double CompactCaptionHeight { get; set; } = 110;
     public double ChatZoom { get; set; } = 1.0;
     public double CompactChatZoom { get; set; } = 0.85;
@@ -107,6 +151,9 @@ public sealed class AppSettings
 
     static string FilePath => Path.Combine(DataFolder, "settings.json");
 
+    /// <summary>Height of the interview view's message box with its spacing.</summary>
+    const double MessageBoxHeight = 56;
+
     static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     static string BackupPath => FilePath + ".bak";
@@ -131,7 +178,7 @@ public sealed class AppSettings
                 Log.Write($"Settings file {Path.GetFileName(path)} could not be read: {ex.Message}");
             }
         }
-        return new AppSettings();
+        return new AppSettings().Normalized();
     }
 
     /// <summary>
@@ -189,6 +236,19 @@ public sealed class AppSettings
         Resume ??= "";
         JobStrikeUser ??= "";
         JobStrikeKeyProtected ??= "";
+        VoiceId ??= "";
+        VoiceDeviceId ??= "";
+        GoogleKeyProtected ??= "";
+        OpenAiKeyProtected ??= "";
+        OpenAiModel ??= "";
+        DeepSeekKeyProtected ??= "";
+        DeepSeekModel ??= "";
+        if (!Enum.IsDefined(AnswerEngine)) AnswerEngine = AnswerEngine.ChatPage;
+        if (!Enum.IsDefined(InterviewType)) InterviewType = InterviewType.Screening;
+        if (!Enum.IsDefined(AnswerLength)) AnswerLength = AnswerLength.Normal;
+        if (string.IsNullOrWhiteSpace(GoogleVoice)) GoogleVoice = GoogleSpeech.DefaultVoice;
+        if (!Enum.IsDefined(VoiceService)) VoiceService = VoiceService.Google;
+        VoiceRate = Clamp(VoiceRate, 0.5, 2.5, 1.1);
         if (!Uri.TryCreate(JobStrikeUrl, UriKind.Absolute, out var site) || site.Scheme != Uri.UriSchemeHttps)
         {
             JobStrikeUrl = JobStrikeClient.DefaultUrl;
@@ -198,11 +258,12 @@ public sealed class AppSettings
             CallPromptTemplate = DefaultCallPrompt;
         }
         Hotkeys ??= new HotkeySettings();
+        HotkeyApps ??= DefaultHotkeyApps;
         Hotkeys.Normalize();
 
         if (!Enum.IsDefined(Provider)) Provider = ChatProvider.ChatGpt;
         if (!Enum.IsDefined(Theme)) Theme = AppTheme.Dark;
-        if (!Enum.IsDefined(CompactCaptionDock)) CompactCaptionDock = CaptionDock.Top;
+        if (!Enum.IsDefined(CompactCaptionDock)) CompactCaptionDock = CaptionDock.Bottom;
         if (!Enum.IsDefined(NormalCaptionDock)) NormalCaptionDock = CaptionDock.Left;
 
         PauseSeconds = Clamp(PauseSeconds, 0.3, 10, 1.6);
@@ -215,6 +276,21 @@ public sealed class AppSettings
         CompactCaptionWidth = Clamp(CompactCaptionWidth, 160, 4000, 200);
         CompactCaptionHeight = Clamp(CompactCaptionHeight, 50, 4000, 110);
         OverlayCaptionHeight = Clamp(OverlayCaptionHeight, 40, 4000, 120);
+        if (LayoutVersion < 1)
+        {
+            CompactCaptionHeight += MessageBoxHeight;
+            OverlayCaptionHeight += MessageBoxHeight;
+            LayoutVersion = 1;
+        }
+        if (LayoutVersion < 2)
+        {
+            // The teleprompter layout: answer above, captions below (other choices are kept).
+            if (CompactCaptionDock == CaptionDock.Top)
+            {
+                CompactCaptionDock = CaptionDock.Bottom;
+            }
+            LayoutVersion = 2;
+        }
         ChatZoom = Clamp(ChatZoom, 0.25, 5, 1);
         CompactChatZoom = Clamp(CompactChatZoom, 0.25, 5, 0.85);
         NormalBounds = Valid(NormalBounds);
@@ -245,10 +321,14 @@ public sealed class HotkeySettings
     // Not Ctrl+Alt+arrows: some graphics drivers rotate the screen with those.
     public string LessSeeThrough { get; set; } = "Ctrl+Alt+=";
     public string MoreSeeThrough { get; set; } = "Ctrl+Alt+-";
+    public string ToggleVoice { get; set; } = "Ctrl+Alt+V";
+    public string StopVoice { get; set; } = "Ctrl+Alt+R";
 
     /// <summary>A null entry (hand-edited or older file) means "no hotkey".</summary>
     public void Normalize()
     {
+        ToggleVoice ??= "";
+        StopVoice ??= "";
         Send ??= "";
         Discard ??= "";
         ClearChatBox ??= "";
@@ -259,6 +339,32 @@ public sealed class HotkeySettings
         ScrollAnswerUp ??= "";
         LessSeeThrough ??= "";
         MoreSeeThrough ??= "";
+    }
+}
+
+/// <summary>Text encrypted for this Windows account (DPAPI), stored as Base64: the access keys in settings.json.</summary>
+public static class ProtectedText
+{
+    public static string Protect(string text) =>
+        Convert.ToBase64String(System.Security.Cryptography.ProtectedData.Protect(
+            System.Text.Encoding.UTF8.GetBytes(text), null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+
+    /// <summary>The text, or null when there is none or it was saved by another Windows account (or is damaged).</summary>
+    public static string? Unprotect(string protectedText)
+    {
+        if (string.IsNullOrEmpty(protectedText))
+        {
+            return null;
+        }
+        try
+        {
+            return System.Text.Encoding.UTF8.GetString(System.Security.Cryptography.ProtectedData.Unprotect(
+                Convert.FromBase64String(protectedText), null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+        }
+        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or FormatException)
+        {
+            return null;
+        }
     }
 }
 

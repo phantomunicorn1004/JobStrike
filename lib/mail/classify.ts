@@ -29,8 +29,6 @@ export type Classification = {
 
 import { INTERVIEW_STAGES, type InterviewStage } from "@/lib/interviews/types";
 
-export { INTERVIEW_STAGES, type InterviewStage };
-
 /** A user's earlier correction, shown to the model as an example. */
 export type CorrectionExample = { fromEmail: string; subject: string; category: MailCategory };
 

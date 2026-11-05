@@ -24,12 +24,6 @@ export interface WorkflowInput {
   };
 }
 
-/** Resume as structured JSON (project uses ResumeContent + structure). */
-export interface ResumeSchema {
-  content: ResumeContent;
-  structure?: ResumeStructure;
-}
-
 /** Normalized job description from JD Parsing node. */
 export interface NormalizedJobDescription {
   requiredSkills: string[];
@@ -57,9 +51,6 @@ export interface TailorOutput {
   atsAnalysis: AtsAnalysis;
   updatedResume: ResumeContent;
 }
-
-/** Template definition (uses existing TemplateConfig). */
-export type TemplateDefinition = TemplateConfig;
 
 /** View model for PDF/template rendering (section-order and content ready for layout). */
 export interface TemplateViewModel {

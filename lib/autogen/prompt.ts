@@ -5,7 +5,7 @@ import { buildPrompt } from "@/lib/promptBuilder";
 import { getProfilePromptKit } from "@/lib/resume-db/prompt-kit-repository";
 import type { ResumeDbApplication } from "@/lib/resume-db/types";
 
-export type PromptBlock =
+type PromptBlock =
   | "no_profile"
   | "no_kit"
   | "no_job_description"

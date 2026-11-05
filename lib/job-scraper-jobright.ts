@@ -21,7 +21,7 @@ const DEFAULT_SEARCH = {
   location: "United States",
 };
 
-export type JobrightSearch = {
+type JobrightSearch = {
   titleKeyword: string;
   location: string;
 };
@@ -77,7 +77,7 @@ function formatFetchError(error: unknown): string {
   return String(error);
 }
 
-export function normalizeJobrightSearch(search?: Partial<JobrightSearch>): JobrightSearch {
+function normalizeJobrightSearch(search?: Partial<JobrightSearch>): JobrightSearch {
   const titleKeyword = String(search?.titleKeyword ?? "").trim();
   const location = String(search?.location ?? "").trim();
   return {
@@ -86,7 +86,7 @@ export function normalizeJobrightSearch(search?: Partial<JobrightSearch>): Jobri
   };
 }
 
-export function buildJobrightSearchUrl(search: Partial<JobrightSearch>, page = 0): string {
+function buildJobrightSearchUrl(search: Partial<JobrightSearch>, page = 0): string {
   const normalized = normalizeJobrightSearch(search);
   const url = new URL(`${JOBRIGHT_SITE}/jobs/search`);
   url.searchParams.set("titleKeyword", normalized.titleKeyword);
@@ -135,7 +135,7 @@ function parseRelativePublishDesc(desc: unknown, nowMs = Date.now()): string | n
 }
 
 /** Prefer real timestamps; return null when unknown (do not fake "now"). */
-export function parseJobrightPublishDate(
+function parseJobrightPublishDate(
   jr: Record<string, unknown>,
   nowMs = Date.now(),
 ): string | null {
@@ -161,7 +161,7 @@ export function parseJobrightPublishDate(
 }
 
 /** Local display: 2026-09-18 21:34 */
-export function formatJobrightPostedAtLocal(value: unknown): string {
+function formatJobrightPostedAtLocal(value: unknown): string {
   if (value == null || value === "") return "";
   const raw = String(value).trim();
   let d = new Date(raw);
@@ -188,7 +188,7 @@ export function formatJobrightPostedAtLocal(value: unknown): string {
   return `${y}-${m}-${day} ${hh}:${mm}`;
 }
 
-export function extractJobrightJobFields(raw: unknown): ScrapedJob & {
+function extractJobrightJobFields(raw: unknown): ScrapedJob & {
   id?: string | null;
   posted_at?: string | null;
   source?: string;
@@ -258,7 +258,7 @@ function companyKey(job: { company_name?: string | null }): string {
 }
 
 /** Source Platform A→Z, company A→Z, newest posted first. */
-export function sortJobrightJobsForCsv<T extends ScrapedJob & { posted_at?: string | null }>(
+function sortJobrightJobsForCsv<T extends ScrapedJob & { posted_at?: string | null }>(
   jobs: T[],
 ): T[] {
   return [...jobs].sort((a, b) => {
@@ -272,111 +272,12 @@ export function sortJobrightJobsForCsv<T extends ScrapedJob & { posted_at?: stri
   });
 }
 
-export function jobrightJobsToCsv(
-  jobs: Array<ScrapedJob & { posted_at?: string | null }>,
-): string {
-  const headers = [
-    "Application Link",
-    "Date Posted",
-    "Job Title",
-    "Company",
-    "Applicants",
-    "Source Platform",
-  ] as const;
-
-  const escape = (value: string | null | undefined) => {
-    const text = value ?? "";
-    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-  };
-
-  const sorted = sortJobrightJobsForCsv(jobs);
-  const rows = sorted.map((job) =>
-    [
-      job.apply_url ?? "",
-      formatJobrightPostedAtLocal(job.posted_at || job.estimated_publish_date || ""),
-      job.title ?? "",
-      job.company_name ?? "",
-      job.applicants_count ?? "",
-      job.application_site ?? "",
-    ]
-      .map(escape)
-      .join(","),
-  );
-
-  return [headers.join(","), ...rows].join("\n");
-}
-
 function escapeXml(value: unknown): string {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-/** SpreadsheetML (.xls) with white 14pt header text on dark blue. */
-export function jobrightJobsToExcelXml(
-  jobs: Array<ScrapedJob & { posted_at?: string | null }>,
-): string {
-  const headers = [
-    "Application Link",
-    "Date Posted",
-    "Job Title",
-    "Company",
-    "Applicants",
-    "Source Platform",
-  ] as const;
-  const sorted = sortJobrightJobsForCsv(jobs);
-  const headerCells = headers
-    .map(
-      (h) =>
-        `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeXml(h)}</Data></Cell>`,
-    )
-    .join("");
-  const dataRows = sorted
-    .map((job) => {
-      const values = [
-        job.apply_url ?? "",
-        formatJobrightPostedAtLocal(job.posted_at || job.estimated_publish_date || ""),
-        job.title ?? "",
-        job.company_name ?? "",
-        job.applicants_count ?? "",
-        job.application_site ?? "",
-      ];
-      const cells = values
-        .map((v) => `<Cell><Data ss:Type="String">${escapeXml(v)}</Data></Cell>`)
-        .join("");
-      return `<Row>${cells}</Row>`;
-    })
-    .join("");
-
-  return `<?xml version="1.0"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:html="http://www.w3.org/TR/REC-html40">
- <Styles>
-  <Style ss:ID="Header">
-   <Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="14" ss:FontName="Calibri"/>
-   <Interior ss:Color="#1B4F72" ss:Pattern="Solid"/>
-   <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
-  </Style>
- </Styles>
- <Worksheet ss:Name="Jobs">
-  <Table>
-   <Column ss:Width="280"/>
-   <Column ss:Width="110"/>
-   <Column ss:Width="220"/>
-   <Column ss:Width="120"/>
-   <Column ss:Width="80"/>
-   <Column ss:Width="120"/>
-   <Row ss:StyleID="Header">${headerCells}</Row>
-   ${dataRows}
-  </Table>
- </Worksheet>
-</Workbook>`;
 }
 
 function collectJobRowsFromPayload(payload: unknown, out: unknown[]): void {

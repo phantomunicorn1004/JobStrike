@@ -18,7 +18,7 @@ export default function AdminLayout({
   return (
     <div className="flex min-h-svh bg-background">
       <aside className="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
-        <div className="border-b border-sidebar-border px-4 py-5">
+        <div className="flex h-14 items-center border-b border-sidebar-border px-4">
           <BrandLogo href="/admin/users" />
         </div>
         <nav className="flex-1 p-3">

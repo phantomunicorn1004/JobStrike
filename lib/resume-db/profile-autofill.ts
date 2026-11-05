@@ -8,7 +8,7 @@
 
 export type ProfileAutofill = Record<string, string>;
 
-export type AutofillFieldOption = { value: string; label: string };
+type AutofillFieldOption = { value: string; label: string };
 
 export type AutofillFieldDef = {
   key: string;

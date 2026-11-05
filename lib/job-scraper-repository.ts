@@ -72,10 +72,6 @@ export async function addBlockedCompany(
   return mapBlockedCompany(data as BlockedCompanyRow);
 }
 
-export async function deleteBlockedCompany(userId: string, id: string): Promise<void> {
-  await deleteBlockedCompanies(userId, [id]);
-}
-
 export async function deleteBlockedCompanies(
   userId: string,
   ids: string[],

@@ -9,7 +9,7 @@ export const REQUIRED_BUILT_RESUME_JSON_FIELDS = [
   "job_description",
 ] as const;
 
-export type RequiredBuiltResumeJsonField =
+type RequiredBuiltResumeJsonField =
   (typeof REQUIRED_BUILT_RESUME_JSON_FIELDS)[number];
 
 export type BuildPromptResult = {
@@ -40,27 +40,6 @@ export function buildPrompt(
     .join(jobDescriptionValue);
 
   return { prompt, missingPlaceholders };
-}
-
-/**
- * Returns which required top-level registration/generation fields are missing
- * from a built resume JSON object (or parsed paste).
- */
-export function getMissingBuiltResumeJsonFields(
-  data: unknown,
-): RequiredBuiltResumeJsonField[] {
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    return [...REQUIRED_BUILT_RESUME_JSON_FIELDS];
-  }
-  const obj = data as Record<string, unknown>;
-  return REQUIRED_BUILT_RESUME_JSON_FIELDS.filter((key) => {
-    const value = obj[key];
-    if (typeof value === "string") return !value.trim();
-    if (value && typeof value === "object" && "text" in (value as object)) {
-      return !String((value as { text?: unknown }).text ?? "").trim();
-    }
-    return value == null || value === "";
-  });
 }
 
 export const PROMPT_BUILDER_STORAGE_KEYS = {

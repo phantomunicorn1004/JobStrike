@@ -477,7 +477,7 @@ export function ResumeTailor() {
 
   if (state === "tailoring") {
     return (
-      <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto py-8 px-4">
+      <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto">
         <Card>
           <CardContent className="pt-12 pb-12">
             <div className="text-center space-y-6">
@@ -526,9 +526,9 @@ export function ResumeTailor() {
 
   if (state === "results") {
     return (
-      <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto py-8 px-4 space-y-6">
+      <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold">Resume Ready</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Resume ready</h1>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setShowSettings(true)}>
               <Settings className="h-4 w-4 mr-2" />
@@ -557,9 +557,9 @@ export function ResumeTailor() {
   }
 
   return (
-    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto py-8 px-4">
+    <div className="w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold">Resume Tailor</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Resume Tailor</h1>
         <Button variant="outline" onClick={() => setShowSettings(true)}>
           <Settings className="h-4 w-4 mr-2" />
           Settings

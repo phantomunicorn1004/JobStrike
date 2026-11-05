@@ -166,4 +166,3 @@ export function WorkflowNode({
 }
 
 export const NODE_DIMENSIONS = { width: NODE_WIDTH, height: NODE_HEIGHT };
-export const NODE_HANDLE_OFFSET = { x: NODE_WIDTH, y: NODE_HEIGHT / 2 };

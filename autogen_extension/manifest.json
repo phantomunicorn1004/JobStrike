@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AutoGen",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "JobStrike AutoGen: generates queued resumes with a ChatGPT tab or the JobStrike API engine, using each profile's own prompt.",
   "icons": {
     "16": "icons/icon-16.png",

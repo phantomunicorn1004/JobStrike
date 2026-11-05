@@ -1,7 +1,7 @@
 export type TemplateId = "modern" | "classic" | "creative" | "minimal";
 
 /** FlowCV-style skill entry: category label + sub-skills + optional level */
-export type SkillEntry = {
+type SkillEntry = {
   label: string;
   subSkills?: string[];
   level?: string;

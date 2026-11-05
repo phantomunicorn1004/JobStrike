@@ -14,16 +14,22 @@ export function MailAutoSync() {
     try {
       const last = Number(window.localStorage.getItem(STORAGE_KEY) || 0);
       if (Date.now() - last < EVERY_MS) return;
-      window.localStorage.setItem(STORAGE_KEY, String(Date.now()));
     } catch {
       // No storage (private window): still fine to ask; the server skips fresh mailboxes.
     }
-    void fetch("/api/integrations/mail/sync", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ auto: true }),
-    }).catch(() => {});
+    // Start after the page has loaded so the sync never competes with what the user opened.
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, String(Date.now()));
+      } catch {}
+      void fetch("/api/integrations/mail/sync", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auto: true }),
+      }).catch(() => {});
+    }, 8_000);
+    return () => window.clearTimeout(timer);
   }, []);
 
   return null;

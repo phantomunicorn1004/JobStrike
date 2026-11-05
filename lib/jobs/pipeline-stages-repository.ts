@@ -10,7 +10,7 @@ export type PipelineStageRow = {
   is_visible: boolean;
 };
 
-export const DEFAULT_PIPELINE_STAGES: PipelineStageRow[] = [
+const DEFAULT_PIPELINE_STAGES: PipelineStageRow[] = [
   { id: "applied", name: "Applied", sort_order: 0, is_visible: true },
   { id: "technical", name: "Technical", sort_order: 1, is_visible: true },
   { id: "final", name: "Final", sort_order: 2, is_visible: true },

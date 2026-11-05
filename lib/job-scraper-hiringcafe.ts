@@ -473,7 +473,3 @@ export async function scrapeHiringCafeJobs(
     reportedTotal,
   };
 }
-
-export type { ScrapeProxyConfig } from "@/lib/job-scraper-browser";
-export { getHiringCafeProxyConfig, getScrapeProxyConfig } from "@/lib/job-scraper-browser";
-

@@ -2,7 +2,7 @@ import { parsePDF, type PDFParseResult } from "./parsers/pdf";
 import { parseDOCX, type DOCXParseResult } from "./parsers/docx";
 
 export type SupportedFileType = "pdf" | "docx";
-export type ParseResult = PDFParseResult | DOCXParseResult;
+type ParseResult = PDFParseResult | DOCXParseResult;
 
 export interface ResumeParseOptions {
   maxFileSize?: number;
@@ -17,7 +17,7 @@ const DEFAULT_OPTIONS: Required<ResumeParseOptions> = {
 /**
  * Detect file type from filename or MIME type
  */
-export function detectFileType(
+function detectFileType(
   filename: string,
   mimeType?: string
 ): SupportedFileType | null {
@@ -39,14 +39,14 @@ export function detectFileType(
 }
 
 /** File-like value accepted by validateFile and parseResume */
-export type FileLike =
+type FileLike =
   | File
   | { name: string; size?: number; type?: string; arrayBuffer?: () => Promise<ArrayBuffer> };
 
 /**
  * Validate file before parsing
  */
-export function validateFile(
+function validateFile(
   file: FileLike,
   options: ResumeParseOptions = {}
 ): { valid: boolean; error?: string } {

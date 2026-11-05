@@ -1,5 +1,5 @@
 /** Legacy generic types (kept for backward compatibility). */
-export type LegacyNodeType =
+type LegacyNodeType =
   | "trigger"
   | "input"
   | "ai"

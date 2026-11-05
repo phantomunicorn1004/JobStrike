@@ -21,7 +21,7 @@ export const RESUME_DB_COLUMN_DEFAULTS = {
 
 export type ResumeDBColumnId = keyof typeof RESUME_DB_COLUMN_DEFAULTS;
 
-export const RESUME_DB_COLUMN_MIN_PERCENT: Record<ResumeDBColumnId, number> = {
+const RESUME_DB_COLUMN_MIN_PERCENT: Record<ResumeDBColumnId, number> = {
   select: 3,
   no: 3.5,
   profile: 5,

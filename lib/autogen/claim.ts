@@ -6,10 +6,7 @@ import { mapApplicationRow } from "@/lib/resume-db/repository";
 import type { ResumeDbApplication } from "@/lib/resume-db/types";
 
 /** A claim nobody has refreshed for this long is abandoned (window closed, crash) and claimable again. */
-export const STALE_CLAIM_MS = 10 * 60 * 1000;
-
-/** How often a worker re-stamps a claim it is still working on. */
-export const CLAIM_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+const STALE_CLAIM_MS = 10 * 60 * 1000;
 
 const TABLE = "resume_db_applications";
 const MISSING_COLUMNS = "Resume generation columns are missing. Run scripts/add-autogen-to-resume-db.sql in Supabase.";
@@ -31,7 +28,7 @@ function staleCutoffIso(nowMs = Date.now()): string {
   return new Date(nowMs - STALE_CLAIM_MS).toISOString();
 }
 
-export function isClaimStale(claimedAt: string | null | undefined, nowMs = Date.now()): boolean {
+function isClaimStale(claimedAt: string | null | undefined, nowMs = Date.now()): boolean {
   if (!claimedAt) return true;
   const ts = new Date(claimedAt).getTime();
   return !Number.isFinite(ts) || nowMs - ts >= STALE_CLAIM_MS;

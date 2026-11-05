@@ -1,8 +1,8 @@
 import type { ProfilePromptKit } from "@/lib/resume-builder/promptKitStorage";
 
-export const PROMPT_KIT_BRIDGE_SOURCE = "rwh-resume-builder";
+const PROMPT_KIT_BRIDGE_SOURCE = "rwh-resume-builder";
 
-export type PromptKitBridgeSaveMessage = {
+type PromptKitBridgeSaveMessage = {
   source: typeof PROMPT_KIT_BRIDGE_SOURCE;
   type: "prompt-kit-save";
   requestId: string;
@@ -10,14 +10,14 @@ export type PromptKitBridgeSaveMessage = {
   kit: ProfilePromptKit;
 };
 
-export type PromptKitBridgeGetMessage = {
+type PromptKitBridgeGetMessage = {
   source: typeof PROMPT_KIT_BRIDGE_SOURCE;
   type: "prompt-kit-get";
   requestId: string;
   profileId: number;
 };
 
-export type PromptKitBridgeSaveResult = {
+type PromptKitBridgeSaveResult = {
   source: typeof PROMPT_KIT_BRIDGE_SOURCE;
   type: "prompt-kit-save-result";
   requestId: string;
@@ -26,7 +26,7 @@ export type PromptKitBridgeSaveResult = {
   kit?: ProfilePromptKit;
 };
 
-export type PromptKitBridgeGetResult = {
+type PromptKitBridgeGetResult = {
   source: typeof PROMPT_KIT_BRIDGE_SOURCE;
   type: "prompt-kit-get-result";
   requestId: string;
@@ -34,13 +34,6 @@ export type PromptKitBridgeGetResult = {
   exists: boolean;
   kit?: ProfilePromptKit;
   error?: string;
-};
-
-export type PromptKitBridgeChangedMessage = {
-  source: typeof PROMPT_KIT_BRIDGE_SOURCE;
-  type: "prompt-kit-changed";
-  profileId: number;
-  kit: ProfilePromptKit;
 };
 
 function newRequestId(): string {
@@ -117,55 +110,4 @@ export async function syncPromptKitToExtension(
     };
   }
   return { ok: true, synced: true, kit: result.kit };
-}
-
-/** Read kit from extension storage when the bridge is present. */
-export async function fetchPromptKitFromExtension(
-  profileId: number,
-  timeoutMs = 2000,
-): Promise<{ available: boolean; exists: boolean; kit: ProfilePromptKit | null }> {
-  if (typeof window === "undefined") {
-    return { available: false, exists: false, kit: null };
-  }
-
-  const requestId = newRequestId();
-  const message: PromptKitBridgeGetMessage = {
-    source: PROMPT_KIT_BRIDGE_SOURCE,
-    type: "prompt-kit-get",
-    requestId,
-    profileId,
-  };
-
-  const pending = waitForBridgeResult<PromptKitBridgeGetResult>(
-    requestId,
-    "prompt-kit-get-result",
-    timeoutMs,
-  );
-  window.postMessage(message, window.location.origin);
-  const result = await pending;
-
-  if (!result) {
-    return { available: false, exists: false, kit: null };
-  }
-  if (!result.ok) {
-    return { available: true, exists: false, kit: null };
-  }
-  return {
-    available: true,
-    exists: Boolean(result.exists),
-    kit: result.kit ?? null,
-  };
-}
-
-export function pickNewerPromptKit(
-  localKit: ProfilePromptKit,
-  extensionKit: ProfilePromptKit | null,
-  extensionExists: boolean,
-): ProfilePromptKit {
-  if (!extensionExists || !extensionKit) return localKit;
-  const localTs = localKit.updatedAt ? Date.parse(localKit.updatedAt) : 0;
-  const extTs = extensionKit.updatedAt ? Date.parse(extensionKit.updatedAt) : 0;
-  if (!Number.isFinite(localTs) || localTs <= 0) return extensionKit;
-  if (!Number.isFinite(extTs) || extTs <= 0) return localKit;
-  return extTs >= localTs ? extensionKit : localKit;
 }

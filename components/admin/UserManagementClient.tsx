@@ -138,13 +138,13 @@ export function UserManagementClient() {
     <AdminLayout onLogout={handleLogout}>
       <div className="flex min-h-0 w-full flex-1 flex-col gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">User management</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight">User management</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             View, update, and delete registered accounts.
           </p>
         </div>
 
-        <div className="rounded-xl border bg-card shadow-sm">
+        <div className="rounded-xl border bg-card">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />

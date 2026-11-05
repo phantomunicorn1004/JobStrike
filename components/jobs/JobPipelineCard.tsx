@@ -8,8 +8,6 @@ import { cn } from "@/lib/utils";
 import { statusDot } from "@/lib/ui/semanticColors";
 import type { StageDates } from "@/lib/jobs/pipelineCardUtils";
 
-export type { StageDates };
-
 /** Stage id: "applied" is reserved for jobs table; others are technical_jobs.stage_id */
 export type PipelineStageId = string;
 

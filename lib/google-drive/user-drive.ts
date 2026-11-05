@@ -22,7 +22,7 @@ export async function isUserGoogleDriveConnected(
   return Boolean(settings?.refreshToken);
 }
 
-export async function getConnectedUserDriveSettings(
+async function getConnectedUserDriveSettings(
   userId: string,
 ): Promise<UserGoogleDriveSettings | null> {
   const settings = await getUserGoogleDriveSettings(userId);
@@ -46,7 +46,7 @@ async function driveFromRefreshToken(
 }
 
 /** Google refused the saved sign-in: revoked, or expired (weekly while the OAuth app is in Testing). */
-export const DRIVE_RECONNECT_MESSAGE =
+const DRIVE_RECONNECT_MESSAGE =
   "Google Drive sign-in has expired. Reconnect Google Drive on the website (Settings → Google Drive), then register again.";
 
 function isExpiredGrant(error: unknown): boolean {

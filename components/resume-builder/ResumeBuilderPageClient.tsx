@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useActiveProfile } from "@/components/active-profile";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -273,6 +274,16 @@ export function ResumeBuilderPageClient() {
     void loadKitForProfile(id);
   };
 
+  const { profileId: activeProfileId } = useActiveProfile();
+  const syncedActiveRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (profilesLoading || activeProfileId === null || syncedActiveRef.current === activeProfileId) return;
+    syncedActiveRef.current = activeProfileId;
+    if (activeProfileId !== profileId && profiles.some((p) => p.id === activeProfileId)) {
+      selectProfile(String(activeProfileId));
+    }
+  }, [activeProfileId, profilesLoading]); // selectProfile and profileId are read at the moment of the switch
+
   const patchKit = (partial: Partial<ProfilePromptKit>) => {
     setKit((prev) => ({ ...prev, ...partial }));
   };
@@ -329,8 +340,8 @@ export function ResumeBuilderPageClient() {
     <div className="flex h-full min-h-0 w-full flex-col gap-4">
         <header className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-lg font-semibold">Resume Builder</h1>
-            <p className="text-xs text-muted-foreground">
+            <h1 className="text-2xl font-semibold tracking-tight">Resume Builder</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
               Edit and save the per-profile prompt kit to your account (works across
               Chrome profiles once signed in). Build &amp; Copy and job description live
               in the extension Register tab. Built JSON must include{" "}

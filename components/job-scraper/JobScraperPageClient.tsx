@@ -1325,8 +1325,8 @@ export function JobScraperPageClient() {
     <div className="relative flex h-full min-h-0 w-full flex-col gap-2.5 text-sm [&_button]:text-xs [&_input]:text-xs [&_textarea]:text-xs [&_[data-slot=badge]]:text-[11px] [&_[data-slot=table]]:text-xs">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h1 className="text-lg font-semibold">Job Scraper</h1>
-            <p className="text-xs text-muted-foreground">
+            <h1 className="text-2xl font-semibold tracking-tight">Job Scraper</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
               Results-first scrape review for{" "}
               {scrapeSource === "jobright" ? "jobright.ai" : "hiringcafe.com"}.
             </p>

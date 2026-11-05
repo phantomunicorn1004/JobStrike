@@ -12,7 +12,7 @@ export function resumeDbMarker(applicationId: number): string {
 }
 
 /** Remove all pipeline cards created from or linked to a Resume DB application. */
-export async function deletePipelineCardsForApplication(
+async function deletePipelineCardsForApplication(
   applicationId: number,
   pipelineJobId: number | null,
   userId: string,
@@ -121,10 +121,6 @@ export async function removeApplicationFromPipeline(
     pipelineJobId: null,
     pipelineStageId: null,
   });
-}
-
-export function isInPipeline(app: Pick<ResumeDbApplication, "pipelineJobId" | "apply">): boolean {
-  return app.pipelineJobId != null || app.apply === "In Pipeline";
 }
 
 /** Keep denormalized pipeline_stage_id in sync when board cards move. */

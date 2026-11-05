@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useActiveProfile } from "@/components/active-profile";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -153,7 +154,9 @@ function endOf(i: InterviewView): string {
 export function CalendarPageClient() {
   const [data, setData] = useState<InterviewsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [profileId, setProfileId] = useState("all");
+  const { profileId: activeProfileId, setProfileId: setActiveProfileId } = useActiveProfile();
+  const profileId = activeProfileId === null ? "all" : String(activeProfileId);
+  const setProfileId = (value: string) => setActiveProfileId(value === "all" ? null : Number(value));
   const [view, setView] = useState<CalView>("week");
   const [anchor, setAnchor] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -343,7 +346,7 @@ export function CalendarPageClient() {
   }
 
   return (
-    <div className="-m-3 flex h-[calc(100dvh-3rem)] min-h-0 sm:-m-4 md:h-dvh">
+    <div className="-m-4 flex h-[calc(100dvh-3rem)] min-h-0 lg:-m-6">
       {/* Side pane */}
       <aside className="hidden w-64 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-muted/30 p-3 lg:flex">
         <h1 className="px-2 pt-1 text-lg font-semibold tracking-tight">Calendar</h1>

@@ -70,12 +70,6 @@ export function interviewStageOf(stageHint: string | null | undefined, text: str
   return "screening";
 }
 
-/** The board column role for an interview stage. */
-export function interviewRole(stageHint: string | null | undefined, text: string): "screening" | "hr" | "technical" | "final" {
-  const stage = interviewStageOf(stageHint, text);
-  return stage === "ai_screening" ? "screening" : stage;
-}
-
 /** A stored suggestion still makes sense: forward, or a rejection of a card not yet rejected. */
 export function isStillAMove(roles: StageRoles, currentStage: string | null, toStage: string): boolean {
   if (toStage === roles.reject) return currentStage !== roles.reject;

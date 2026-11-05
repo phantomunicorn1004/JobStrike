@@ -43,24 +43,7 @@ export function createLogoutJsonResponse(): NextResponse {
   return response;
 }
 
-export async function setSessionCookie(user: SessionUser): Promise<void> {
-  const cookieStore = await cookies();
-  const token = await signSessionToken(user);
-  cookieStore.set(SESSION_COOKIE, token, {
-    ...sessionCookieBase,
-    maxAge: SESSION_MAX_AGE_SEC,
-  });
-}
-
-export async function clearSessionCookie(): Promise<void> {
-  const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, "", {
-    ...sessionCookieBase,
-    maxAge: 0,
-  });
-}
-
-export async function requireSessionUser(): Promise<SessionUser> {
+async function requireSessionUser(): Promise<SessionUser> {
   const user = await getSessionUser();
   if (!user) throw new Error("Unauthorized");
   return user;

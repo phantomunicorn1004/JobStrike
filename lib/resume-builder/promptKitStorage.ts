@@ -8,7 +8,7 @@ export type ProfilePromptKit = {
   updatedAt: string | null;
 };
 
-export const RESUME_BUILDER_STORAGE_KEYS = {
+const RESUME_BUILDER_STORAGE_KEYS = {
   selectedProfileId: "resumeBuilder_selectedProfileId",
   kitPrefix: "resumeBuilder_promptKit_v1_",
 } as const;
@@ -26,7 +26,7 @@ export function emptyProfilePromptKit(
   };
 }
 
-export function promptKitStorageKey(profileId: number): string {
+function promptKitStorageKey(profileId: number): string {
   return `${RESUME_BUILDER_STORAGE_KEYS.kitPrefix}${profileId}`;
 }
 

@@ -2,7 +2,7 @@ import "server-only";
 
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { QUEUED_APPLY } from "@/lib/resume-db/types";
-import { toAutobidJob, type AutobidJob, type AutobidRowInput } from "@/lib/autobid/stages";
+import { STAGE_GROUP, stageOf, toAutobidJob, type AutobidGroup, type AutobidJob, type AutobidRowInput } from "@/lib/autobid/stages";
 import { freshCutoffIso } from "@/lib/autobid/queue-rules";
 import { jobAnswers, type JobAnswers } from "@/lib/autobid/job-answers";
 import { livesInUs, nonUsLocation } from "@/lib/autobid/screen";
@@ -115,7 +115,7 @@ async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
   const supabase = getSupabaseAdminClient();
   const { data: current, error: readError } = await supabase
     .from(TABLE)
-    .select("id, profile_id, bid_state, bid_claimed_at, generation_status, apply, job_description")
+    .select("id, profile_id, bid_state, bid_claimed_at, generation_status, apply, job_description, bid_meta")
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
@@ -128,6 +128,7 @@ async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
         generation_status: string;
         apply: string;
         job_description: string | null;
+        bid_meta: unknown;
       }
     | null;
   if (!row || row.generation_status !== "completed" || row.apply !== QUEUED_APPLY) return null;
@@ -140,21 +141,49 @@ async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
   // outside the U.S. is not applied for a candidate in the U.S.
   if (ready && (await setAsideAbroad(userId, id, row.profile_id, row.job_description ?? ""))) return null;
 
+  const prev: Record<string, unknown> =
+    row.bid_meta && typeof row.bid_meta === "object" ? (row.bid_meta as Record<string, unknown>) : {};
   const now = new Date().toISOString();
+  // Compare-and-swap on the state (and, for a stale claim, its stamp) the row had when read.
+  const guard = { id, user_id: userId, bid_state: row.bid_state, ...(abandoned && row.bid_claimed_at && { bid_claimed_at: row.bid_claimed_at }) };
+  const nullStamp = abandoned && !row.bid_claimed_at;
+
+  // The lost runner had already pressed Submit: applying again would send the
+  // application twice. Left for the user to check the site.
+  if (abandoned && prev.submitClicked === true) {
+    const note = "Runner was lost after Submit was clicked — check the site before retrying";
+    let park = supabase
+      .from(TABLE)
+      .update({
+        bid_state: "needs_you",
+        bid_claimed_at: null,
+        bid_error: note,
+        bid_meta: { ...withLoggedStep(prev, note, now), step: "", finishedAt: now },
+      } as never)
+      .match(guard);
+    if (nullStamp) park = park.is("bid_claimed_at", null);
+    const { error } = await park;
+    if (error) rethrow(error.message);
+    return null;
+  }
+
+  // A reclaim or a retry keeps the earlier attempt's steps so the page can show both.
+  const taken = abandoned ? "Taken again by the runner (the earlier claim went stale)" : "Taken by the runner";
   let update = supabase
     .from(TABLE)
     .update({
       bid_state: "bidding",
       bid_claimed_at: now,
       bid_error: "",
-      bid_meta: { startedAt: now, step: "Taken by the runner", steps: [{ at: now, text: "Taken by the runner" }] },
+      bid_meta: {
+        ...withLoggedStep({ steps: prev.steps }, taken, now),
+        startedAt: now,
+        step: taken,
+        submitClicked: false,
+      },
     } as never)
-    .eq("id", id)
-    .eq("user_id", userId)
-    .eq("bid_state", row.bid_state);
-  if (abandoned) {
-    update = row.bid_claimed_at ? update.eq("bid_claimed_at", row.bid_claimed_at) : update.is("bid_claimed_at", null);
-  }
+    .match(guard);
+  if (nullStamp) update = update.is("bid_claimed_at", null);
   const { data, error } = await update
     .select(
       "id, profile_id, candidate_name, job_link, job_title, company, job_description, note, built_resume_json, bid_state, bid_claimed_at",
@@ -247,14 +276,25 @@ function withLoggedStep(meta: Record<string, unknown>, text: string, at: string)
   return { ...meta, steps: [...steps, { at, text: text.slice(0, 300) }].slice(-MAX_LOGGED_STEPS) };
 }
 
-/** What the runner is doing now, for the Auto-bid page. Only the claim holder can write it. */
-export async function recordBidStep(userId: string, id: number, claimedAt: string, step: string): Promise<boolean> {
+/**
+ * What the runner is doing now, for the Auto-bid page. Only the claim holder
+ * can write it. `submitClicked` is written just before the runner presses
+ * Submit, so a runner lost right after can never apply to the job twice.
+ */
+export async function recordBidStep(
+  userId: string,
+  id: number,
+  claimedAt: string,
+  step: string,
+  submitClicked?: boolean,
+): Promise<boolean> {
   const current = await heldBidMeta(userId, id, claimedAt);
   if (!current) return false;
   const at = new Date().toISOString();
+  const logged = step ? { ...withLoggedStep(current, step, at), step: step.slice(0, 300) } : current;
   const { data, error } = await getSupabaseAdminClient()
     .from(TABLE)
-    .update({ bid_meta: { ...withLoggedStep(current, step, at), step: step.slice(0, 300) } } as never)
+    .update({ bid_meta: { ...logged, ...(submitClicked !== undefined && { submitClicked }) } } as never)
     .eq("id", id)
     .eq("user_id", userId)
     .eq("bid_state", "bidding")
@@ -509,6 +549,23 @@ export async function listAutobidJobs(userId: string): Promise<AutobidJob[]> {
     .limit(MONITOR_LIMIT);
   if (error) rethrow(error.message);
   return ((data ?? []) as AutobidRowInput[]).map(toAutobidJob);
+}
+
+/** How many of the same jobs fall in each page tab, reading only the three state columns. */
+export async function countAutobidGroups(userId: string): Promise<Record<AutobidGroup, number>> {
+  const { data, error } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .select("apply, generation_status, bid_state")
+    .eq("user_id", userId)
+    .or(`apply.eq.${QUEUED_APPLY},bid_state.neq.none`)
+    .order("id", { ascending: false })
+    .limit(MONITOR_LIMIT);
+  if (error) rethrow(error.message);
+  const counts: Record<AutobidGroup, number> = { active: 0, attention: 0, done: 0 };
+  for (const row of (data ?? []) as Array<Pick<AutobidRowInput, "apply" | "generation_status" | "bid_state">>) {
+    counts[STAGE_GROUP[stageOf(row)]] += 1;
+  }
+  return counts;
 }
 
 /** One job's per-field report from its last attempt; [] when there is none. */

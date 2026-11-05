@@ -49,8 +49,8 @@ export type HourlyActivityPoint = {
   count: number;
 };
 
-export const UNASSIGNED_CANDIDATE_KEY = "unassigned";
-export const OTHER_CANDIDATE_KEY = "other";
+const UNASSIGNED_CANDIDATE_KEY = "unassigned";
+const OTHER_CANDIDATE_KEY = "other";
 
 export function localYmd(d = new Date(), timeZone?: string): string {
   return getDayKeyInTimeZone(d.toISOString(), timeZone || "UTC");
@@ -60,7 +60,7 @@ export function isoToDayKey(iso: string, timeZone: string): string {
   return getDayKeyInTimeZone(iso, timeZone);
 }
 
-export function isDayInRange(day: string, from: string, to: string): boolean {
+function isDayInRange(day: string, from: string, to: string): boolean {
   if (!day) return false;
   if (from && day < from) return false;
   if (to && day > to) return false;
@@ -77,7 +77,7 @@ export function addDaysYmd(ymd: string, delta: number): string {
   return `${year}-${month}-${day}`;
 }
 
-export function resolveCandidateKey(row: ResumeApplicationRow): string {
+function resolveCandidateKey(row: ResumeApplicationRow): string {
   if (row.profile_id != null && Number.isFinite(Number(row.profile_id))) {
     return `profile-${row.profile_id}`;
   }
@@ -86,7 +86,7 @@ export function resolveCandidateKey(row: ResumeApplicationRow): string {
   return UNASSIGNED_CANDIDATE_KEY;
 }
 
-export function resolveCandidateLabel(
+function resolveCandidateLabel(
   key: string,
   profileLabels: Map<number, string> = new Map(),
 ): string {
@@ -104,25 +104,6 @@ export function resolveCandidateLabel(
     }
   }
   return key;
-}
-
-export function filterApplicationsByCandidates(
-  rows: ResumeApplicationRow[],
-  candidateKeys?: Iterable<string> | null,
-): ResumeApplicationRow[] {
-  if (!candidateKeys) return rows;
-  const allowed = candidateKeys instanceof Set ? candidateKeys : new Set(candidateKeys);
-  if (allowed.size === 0) return rows;
-  return rows.filter((row) => allowed.has(resolveCandidateKey(row)));
-}
-
-export function filterApplicationsByCandidate(
-  rows: ResumeApplicationRow[],
-  candidateFilter?: string | null,
-): ResumeApplicationRow[] {
-  const raw = candidateFilter?.trim();
-  if (!raw) return rows;
-  return filterApplicationsByCandidates(rows, [raw]);
 }
 
 export function countApplicationsOnDate(
@@ -260,43 +241,6 @@ function stageEntryDay(
   const dates = normalizeStageDates(row.stage_dates, stageId, fallback);
   const iso = dates[stageId] ?? fallback;
   return isoToDayKey(iso, timeZone);
-}
-
-export function buildStageCounts(
-  jobRows: PipelineJobRow[],
-  techRows: PipelineTechRow[],
-  stages: PipelineStageRow[],
-  from: string,
-  to: string,
-  timeZone: string,
-  appliedStageId = "applied",
-  includeEmpty = false,
-): StageCount[] {
-  const counts = new Map<string, number>();
-  for (const stage of stages) {
-    counts.set(stage.id, 0);
-  }
-
-  for (const row of jobRows) {
-    const day = stageEntryDay(row, appliedStageId, timeZone);
-    if (!isDayInRange(day, from, to)) continue;
-    counts.set(appliedStageId, (counts.get(appliedStageId) ?? 0) + 1);
-  }
-
-  for (const row of techRows) {
-    const stageId = row.stage_id ?? "technical";
-    const day = stageEntryDay(row, stageId, timeZone);
-    if (!isDayInRange(day, from, to)) continue;
-    counts.set(stageId, (counts.get(stageId) ?? 0) + 1);
-  }
-
-  return stages
-    .map((stage) => ({
-      stageId: stage.id,
-      stageName: stage.name,
-      count: counts.get(stage.id) ?? 0,
-    }))
-    .filter((item) => includeEmpty || item.count > 0);
 }
 
 function parseResumeDbIds(text: string | null | undefined): number[] {

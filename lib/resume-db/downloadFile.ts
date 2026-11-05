@@ -60,7 +60,7 @@ export async function downloadFileFromUrl(
   });
 }
 
-export async function downloadApplicationDocument(
+async function downloadApplicationDocument(
   options: DownloadFileOptions,
 ): Promise<{ buffer: Buffer; fileName: string; contentType: string }> {
   const { fileUrl, fallbackName, storagePath, driveFileId, userId, origin } =

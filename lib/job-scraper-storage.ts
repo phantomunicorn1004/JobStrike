@@ -5,7 +5,7 @@ import type {
   ScrapedJob,
 } from "@/lib/job-scraper";
 
-export const JOB_SCRAPER_STORAGE_KEY = "rwh.job-scraper.session.v1";
+const JOB_SCRAPER_STORAGE_KEY = "rwh.job-scraper.session.v1";
 
 export type JobScraperPersistedSession = {
   version: 1;

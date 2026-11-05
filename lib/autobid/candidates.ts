@@ -5,7 +5,7 @@ import { countSentSince } from "@/lib/autobid/claim";
 import { readAutobidConfig } from "@/lib/autobid/config";
 import { checkJobFit } from "@/lib/autobid/fit";
 import { openAiFitModel } from "@/lib/autobid/fit-openai";
-import { companyKey, isStale, queueRoom } from "@/lib/autobid/queue-rules";
+import { companyKey, freshCutoffIso, isStale, queueRoom } from "@/lib/autobid/queue-rules";
 import { screenCandidate, siteOf } from "@/lib/autobid/screen";
 import { loadReadyKit } from "@/lib/autogen/prompt";
 import { canonicalJobUrl } from "@/lib/job-url";
@@ -143,7 +143,7 @@ export async function recordFound(
       ? { ok: false as const, reason: "Posted more than 24 h ago" }
       : screenCandidate(
           { jobLink: row.job_link, jobTitle: row.job_title },
-          { ashby: config.ashby, profile: profile.autofill ?? {} },
+          { profile: profile.autofill ?? {} },
         );
     if (verdict.ok) {
       wantJd.push(row.job_link);
@@ -211,24 +211,14 @@ export async function describeFound(
   if (isStale(row.posted_at, row.found_at)) return skip("Posted more than 24 h ago");
   const screened = screenCandidate(
     { jobLink: row.job_link, jobTitle: row.job_title, jobDescription },
-    { ashby: config.ashby, profile: profile.autofill ?? {} },
+    { profile: profile.autofill ?? {} },
   );
   if (!screened.ok) return skip(screened.reason);
 
   // One application per company and profile at a time.
   const key = companyKey(row.company);
-  if (key) {
-    const { data: same, error: sameError } = await db()
-      .from(TABLE)
-      .select("id, company")
-      .eq("user_id", user.id)
-      .eq("profile_id", profileId)
-      .in("status", ["passed", "queued"])
-      .neq("id", row.id);
-    if (sameError) rethrow(sameError.message);
-    if (((same ?? []) as Array<{ company: string }>).some((other) => companyKey(other.company) === key)) {
-      return skip(`Already a job at ${row.company} in the queue`);
-    }
+  if (key && (await companyInPipeline(user.id, profileId, key, row.id))) {
+    return skip(`Already a job at ${row.company} in the queue`);
   }
 
   const kit = await loadReadyKit(user.id, profileId);
@@ -267,6 +257,40 @@ export async function describeFound(
   const { data: after } = await db().from(TABLE).select("status, reason").eq("id", row.id).maybeSingle();
   const now = (after as { status: CandidateStatus; reason: string } | null) ?? { status: "passed", reason: fit.reason };
   return { ...now, score: fit.score };
+}
+
+/**
+ * Another job at this company is still on its way for this profile: passed
+ * and waiting for room (while fresh), or queued with an application that has
+ * not been sent, failed or expired yet. A candidate stays "queued" forever, so
+ * the application's own state decides, not the candidate's.
+ */
+async function companyInPipeline(userId: string, profileId: number, key: string, exceptId: number): Promise<boolean> {
+  const { data, error } = await db()
+    .from(TABLE)
+    .select("id, company, status, application_id, posted_at, found_at")
+    .eq("user_id", userId)
+    .eq("profile_id", profileId)
+    .in("status", ["passed", "queued"])
+    .gte("found_at", freshCutoffIso())
+    .neq("id", exceptId);
+  if (error) rethrow(error.message);
+  const same = ((data ?? []) as Array<Pick<CandidateRow, "status" | "company" | "posted_at" | "found_at"> & { application_id: number | null }>)
+    .filter((other) => companyKey(other.company) === key);
+  const now = Date.now();
+  if (same.some((other) => other.status === "passed" && !isStale(other.posted_at, other.found_at, now))) return true;
+  const applicationIds = same.flatMap((other) => (other.status === "queued" && other.application_id ? [other.application_id] : []));
+  if (!applicationIds.length) return false;
+  const { count, error: appsError } = await db()
+    .from(APPS)
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .in("id", applicationIds)
+    .eq("apply", QUEUED_APPLY)
+    .in("bid_state", ["none", "bidding"])
+    .in("generation_status", ["queue", "generating", "completed"]);
+  if (appsError) rethrow(appsError.message);
+  return (count ?? 0) > 0;
 }
 
 /** Sent since the user's midnight, and what is queued, generating or ready to apply. */

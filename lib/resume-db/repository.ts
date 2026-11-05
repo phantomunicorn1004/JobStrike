@@ -50,7 +50,7 @@ function toGenerationStatus(value: unknown): GenerationStatus {
 }
 
 /** Columns needed for Resume DB table list (avoid select *). */
-export const RESUME_DB_LIST_COLUMNS =
+const RESUME_DB_LIST_COLUMNS =
   "id, entry_id, profile_id, user_id, candidate_name, job_link, job_title, company, note, apply, resume_url, cover_letter_url, applied_at, created_at, pipeline_job_id, pipeline_stage_id";
 
 /** Set once a query shows the ats_platform column is not there yet (its script has not run). */
@@ -232,19 +232,6 @@ export async function getProfileById(
   const row = data as ProfileRow;
   const { user_id: _uid, ...profile } = row;
   return profile;
-}
-
-export async function listApplications(userId: string): Promise<ResumeDbApplication[]> {
-  const supabase = getSupabaseAdminClient();
-  const data = await fetchAllByRange<DbRow>((from, to) =>
-    supabase
-      .from("resume_db_applications")
-      .select("*")
-      .eq("user_id", userId)
-      .order("id", { ascending: false })
-      .range(from, to),
-  );
-  return data.map(mapRow);
 }
 
 /**

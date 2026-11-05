@@ -25,7 +25,7 @@ const MOVING: MailCategory[] = ["rejection", "interview", "assessment", "offer"]
 const AUTO_CONFIDENCE = 0.75;
 const SURE_MATCH = 0.6;
 
-export type MailAction = { kind: "move"; toStage: string; fromStage: string | null; reason: string; eventId?: number | null };
+type MailAction = { kind: "move"; toStage: string; fromStage: string | null; reason: string; eventId?: number | null };
 
 type CheckRow = {
   id: string;

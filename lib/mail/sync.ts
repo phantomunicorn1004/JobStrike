@@ -230,7 +230,7 @@ export async function syncAccount(accountId: string, deadline: number): Promise<
 // --- Live updates (Microsoft change notifications) ---------------------------------------------
 
 /** Public https address Microsoft can reach; none on a developer's machine. */
-export function liveUpdatesUrl(): string | null {
+function liveUpdatesUrl(): string | null {
   // Vercel sets VERCEL_PROJECT_PRODUCTION_URL ("job-strike.vercel.app") on its own.
   const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
   const base = (process.env.NEXT_PUBLIC_APP_URL?.trim() || (vercel ? `https://${vercel}` : "")).replace(/\/+$/, "");

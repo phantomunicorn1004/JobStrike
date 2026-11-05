@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useActiveProfile } from "@/components/active-profile";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -174,7 +175,6 @@ export function JobsPipelineBoard() {
   const [stages, setStages] = useState<StageConfig[]>([]);
   const [applied, setApplied] = useState<AppliedJob[]>([]);
   const [jobsByStage, setJobsByStage] = useState<Record<string, TechnicalJob[]>>({});
-  const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [movingId, setMovingId] = useState<{ source: string; id: number } | null>(null);
   // Next interview per Resume DB application (from emails, the calendar or added by hand).
@@ -202,6 +202,10 @@ export function JobsPipelineBoard() {
   const [search, setSearch] = useState("");
   const [candidateFilter, setCandidateFilter] = useState("");
   const [candidateFilterOpen, setCandidateFilterOpen] = useState(false);
+  const { profiles, profile: activeProfile, ready: activeReady } = useActiveProfile();
+  useEffect(() => {
+    if (activeReady) setCandidateFilter(activeProfile?.full_name.trim() ?? "");
+  }, [activeReady, activeProfile]);
   const [detailTarget, setDetailTarget] = useState<{
     job: PipelineCardJob;
     stageId: string;
@@ -247,10 +251,9 @@ export function JobsPipelineBoard() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const stageList = await fetchStages();
-      const [pipelineRes, profilesRes] = await Promise.all([
+      const [stageList, pipelineRes] = await Promise.all([
+        fetchStages(),
         fetch("/api/pipeline", { credentials: "same-origin" }),
-        fetch("/api/profiles", { credentials: "same-origin" }),
       ]);
       if (!pipelineRes.ok) {
         const err = await pipelineRes.json().catch(() => ({}));
@@ -259,17 +262,6 @@ export function JobsPipelineBoard() {
         );
       }
       const pipelineData = await pipelineRes.json();
-      if (profilesRes.ok) {
-        const profileData = await profilesRes.json().catch(() => ({}));
-        setProfiles(
-          ((profileData.profiles ?? []) as { id: number; full_name: string }[]).map(
-            (p) => ({
-              id: p.id,
-              full_name: p.full_name,
-            }),
-          ),
-        );
-      }
 
       const appliedRows: AppliedJob[] = (pipelineData.applied ?? []).map(
         (row: AppliedJob) => ({ ...row, source: "jobs" as const }),
@@ -807,8 +799,11 @@ export function JobsPipelineBoard() {
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Job Pipeline</h1>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Job Pipeline</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Drag applications between stages as they move from applied to offer.</p>
+        </div>
         <Dialog open={manageStagesOpen} onOpenChange={setManageStagesOpen}>
           <DialogTrigger asChild>
             <Button variant="outline" size="sm" className="gap-2">

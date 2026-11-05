@@ -1,14 +1,14 @@
 import OpenAI from "openai";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
-export type ATSKeywords = {
+type ATSKeywords = {
   technical_skills: string[];
   tools_and_technologies: string[];
   job_responsibilities: string[];
   industry_terms: string[];
 };
 
-export type TailoredExperience = {
+type TailoredExperience = {
   job_title: string;
   company: string;
   bullets: string[];

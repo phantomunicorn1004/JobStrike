@@ -1,16 +1,31 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Loader2, Play, Square } from "lucide-react";
+import { Loader2, Play, Rocket, Settings2, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { useActiveProfile } from "@/components/active-profile";
 import { LIMITS, type AutobidConfig } from "@/lib/autobid/config-shape";
 
-type Profile = { id: number; full_name: string };
-
-/** What a Start sends: the form's fields only (not the note, version or who saved it). */
 const SETUP_FIELDS = [
   "profileId",
   "profileName",
@@ -28,21 +43,24 @@ const SETUP_FIELDS = [
   "gapMax",
 ] as const satisfies ReadonlyArray<keyof AutobidConfig>;
 
-/**
- * Start/Stop and the setup for the whole chain, from any computer. The
- * JobStrike panel on the VPS reads the same setup every 20 seconds and runs it.
- */
+type NumberKey = "dailyLimit" | "windows" | "everyMinutes" | "freshnessHours" | "gapMin" | "gapMax";
+
 export function AutobidControlPanel({
   appliedVersion,
   panelOnline,
+  sentToday,
+  onConfig,
+  footer,
 }: {
-  /** The setup version the VPS panel last applied (from its status report). */
   appliedVersion: number | null;
   panelOnline: boolean;
+  sentToday: number;
+  onConfig?: (config: AutobidConfig) => void;
+  footer?: React.ReactNode;
 }) {
   const [config, setConfig] = useState<AutobidConfig | null>(null);
   const [draft, setDraft] = useState<Partial<AutobidConfig>>({});
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const { profiles } = useActiveProfile();
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -60,16 +78,18 @@ export function AutobidControlPanel({
 
   useEffect(() => {
     void load();
-    void fetch("/api/profiles", { credentials: "same-origin" })
-      .then((res) => (res.ok ? res.json() : { profiles: [] }))
-      .then((data: { profiles?: Profile[] }) => setProfiles(data.profiles ?? []))
-      .catch(() => {});
-    // Follows changes made in the panel on the VPS.
+  }, [load]);
+
+  useEffect(() => {
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") void load();
-    }, 20_000);
+    }, config?.running ? 20_000 : 60_000);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, config?.running]);
+
+  useEffect(() => {
+    if (config) onConfig?.(config);
+  }, [config, onConfig]);
 
   const save = async (edit: Partial<AutobidConfig>) => {
     setSaving(true);
@@ -95,7 +115,7 @@ export function AutobidControlPanel({
 
   if (!config) {
     return error ? (
-      <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+      <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
         {error}
       </p>
     ) : null;
@@ -104,28 +124,38 @@ export function AutobidControlPanel({
   const view = { ...config, ...draft };
   const running = config.running;
   const applied = appliedVersion !== null && appliedVersion >= config.version;
+  const mode = !view.submit ? "dry" : view.once ? "once" : "submit";
 
-  /** A number field left: an emptied one goes back to the saved value. */
-  const changeNumber = (
-    key: "dailyLimit" | "windows" | "everyMinutes" | "freshnessHours" | "gapMin" | "gapMax",
-    text: string,
-  ) => {
-    if (text.trim() === "") {
-      setDraft(({ [key]: _dropped, ...rest }) => rest);
-      return;
-    }
-    change({ [key]: Number(text) });
-  };
-
-  /** A field changed: kept as a draft while stopped, saved at once while running. */
   const change = (edit: Partial<AutobidConfig>) => {
     if (running) void save(edit);
     else setDraft((d) => ({ ...d, ...edit }));
   };
 
+  const numberInput = (key: NumberKey, limits: readonly [number, number], step?: number, label?: string) => (
+    <Input
+      type="number"
+      aria-label={label}
+      min={limits[0]}
+      max={limits[1]}
+      step={step}
+      value={view[key]}
+      onChange={(e) =>
+        setDraft((d) => ({ ...d, [key]: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))
+      }
+      onBlur={(e) => {
+        if (e.target.value.trim() === "") setDraft(({ [key]: _dropped, ...rest }) => rest);
+        else change({ [key]: Number(e.target.value) });
+      }}
+    />
+  );
+
   const startStop = async () => {
     if (running) {
       if (await save({ running: false, note: "" })) toast.success("Stopping. The VPS stops within about 20 seconds.");
+      return;
+    }
+    if (!view.profileId) {
+      toast.error("Choose a profile first.");
       return;
     }
     const profile = profiles.find((p) => p.id === view.profileId);
@@ -134,188 +164,260 @@ export function AutobidControlPanel({
     if (saved) {
       toast.success(
         !saved.submit
-          ? `Starting a dry run for ${saved.profileName}: one job is filled and left open, then it stops.`
+          ? `Dry run for ${saved.profileName}: one job is filled and left open, then it stops.`
           : saved.once
-            ? `Starting a test run for ${saved.profileName}: one job is applied to and registered, then it stops.`
-            : `Starting for ${saved.profileName}. The VPS picks it up within about 20 seconds.`,
+            ? `Test run for ${saved.profileName}: one job is applied to, then it stops.`
+            : `Started for ${saved.profileName}. The VPS picks it up within about 20 seconds.`,
       );
     }
   };
 
-  const field = "flex flex-col gap-1 text-xs text-muted-foreground";
+  const status = !running
+    ? { tone: "idle", label: "Auto-bid is off", sub: "Press Start and it finds jobs, writes resumes and applies for you." }
+    : !panelOnline
+      ? { tone: "warn", label: "Waiting for the VPS", sub: "Started, but the JobStrike panel on the VPS isn't responding yet." }
+      : !applied
+        ? { tone: "warn", label: "Starting…", sub: "Sending your setup to the VPS." }
+        : { tone: "on", label: "Auto-bid is running", sub: `Applying as ${config.profileName || "your profile"}.` };
+  const percent = Math.min(100, Math.round((sentToday / Math.max(1, config.dailyLimit)) * 100));
 
   return (
-    <section className={cn("flex flex-col gap-3 rounded-lg border bg-card p-3 sm:p-4", running && "border-emerald-500/40")}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold">
-            {running ? (!config.submit ? "Dry run" : config.once ? "Test run" : "Running") : "Stopped"}
-            {running && config.profileName ? <span className="font-normal text-muted-foreground"> · {config.profileName}</span> : null}
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {!panelOnline
-              ? "The JobStrike panel on the VPS is not reporting: changes apply when it is open again."
-              : applied
-                ? "The VPS is following this setup."
-                : "Waiting for the VPS to pick up the change (up to 20 seconds)…"}
-          </p>
-        </div>
-        <Button
-          size="lg"
-          disabled={saving}
-          onClick={() => void startStop()}
+    <Card
+      className={cn(
+        "gap-0 overflow-hidden border-border/70 py-0 shadow-none",
+        status.tone === "on" && "border-primary/30",
+        status.tone === "warn" && "border-amber-500/30",
+      )}
+    >
+      <CardContent className="p-0">
+        <div
           className={cn(
-            "min-w-32 rounded-lg text-white",
-            running ? "bg-rose-600 hover:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-700",
+            "flex flex-col gap-5 p-5 lg:flex-row lg:items-center lg:gap-8",
+            status.tone === "on" && "bg-primary/[0.04]",
           )}
         >
-          {saving ? (
-            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-          ) : running ? (
-            <Square className="mr-1.5 h-4 w-4" />
-          ) : (
-            <Play className="mr-1.5 h-4 w-4" />
+          {/* Status */}
+          <div className="flex min-w-0 flex-1 items-center gap-4">
+            <span
+              className={cn(
+                "relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl",
+                status.tone === "on" && "bg-primary/10 text-primary",
+                status.tone === "warn" && "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+                status.tone === "idle" && "bg-muted text-muted-foreground",
+              )}
+            >
+              <Rocket className="h-5 w-5" />
+              <span
+                className={cn(
+                  "absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-card",
+                  status.tone === "on" && "bg-emerald-500",
+                  status.tone === "warn" && "animate-pulse bg-amber-500",
+                  status.tone === "idle" && "bg-muted-foreground/40",
+                )}
+              />
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-semibold tracking-tight">{status.label}</h2>
+                {mode !== "submit" && (
+                  <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                    {mode === "dry" ? "Dry run" : "Test run"}
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground">{status.sub}</p>
+            </div>
+          </div>
+
+          {/* Today's progress */}
+          <div className="w-full lg:w-60">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs font-medium text-muted-foreground">Sent today</span>
+              <span className="tabular-nums">
+                <span className="text-xl font-semibold tracking-tight">{sentToday}</span>
+                <span className="text-sm text-muted-foreground"> / {config.dailyLimit}</span>
+              </span>
+            </div>
+            <Progress value={percent} className="mt-2 h-1.5" />
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              {sentToday >= config.dailyLimit
+                ? "Daily limit reached. It continues tomorrow."
+                : `${config.dailyLimit - sentToday} left today`}
+            </p>
+          </div>
+
+          {/* Actions */}
+          <div className="flex shrink-0 items-center gap-2">
+            <SettingsDialog view={view} running={running} change={change}
+              setHours={(hours) => setDraft((d) => ({ ...d, hours }))}
+              numberInput={numberInput} mode={mode}
+            />
+            <Button
+              disabled={saving}
+              onClick={() => void startStop()}
+              className={cn(
+                "h-10 min-w-[120px] flex-1 lg:flex-none",
+                running
+                  ? "bg-rose-600 text-white hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-700"
+                  : "bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-700",
+              )}
+            >
+              {saving ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : running ? (
+                <Square className="mr-1.5 h-4 w-4" />
+              ) : (
+                <Play className="mr-1.5 h-4 w-4" />
+              )}
+              {running ? "Stop" : "Start"}
+            </Button>
+          </div>
+        </div>
+
+        {config.note && !running && (
+          <p className="mx-5 mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+            {config.note}
+          </p>
+        )}
+
+        {/* Profile + daily limit */}
+        <div className="grid grid-cols-1 gap-3 border-t border-border/60 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_140px]">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Apply as</span>
+            <Select
+              value={view.profileId ? String(view.profileId) : ""}
+              onValueChange={(v) => {
+                const id = Number(v) || null;
+                change({ profileId: id, profileName: profiles.find((p) => p.id === id)?.full_name ?? "" });
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Choose a profile…" />
+              </SelectTrigger>
+              <SelectContent>
+                {profiles.map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>{p.full_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Daily limit</span>
+            {numberInput("dailyLimit", LIMITS.dailyLimit)}
+          </label>
+          {!running && Object.keys(draft).length > 0 && (
+            <p className="text-[11px] text-muted-foreground sm:col-span-2">Changes are saved when you press Start.</p>
           )}
-          {running ? "Stop" : "Start"}
+        </div>
+
+        {footer && <div className="border-t border-border/60 bg-muted/30 px-5 py-3">{footer}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ─── Settings dialog ─── */
+
+function SettingsDialog({
+  view, running, change, setHours, numberInput, mode,
+}: {
+  view: AutobidConfig;
+  running: boolean;
+  change: (edit: Partial<AutobidConfig>) => void;
+  setHours: (hours: string) => void;
+  numberInput: (key: NumberKey, limits: readonly [number, number], step?: number, label?: string) => React.ReactNode;
+  mode: "dry" | "once" | "submit";
+}) {
+  const field = "flex flex-col gap-1.5";
+  const labelCls = "text-sm font-medium";
+  const hint = "text-xs text-muted-foreground";
+  const toggle =
+    "flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors hover:bg-muted/60";
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="icon" className="h-9 w-9" title="Settings" aria-label="Settings">
+          <Settings2 className="h-4 w-4" />
         </Button>
-      </div>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Auto-bid settings</DialogTitle>
+          <DialogDescription>
+            The defaults work for most people. {running ? "Changes apply right away." : "Changes are saved when you press Start."}
+          </DialogDescription>
+        </DialogHeader>
 
-      {config.note && !running && (
-        <p className="rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-300">{config.note}</p>
-      )}
+        <div className="space-y-5 pt-2">
+          <div className={field}>
+            <span className={labelCls}>Run mode</span>
+            <Select value={mode} onValueChange={(v) => change({ submit: v !== "dry", once: v === "once" })}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="submit">Full auto: apply continuously</SelectItem>
+                <SelectItem value="once">Test: apply to one job, then stop</SelectItem>
+                <SelectItem value="dry">Dry run: fill one job without submitting</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label className={field}>
-          Profile
-          <select
-            className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-            value={view.profileId ?? ""}
-            onChange={(e) => {
-              const id = Number(e.target.value) || null;
-              change({ profileId: id, profileName: profiles.find((p) => p.id === id)?.full_name ?? "" });
-            }}
-          >
-            <option value="">Choose a profile…</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.full_name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className={field}>
-          Mode
-          <select
-            className="h-9 rounded-md border bg-background px-2 text-sm text-foreground"
-            value={!view.submit ? "dry" : view.once ? "once" : "submit"}
-            onChange={(e) => change({ submit: e.target.value !== "dry", once: e.target.value === "once" })}
-          >
-            <option value="dry">Dry run: fill one job, then stop</option>
-            <option value="once">Test run: apply to one job with Submit, then stop</option>
-            <option value="submit">Submit: apply by itself</option>
-          </select>
-        </label>
-        <label className={field}>
-          Applications per day
-          <Input
-            type="number"
-            min={LIMITS.dailyLimit[0]}
-            max={LIMITS.dailyLimit[1]}
-            value={view.dailyLimit}
-            onChange={(e) => setDraft((d) => ({ ...d, dailyLimit: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
-            onBlur={(e) => changeNumber("dailyLimit", e.target.value)}
-          />
-        </label>
-        <label className={field}>
-          ChatGPT windows (AutoGen)
-          <Input
-            type="number"
-            min={LIMITS.windows[0]}
-            max={LIMITS.windows[1]}
-            value={view.windows}
-            onChange={(e) => setDraft((d) => ({ ...d, windows: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
-            onBlur={(e) => changeNumber("windows", e.target.value)}
-          />
-        </label>
-        <label className={field}>
-          Check HiringCafe every (minutes)
-          <Input
-            type="number"
-            min={LIMITS.everyMinutes[0]}
-            max={LIMITS.everyMinutes[1]}
-            step={5}
-            value={view.everyMinutes}
-            onChange={(e) => setDraft((d) => ({ ...d, everyMinutes: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
-            onBlur={(e) => changeNumber("everyMinutes", e.target.value)}
-          />
-        </label>
-        <label className={field}>
-          HiringCafe: posted within (hours)
-          <Input
-            type="number"
-            min={LIMITS.freshnessHours[0]}
-            max={LIMITS.freshnessHours[1]}
-            value={view.freshnessHours}
-            onChange={(e) => setDraft((d) => ({ ...d, freshnessHours: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
-            onBlur={(e) => changeNumber("freshnessHours", e.target.value)}
-          />
-        </label>
-        <div className={field}>
-          Minutes between applications
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              aria-label="At least (minutes)"
-              min={LIMITS.gap[0]}
-              max={LIMITS.gap[1]}
-              value={view.gapMin}
-              onChange={(e) => setDraft((d) => ({ ...d, gapMin: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
-              onBlur={(e) => changeNumber("gapMin", e.target.value)}
-            />
-            <span className="text-foreground">–</span>
-            <Input
-              type="number"
-              aria-label="At most (minutes)"
-              min={LIMITS.gap[0]}
-              max={LIMITS.gap[1]}
-              value={view.gapMax}
-              onChange={(e) => setDraft((d) => ({ ...d, gapMax: e.target.value === "" ? ("" as unknown as number) : Number(e.target.value) }))}
-              onBlur={(e) => changeNumber("gapMax", e.target.value)}
-            />
+          <div className={field}>
+            <span className={labelCls}>Where to find jobs</span>
+            <div className="grid grid-cols-2 gap-2">
+              <label className={toggle}>
+                <input type="checkbox" className="accent-primary" checked={view.hiringCafe} onChange={(e) => change({ hiringCafe: e.target.checked })} />
+                HiringCafe
+              </label>
+              <label className={toggle}>
+                <input type="checkbox" className="accent-primary" checked={view.jobright} onChange={(e) => change({ jobright: e.target.checked })} />
+                Jobright
+              </label>
+            </div>
           </div>
-        </div>
-        <div className={field}>
-          Sources
-          <div className="flex h-9 items-center gap-4 text-sm text-foreground">
-            <label className="flex items-center gap-1.5">
-              <input type="checkbox" checked={view.hiringCafe} onChange={(e) => change({ hiringCafe: e.target.checked })} />
-              HiringCafe
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="checkbox" checked={view.jobright} onChange={(e) => change({ jobright: e.target.checked })} />
-              Jobright
-            </label>
+
+          <div className={field}>
+            <span className={labelCls}>Only run during these hours</span>
+            <Input
+              value={view.hours}
+              placeholder="All day (e.g. 09:00-18:00)"
+              onChange={(e) => setHours(e.target.value)}
+              onBlur={(e) => change({ hours: e.target.value })}
+            />
+            <span className={hint}>VPS clock. Leave empty to run all day.</span>
           </div>
+
+          <details className="group rounded-lg border border-border/60">
+            <summary className="cursor-pointer select-none px-3 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground">
+              Advanced tuning
+            </summary>
+            <div className="grid grid-cols-2 gap-3 border-t border-border/60 p-3">
+              <label className={field}>
+                <span className={hint}>Check for jobs every (min)</span>
+                {numberInput("everyMinutes", LIMITS.everyMinutes, 5)}
+              </label>
+              <label className={field}>
+                <span className={hint}>Only jobs posted within (h)</span>
+                {numberInput("freshnessHours", LIMITS.freshnessHours)}
+              </label>
+              <div className={cn(field, "col-span-2 sm:col-span-1")}>
+                <span className={hint}>Wait between applications (min)</span>
+                <div className="flex items-center gap-2">
+                  {numberInput("gapMin", LIMITS.gap, undefined, "At least")}
+                  <span className="text-muted-foreground">–</span>
+                  {numberInput("gapMax", LIMITS.gap, undefined, "At most")}
+                </div>
+              </div>
+              <label className={cn(field, "col-span-2 sm:col-span-1")}>
+                <span className={hint}>Resumes written at once</span>
+                {numberInput("windows", LIMITS.windows)}
+              </label>
+            </div>
+          </details>
         </div>
-        <label className={cn(field, "sm:col-span-2")}>
-          Look for jobs only between (VPS clock; empty = all day)
-          <Input
-            value={view.hours}
-            placeholder="All day"
-            onChange={(e) => setDraft((d) => ({ ...d, hours: e.target.value }))}
-            onBlur={(e) => change({ hours: e.target.value })}
-          />
-        </label>
-        <label className={cn(field, "sm:col-span-2 justify-end")}>
-          <span className="flex h-9 items-center gap-1.5 text-sm text-foreground">
-            <input type="checkbox" checked={view.ashby} onChange={(e) => change({ ashby: e.target.checked })} />
-            Queue Ashby jobs too (filled, then left for you to press Submit)
-          </span>
-        </label>
-      </div>
-      {!running && Object.keys(draft).length > 0 && (
-        <p className="text-xs text-muted-foreground">Changes are saved when you press Start.</p>
-      )}
-    </section>
+      </DialogContent>
+    </Dialog>
   );
 }

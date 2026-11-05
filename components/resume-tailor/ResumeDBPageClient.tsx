@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useActiveProfile } from "@/components/active-profile";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -82,6 +83,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { TONE_TEXT } from "@/lib/ui/tone";
 import { DEFAULT_TIMEZONE, formatIsoInTimeZone } from "@/lib/timezone";
 import { INTERVIEW_ROUND_LABELS } from "@/lib/interviews/types";
 import type { ApplicationResponse, ResponseStatus } from "@/lib/mail/response-types";
@@ -90,10 +92,10 @@ import type { ApplicationResponse, ResponseStatus } from "@/lib/mail/response-ty
 type MailStatus = ApplicationResponse;
 
 const MAIL_STATUS_STYLE: Record<ResponseStatus, string> = {
-  not_responded: "text-muted-foreground",
-  interviewing: "text-violet-600 dark:text-violet-400",
-  rejected: "text-rose-600 dark:text-rose-400",
-  offer: "text-emerald-600 dark:text-emerald-400",
+  not_responded: TONE_TEXT.idle,
+  interviewing: TONE_TEXT.progress,
+  rejected: TONE_TEXT.danger,
+  offer: TONE_TEXT.success,
 };
 
 export type ResumeDbRow = {
@@ -995,7 +997,6 @@ export function ResumeDBPageClient() {
   const [retryingBids, setRetryingBids] = useState<Set<number>>(() => new Set());
   const tableRef = useRef<HTMLTableElement>(null);
   const { percents, resizePair, fitColumn } = useResizableColumns();
-  const [profiles, setProfiles] = useState<{ id: number; full_name: string }[]>([]);
   const [orphanCandidateNames, setOrphanCandidateNames] = useState<string[]>([]);
   const [orphanCandidateNamesLoaded, setOrphanCandidateNamesLoaded] = useState(false);
   const [atsPlatforms, setAtsPlatforms] = useState<AtsPlatformOption[]>([]);
@@ -1017,20 +1018,17 @@ export function ResumeDBPageClient() {
     [pathname, router, searchParams],
   );
 
-  const loadProfiles = useCallback(async () => {
-    try {
-      const profilesRes = await fetch("/api/profiles", {
-        credentials: "same-origin",
-      });
-      if (!profilesRes.ok) return;
-      const profileData = (await profilesRes.json().catch(() => ({}))) as {
-        profiles?: { id: number; full_name: string }[];
-      };
-      setProfiles(profileData.profiles ?? []);
-    } catch {
-      // ignore profile load errors (table still works)
-    }
-  }, []);
+  // The top-bar candidate sets this page's filter; a filter already in the URL wins on load.
+  const { profiles, profileId: activeProfileId, ready: activeReady } = useActiveProfile();
+  const syncedProfileRef = useRef<number | null | undefined>(undefined);
+  useEffect(() => {
+    if (!activeReady || syncedProfileRef.current === activeProfileId) return;
+    const first = syncedProfileRef.current === undefined;
+    syncedProfileRef.current = activeProfileId;
+    const wanted = activeProfileId !== null ? `profile-${activeProfileId}` : "";
+    if (first && (candidateFilter || !wanted)) return;
+    if (candidateFilter !== wanted) updateParams({ candidateFilter: wanted || null, page: "1" });
+  }, [activeReady, activeProfileId, candidateFilter, updateParams]);
 
   const loadRows = useCallback(async () => {
     loadRowsAbortRef.current?.abort();
@@ -1114,10 +1112,6 @@ export function ResumeDBPageClient() {
     atsPlatformsLoaded,
     updateParams,
   ]);
-
-  useEffect(() => {
-    void loadProfiles();
-  }, [loadProfiles]);
 
   useEffect(() => {
     void loadRows();
@@ -1466,8 +1460,8 @@ export function ResumeDBPageClient() {
     <div className="flex min-h-0 w-full flex-1 flex-col gap-2 sm:gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
           <div className="min-w-0 space-y-0.5">
-            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Resume DB</h1>
-            <p className="text-xs text-muted-foreground sm:text-sm">
+            <h1 className="text-2xl font-semibold tracking-tight">Resume DB</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
               {totalCount} application{totalCount === 1 ? "" : "s"} — register via
               the JobStrike Extension. Set status to move jobs through the{" "}
               <Link href="/jobs" className="text-primary underline-offset-4 hover:underline">
@@ -1481,7 +1475,7 @@ export function ResumeDBPageClient() {
               <Button
                 variant="outline"
                 size="icon"
-                className="h-9 w-9 rounded-lg shadow-sm shrink-0"
+                className="h-9 w-9 shrink-0"
                 onClick={loadRows}
                 disabled={isLoading}
                 aria-label="Refresh applications"

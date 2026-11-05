@@ -79,8 +79,8 @@ export function kitRunMode(promptTemplate: string): KitRunMode {
   return "unknown";
 }
 
-export const PROMPT_RESUME_PLACEHOLDER = "{resume_template_json}";
-export const PROMPT_JOB_PLACEHOLDER = "{job_description}";
+const PROMPT_RESUME_PLACEHOLDER = "{resume_template_json}";
+const PROMPT_JOB_PLACEHOLDER = "{job_description}";
 
 export type GenerationReadiness = {
   ready: boolean;

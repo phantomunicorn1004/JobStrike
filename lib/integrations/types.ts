@@ -3,7 +3,7 @@
 export const MAIL_PROVIDERS = ["google", "microsoft"] as const;
 export type MailProvider = (typeof MAIL_PROVIDERS)[number];
 
-export const MAIL_AUTOMATION_MODES = ["auto", "suggest", "off"] as const;
+const MAIL_AUTOMATION_MODES = ["auto", "suggest", "off"] as const;
 export type MailAutomation = (typeof MAIL_AUTOMATION_MODES)[number];
 
 export type MailAccountStatus = "active" | "reauth_required" | "disabled";

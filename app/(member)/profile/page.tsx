@@ -294,16 +294,19 @@ export default function ProfilePage() {
 
   if (isLoading) {
     return (
-      <div className="w-full mx-auto py-12">
+      <div className="w-full">
         <p className="text-muted-foreground">Loading profiles...</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full mx-auto py-12">
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
-        <h1 className="text-3xl font-bold">User Profiles</h1>
+    <div className="w-full">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Profiles</h1>
+          <p className="mt-1 text-sm text-muted-foreground">The candidates you apply as. Each profile fills its own applications and resumes.</p>
+        </div>
         <Dialog open={addProfileOpen} onOpenChange={setAddProfileOpen}>
           <DialogTrigger asChild>
             <Button className="gap-2">

@@ -26,7 +26,7 @@ export const COLUMN_ORDER: ResumeDBColumnId[] = [
   "actions",
 ];
 
-export const COLUMN_HEADERS: Record<ResumeDBColumnId, string> = {
+const COLUMN_HEADERS: Record<ResumeDBColumnId, string> = {
   select: "",
   no: "No",
   profile: "Profile",

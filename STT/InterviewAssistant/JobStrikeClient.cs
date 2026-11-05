@@ -67,26 +67,8 @@ public sealed class JobStrikeClient : IDisposable
 
     public bool IsSignedIn => Key != null;
 
-    string? Key
-    {
-        get
-        {
-            if (string.IsNullOrEmpty(_settings.JobStrikeKeyProtected))
-            {
-                return null;
-            }
-            try
-            {
-                byte[] plain = ProtectedData.Unprotect(Convert.FromBase64String(_settings.JobStrikeKeyProtected), null,
-                    DataProtectionScope.CurrentUser);
-                return Encoding.UTF8.GetString(plain);
-            }
-            catch (Exception ex) when (ex is CryptographicException or FormatException)
-            {
-                return null; // saved by another Windows account or damaged: sign in again
-            }
-        }
-    }
+    // Saved by another Windows account or damaged: null, so the user signs in again.
+    string? Key => ProtectedText.Unprotect(_settings.JobStrikeKeyProtected);
 
     /// <exception cref="JobStrikeException">Wrong credentials, or the site could not be reached.</exception>
     public async Task SignInAsync(string username, string password)
@@ -102,8 +84,7 @@ public sealed class JobStrikeClient : IDisposable
         {
             throw new JobStrikeException("JobStrike did not return an access key for this account.");
         }
-        byte[] protectedKey = ProtectedData.Protect(Encoding.UTF8.GetBytes(login.ExtensionApiKey), null, DataProtectionScope.CurrentUser);
-        _settings.JobStrikeKeyProtected = Convert.ToBase64String(protectedKey);
+        _settings.JobStrikeKeyProtected = ProtectedText.Protect(login.ExtensionApiKey);
         _settings.JobStrikeUser = login.User?.Username ?? username;
         _settings.Save();
     }

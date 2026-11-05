@@ -52,35 +52,70 @@ export async function listApplicationsForDashboardRange(
   );
 }
 
-/** Lightweight pipeline rows for dashboard charts (no company/title fluff). */
+/** Only cards whose text holds a link back to Resume DB carry anything the charts read from it. */
+const RESUME_DB_MARKER = "%Resume DB #%";
+
+/** Puts each linked card's text back on its row; unlinked rows keep no text (they count as unassigned). */
+function withMarkerText<R extends { id?: number }>(
+  rows: R[],
+  textById: Map<number, string | null>,
+  column: "note" | "job_description",
+): R[] {
+  return rows.map((row) => (row.id != null && textById.has(row.id) ? { ...row, [column]: textById.get(row.id) } : row));
+}
+
+/** Pipeline rows for the dashboard: dates for every card, the note only for cards linked to Resume DB. */
 export async function listPipelineJobsForDashboard(
   userId: string,
 ): Promise<PipelineJobRow[]> {
   const supabase = getSupabaseAdminClient();
-  return fetchAllByRange<PipelineJobRow>((from, to) =>
-    supabase
-      .from("jobs")
-      .select("id, note, created_at, stage_entered_at, stage_dates")
-      .eq("user_id", userId)
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
+  const [rows, linked] = await Promise.all([
+    fetchAllByRange<PipelineJobRow>((from, to) =>
+      supabase
+        .from("jobs")
+        .select("id, created_at, stage_entered_at, stage_dates")
+        .eq("user_id", userId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllByRange<{ id: number; note: string | null }>((from, to) =>
+      supabase
+        .from("jobs")
+        .select("id, note")
+        .eq("user_id", userId)
+        .like("note", RESUME_DB_MARKER)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+  ]);
+  return withMarkerText(rows, new Map(linked.map((row) => [row.id, row.note])), "note");
 }
 
+/** Technical-board rows: dates and column for every card, the description only for linked cards. */
 export async function listTechnicalJobsForDashboard(
   userId: string,
 ): Promise<PipelineTechRow[]> {
   const supabase = getSupabaseAdminClient();
-  return fetchAllByRange<PipelineTechRow>((from, to) =>
-    supabase
-      .from("technical_jobs")
-      .select(
-        "id, stage_id, job_description, created_at, stage_entered_at, stage_dates",
-      )
-      .eq("user_id", userId)
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
+  const [rows, linked] = await Promise.all([
+    fetchAllByRange<PipelineTechRow>((from, to) =>
+      supabase
+        .from("technical_jobs")
+        .select("id, stage_id, created_at, stage_entered_at, stage_dates")
+        .eq("user_id", userId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllByRange<{ id: number; job_description: string | null }>((from, to) =>
+      supabase
+        .from("technical_jobs")
+        .select("id, job_description")
+        .eq("user_id", userId)
+        .like("job_description", RESUME_DB_MARKER)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+  ]);
+  return withMarkerText(rows, new Map(linked.map((row) => [row.id, row.job_description])), "job_description");
 }
 
 /**
@@ -113,25 +148,4 @@ export async function listApplicationsForResponseStats(
         .range(from, to),
     );
   }
-}
-
-/** @deprecated Prefer range-scoped helpers above. */
-export async function listAllApplicationsForDashboard(
-  userId: string,
-): Promise<ResumeApplicationRow[]> {
-  return listApplicationCandidateKeysForDashboard(userId);
-}
-
-/** @deprecated Prefer listPipelineJobsForDashboard. */
-export async function listAllPipelineJobsForDashboard(
-  userId: string,
-): Promise<PipelineJobRow[]> {
-  return listPipelineJobsForDashboard(userId);
-}
-
-/** @deprecated Prefer listTechnicalJobsForDashboard. */
-export async function listAllTechnicalJobsForDashboard(
-  userId: string,
-): Promise<PipelineTechRow[]> {
-  return listTechnicalJobsForDashboard(userId);
 }

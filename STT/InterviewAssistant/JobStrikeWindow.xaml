@@ -42,7 +42,7 @@
                 <TextBlock Text="&#xE821;" Style="{StaticResource ChipGlyph}" FontSize="18" Foreground="{DynamicResource LilacFg}" />
             </Border>
             <StackPanel>
-                <TextBlock Text="Load from JobStrike" FontFamily="{StaticResource DisplayFont}" FontSize="21" FontWeight="ExtraBold"
+                <TextBlock Text="Load from JobStrike" FontFamily="{StaticResource DisplayFont}" FontSize="21" FontWeight="SemiBold"
                            Foreground="{DynamicResource Strong}" />
                 <TextBlock Foreground="{DynamicResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0"
                            Text="Pick the application you are interviewing for. Its company, job description and resume are filled into Settings for you to check." />
@@ -68,7 +68,7 @@
             <ContentControl x:Name="SignInPanel" Style="{StaticResource Card}" Margin="0,4,0,0" VerticalAlignment="Top"
                             Visibility="Collapsed">
                 <StackPanel MaxWidth="420" HorizontalAlignment="Left" Width="420">
-                    <TextBlock Text="Sign in to JobStrike" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="ExtraBold"
+                    <TextBlock Text="Sign in to JobStrike" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="SemiBold"
                                Foreground="{DynamicResource Strong}" />
                     <TextBlock x:Name="SiteText" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,3,0,0" />
                     <TextBlock Text="Username" Style="{StaticResource FieldLabel}" />
@@ -134,12 +134,12 @@
                                     <!-- Company initials in a colour picked from the name -->
                                     <Border Width="36" Height="36" CornerRadius="12" Background="{Binding AvatarBrush, Mode=OneWay}"
                                             VerticalAlignment="Center" Margin="0,0,12,0">
-                                        <TextBlock Text="{Binding Initials, Mode=OneWay}" Foreground="White" FontWeight="ExtraBold"
+                                        <TextBlock Text="{Binding Initials, Mode=OneWay}" Foreground="White" FontWeight="SemiBold"
                                                    FontSize="12.5" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock TextTrimming="CharacterEllipsis">
-                                            <Run Text="{Binding Company, Mode=OneWay}" FontWeight="Bold" Foreground="{DynamicResource Strong}" />
+                                            <Run Text="{Binding Company, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Strong}" />
                                             <Run Text="{Binding TitleSuffix, Mode=OneWay}" Foreground="{DynamicResource Text}" />
                                         </TextBlock>
                                         <TextBlock Text="{Binding Details, Mode=OneWay}" Foreground="{DynamicResource Muted}" FontSize="11.5"

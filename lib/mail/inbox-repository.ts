@@ -17,7 +17,7 @@ const db = () => getSupabaseAdminClient();
 // --- Sorting ------------------------------------------------------------------------------------
 
 /** A failed sort is retried this often before the email is left as it is. */
-export const MAX_CLASSIFY_ATTEMPTS = 3;
+const MAX_CLASSIFY_ATTEMPTS = 3;
 
 export type PendingMessage = {
   id: string;
@@ -251,7 +251,7 @@ function toItem(row: ItemRow): InboxItem {
 }
 
 /** Below this, a match is shown as "check this". */
-export const SURE_MATCH = 0.6;
+const SURE_MATCH = 0.6;
 
 const VIEW_CATEGORIES: Record<InboxView, MailCategory[] | null> = {
   inbox: ["interview", "assessment", "offer", "rejection", "update", "outreach", "other"],

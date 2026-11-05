@@ -30,18 +30,3 @@ export interface ResumeStructure {
     styles?: Record<string, any>;
   };
 }
-
-export interface StructuredResumeContent {
-  profileTitle: string;
-  contactInfo?: string;
-  professionalSummary?: string;
-  experience: Array<{
-    jobTitle: string;
-    company: string;
-    bullets: string[];
-  }>;
-  skills?: string[];
-  education?: string[];
-  certifications?: string[];
-  structure: ResumeStructure;
-}

@@ -16,11 +16,7 @@ import { canonicalJobUrl } from "@/lib/job-url";
 export type { BlockedJobRef, JobDuplicateStatus, RegisteredJobRef };
 export {
   classifyJobAgainstResumeDb,
-  companiesMatch,
-  companyMatchLevelInList,
-  companyMatchesList,
   jobMatchesBlockedJobs,
-  jobMatchesRegisteredJobRef,
   normalizeCompanyName,
 };
 
@@ -33,7 +29,7 @@ export type JobScraperDateWindow =
   | "3d"
   | "7d";
 
-export const JOB_SCRAPER_DATE_WINDOWS: readonly JobScraperDateWindow[] = [
+const JOB_SCRAPER_DATE_WINDOWS: readonly JobScraperDateWindow[] = [
   "2h",
   "4h",
   "8h",
@@ -43,7 +39,7 @@ export const JOB_SCRAPER_DATE_WINDOWS: readonly JobScraperDateWindow[] = [
   "7d",
 ] as const;
 
-export function isJobScraperDateWindow(value: unknown): value is JobScraperDateWindow {
+function isJobScraperDateWindow(value: unknown): value is JobScraperDateWindow {
   return (
     typeof value === "string" &&
     (JOB_SCRAPER_DATE_WINDOWS as readonly string[]).includes(value)
@@ -62,7 +58,7 @@ export function normalizeJobScraperDateWindow(
   return fallback;
 }
 
-export type FreshnessWindow = {
+type FreshnessWindow = {
   kind: "hours" | "days";
   amount: number;
   label: string;
@@ -70,7 +66,7 @@ export type FreshnessWindow = {
   hcDays: number;
 };
 
-export function parseFreshnessWindow(
+function parseFreshnessWindow(
   dateWindow: JobScraperDateWindow | number | string,
 ): FreshnessWindow {
   if (typeof dateWindow === "number" && Number.isFinite(dateWindow)) {
@@ -147,7 +143,7 @@ export function dateWindowDays(dateWindow: JobScraperDateWindow): number {
   return parseFreshnessWindow(dateWindow).hcDays;
 }
 
-export function dateWindowCutoffMs(
+function dateWindowCutoffMs(
   dateWindow: JobScraperDateWindow,
   nowMs: number = Date.now(),
 ): number {
@@ -232,7 +228,7 @@ export function normalizeAtsName(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
-export function atsMatchesList(
+function atsMatchesList(
   jobAts: string | null | undefined,
   atsList: string[],
 ): boolean {
@@ -244,7 +240,7 @@ export function atsMatchesList(
   });
 }
 
-export function jobMatchesRegisteredJobs(
+function jobMatchesRegisteredJobs(
   job: ScrapedJob,
   registeredJobs: RegisteredJobRef[],
 ): boolean {
@@ -332,29 +328,6 @@ export function applyOptionalScrapeFilters(
       removedBlocked,
       removedAts,
     },
-  };
-}
-
-/** @deprecated Prefer applyOptionalScrapeFilters */
-export function filterJobsByCompany(
-  jobs: ScrapedJob[],
-  blockedCompanies: string[],
-  resumeDbCompanies: string[],
-  blockedAts: string[] = [],
-) {
-  const { filtered, stats } = applyOptionalScrapeFilters(jobs, {
-    excludeBlockedCompanies: true,
-    excludeRegisteredCompanies: true,
-    excludeBlockedAts: true,
-    blockedCompanies,
-    registeredCompanies: resumeDbCompanies,
-    blockedAts,
-  });
-  return {
-    filtered,
-    removedBlockedCount: stats.removedBlocked,
-    removedResumeCount: stats.removedRegisteredCompanies,
-    removedAtsCount: stats.removedAts,
   };
 }
 

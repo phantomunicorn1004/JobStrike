@@ -32,6 +32,29 @@ public sealed partial class CaptionTracker
     public string Pending => CleanForSending(_transcript[_sentUpTo..]);
     public int PendingWordCount => CountWords(Pending);
 
+    /// <summary>Where the shown transcript starts; moved to the end by <see cref="ClearHistory"/>.</summary>
+    public int VisibleFrom => Math.Min(_visibleFrom, _transcript.Length);
+    int _visibleFrom;
+
+    /// <summary>
+    /// Starts an empty transcript (a new interview): everything so far is hidden and counts as sent,
+    /// and the part Live Captions no longer shows is forgotten.
+    /// </summary>
+    public void ClearHistory()
+    {
+        DiscardPending();
+        _visibleFrom = _transcript.Length;
+        // Text from the current Live Captions snapshot is kept: the next snapshot is aligned against it.
+        int cut = Math.Min(_visibleFrom, _snapshotStart);
+        if (cut > 0)
+        {
+            _transcript = _transcript[cut..];
+            _snapshotStart -= cut;
+            _sentUpTo -= cut;
+            _visibleFrom -= cut;
+        }
+    }
+
     /// <summary>Feeds one Live Captions snapshot. Returns true when the transcript changed.</summary>
     public bool Update(string snapshot)
     {
@@ -92,6 +115,21 @@ public sealed partial class CaptionTracker
 
     /// <summary>Puts text back into the pending range after a failed send.</summary>
     public void RestoreMarker(int marker) => _sentUpTo = Math.Clamp(marker, 0, _transcript.Length);
+
+    /// <summary>
+    /// Counts the transcript up to <paramref name="position"/> as sent: the user sent those words as
+    /// part of a message they edited. Words after it stay waiting.
+    /// </summary>
+    public void MarkSentUpTo(int position)
+    {
+        int upTo = Math.Min(position, _transcript.Length);
+        if (upTo > _sentUpTo)
+        {
+            _sentUpTo = upTo;
+            SnapSentMarkerToWordEnd();
+        }
+        TakeCount++;
+    }
 
     public void DiscardPending()
     {

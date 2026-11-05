@@ -49,7 +49,7 @@ export function BrandLogo({
           wordmarkClassName,
         )}
       >
-        <span className="text-sidebar-foreground">Job</span>
+        <span className="text-foreground">Job</span>
         <span className="text-primary">Strike</span>
       </span>
     </Link>

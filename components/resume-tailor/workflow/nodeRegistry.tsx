@@ -54,7 +54,7 @@ const STYLE_TRIGGER = {
 };
 
 /** Registry of all workflow node types (resume + legacy). */
-export const NODE_REGISTRY: Record<WorkflowNodeType, NodeDefinition> = {
+const NODE_REGISTRY: Record<WorkflowNodeType, NodeDefinition> = {
   // Legacy
   trigger: {
     type: "trigger",
@@ -156,18 +156,6 @@ export const NODE_REGISTRY: Record<WorkflowNodeType, NodeDefinition> = {
     ...STYLE_OUTPUT,
   },
 };
-
-export const RESUME_NODE_TYPES: ResumeNodeType[] = [
-  "initialInput",
-  "resumeSelection",
-  "jdParsing",
-  "tailorAi",
-  "resumeValidation",
-  "templateSelection",
-  "resumeToTemplateMapping",
-  "pdfBuild",
-  "download",
-];
 
 export function getNodeDefinition(type: WorkflowNodeType): NodeDefinition {
   const def = NODE_REGISTRY[type];

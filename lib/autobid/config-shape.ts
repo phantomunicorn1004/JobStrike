@@ -26,7 +26,7 @@ export type AutobidConfig = {
   jobright: boolean;
   /** HiringCafe: only jobs posted within this many hours (Jobright dates by day: 1 day). */
   freshnessHours: number;
-  /** Queue Ashby jobs too: they are filled and left for your click (Ashby drops an automated Submit). */
+  /** Include Ashby jobs (auto-submitted like Greenhouse and Lever). */
   ashby: boolean;
   /** Minutes between two applications, picked at random in this range: a person's pace. */
   gapMin: number;
@@ -52,7 +52,7 @@ export const DEFAULT_AUTOBID_CONFIG: AutobidConfig = {
   hiringCafe: true,
   jobright: true,
   freshnessHours: 3,
-  ashby: false,
+  ashby: true,
   gapMin: 2,
   gapMax: 5,
   version: 0,

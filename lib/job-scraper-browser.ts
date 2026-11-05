@@ -48,11 +48,6 @@ export function getScrapeProxyConfig(): ScrapeProxyConfig | undefined {
   };
 }
 
-/** @deprecated Use getScrapeProxyConfig */
-export function getHiringCafeProxyConfig(): ScrapeProxyConfig | undefined {
-  return getScrapeProxyConfig();
-}
-
 export async function launchScrapeBrowser(): Promise<Browser> {
   const proxy = getScrapeProxyConfig();
   const isLambda = Boolean(process.env.AWS_LAMBDA_FUNCTION_VERSION || process.env.VERCEL);

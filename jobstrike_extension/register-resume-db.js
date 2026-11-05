@@ -1161,7 +1161,14 @@
    * Auto-bid: Register the job now in the form, as the Register button does,
    * minus its confirmations (the runner has attached the generated files).
    */
-  async function registerForAutobid() {
+  async function registerForAutobid(snapshot = null) {
+    // A snapshot (taken while the form still held this job) registers without
+    // touching the form, which may already hold the runner's next job.
+    if (snapshot) {
+      const result = await postRegisterDraft(snapshot);
+      if (!result.alreadyRegistered) rememberRegisteredApplication(result);
+      return result;
+    }
     if (generateInFlight) throw new Error('Files are still being generated.');
     const draft = prepareRegisterDraftForSubmit();
     if (!draft.ok) throw new Error(draft.errors[0] || 'Register draft is incomplete.');
@@ -1185,6 +1192,22 @@
     );
     clearAllRegisterFiles();
     return result;
+  }
+
+  /**
+   * The Register draft as the form holds it now (fields + File objects), for a
+   * later registerForAutobid(snapshot) after the form has moved on. Null when
+   * the draft would not register.
+   */
+  function snapshotRegisterDraft() {
+    if (generateInFlight) return null;
+    const draft = prepareRegisterDraftForSubmit();
+    if (!draft.ok) return null;
+    return {
+      ...draft,
+      resumeFile: draft.resumeFile || readFileInput(document.getElementById('regResumeFile')),
+      coverFile: draft.coverFile || readFileInput(document.getElementById('regCoverFile')),
+    };
   }
 
   /** The website's Auto-bid API (signed in): parsed JSON, or an Error with its reason. */
@@ -2031,17 +2054,7 @@
       );
     }
 
-    if (needsUpload && !status) {
-      throw new Error(
-        'Could not check Google Drive status — check the website connection and try again.'
-      );
-    }
-
-    if (needsUpload && !status?.connected && !status?.serviceAccountConfigured) {
-      throw new Error(
-        'Connect Google Drive on the website Settings page before uploading files from the extension.'
-      );
-    }
+    // Uploads without Drive land in Supabase storage server-side; the server decides.
   }
 
   async function getSelectedProfileId() {
@@ -2670,11 +2683,19 @@
     if (!draft.ok) {
       throw new Error(draft.errors[0] || 'Register draft is incomplete.');
     }
+    return postRegisterDraft({
+      ...draft,
+      resumeFile: draft.resumeFile || readFileInput(document.getElementById('regResumeFile')),
+      coverFile: draft.coverFile || readFileInput(document.getElementById('regCoverFile')),
+    });
+  }
 
+  /** Registers a prepared draft (fields + File objects) without reading the form. */
+  async function postRegisterDraft(draft) {
     const fields = draft.fields;
     const { jobTitle, companyName, jobLink, note, profileId } = fields;
-    const resumeFile = draft.resumeFile || readFileInput(document.getElementById('regResumeFile'));
-    const coverFile = draft.coverFile || readFileInput(document.getElementById('regCoverFile'));
+    const resumeFile = draft.resumeFile || null;
+    const coverFile = draft.coverFile || null;
 
     const resumeIsDefault = fields.resumeIsDefault;
     const coverIsDefault = fields.coverLetterIsDefault;
@@ -5291,6 +5312,7 @@
     describeForAutobid,
     generateFilesFromResumeJson,
     registerForAutobid,
+    snapshotRegisterDraft,
     autobidFetch,
     waitForTabLoaded,
     BACKEND_URL_KEY,

@@ -191,8 +191,8 @@ export function PromptBuilderPageClient() {
   return (
     <div className="flex h-full min-h-0 w-full flex-col gap-4">
         <header className="shrink-0">
-          <h1 className="text-lg font-semibold">Prompt Builder</h1>
-          <p className="text-xs text-muted-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight">Prompt Builder</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             Placeholders: {"{resume_template_json}"}, {"{job_description}"}. Built JSON must include{" "}
             {REQUIRED_BUILT_RESUME_JSON_FIELDS.map((field) => (
               <code key={field} className="mx-0.5">

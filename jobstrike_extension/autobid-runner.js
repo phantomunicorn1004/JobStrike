@@ -9,7 +9,7 @@
  *
  * Anything it cannot finish safely stops before (or at) Submit and is listed
  * under Needs you, with the tab left open: a CAPTCHA, a required field it has
- * no answer for, a site it does not submit on (Ashby: ready for your click),
+ * no answer for, a site it does not submit on,
  * no confirmation after Submit.
  * A job is never taken again once attempted, so nothing is sent twice.
  *
@@ -36,11 +36,8 @@
   const MAX_PERSON_TABS_OPEN = 12;
   /** Sites Auto-bid presses Submit on. Others are filled and left for the user. */
   const SUBMIT_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com)$/i;
-  /**
-   * Ashby has not taken one Submit pressed by Auto-bid (7 of 7 left the form
-   * as it was): its forms are filled, checked and left for one click.
-   */
-  const CLICK_YOURSELF_HOST_RE = /(^|\.)ashbyhq\.com$/i;
+  /** Sites whose Submit button needs a full pointer-event sequence (bare .click() is ignored). */
+  const FULL_CLICK_HOST_RE = /(^|\.)ashbyhq\.com$/i;
   /** Another panel's report newer than this means it is open now (reports go out at least every minute). */
   const OTHER_PANEL_MS = 150 * 1000;
   const INSTANCE_KEY = 'autobid_instance';
@@ -60,7 +57,7 @@
     stepPost: Promise.resolve(),
     lastDetail: '', // why the last job stopped, for the one-job notes
     tabsLeftOpen: [],
-    /** Tabs waiting for the user to finish a person check (code, CAPTCHA, Ashby's Submit). */
+    /** Tabs waiting for the user to finish a person check (code, CAPTCHA). */
     personTabs: [],
     /** Whether the last job's Submit was pressed, sent or not: the gap after it applies either way. */
     lastSubmitClicked: false,
@@ -237,14 +234,41 @@
     }
   }
 
-  /** Runs in the form's frame. Clicks the form's own submit button; never an "Apply" link. */
-  function clickSubmitButton() {
+  /**
+   * Runs in the form's frame. Clicks the form's own submit button.
+   * Uses a full pointer → mouse → click event sequence with coordinates
+   * so React/Ashby forms that ignore a bare `.click()` still fire.
+   */
+  function clickSubmitButton(useFullSequence) {
     const visible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = getComputedStyle(el);
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
     };
     const label = (el) => String(el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+
+    function fireClick(el) {
+      el.scrollIntoView({ block: 'center' });
+      if (useFullSequence) {
+        const rect = el.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
+        el.focus();
+        try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (_) {}
+        try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch (_) {}
+        try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (_) {}
+        try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch (_) {}
+        try { el.dispatchEvent(new MouseEvent('click', opts)); } catch (_) {}
+        const form = el.closest('form');
+        if (form && typeof form.requestSubmit === 'function') {
+          try { form.requestSubmit(el); } catch (_) {}
+        }
+      } else {
+        el.click();
+      }
+    }
+
     const selectors = [
       '#submit_app',
       'button#btn-submit',
@@ -258,16 +282,14 @@
         if (!visible(el) || el.disabled) continue;
         const text = label(el);
         if (text && !/submit|send application/i.test(text)) continue;
-        el.scrollIntoView({ block: 'center' });
-        el.click();
+        fireClick(el);
         return { clicked: true, label: text || selector };
       }
     }
     for (const el of document.querySelectorAll('button')) {
       const text = label(el);
       if (/^submit( (your )?application)?$/i.test(text) && visible(el) && !el.disabled) {
-        el.scrollIntoView({ block: 'center' });
-        el.click();
+        fireClick(el);
         return { clicked: true, label: text };
       }
     }
@@ -851,27 +873,38 @@
       if (!state.prefs.submit) {
         throw new Stop('needs_you', 'Dry run: filled and checked, not submitted. Review the tab, submit, then Register.', meta);
       }
-      if (CLICK_YOURSELF_HOST_RE.test(meta.formHost)) {
-        meta.readyForClick = true;
-        throw new Stop(
-          'needs_you',
-          'Ready for your click: filled and checked. Ashby does not take a Submit pressed by Auto-bid, so press Submit in the tab yourself.',
-          meta
-        );
-      }
       checkStop();
 
+      const useFullSequence = FULL_CLICK_HOST_RE.test(meta.formHost);
       setStep('Submitting…');
       const before = await probeOutcome(tabId);
       if (before.navigating || !before.formPresent) {
         // Nothing to compare the page with after Submit: not pressed.
         throw new Stop('needs_you', 'Filled, but the form could not be read just before Submit. Review the tab and submit it by hand.', meta);
       }
+      // Recorded on the server before the click: a runner lost right after it must never re-apply.
+      await state.stepPost
+        .then(() =>
+          bid().autobidFetch(`/api/autobid/${job.id}/step`, {
+            method: 'POST',
+            body: { claimedAt: job.claimed_at, submitClicked: true },
+          })
+        )
+        .catch((error) => logLine(`Could not record the Submit on the server first: ${error?.message || error}`));
       const [click] = await chrome.scripting.executeScript({
         target: { tabId, frameIds: [autofillFrameId || 0] },
         func: clickSubmitButton,
+        args: [useFullSequence],
       });
-      if (!click?.result?.clicked) throw new Stop('needs_you', 'Filled, but no Submit button was found. Submit it by hand.', meta);
+      if (!click?.result?.clicked) {
+        await bid()
+          .autobidFetch(`/api/autobid/${job.id}/step`, {
+            method: 'POST',
+            body: { claimedAt: job.claimed_at, submitClicked: false },
+          })
+          .catch(() => {});
+        throw new Stop('needs_you', 'Filled, but no Submit button was found. Submit it by hand.', meta);
+      }
       submitClicked = true;
       meta.submitClicked = true;
       meta.submitLabel = click.result.label;
@@ -1002,6 +1035,7 @@
                 const [reclick] = await chrome.scripting.executeScript({
                   target: { tabId, frameIds: [autofillFrameId || 0] },
                   func: clickSubmitButton,
+                  args: [useFullSequence],
                 });
                 if (reclick?.result?.clicked) {
                   errorPolls = 0;
@@ -1090,8 +1124,8 @@
     }
   }
 
-  /** A stop the user finishes in the tab: a code, a CAPTCHA, Ashby's Submit, or an unsupported host where Submit is manual. */
-  const PERSON_CHECK_RE = /verification code|CAPTCHA|Ready for your click|Auto-submit covers/i;
+  /** A stop the user finishes in the tab: a code, a CAPTCHA, or an unsupported host where Submit is manual. */
+  const PERSON_CHECK_RE = /verification code|CAPTCHA|Auto-submit covers/i;
 
   /**
    * Running all day, stopped jobs would fill the window: only the newest few
@@ -1111,7 +1145,7 @@
 
   // ───────────────────── Tab watcher (auto-resume) ─────────────────────
   //
-  // Person-check tabs (Ashby Submit, CAPTCHA, verification code) are polled
+  // Person-check tabs (CAPTCHA, verification code) are polled
   // in the background. When the user completes the action and the page shows
   // a confirmation, the watcher promotes the job from needs_you → submitted
   // via the /confirm API, then registers it in Resume DB and closes the tab.
@@ -1122,9 +1156,18 @@
   let tabWatchTimer = null;
 
   function watchTab(tabId, job, before) {
+    // The Bid form holds this job now; by the time the user acts it may hold
+    // the next one, so Register later works from this copy.
+    let draft = null;
+    try {
+      draft = bid().snapshotRegisterDraft();
+    } catch (_) {
+      /* no snapshot: Register is skipped with a note */
+    }
     watchedTabs.set(tabId, {
       job,
       before,
+      draft,
       startedAt: Date.now(),
       confirmPolls: 0,
     });
@@ -1133,12 +1176,24 @@
     }
   }
 
+  let tabWatchTicking = false;
+
   async function tabWatchTick() {
+    if (tabWatchTicking) return;
     if (!watchedTabs.size) {
       clearInterval(tabWatchTimer);
       tabWatchTimer = null;
       return;
     }
+    tabWatchTicking = true;
+    try {
+      await tabWatchPass();
+    } finally {
+      tabWatchTicking = false;
+    }
+  }
+
+  async function tabWatchPass() {
     for (const [tabId, ctx] of watchedTabs) {
       if (Date.now() - ctx.startedAt > TAB_WATCH_TIMEOUT_MS) {
         watchedTabs.delete(tabId);
@@ -1169,11 +1224,15 @@
           } catch (e) {
             logLine(`Tab watcher: could not confirm #${ctx.job.id}: ${e?.message || e}`);
           }
-          try {
-            await bid().registerForAutobid();
-            logLine(`Tab watcher: registered #${ctx.job.id} in Resume DB.`);
-          } catch (_) {
-            logLine(`Tab watcher: #${ctx.job.id} confirmed but Register failed — do it from the Bid tab.`);
+          if (ctx.draft) {
+            try {
+              await bid().registerForAutobid(ctx.draft);
+              logLine(`Tab watcher: registered #${ctx.job.id} in Resume DB.`);
+            } catch (e) {
+              logLine(`Tab watcher: #${ctx.job.id} confirmed but Register failed: ${e?.message || e}`);
+            }
+          } else {
+            logLine(`Tab watcher: #${ctx.job.id} confirmed; no Register draft was kept — register it from the Bid tab.`);
           }
           await chrome.tabs.remove(tabId).catch(() => {});
         } else {
@@ -1254,10 +1313,8 @@
         void stopAfterOneJob(job, 'dry', state.lastDetail);
       }
       // A test run stops once a job was sent or needs you; a job that could not
-      // be applied to at all (closed posting), or an Ashby form left for your
-      // click, does not count: the next one is tried.
-      const leftForClick = /^Ready for your click/.test(state.lastDetail);
-      if (once && (outcome === 'submitted' || (outcome === 'needs_you' && !leftForClick))) {
+      // be applied to at all (closed posting) does not count: the next one is tried.
+      if (once && (outcome === 'submitted' || outcome === 'needs_you')) {
         state.prefs.enabled = false;
         await savePrefs();
         setStep(
@@ -1336,8 +1393,8 @@
   // ───────────────────────────── All-in-one workflow ─────────────────────────────
   // One Start/Stop and one setup for the whole chain, saved on the server: the
   // website's Auto-bid page and this panel's Auto-bid tab edit the same setup,
-  // and this panel runs it. Start: Live finds jobs and queues the Greenhouse /
-  // Lever / Ashby ones for AutoGen, AutoGen keeps N ChatGPT windows generating,
+  // and this panel runs it. Start: Live finds jobs and queues the Greenhouse,
+  // Lever and Ashby ones for AutoGen, AutoGen keeps N ChatGPT windows generating,
   // and the runner above applies and registers. Stop undoes all three.
 
   const CONFIG_POLL_MS = 20 * 1000;

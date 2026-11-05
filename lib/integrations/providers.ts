@@ -33,7 +33,7 @@ export type MailOAuthProvider = {
   revoke(refreshToken: string): Promise<boolean>;
 };
 
-export type RefreshedAccess = {
+type RefreshedAccess = {
   accessToken: string;
   accessExpiresAt: string;
   /** Microsoft hands out a new refresh token each time; it replaces the stored one. */

@@ -8,7 +8,7 @@ export type Json2docxSettings = {
   outputMode: Json2docxOutputMode;
 };
 
-export const JSON2DOCX_STORAGE_KEYS = {
+const JSON2DOCX_STORAGE_KEYS = {
   enabled: "json2docx_enabled",
   baseUrl: "json2docx_base_url",
   outputMode: "json2docx_output_mode",
@@ -20,7 +20,7 @@ export const DEFAULT_JSON2DOCX_SETTINGS: Json2docxSettings = {
   outputMode: "both",
 };
 
-export function normalizeJson2docxBaseUrl(value: string | null | undefined): string {
+function normalizeJson2docxBaseUrl(value: string | null | undefined): string {
   let url = String(value ?? "").trim() || DEFAULT_JSON2DOCX_SETTINGS.baseUrl;
   url = url.replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(url)) {
@@ -29,7 +29,7 @@ export function normalizeJson2docxBaseUrl(value: string | null | undefined): str
   return url;
 }
 
-export function normalizeJson2docxOutputMode(
+function normalizeJson2docxOutputMode(
   value: string | null | undefined,
 ): Json2docxOutputMode {
   const mode = String(value ?? "").trim().toLowerCase();
@@ -72,7 +72,7 @@ export function writeJson2docxSettingsToStorage(
   return next;
 }
 
-export function json2docxApiUrl(baseUrl: string, path: string): string {
+function json2docxApiUrl(baseUrl: string, path: string): string {
   const root = normalizeJson2docxBaseUrl(baseUrl);
   const suffix = path.startsWith("/") ? path : `/${path}`;
   return `${root}${suffix}`;

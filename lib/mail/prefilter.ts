@@ -112,7 +112,7 @@ export function senderOrganisation(fromEmail: string): string | null {
 }
 
 /** "Ten Mile Square Technologies" → "tenmilesquaretechnologies". */
-export function compactCompany(name: string | null | undefined): string {
+function compactCompany(name: string | null | undefined): string {
   return normalizeCompanyName(name).replace(/\band\b/g, "").replace(/[^a-z0-9]/g, "");
 }
 

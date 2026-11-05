@@ -14,7 +14,7 @@ import {
   kitProblems,
 } from "@/lib/autogen/kit";
 
-export type FinalizeTarget = {
+type FinalizeTarget = {
   jobTitle: string;
   company: string;
   jobDescription: string;
@@ -52,7 +52,7 @@ function same(a: unknown, b: unknown): boolean {
 type PlaceholderEntry = { path: string; obj: Record<string, unknown> };
 
 /** Every {placeholder, text, …} object, keyed by its placeholder ("<<Summary>>"). */
-export function placeholderEntries(root: unknown): Map<string, PlaceholderEntry> {
+function placeholderEntries(root: unknown): Map<string, PlaceholderEntry> {
   const found = new Map<string, PlaceholderEntry>();
   const walk = (node: unknown, path: string) => {
     if (Array.isArray(node)) {
