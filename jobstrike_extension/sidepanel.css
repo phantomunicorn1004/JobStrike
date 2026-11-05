@@ -4649,6 +4649,11 @@ textarea.js-input {
   flex: 1;
   min-width: 0;
 }
+.ab-need-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 0 6px;
+}
 .ab-need-title,
 .ab-need-reason {
   overflow: hidden;

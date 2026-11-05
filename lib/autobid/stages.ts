@@ -3,6 +3,8 @@
  * from its Resume DB columns. Pure: shared by the API and the Auto-bid page.
  */
 
+import { missingFieldsOf } from "@/lib/autobid/saved-answers";
+
 export const QUEUED = "Queued";
 
 export type AutobidStage =
@@ -60,6 +62,10 @@ export type AutobidJob = {
   currentStep: string;
   reason: string;
   submitClicked: boolean;
+  /** Required questions it stopped on, for answering from Needs you. */
+  missingFields: string[];
+  /** Extension version of the run that last finished it. */
+  runVersion: string;
   steps: AutobidStep[];
   log: BidLogEntry[];
   updatedAt: string;
@@ -189,6 +195,8 @@ export function toAutobidJob(row: AutobidRowInput): AutobidJob {
     currentStep: bidState === "bidding" ? text(bid.step) : "",
     reason,
     submitClicked: Boolean(bid.submitClicked),
+    missingFields: stage === "needs_you" || stage === "failed" ? missingFieldsOf(text(row.bid_error), bid) : [],
+    runVersion: text(bid.lastRunVersion),
     steps: [
       { key: "queued", label: "Queued", state: "done", at: iso(row.created_at) },
       resume,

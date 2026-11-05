@@ -457,6 +457,7 @@
       '"Do you have experience in [industry]?" or "experience in fintech/healthcare/etc.": check Work experience for related roles; answer honestly from what is shown.',
       'For U.S. citizenship, work authorization, or "Are you legally authorized to work in the US?" questions: answer from the profile\'s citizenship and authorization fields. If those fields exist and contain a value, use it. Only return needs_input when the profile has no citizenship or authorization data at all.',
       '"Tell us about your relationship with [topic]" or other open-ended opinion questions: give a brief, genuine, first-person answer drawing on general professional experience. Do not return needs_input for these.',
+      'Work arrangement, work environment, or office preference questions ("[Company] offers remote/hybrid/in-office", "Where would you prefer to work?", "Select your preferred work arrangement"): pick "Remote" if listed, otherwise the most flexible option. Do not return needs_input.',
     ];
 
     if (qType === 'behavioral') {
@@ -864,7 +865,38 @@
     return { verdict, blockers, warnings, summary, signalReviews };
   }
 
+  /**
+   * A short cover letter for a form that requires one when the kit has none.
+   * Only the facts in the context block (resume, profile, posting) are used.
+   */
+  async function writeCoverLetter(apiKey, model, contextBlock, { company, jobTitle, candidateName, baseUrl } = {}) {
+    const data = await chatCompletion(apiKey, {
+      model,
+      baseUrl,
+      temperature: 0.5,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            'You write the body of a cover letter for the candidate described below, first person, in plain text.',
+            'Three short paragraphs, 180–260 words in all: why this role and company, two or three concrete strengths drawn ONLY from the resume and facts given, a brief close.',
+            'Never invent employers, titles, numbers, degrees or skills that are not in the context.',
+            'No greeting line, no signature, no date, no address block, no placeholders in brackets, no markdown.',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: `${contextBlock}\n\n## Write the letter for\nRole: ${trim(jobTitle) || 'this role'}\nCompany: ${trim(company) || 'the company'}\nCandidate: ${trim(candidateName)}`,
+        },
+      ],
+    });
+    const text = trim(data?.choices?.[0]?.message?.content).replace(/\[[^\]]{2,40}\]/g, '').trim();
+    if (text.split(/\s+/).length < 80) throw new Error('The cover letter came back too short.');
+    return text;
+  }
+
   root.SmartJobAiFill = {
+    writeCoverLetter,
     DEFAULT_MODEL,
     DEFAULT_BASE_URL,
     normalizeChatBaseUrl,

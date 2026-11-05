@@ -110,10 +110,10 @@ async function reenableSidePanelOnTab(tabId) {
   }
 }
 
-// Live mode's "new jobs" notification: bring the window forward with the panel.
+// Live mode's "new jobs" and Auto-bid's alerts: bring the window forward with the panel.
 try {
   chrome.notifications?.onClicked?.addListener(async (id) => {
-    if (id !== 'jobstrike-live') return;
+    if (id !== 'jobstrike-live' && !id.startsWith('jobstrike-ab-')) return;
     try {
       const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
       if (win?.id != null) {

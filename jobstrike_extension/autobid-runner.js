@@ -139,7 +139,10 @@
       const rows = state.summary?.needsYou || [];
       needs.hidden = rows.length === 0;
       needs.innerHTML = rows.length
-        ? `<summary>Needs you (${rows.length})</summary>${rows
+        ? `<summary>Needs you (${rows.length})</summary>
+          <div class="ab-need-toolbar">
+            <button type="button" class="ab-need-btn" data-ab-action="dismiss-all" title="Remove every job from this list">Dismiss all</button>
+          </div>${rows
             .slice(0, 20)
             .map(
               (row) => `
@@ -150,6 +153,7 @@
             </div>
             <button type="button" class="ab-need-btn" data-ab-action="open" title="Open the job">Open</button>
             <button type="button" class="ab-need-btn" data-ab-action="retry" title="Give it back to Auto-bid">Retry</button>
+            <button type="button" class="ab-need-btn" data-ab-action="dismiss" title="Remove from this list (moves to Finished)">Dismiss</button>
           </div>`
             )
             .join('')}`
@@ -476,6 +480,22 @@
       const section = cb.closest('fieldset, [class*="consent" i], [class*="gdpr" i], [class*="demographic" i]');
       if (section) return tryCheck(cb);
     }
+    // Pass 5: toggle switches or buttons for demographic consent (non-checkbox controls)
+    for (const el of document.querySelectorAll('[role="switch"], [role="checkbox"], button, [type="button"]')) {
+      const name = el.getAttribute('name') || el.id || el.getAttribute('data-field') || '';
+      if (/gdpr|demographic.?data.?consent/i.test(name) && el.getAttribute('aria-checked') !== 'true') {
+        el.click();
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { fixed: true };
+      }
+    }
+    // Pass 6: any unchecked checkbox anywhere (not just in named sections)
+    for (const cb of cbs) {
+      if (cb.checked || cb.disabled) continue;
+      const wrapper = cb.closest('div, fieldset, section') || document.body;
+      const text = (wrapper?.textContent || '').toLowerCase();
+      if (/accept the terms|accept.*proceed|consent.*demographic|demographic.*consent/i.test(text)) return tryCheck(cb);
+    }
     return { fixed: false, reason: 'no GDPR consent checkbox found' };
   }
 
@@ -484,11 +504,20 @@
    * as missing after submit (location, yes/no, etc.). Returns a summary of
    * what was fixed.
    */
-  async function fixAshbyMissingFields(profileCity) {
+  async function fixAshbyMissingFields(profileCity, requiredOnly = false) {
     const delay = (ms) => new Promise((r) => setTimeout(r, ms));
     const visible = (el) => {
       const rect = el.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
+    };
+    const NEUTRAL_PRONOUN_RE = /prefer not|decline|rather not|don.t wish/i;
+    // Before Submit only required questions are touched: optional ones stay as Autofill left them.
+    const wanted = (entry) => {
+      if (!requiredOnly) return true;
+      if (!entry) return false;
+      if (entry.querySelector('[required], [aria-required="true"]')) return true;
+      const label = (entry.querySelector('label, [class*="label" i]')?.textContent || '').trim();
+      return /\*\s*$/.test(label) || Boolean(entry.querySelector('[class*="required" i]'));
     };
     const fixed = [];
 
@@ -501,7 +530,7 @@
         const labelText = (labelEl?.textContent || '').toLowerCase();
         const isLocation = /location|city|state|where.*based|reside|work.*from/i.test(path) ||
           /location|city|state|where.*based|reside|work.*from/i.test(labelText);
-        if (!isLocation) continue;
+        if (!isLocation || !wanted(entry)) continue;
 
         const input = entry.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])');
         if (!input || !visible(input)) continue;
@@ -531,7 +560,7 @@
           }
           if (picked) break;
         }
-        if (picked) fixed.push('location');
+        if (picked) fixed.push(`location:${labelText.slice(0, 40)}`);
         await delay(200);
       }
     }
@@ -540,7 +569,7 @@
     const yesnoEntries = document.querySelectorAll('[data-field-path]');
     for (const entry of yesnoEntries) {
       const yesno = entry.querySelector('[class*="yesno" i], [class*="_yesno_" i]');
-      if (!yesno) continue;
+      if (!yesno || !wanted(entry)) continue;
       const buttons = Array.from(entry.querySelectorAll('button')).filter((b) => visible(b) && (b.textContent || '').trim());
       if (!buttons.length) continue;
       const alreadySelected = buttons.some((b) =>
@@ -550,6 +579,8 @@
       if (alreadySelected) continue;
       const labelText = (entry.querySelector('label, [class*="label" i]')?.textContent || '').toLowerCase();
       const isPositive = /willing|background check|certif|agree|consent|authori[sz]/i.test(labelText);
+      // A "No" guessed before Submit could be untrue ("Are you located in the US?"): only consent-like Yes.
+      if (requiredOnly && !isPositive) continue;
       const target = isPositive
         ? buttons.find((b) => /^yes$/i.test(b.textContent.trim())) || buttons[0]
         : buttons.find((b) => /^no$/i.test(b.textContent.trim())) || buttons[buttons.length - 1];
@@ -564,6 +595,50 @@
         fixed.push(`yesno:${labelText.slice(0, 40)}`);
         await delay(150);
       }
+    }
+
+    // Fix unfilled required select dropdowns (pronouns, etc.)
+    const selects = document.querySelectorAll('[data-field-path] select');
+    for (const sel of selects) {
+      if (sel.disabled || sel.value) continue;
+      const entry = sel.closest('[data-field-path]');
+      if (!wanted(entry)) continue;
+      const labelText = (entry?.querySelector('label, [class*="label" i]')?.textContent || '').toLowerCase();
+      // Only pronouns have a neutral answer; any other dropdown would be a guess.
+      if (!/pronoun/i.test(labelText)) continue;
+      const opts = Array.from(sel.options).filter(o => o.value && o.value !== '');
+      const pick = opts.find(o => NEUTRAL_PRONOUN_RE.test(o.text)) || opts.find(o => /they|them/i.test(o.text));
+      if (!pick) continue;
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+      if (nativeSetter) nativeSetter.call(sel, pick.value);
+      else sel.value = pick.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      fixed.push(`select:${labelText.slice(0, 40)}`);
+    }
+
+    // Fix unfilled required custom combobox/dropdown fields (Ashby custom selects)
+    const fieldEntries = document.querySelectorAll('[data-field-path]');
+    for (const entry of fieldEntries) {
+      const combobox = entry.querySelector('[role="combobox"], [role="listbox"]');
+      if (!combobox || !wanted(entry)) continue;
+      const labelText = (entry.querySelector('label, [class*="label" i]')?.textContent || '').toLowerCase();
+      if (!/pronoun/i.test(labelText)) continue;
+      if (fixed.some(f => f.includes(labelText.slice(0, 20)))) continue;
+      const hasValue = entry.querySelector('[role="option"][aria-selected="true"]') ||
+        (combobox.textContent || '').trim().length > 0;
+      if (hasValue) continue;
+      const trigger = combobox.querySelector('button, [role="button"]') || combobox;
+      trigger.click();
+      await delay(200);
+      const options = Array.from(document.querySelectorAll('[role="option"]'));
+      const pick = options.find(o => NEUTRAL_PRONOUN_RE.test(o.textContent || '')) || options.find(o => /they|them/i.test(o.textContent || ''));
+      if (pick && visible(pick)) {
+        pick.click();
+        fixed.push(`combobox:${labelText.slice(0, 40)}`);
+      } else {
+        trigger.click();
+      }
+      await delay(150);
     }
 
     return { fixed: fixed.length > 0, fields: fixed, reason: fixed.length ? undefined : 'no fixable fields found' };
@@ -625,6 +700,7 @@
   const COUNTRY_ERROR_RE = /select a country|country.*required/i;
   const GDPR_ERROR_RE = /gdpr|demographic.*consent/i;
   const ASHBY_CORRECTIONS_RE = /form needs corrections|missing entry for required field/i;
+  const COVER_ERROR_RE = /cover letter.{0,20}(is )?required/i;
 
   /**
    * Runs in the form's frame. Labels of required fields that are empty on the
@@ -741,7 +817,7 @@
     const errors = errorEls
       .filter(visible)
       .map((el) => String(el.innerText || el.getAttribute('aria-label') || el.getAttribute('name') || '').replace(/\s+/g, ' ').trim())
-      .filter((t) => t && t.length < 200);
+      .filter((t) => t && t.length < 500);
     return {
       href: location.href,
       lines,
@@ -952,8 +1028,54 @@
     }
   }
 
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error || new Error('Could not read the file.'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /** Writes a cover letter for this job, attaches it to the plan row and fills that one field. */
+  async function fillGeneratedCoverLetter(row, job) {
+    const apiKey = getOpenAiApiKey();
+    if (!apiKey) throw new Error('no OpenAI key');
+    const candidateName = String(currentProfile?.fullName || job.candidate_name || '').trim();
+    const body = await window.SmartJobAiFill.writeCoverLetter(apiKey, currentSettings.openaiModel, await getAiContextBlock(), {
+      company: job.company,
+      jobTitle: job.job_title,
+      candidateName,
+      baseUrl: getOpenAiBaseUrl(),
+    });
+    const blob = window.SmartJobCoverLetterDocx.buildCoverLetterDocx({ candidateName, company: job.company, body });
+    const name = `${(candidateName || 'Candidate').replace(/[^\w.-]+/g, '_')}_Cover_Letter.docx`;
+    row.uploadFile = { name, type: blob.type, size: blob.size, dataUrl: await blobToDataUrl(blob) };
+    row.suggestedValue = name;
+    row.source = 'kit';
+    row.status = `Ready — Cover letter: ${name} (written for this job)`;
+    // Staged like a file attached on the Bid tab, so a second Autofill pass uses it too.
+    const jobKey = getRegisterFieldValue('regJobLink');
+    stagedJobUploads = {
+      jobKey,
+      resume: stagedJobUploads.jobKey === jobKey ? stagedJobUploads.resume : null,
+      coverLetter: row.uploadFile,
+    };
+    await chrome.storage.local.set({ [JOB_UPLOAD_FILES_KEY]: stagedJobUploads });
+    const { response } = await sendToFormFrame({
+      action: 'fillApplicationFields',
+      fields: [{ ...buildFillPayloadFromRow(row), uploadFile: row.uploadFile }],
+      thresholds: {
+        selectMatchThreshold: currentSettings.selectMatchThreshold ?? defaultSettings.selectMatchThreshold,
+        radioMatchThreshold: currentSettings.radioMatchThreshold ?? defaultSettings.radioMatchThreshold,
+      },
+    });
+    const result = (response?.results || [])[0] || { success: false, error: response?.error || 'No result returned.' };
+    applyFillResultToPlanRow(row, result);
+  }
+
   async function applyToJob(job, windowId) {
-    const meta = { method: state.prefs.submit ? 'auto' : 'dry_run', startedAt: new Date().toISOString() };
+    const meta = { method: state.prefs.submit ? 'auto' : 'dry_run', startedAt: new Date().toISOString(), lastRunVersion: chrome.runtime?.getManifest?.().version || '' };
     let tabId = null;
     let submitClicked = false;
     try {
@@ -1071,6 +1193,21 @@
         meta.botCheck = rowLabel(ownWords);
         throw new Stop('needs_you', `${OWN_WORDS_STOP} ("${rowLabel(ownWords)}")`, meta);
       }
+      // A required cover letter the kit did not provide: written from the resume and posting, uploaded as .docx.
+      const coverRow = currentPlan.find(
+        (row) => row.field?.fieldCategory === 'cover_letter_upload' && row.field?.required && row.fillOutcome !== 'filled'
+      );
+      if (coverRow) {
+        setStep('Writing a cover letter…');
+        try {
+          await fillGeneratedCoverLetter(coverRow, job);
+          meta.coverLetter = coverRow.fillOutcome === 'filled' ? 'generated' : `generated, upload failed: ${coverRow.fillError || 'unknown'}`;
+        } catch (error) {
+          meta.coverLetter = `could not write: ${error?.message || error}`;
+        }
+        meta.fieldReport = fieldReport();
+        checkStop();
+      }
       // Check consent checkboxes and Ashby yes/no that Autofill may have missed.
       try {
         const [consent] = await chrome.scripting.executeScript({
@@ -1080,7 +1217,26 @@
         if (consent?.result?.fixed?.length) meta.consentFixed = consent.result.fixed;
       } catch (_) {}
 
-      const open = currentPlan.filter((row) => row.field?.required && row.fillOutcome !== 'filled');
+      // Ashby only complains after Submit ("Your form needs corrections"): its
+      // location typeahead, consent yes/no and pronoun pickers are completed first.
+      const preHost = hostOf((await frameHref(tabId, autofillFrameId)) || url);
+      if (/(^|\.)ashbyhq\.com$/i.test(preHost)) {
+        try {
+          const profileCity = [currentProfile?.city, currentProfile?.state].filter(Boolean).join(', ');
+          const [pre] = await chrome.scripting.executeScript({
+            target: { tabId, frameIds: [autofillFrameId || 0] },
+            func: fixAshbyMissingFields,
+            args: [profileCity, true],
+          });
+          if (pre?.result?.fixed) meta.ashbyPreFix = pre.result.fields;
+        } catch (_) {}
+      }
+
+      let open = currentPlan.filter((row) => row.field?.required && row.fillOutcome !== 'filled');
+      if (open.length && meta.ashbyPreFix?.length) {
+        const fixedLabels = meta.ashbyPreFix.map((f) => f.split(':').slice(1).join(':').trim().slice(0, 20)).filter(Boolean);
+        open = open.filter((row) => !fixedLabels.some((label) => rowLabel(row).toLowerCase().startsWith(label)));
+      }
       meta.fields = currentPlan.length;
       meta.filled = currentPlan.filter((row) => row.fillOutcome === 'filled').length;
       meta.aiAnswers = currentPlan.filter((row) => row.source === 'ai' && row.fillOutcome === 'filled').length;
@@ -1249,13 +1405,17 @@
         // Detect errors from standard error elements OR from Ashby “form needs corrections” in new text
         const hasStdErrors = judged.verdict === 'errors';
         const ashbyCorrections = !hasStdErrors && ASHBY_CORRECTIONS_RE.test(judged.newText || '');
-        errorPolls = (hasStdErrors || ashbyCorrections) ? errorPolls + 1 : 0;
+        if (ashbyCorrections) errorPolls = 2;
+        else errorPolls = hasStdErrors ? errorPolls + 1 : 0;
         if (errorPolls >= 2) {
           const errorText = [...judged.errors, judged.newText || ''].join(' ');
           const isCountry = COUNTRY_ERROR_RE.test(errorText);
           const isGdpr = GDPR_ERROR_RE.test(errorText);
           const isAshby = ashbyCorrections || ASHBY_CORRECTIONS_RE.test(errorText);
-          if ((isCountry || isGdpr || isAshby) && !meta.formRetried) {
+          const coverRow = COVER_ERROR_RE.test(errorText)
+            ? currentPlan.find((row) => row.field?.fieldCategory === 'cover_letter_upload')
+            : null;
+          if ((isCountry || isGdpr || isAshby || coverRow) && !meta.formRetried) {
             meta.formRetried = true;
             setStep('Fixing rejected field and resubmitting…');
             try {
@@ -1285,7 +1445,17 @@
                 });
                 meta.ashbyRetry = fix?.result || {};
               }
-              if (meta.countryRetry?.fixed || meta.gdprRetry?.fixed || meta.ashbyRetry?.fixed) {
+              if (coverRow) {
+                try {
+                  await fillGeneratedCoverLetter(coverRow, job);
+                  meta.coverRetry = coverRow.fillOutcome === 'filled'
+                    ? { fixed: true }
+                    : { fixed: false, reason: `cover letter upload failed: ${coverRow.fillError || 'unknown'}` };
+                } catch (error) {
+                  meta.coverRetry = { fixed: false, reason: `cover letter not written: ${error?.message || error}` };
+                }
+              }
+              if (meta.countryRetry?.fixed || meta.gdprRetry?.fixed || meta.ashbyRetry?.fixed || meta.coverRetry?.fixed) {
                 await sleep(500);
                 const [reclick] = await chrome.scripting.executeScript({
                   target: { tabId, frameIds: [autofillFrameId || 0] },
@@ -1302,7 +1472,7 @@
             } catch (_) {}
           }
           meta.pageErrors = judged.errors.length ? judged.errors : [judged.newText?.slice(0, 200) || 'form errors'];
-          const retryNote = [meta.countryRetry?.reason, meta.gdprRetry?.reason, meta.ashbyRetry?.reason].filter(Boolean).join('; ');
+          const retryNote = [meta.countryRetry?.reason, meta.gdprRetry?.reason, meta.ashbyRetry?.reason, meta.coverRetry?.reason].filter(Boolean).join('; ');
           throw new Stop(
             'needs_you',
             `The site rejected the form: ${(meta.pageErrors).slice(0, 3).join('; ')}${retryNote ? ` (auto-fix: ${retryNote})` : ''}`,
@@ -1311,12 +1481,52 @@
         }
       }
       if (judged?.verdict !== 'confirmed' || confirmPolls < 2) {
+        if (!meta.formRetried && ASHBY_CORRECTIONS_RE.test(judged?.newText || '')) {
+          meta.formRetried = true;
+          setStep('Fixing Ashby corrections and resubmitting…');
+          try {
+            const profileCity = [currentProfile?.city, currentProfile?.state].filter(Boolean).join(', ') || '';
+            const [fix] = await chrome.scripting.executeScript({
+              target: { tabId, frameIds: [autofillFrameId || 0] },
+              func: fixAshbyMissingFields,
+              args: [profileCity],
+            });
+            meta.ashbyRetry = fix?.result || {};
+            if (meta.ashbyRetry?.fixed) {
+              await sleep(500);
+              const [reclick] = await chrome.scripting.executeScript({
+                target: { tabId, frameIds: [autofillFrameId || 0] },
+                func: clickSubmitButton,
+                args: [useFullSequence],
+              });
+              if (reclick?.result?.clicked) {
+                setStep('Resubmitted — waiting for confirmation…');
+                const resubUntil = Date.now() + CONFIRM_WAIT_MS;
+                while (Date.now() < resubUntil) {
+                  await sleep(CONFIRM_POLL_MS);
+                  const outcome = await probeOutcome(tabId);
+                  judged = judgeAfterSubmit(before, outcome);
+                  if (!outcome.navigating) meta.afterSubmit = { hrefs: outcome.hrefs, newText: judged.newText, formPresent: outcome.formPresent };
+                  if (judged.verdict === 'confirmed') {
+                    confirmPolls = judged.by === 'form_replaced' ? confirmPolls + 1 : 2;
+                    if (confirmPolls >= 2) break;
+                    continue;
+                  }
+                  confirmPolls = 0;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      if (judged?.verdict !== 'confirmed' || confirmPolls < 2) {
         const shown = judged?.newText
           ? `The page shows: “${judged.newText.slice(0, 200)}”.`
           : 'Nothing new appeared on the page.';
+        const retryNote = meta.ashbyRetry?.reason ? ` (auto-fix: ${meta.ashbyRetry.reason})` : '';
         throw new Stop(
           'needs_you',
-          `Submit was clicked but no confirmation was recognised. ${shown} Check the tab before doing anything else.`,
+          `Submit was clicked but no confirmation was recognised. ${shown}${retryNote} Check the tab before doing anything else.`,
           meta
         );
       }
@@ -1509,6 +1719,107 @@
     state.tabsLeftOpen = state.tabsLeftOpen.filter((id) => id !== tabId);
   });
 
+  // ───────────────────────────── Alerts ─────────────────────────────
+  // Browser notifications for what needs the user: the day's limit reached,
+  // stopped jobs piling up, ChatGPT refusing prompts, a ChatGPT page that keeps
+  // failing, and a once-a-day summary of the day before.
+
+  const ALERTS_KEY = 'autobid_alerts';
+  const NEEDS_YOU_ALERT_STEP = 10;
+  const DIGEST_HOUR = 8;
+  const NOT_READY_ALERT_STREAK = 3;
+  const NOT_READY_ALERT_MS = 60 * 60 * 1000;
+
+  function notify(id, title, message) {
+    if (!chrome.notifications?.create) return;
+    try {
+      chrome.notifications.create(`jobstrike-ab-${id}`, {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+        title,
+        message: String(message || '').slice(0, 300),
+        priority: 1,
+      });
+    } catch (_) {
+      /* notifications off */
+    }
+  }
+
+  function localDay(offsetDays = 0) {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  async function dailyDigest(store) {
+    const today = localDay();
+    const day = today.toDateString();
+    if (store.digestDay === day || new Date().getHours() < DIGEST_HOUR) return;
+    store.digestDay = day;
+    const since = localDay(-1).toISOString();
+    const { digest } =
+      (await bid().autobidFetch(
+        `/api/autobid/digest?since=${encodeURIComponent(since)}&until=${encodeURIComponent(today.toISOString())}`
+      )) || {};
+    if (!digest) return;
+    const top = (digest.byCategory || [])[0];
+    const mins = (v) => (v == null ? '' : v < 60 ? `${Math.round(v)} min` : `${(v / 60).toFixed(1)} h`);
+    notify(
+      'digest',
+      `Auto-bid yesterday: ${digest.sent} sent, ${digest.stopped} stopped`,
+      [
+        `${digest.resumesWritten} resume${digest.resumesWritten === 1 ? '' : 's'} written${digest.resumesFailed ? `, ${digest.resumesFailed} failed` : ''}.`,
+        top ? `Top stop: ${top.label} (${top.count}).` : '',
+        digest.avgApplyMin != null ? `Apply → sent ${mins(digest.avgApplyMin)} on average.` : '',
+      ].filter(Boolean).join(' ')
+    );
+  }
+
+  async function checkAlerts(summary) {
+    const stored = await chrome.storage.local.get(ALERTS_KEY).catch(() => ({}));
+    const store = { ...(stored?.[ALERTS_KEY] || {}) };
+    const day = localDay().toDateString();
+
+    if (state.prefs.submit && summary.submittedSince >= state.prefs.dailyLimit && store.limitDay !== day) {
+      store.limitDay = day;
+      notify('limit', 'Auto-bid reached its daily limit', `${summary.submittedSince} sent today (limit ${state.prefs.dailyLimit}). It starts again tomorrow.`);
+    }
+
+    const needs = summary.needsYou?.length || 0;
+    const step = Math.floor(needs / NEEDS_YOU_ALERT_STEP);
+    if (step > 0 && (store.needsDay !== day || step > (store.needsStep || 0))) {
+      store.needsDay = day;
+      store.needsStep = step;
+      notify('needs', `${needs} jobs need you`, 'Answer, retry or dismiss them under Needs you.');
+    } else if (step === 0) {
+      store.needsStep = 0;
+    }
+
+    const ag = wf.autogen;
+    if (ag?.blocked && store.blockedAt !== ag.blockedAt) {
+      store.blockedAt = ag.blockedAt;
+      notify('chatgpt', 'AutoGen stopped: ChatGPT is blocked', `${ag.blocked}. Fix ChatGPT in the AutoGen window, then resumes are written again.`);
+    }
+    const stuck = (ag?.windows || []).filter((w) => (w.notReadyStreak || 0) >= NOT_READY_ALERT_STREAK);
+    if (stuck.length && Date.now() - (store.notReadyAt || 0) > NOT_READY_ALERT_MS) {
+      store.notReadyAt = Date.now();
+      notify(
+        'notready',
+        'AutoGen cannot use ChatGPT',
+        `${stuck.length} ChatGPT window${stuck.length === 1 ? '' : 's'} failed ${NOT_READY_ALERT_STREAK}+ times even after a reload. Check that ChatGPT loads and you are signed in.`
+      );
+    }
+
+    try {
+      await dailyDigest(store);
+    } catch (_) {
+      /* the summary is tried again on the next check */
+      store.digestDay = '';
+    }
+    await chrome.storage.local.set({ [ALERTS_KEY]: store }).catch(() => {});
+  }
+
   // ───────────────────────────── Loop ─────────────────────────────
 
   function schedule(ms) {
@@ -1524,11 +1835,23 @@
     try {
       const summary = await refreshSummary();
       if (!summary) return;
+      void checkAlerts(summary).catch(() => {});
       if (state.prefs.submit && summary.submittedSince >= state.prefs.dailyLimit) {
         setStep(`Daily limit reached (${state.prefs.dailyLimit}). Resumes tomorrow.`);
         return;
       }
       if (!summary.ready) {
+        if (summary.needsYou?.length && Date.now() - (state.lastAutoRetry || 0) > 30 * 60_000) {
+          state.lastAutoRetry = Date.now();
+          try {
+            const ver = chrome.runtime?.getManifest?.().version || '';
+            const { retried } = await bid().autobidFetch('/api/autobid/auto-retry', { method: 'POST', body: { version: ver } });
+            if (retried) {
+              logLine(`Auto-retried ${retried} needs-you job(s) with v${ver}.`);
+              await refreshSummary();
+            }
+          } catch (_) {}
+        }
         setStep('Waiting for generated resumes…');
         return;
       }
@@ -1618,11 +1941,26 @@
   async function onNeedsYouClick(event) {
     const btn = event.target.closest('[data-ab-action]');
     if (!btn) return;
+    const action = btn.getAttribute('data-ab-action');
+    if (action === 'dismiss-all') {
+      const ids = (state.summary?.needsYou || []).map((item) => item.id);
+      if (!ids.length) return;
+      const ask = `Dismiss ${ids.length} job${ids.length === 1 ? '' : 's'}?\nThey leave Needs you for Finished and are not applied to again.`;
+      const ok = typeof window.rwhConfirm === 'function'
+        ? await window.rwhConfirm(ask, { confirmLabel: 'Dismiss', danger: true })
+        : window.confirm(ask);
+      if (ok) await dismissNeedsYou(ids, btn);
+      return;
+    }
     const id = Number(btn.closest('[data-ab-id]')?.getAttribute('data-ab-id'));
     const row = state.summary?.needsYou?.find((item) => item.id === id);
     if (!row) return;
-    if (btn.getAttribute('data-ab-action') === 'open') {
+    if (action === 'open') {
       if (row.jobLink) await chrome.tabs.create({ url: row.jobLink, active: true });
+      return;
+    }
+    if (action === 'dismiss') {
+      await dismissNeedsYou([id], btn);
       return;
     }
     btn.disabled = true;
@@ -1637,6 +1975,18 @@
       logLine(`#${id} given back to Auto-bid.`);
       await refreshSummary();
       schedule(1000);
+    } catch (error) {
+      toast(error?.message || String(error), 'error');
+      btn.disabled = false;
+    }
+  }
+
+  async function dismissNeedsYou(ids, btn) {
+    btn.disabled = true;
+    try {
+      const { dismissed } = (await bid().autobidFetch('/api/autobid/dismiss', { method: 'POST', body: { ids } })) || {};
+      logLine(`Dismissed ${dismissed || 0} job(s) from Needs you.`);
+      await refreshSummary();
     } catch (error) {
       toast(error?.message || String(error), 'error');
       btn.disabled = false;

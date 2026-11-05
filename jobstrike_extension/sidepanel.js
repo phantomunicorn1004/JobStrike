@@ -220,7 +220,7 @@ const WEBSITE_AUTOFILL_KEYS = [
   'pronouns', 'github', 'portfolio', 'currentTitle', 'currentCompany', 'yearsOfExperience',
   'desiredSalary', 'noticePeriod', 'howDidYouHear', 'relocationPreference', 'highestEducation',
   'degree', 'major', 'gender', 'race', 'hispanicLatino', 'veteranStatus', 'disabilityStatus',
-  'extraFacts'
+  'extraFacts', 'savedAnswers'
 ];
 
 /** Canonical profile choices; field-registry maps these to ATS-specific option text at fill time. */
@@ -3758,8 +3758,71 @@ function consentAnswer(field) {
   return agreeingOption(options) || (/checkbox|yes-no/.test(type) ? 'Yes' : '');
 }
 
+let savedAnswerCache = { text: null, bank: [] };
+
+/** The profile's "Saved form answers" ("Q: …" / "A: …" pairs) as { question, answer }. */
+function savedAnswerBank() {
+  const text = String(currentProfile?.savedAnswers || '');
+  if (text === savedAnswerCache.text) return savedAnswerCache.bank;
+  const bank = [];
+  let question = '';
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    const q = /^q\s*[:：]\s*(.*)$/i.exec(line);
+    if (q) {
+      question = q[1].trim();
+      continue;
+    }
+    const a = /^a\s*[:：]\s*(.*)$/i.exec(line);
+    if (a && question && a[1].trim()) {
+      bank.push({ question, answer: a[1].trim() });
+      question = '';
+    }
+  }
+  savedAnswerCache = { text, bank };
+  return bank;
+}
+
+/**
+ * The saved answer for this field. A short saved question must not match a
+ * long, different one by containment ("Location" inside "Willing to relocate
+ * to our location?"), unless the form's question starts with it (labels are
+ * saved cut to 80 characters).
+ */
+function matchSavedAnswer(field) {
+  const bank = savedAnswerBank();
+  if (!bank.length) return null;
+  const asked = field.questionText || field.labelText || field.nearbyText || '';
+  const askedNorm = normalizeText(techAwareText(asked));
+  const count = (t) => t.split(' ').filter(Boolean).length;
+  let best = null;
+  for (const item of bank) {
+    const score = tokenSimilarity(asked, item.question);
+    if (score < 0.75) continue;
+    const savedNorm = normalizeText(techAwareText(item.question));
+    const lopsided = Math.min(count(savedNorm), count(askedNorm)) < 0.5 * Math.max(count(savedNorm), count(askedNorm));
+    if (score < 1 && lopsided && !askedNorm.startsWith(savedNorm)) continue;
+    if (!best || score > best.score) best = { item, score };
+  }
+  return best;
+}
+
 function createPlanRow(field) {
   let category = field.fieldCategory || 'unknown';
+  const saved = matchSavedAnswer(field);
+  if (saved) {
+    const options = Array.isArray(field.options) ? field.options : [];
+    return {
+      field,
+      suggestedValue: options.length ? matchValueToOptions(saved.item.answer, options) || saved.item.answer : saved.item.answer,
+      source: 'custom',
+      status: 'Ready (saved answer)',
+      fillOutcome: null,
+      fillError: '',
+      confidence: saved.score,
+      customQuestionId: ''
+    };
+  }
   // "Do you have at least 5 years of AWS experience?" or "How many years of
   // Kubernetes?" ask about one skill; total years of experience does not answer
   // it. Leave it as an open question for the user or the AI.
@@ -4711,6 +4774,10 @@ function resolveDeterministicValueForRow(row) {
     }
     if (PROFILE_LINK_CATEGORIES.has(cat) && !isUsableProfileLinkValue(profileValue)) {
       profileValue = '';
+    }
+    if (!profileValue && cat === 'portfolio') {
+      const linkedinUrl = String(currentProfile.linkedin || '').trim();
+      if (isUsableProfileLinkValue(linkedinUrl)) profileValue = linkedinUrl;
     }
     if (profileValue) {
       const value = options.length ? matchValueToOptions(profileValue, options) : profileValue;

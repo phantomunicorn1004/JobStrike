@@ -15,6 +15,7 @@ import {
   Rocket,
   Search,
   Send,
+  Trash2,
   TriangleAlert,
   X,
   XCircle,
@@ -30,6 +31,8 @@ import { TONE_DOT, TONE_PILL, type Tone } from "@/lib/ui/tone";
 import { useActiveProfile } from "@/components/active-profile";
 import { CandidateAvatar } from "@/components/candidate-avatar";
 import { AutobidControlPanel } from "@/components/autobid/AutobidControlPanel";
+import { AnswerForm } from "@/components/autobid/AnswerForm";
+import { AutobidInsights } from "@/components/autobid/AutobidInsights";
 import { CompanyAvatar } from "@/components/autobid/CompanyAvatar";
 import { FoundJobsList } from "@/components/autobid/FoundJobsList";
 import { FieldReport } from "@/components/autobid/FieldReport";
@@ -132,6 +135,10 @@ function isOnline(reportedAt: string | undefined, now: number): boolean {
 
 function canRetry(job: AutobidJob): boolean {
   return job.stage === "gen_failed" || ((job.stage === "needs_you" || job.stage === "failed") && !job.submitClicked);
+}
+
+function canDismiss(job: AutobidJob): boolean {
+  return job.stage === "gen_failed" || job.stage === "needs_you" || job.stage === "failed";
 }
 
 /* ─── System health (shown at the bottom of the control card) ─── */
@@ -294,11 +301,13 @@ function Pipeline({ steps }: { steps: FlowStep[] }) {
 /* ─── Needs-you queue ─── */
 
 function AttentionQueue({
-  jobs, busyIds, onRetry, onSeeAll,
+  jobs, busyIds, onRetry, onDismiss, onAnswer, onSeeAll,
 }: {
   jobs: AutobidJob[];
   busyIds: Set<number>;
   onRetry: (job: AutobidJob) => void;
+  onDismiss: (job: AutobidJob) => void;
+  onAnswer: (job: AutobidJob) => void;
   onSeeAll: () => void;
 }) {
   return (
@@ -345,6 +354,24 @@ function AttentionQueue({
                 <Button variant="outline" size="sm" className="h-8" disabled={busyIds.has(job.id)} onClick={() => onRetry(job)}>
                   {busyIds.has(job.id) ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
                   Retry
+                </Button>
+              )}
+              {job.missingFields.length > 0 && (
+                <Button variant="outline" size="sm" className="h-8" onClick={() => onAnswer(job)} title="Answer the questions it stopped on">
+                  Answer
+                </Button>
+              )}
+              {canDismiss(job) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-muted-foreground"
+                  disabled={busyIds.has(job.id)}
+                  title="Remove from Needs you (moves to Finished)"
+                  onClick={() => onDismiss(job)}
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                  Dismiss
                 </Button>
               )}
               {job.jobLink && (
@@ -411,7 +438,7 @@ function Timeline({ steps }: { steps: AutobidStep[] }) {
 }
 
 function JobRow({
-  job, now, open, busy, onToggle, onRetry,
+  job, now, open, busy, onToggle, onRetry, onDismiss, onChanged,
 }: {
   job: AutobidJob;
   now: number;
@@ -419,6 +446,8 @@ function JobRow({
   busy: boolean;
   onToggle: () => void;
   onRetry: (job: AutobidJob) => void;
+  onDismiss: (job: AutobidJob) => void;
+  onChanged: () => void;
 }) {
   const lastWord = job.log.at(-1)?.at ?? null;
   const silent = job.stage === "applying" && lastWord && now - new Date(lastWord).getTime() > STALE_MS;
@@ -483,6 +512,14 @@ function JobRow({
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             </Button>
           )}
+          {canDismiss(job) && (
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground" disabled={busy}
+              title="Remove from Needs you (moves to Finished)"
+              onClick={() => onDismiss(job)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
           {job.jobLink && (
             <Button asChild variant="ghost" size="sm" className="h-8 w-8 p-0">
               <a href={job.jobLink} target="_blank" rel="noreferrer" title="Open the job posting">
@@ -507,6 +544,8 @@ function JobRow({
               </div>
             </div>
           )}
+
+          <AnswerForm job={job} onDone={onChanged} />
 
           {job.log.length > 0 && (
             <div>
@@ -711,6 +750,55 @@ export function AutobidMonitorClient() {
     }
   };
 
+  const dismissable = useMemo(() => attentionJobs.filter(canDismiss), [attentionJobs]);
+  const [dismissingAll, setDismissingAll] = useState(false);
+
+  const dismiss = async (targets: AutobidJob[]) => {
+    const ids = targets.map((job) => job.id);
+    let dismissed = 0;
+    for (let i = 0; i < ids.length; i += 200) {
+      const res = await fetch("/api/autobid/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ ids: ids.slice(i, i + 200) }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { dismissed?: number; error?: string };
+      if (!res.ok) throw new Error(data.error || "Could not dismiss.");
+      dismissed += Number(data.dismissed) || 0;
+    }
+    return dismissed;
+  };
+
+  const dismissOne = async (job: AutobidJob) => {
+    setBusyIds(new Set([job.id]));
+    try {
+      const done = await dismiss([job]);
+      if (done) toast.success("Removed from Needs you.");
+      else toast.error("Not dismissed: it changed meanwhile. Refreshing.");
+      void load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not dismiss.");
+    } finally {
+      setBusyIds(new Set());
+    }
+  };
+
+  const dismissAll = async () => {
+    const n = dismissable.length;
+    if (!n || !window.confirm(`Remove all ${n} job${n === 1 ? "" : "s"} from Needs you? They move to Finished and are not applied to again.`)) return;
+    setDismissingAll(true);
+    try {
+      const done = await dismiss(dismissable);
+      toast.success(`${done} job${done === 1 ? "" : "s"} removed from Needs you.`);
+      void load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not dismiss.");
+    } finally {
+      setDismissingAll(false);
+    }
+  };
+
   const failedResumes = useMemo(() => list.filter((job) => job.stage === "gen_failed"), [list]);
   const [retryingAll, setRetryingAll] = useState(false);
 
@@ -822,8 +910,20 @@ export function AutobidMonitorClient() {
 
       <Pipeline steps={flow} />
 
+      {jobs !== null && <AutobidInsights jobs={list} now={now} />}
+
       {attentionJobs.length > 0 && tab !== "attention" && (
-        <AttentionQueue jobs={attentionJobs} busyIds={busyIds} onRetry={(j) => void retry(j)} onSeeAll={() => pickTab("attention")} />
+        <AttentionQueue
+          jobs={attentionJobs}
+          busyIds={busyIds}
+          onRetry={(j) => void retry(j)}
+          onDismiss={(j) => void dismissOne(j)}
+          onAnswer={(j) => {
+            pickTab("attention");
+            setOpenIds((prev) => new Set(prev).add(j.id));
+          }}
+          onSeeAll={() => pickTab("attention")}
+        />
       )}
 
       {error && (
@@ -868,6 +968,19 @@ export function AutobidMonitorClient() {
               >
                 {retryingAll ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
                 Retry {failedResumes.length} failed resume{failedResumes.length === 1 ? "" : "s"}
+              </Button>
+            )}
+            {tab === "attention" && dismissable.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0"
+                disabled={dismissingAll}
+                onClick={() => void dismissAll()}
+                title="Remove every job from Needs you (they move to Finished)"
+              >
+                {dismissingAll ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
+                Dismiss all ({dismissable.length})
               </Button>
             )}
             <div className="relative flex-1 sm:w-64 sm:flex-none">
@@ -939,6 +1052,8 @@ export function AutobidMonitorClient() {
                       busy={busyIds.has(job.id)}
                       onToggle={() => toggleOpen(job.id)}
                       onRetry={(j) => void retry(j)}
+                      onDismiss={(j) => void dismissOne(j)}
+                      onChanged={() => void load()}
                     />
                   ))}
                 </ul>

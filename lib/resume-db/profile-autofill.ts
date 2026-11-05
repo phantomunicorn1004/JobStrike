@@ -20,6 +20,8 @@ export type AutofillFieldDef = {
   options?: AutofillFieldOption[];
   /** Pre-selected for a new profile; the stored value still wins. */
   defaultValue?: string;
+  /** Overrides the default length cap for this field. */
+  maxChars?: number;
 };
 
 export type AutofillFieldGroup = {
@@ -269,6 +271,22 @@ export const PROFILE_AUTOFILL_GROUPS: AutofillFieldGroup[] = [
       },
     ],
   },
+  {
+    id: "answers",
+    title: "Saved form answers",
+    description:
+      "Answers to form questions Auto-bid could not fill. Saved from Needs you, or typed here. The question only has to be close to the form's wording.",
+    fields: [
+      {
+        key: "savedAnswers",
+        label: "Question and answer pairs",
+        kind: "textarea",
+        placeholder: "Q: What pronouns do you use?\nA: He/Him\n\nQ: Website\nA: https://linkedin.com/in/me",
+        hint: "One “Q:” line and one “A:” line per answer, with a blank line between pairs.",
+        maxChars: 20_000,
+      },
+    ],
+  },
 ];
 
 export const PROFILE_AUTOFILL_FIELDS: AutofillFieldDef[] = PROFILE_AUTOFILL_GROUPS.flatMap(
@@ -288,7 +306,7 @@ export function sanitizeProfileAutofill(raw: unknown): ProfileAutofill {
     if (field.kind === "select" && !field.options?.some((option) => option.value === value)) {
       continue;
     }
-    out[field.key] = value.slice(0, field.kind === "textarea" ? MAX_TEXTAREA_CHARS : MAX_VALUE_CHARS);
+    out[field.key] = value.slice(0, field.maxChars ?? (field.kind === "textarea" ? MAX_TEXTAREA_CHARS : MAX_VALUE_CHARS));
   }
   return out;
 }

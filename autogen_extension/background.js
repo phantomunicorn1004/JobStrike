@@ -274,6 +274,7 @@ function getOrCreateWindowWorker(windowId) {
       stopWaiters: [],
       tickTimer: null,
       claimFailureStreak: 0,
+      notReadyStreak: 0,
     };
   }
   return windowWorkers[windowId];
@@ -412,6 +413,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 const OWNED_WINDOWS_KEY = "autogenOwnedWindows";
 const CHATGPT_START_URL = "https://chatgpt.com/";
 
+/** The last time ChatGPT refused prompts (signed out, usage limit, verification), for the runner's alerts. */
+let lastChatGptBlock = { reason: "", at: 0 };
+const BLOCK_REPORT_MS = 60 * 60 * 1000;
+
 async function autogenWindowSummary() {
   const settings = await autogenGetSettings();
   const windows = [];
@@ -425,8 +430,10 @@ async function autogenWindowSummary() {
       busy: Boolean(worker.busy),
       minimized: win.state === "minimized",
       chatGptActive: isChatGptUrl(active?.url || active?.pendingUrl || ""),
+      notReadyStreak: worker.notReadyStreak || 0,
     });
   }
+  const recentBlock = lastChatGptBlock.reason && Date.now() - lastChatGptBlock.at < BLOCK_REPORT_MS;
   return {
     ok: true,
     version: chrome.runtime.getManifest().version,
@@ -435,6 +442,8 @@ async function autogenWindowSummary() {
     engine: settings.engine === "api" ? "api" : "chatgpt",
     autoClaim: Boolean(settings.autoClaim),
     windows,
+    blocked: recentBlock ? lastChatGptBlock.reason : "",
+    blockedAt: recentBlock ? new Date(lastChatGptBlock.at).toISOString() : "",
   };
 }
 
@@ -1177,6 +1186,7 @@ async function processApplication(windowId, application, settings) {
       if (outcome.stopped) return stopEntry(windowId, entry);
       if (outcome.claimLost instanceof ClaimLostError) return claimLostEntry(windowId, entry, outcome.claimLost);
       if (outcome.blocked) {
+        lastChatGptBlock = { reason: String(outcome.detail || "ChatGPT is blocked"), at: Date.now() };
         await releaseApplicationClaim(application.id, guard.claimedAt, windowId);
         entry.status = "Paused";
         entry.error = outcome.detail;
@@ -1202,6 +1212,8 @@ async function processApplication(windowId, application, settings) {
       );
       entry.status = "Completed";
       entry.error = "";
+      worker.notReadyStreak = 0;
+      lastChatGptBlock = { reason: "", at: 0 };
       await setWindowStatus(windowId, entry);
       await setQueueStatus(application.id, "completed", { windowId });
       if (engine === "chatgpt") await autogenBumpWindowGenerationCount(windowId, tab.id);
@@ -1235,6 +1247,8 @@ async function processApplication(windowId, application, settings) {
     entry.error = lastError;
     await setWindowStatus(windowId, entry);
     await setQueueStatus(application.id, "skipped", { error: lastError });
+    worker.notReadyStreak = (worker.notReadyStreak || 0) + 1;
+    if (tab?.id) await recoverChatGptTab(windowId, tab.id, worker.notReadyStreak, tabLabel);
     const until = Date.now() + NOT_READY_PAUSE_MS;
     while (Date.now() < until && !stopped()) await new Promise((resolve) => setTimeout(resolve, 1000));
     return;
@@ -1444,6 +1458,26 @@ function isChatGptUrl(url) {
     return host === "chatgpt.com" || host.endsWith(".chatgpt.com") || host === "chat.openai.com" || host.endsWith(".chat.openai.com");
   } catch (_e) {
     return false;
+  }
+}
+
+/**
+ * A ChatGPT page that keeps failing the self-test is repaired, not just waited
+ * on: reloaded the first time, then opened fresh on chatgpt.com (a stuck chat
+ * or a half-loaded app state survives a reload).
+ */
+async function recoverChatGptTab(windowId, tabId, streak, tabLabel) {
+  try {
+    if (streak <= 1) {
+      await appendActivityLog(windowId, tabLabel, "ChatGPT page not usable - reloading it");
+      await reloadTab(tabId);
+    } else {
+      await appendActivityLog(windowId, tabLabel, `ChatGPT page not usable ${streak} times in a row - opening a fresh chatgpt.com page`);
+      await chrome.tabs.update(tabId, { url: "https://chatgpt.com/" });
+      await waitForTabReady(tabId, 30000);
+    }
+  } catch (_e) {
+    /* tab closed: the next attempt reports there is no ChatGPT tab */
   }
 }
 

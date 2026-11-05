@@ -5,6 +5,7 @@ import { QUEUED_APPLY } from "@/lib/resume-db/types";
 import { STAGE_GROUP, stageOf, toAutobidJob, type AutobidGroup, type AutobidJob, type AutobidRowInput } from "@/lib/autobid/stages";
 import { freshCutoffIso } from "@/lib/autobid/queue-rules";
 import { jobAnswers, type JobAnswers } from "@/lib/autobid/job-answers";
+import { missingFieldsOf } from "@/lib/autobid/saved-answers";
 import { livesInUs, nonUsLocation, siteOf } from "@/lib/autobid/screen";
 
 /** A claim this old is abandoned (panel closed, crash): the row can be taken again. */
@@ -467,10 +468,126 @@ export async function retryBids(userId: string, ids: number[]): Promise<number> 
   return (data ?? []).length;
 }
 
+/**
+ * Removes jobs from Needs you: needs-you, failed and failed-resume rows move to
+ * Finished as expired, so neither the runner nor AutoGen picks them up again.
+ * The row and its resume stay; the reason it stopped is kept in bid_meta.
+ */
+export async function dismissBids(userId: string, ids: number[]): Promise<number> {
+  if (!ids.length) return 0;
+  const supabase = getSupabaseAdminClient();
+  const { data: rows, error } = await supabase
+    .from(TABLE)
+    .select("id, bid_state, bid_error, generation_error, bid_meta")
+    .eq("user_id", userId)
+    .in("id", ids)
+    .eq("apply", QUEUED_APPLY)
+    .or("bid_state.in.(needs_you,failed),and(bid_state.eq.none,generation_status.eq.failed)");
+  if (error) rethrow(error.message);
+
+  const at = new Date().toISOString();
+  let dismissed = 0;
+  for (const row of (rows ?? []) as Array<{
+    id: number;
+    bid_state: string;
+    bid_error: string | null;
+    generation_error: string | null;
+    bid_meta: Record<string, unknown> | null;
+  }>) {
+    const reason = row.bid_state === "none" ? row.generation_error : row.bid_error;
+    const { data, error: updateError } = await supabase
+      .from(TABLE)
+      .update({
+        bid_state: "expired",
+        bid_claimed_at: null,
+        bid_error: "Dismissed from Needs you.",
+        bid_meta: {
+          ...withLoggedStep(row.bid_meta ?? {}, "Dismissed from Needs you", at),
+          dismissedAt: at,
+          dismissedReason: String(reason ?? "").slice(0, 1000),
+        },
+      } as never)
+      .eq("id", row.id)
+      .eq("user_id", userId)
+      .eq("bid_state", row.bid_state)
+      .select("id")
+      .maybeSingle();
+    if (updateError) rethrow(updateError.message);
+    if (data) dismissed += 1;
+  }
+  return dismissed;
+}
+
+const PERMANENT_BID_ERROR_RE =
+  /real human|human being|not (?:a )?bot|not (?:using|submitted by).*automated|in my own words|own words.*AI|captcha|CAPTCHA|no longer (?:accepting|available)|position.*(?:closed|filled)|job.*(?:closed|filled|not found)|Auto-submit covers|covers Greenhouse, Lever and Ashby/i;
+
+/**
+ * Auto-retries eligible needs_you jobs: not yet submitted, error looks fixable,
+ * and auto-retried fewer than `maxRetries` times. Returns the count retried.
+ */
+export async function autoRetryBids(
+  userId: string,
+  extensionVersion: string,
+  maxRetries = 2,
+): Promise<{ retried: number; ids: number[] }> {
+  const supabase = getSupabaseAdminClient();
+  const { data: candidates, error } = await supabase
+    .from(TABLE)
+    .select("id, bid_error, bid_meta")
+    .eq("user_id", userId)
+    .eq("bid_state", "needs_you")
+    .eq("apply", QUEUED_APPLY)
+    .or("bid_meta->>submitClicked.is.null,bid_meta->>submitClicked.neq.true")
+    .order("id", { ascending: false })
+    .limit(50);
+  if (error) rethrow(error.message);
+  if (!candidates?.length) return { retried: 0, ids: [] };
+
+  const eligible = (candidates as Array<{ id: number; bid_error: string | null; bid_meta: Record<string, unknown> | null }>)
+    .filter((row) => {
+      const err = row.bid_error ?? "";
+      if (PERMANENT_BID_ERROR_RE.test(err)) return false;
+      const count = Number(row.bid_meta?.autoRetryCount ?? 0);
+      if (count >= maxRetries) return false;
+      const lastVersion = String(row.bid_meta?.lastRunVersion ?? "");
+      if (lastVersion === extensionVersion && count > 0) return false;
+      return true;
+    });
+  if (!eligible.length) return { retried: 0, ids: [] };
+
+  const ids = eligible.map((r) => r.id);
+  const results: number[] = [];
+  for (const row of eligible) {
+    const prevMeta = (row.bid_meta ?? {}) as Record<string, unknown>;
+    const count = Number(prevMeta.autoRetryCount ?? 0);
+    const { error: upErr } = await supabase
+      .from(TABLE)
+      .update({
+        bid_state: "none",
+        bid_error: "",
+        bid_claimed_at: null,
+        bid_meta: { ...prevMeta, autoRetryCount: count + 1, autoRetryAt: new Date().toISOString(), autoRetryVersion: extensionVersion },
+      } as never)
+      .eq("id", row.id)
+      .eq("user_id", userId)
+      .eq("bid_state", "needs_you");
+    if (!upErr) results.push(row.id);
+  }
+  return { retried: results.length, ids: results };
+}
+
 export type BidSummary = {
   ready: number;
   submittedSince: number;
-  needsYou: Array<{ id: number; candidate: string; jobTitle: string; company: string; jobLink: string; reason: string }>;
+  needsYou: Array<{
+    id: number;
+    candidate: string;
+    jobTitle: string;
+    company: string;
+    jobLink: string;
+    reason: string;
+    missingFields: string[];
+  }>;
 };
 
 /** For the runner's card: how many are waiting, sent since `sinceIso`, and what needs the user. */
@@ -488,7 +605,7 @@ export async function bidSummary(userId: string, sinceIso: string): Promise<BidS
     countSentSince(userId, sinceIso),
     supabase
       .from(TABLE)
-      .select("id, candidate_name, job_title, company, job_link, bid_error")
+      .select("id, candidate_name, job_title, company, job_link, bid_error, bid_meta->openFields")
       .eq("user_id", userId)
       .eq("bid_state", "needs_you")
       .eq("apply", QUEUED_APPLY)
@@ -507,6 +624,7 @@ export async function bidSummary(userId: string, sinceIso: string): Promise<BidS
       company: String(row.company ?? ""),
       jobLink: String(row.job_link ?? ""),
       reason: String(row.bid_error ?? ""),
+      missingFields: missingFieldsOf(String(row.bid_error ?? ""), { openFields: row.openFields }),
     })),
   };
 }
