@@ -5,7 +5,7 @@ import { QUEUED_APPLY } from "@/lib/resume-db/types";
 import { STAGE_GROUP, stageOf, toAutobidJob, type AutobidGroup, type AutobidJob, type AutobidRowInput } from "@/lib/autobid/stages";
 import { freshCutoffIso } from "@/lib/autobid/queue-rules";
 import { jobAnswers, type JobAnswers } from "@/lib/autobid/job-answers";
-import { livesInUs, nonUsLocation } from "@/lib/autobid/screen";
+import { livesInUs, nonUsLocation, siteOf } from "@/lib/autobid/screen";
 
 /** A claim this old is abandoned (panel closed, crash): the row can be taken again. */
 export const BID_STALE_MS = 20 * 60 * 1000;
@@ -26,6 +26,13 @@ export function explainMissingBidColumns(message: string): string {
 function rethrow(message: string): never {
   throw new Error(explainMissingBidColumns(message));
 }
+
+/**
+ * Auto-bid applies only on Greenhouse, Lever and Ashby. Jobs queued by hand on
+ * other sites stay in Resume DB for the Bid tab. A coarse SQL match; the exact
+ * host is checked with siteOf wherever a row is used.
+ */
+const ON_AUTOBID_SITE = "job_link.ilike.*.greenhouse.io/*,job_link.ilike.*.lever.co/*,job_link.ilike.*.ashbyhq.com/*";
 
 /** One job for the runner: everything it needs to apply, with the claim it holds. */
 export type BidJob = {
@@ -84,7 +91,8 @@ function readyRows(userId: string) {
     .eq("user_id", userId)
     .eq("generation_status", "completed")
     .eq("apply", QUEUED_APPLY)
-    .eq("bid_state", "none");
+    .eq("bid_state", "none")
+    .or(ON_AUTOBID_SITE);
 }
 
 /**
@@ -115,7 +123,7 @@ async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
   const supabase = getSupabaseAdminClient();
   const { data: current, error: readError } = await supabase
     .from(TABLE)
-    .select("id, profile_id, bid_state, bid_claimed_at, generation_status, apply, job_description, bid_meta")
+    .select("id, profile_id, bid_state, bid_claimed_at, generation_status, apply, job_link, job_description, bid_meta")
     .eq("id", id)
     .eq("user_id", userId)
     .maybeSingle();
@@ -127,11 +135,12 @@ async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
         bid_claimed_at: string | null;
         generation_status: string;
         apply: string;
+        job_link: string | null;
         job_description: string | null;
         bid_meta: unknown;
       }
     | null;
-  if (!row || row.generation_status !== "completed" || row.apply !== QUEUED_APPLY) return null;
+  if (!row || row.generation_status !== "completed" || row.apply !== QUEUED_APPLY || !siteOf(row.job_link ?? "")) return null;
   const ready = row.bid_state === "none";
   const abandoned =
     row.bid_state === "bidding" &&
@@ -208,6 +217,7 @@ export async function expireStaleQueued(userId: string): Promise<number> {
     .eq("bid_state", "none")
     .in("generation_status", ["queue", "completed"])
     .lt("posted_at", freshCutoffIso())
+    .or(ON_AUTOBID_SITE)
     .select("id");
   if (error) rethrow(error.message);
   return (data ?? []).length;
@@ -473,7 +483,8 @@ export async function bidSummary(userId: string, sinceIso: string): Promise<BidS
       .eq("user_id", userId)
       .eq("generation_status", "completed")
       .eq("apply", QUEUED_APPLY)
-      .eq("bid_state", "none"),
+      .eq("bid_state", "none")
+      .or(ON_AUTOBID_SITE),
     countSentSince(userId, sinceIso),
     supabase
       .from(TABLE)
@@ -481,6 +492,7 @@ export async function bidSummary(userId: string, sinceIso: string): Promise<BidS
       .eq("user_id", userId)
       .eq("bid_state", "needs_you")
       .eq("apply", QUEUED_APPLY)
+      .or(ON_AUTOBID_SITE)
       .order("id", { ascending: false })
       .limit(50),
   ]);
@@ -545,25 +557,27 @@ export async function listAutobidJobs(userId: string): Promise<AutobidJob[]> {
     )
     .eq("user_id", userId)
     .or(`apply.eq.${QUEUED_APPLY},bid_state.neq.none`)
+    .or(ON_AUTOBID_SITE)
     .order("id", { ascending: false })
     .limit(MONITOR_LIMIT);
   if (error) rethrow(error.message);
-  return ((data ?? []) as AutobidRowInput[]).map(toAutobidJob);
+  return ((data ?? []) as AutobidRowInput[]).filter((row) => siteOf(String(row.job_link ?? ""))).map(toAutobidJob);
 }
 
 /** How many of the same jobs fall in each page tab, reading only the three state columns. */
 export async function countAutobidGroups(userId: string): Promise<Record<AutobidGroup, number>> {
   const { data, error } = await getSupabaseAdminClient()
     .from(TABLE)
-    .select("apply, generation_status, bid_state")
+    .select("apply, generation_status, bid_state, job_link")
     .eq("user_id", userId)
     .or(`apply.eq.${QUEUED_APPLY},bid_state.neq.none`)
+    .or(ON_AUTOBID_SITE)
     .order("id", { ascending: false })
     .limit(MONITOR_LIMIT);
   if (error) rethrow(error.message);
   const counts: Record<AutobidGroup, number> = { active: 0, attention: 0, done: 0 };
-  for (const row of (data ?? []) as Array<Pick<AutobidRowInput, "apply" | "generation_status" | "bid_state">>) {
-    counts[STAGE_GROUP[stageOf(row)]] += 1;
+  for (const row of (data ?? []) as Array<Pick<AutobidRowInput, "apply" | "generation_status" | "bid_state"> & { job_link: string | null }>) {
+    if (siteOf(row.job_link ?? "")) counts[STAGE_GROUP[stageOf(row)]] += 1;
   }
   return counts;
 }

@@ -866,7 +866,7 @@
       if (!SUBMIT_HOST_RE.test(meta.formHost)) {
         throw new Stop(
           'needs_you',
-          `Filled. Auto-submit covers Greenhouse and Lever; this form is on ${meta.formHost || 'another site'}. Review it, submit, then Register.`,
+          `Filled. Auto-submit covers Greenhouse, Lever and Ashby; this form is on ${meta.formHost || 'another site'}. Review it, submit, then Register.`,
           meta
         );
       }
