@@ -322,39 +322,31 @@
   }
 
   /**
-   * Runs in the form's frame. Greenhouse country react-select: types
-   * "United States", waits for options, clicks the match.  Returns
-   * { fixed: true } on success or { fixed: false, reason } on failure.
+   * Runs in the form's frame. Picks the United States in an empty Greenhouse
+   * country react-select, the phone's dialling-code picker first ("United
+   * States +1"). Returns { fixed } and a reason when it could not.
    */
   async function fixCountryDropdown() {
     const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    const containerOf = (el) => el.closest('.phone-input__country, .select__container, .select-shell') || el.parentElement;
+    const picked = (el) => {
+      const sv = containerOf(el)?.querySelector('[class*="single-value" i], [class*="singleValue" i]');
+      return /united states/i.test(sv?.textContent || '');
+    };
+    const labelOf = (el) => {
+      const ids = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+      return [
+        el.getAttribute('aria-label') || '',
+        ...ids.map((id) => document.getElementById(id)?.textContent || ''),
+        ...Array.from(el.labels || []).map((l) => l.textContent || ''),
+      ].join(' ');
+    };
 
-    // Greenhouse shows the error label next to the bad field. Find a
-    // react-select whose error / label / placeholder says "country".
-    const shells = document.querySelectorAll(
-      '.select-shell, .select__container, [class*="select__control"]'
-    );
-    let input = null;
-    for (const shell of shells) {
-      const text = (shell.closest('[class*="field"]')?.textContent || shell.textContent || '').toLowerCase();
-      if (!/country/i.test(text)) continue;
-      input = shell.querySelector('input[role="combobox"], input[id*="react-select"]')
-        || shell.querySelector('input:not([type="hidden"])');
-      if (input) break;
-    }
-    // Fallback: any combobox whose label says "country"
-    if (!input) {
-      for (const el of document.querySelectorAll('input[role="combobox"]')) {
-        const label = el.getAttribute('aria-label') || '';
-        const wrapper = el.closest('[class*="field"], label, fieldset');
-        const wrapText = wrapper ? wrapper.textContent : '';
-        if (/country/i.test(label) || /country/i.test(wrapText)) {
-          input = el;
-          break;
-        }
-      }
-    }
-    if (!input) return { fixed: false, reason: 'no country input found' };
+    const combos = Array.from(document.querySelectorAll('input[role="combobox"]'));
+    const input =
+      combos.find((el) => el.closest('.phone-input__country, fieldset.phone-input') && !picked(el)) ||
+      combos.find((el) => /\bcountry\b/i.test(labelOf(el)) && !picked(el));
+    if (!input) return { fixed: false, reason: 'no empty country picker found' };
 
     input.focus();
     const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -369,8 +361,9 @@
       await delay(100);
       const opts = document.querySelectorAll('[role="option"]');
       for (const opt of opts) {
-        const t = (opt.textContent || '').trim();
-        if (/^United States$/i.test(t) || /^United States of America$/i.test(t)) {
+        // "United States +1" in the phone picker; never "United States Minor Outlying Islands".
+        const t = (opt.textContent || '').replace(/\s*\(?\+?\d+\)?\s*$/, '').trim();
+        if (/^(united states( of america)?|usa)$/i.test(t)) {
           option = opt;
           break;
         }
@@ -384,14 +377,7 @@
     option.dispatchEvent(new MouseEvent('mouseup', evtOpts));
     option.click();
     await delay(200);
-
-    // Verify: the single-value element should show the selection
-    const shell = input.closest('.select-shell, .select__container, [class*="select__control"]');
-    if (shell) {
-      const sv = shell.querySelector('[class*="single-value" i], [class*="SingleValue" i]');
-      if (sv && /united states/i.test(sv.textContent || '')) return { fixed: true };
-    }
-    return { fixed: true };
+    return picked(input) ? { fixed: true } : { fixed: false, reason: 'the form did not keep "United States"' };
   }
 
   /**
@@ -891,7 +877,7 @@
       meta.submitLabel = click.result.label;
 
       setStep('Waiting for the confirmation…');
-      const until = Date.now() + CONFIRM_WAIT_MS;
+      let until = Date.now() + CONFIRM_WAIT_MS;
       let judged = null;
       let errorPolls = 0;
       let confirmPolls = 0;
@@ -1011,20 +997,28 @@
                 });
                 meta.gdprRetry = fix?.result || {};
               }
-              await sleep(500);
-              const [reclick] = await chrome.scripting.executeScript({
-                target: { tabId, frameIds: [autofillFrameId || 0] },
-                func: clickSubmitButton,
-              });
-              if (reclick?.result?.clicked) {
-                errorPolls = 0;
-                setStep('Resubmitted — waiting for confirmation…');
-                continue;
+              if (meta.countryRetry?.fixed || meta.gdprRetry?.fixed) {
+                await sleep(500);
+                const [reclick] = await chrome.scripting.executeScript({
+                  target: { tabId, frameIds: [autofillFrameId || 0] },
+                  func: clickSubmitButton,
+                });
+                if (reclick?.result?.clicked) {
+                  errorPolls = 0;
+                  until = Date.now() + CONFIRM_WAIT_MS;
+                  setStep('Resubmitted — waiting for confirmation…');
+                  continue;
+                }
               }
             } catch (_) {}
           }
           meta.pageErrors = judged.errors;
-          throw new Stop('needs_you', `The site rejected the form: ${judged.errors.slice(0, 3).join('; ')}`, meta);
+          const retryNote = [meta.countryRetry?.reason, meta.gdprRetry?.reason].filter(Boolean).join('; ');
+          throw new Stop(
+            'needs_you',
+            `The site rejected the form: ${judged.errors.slice(0, 3).join('; ')}${retryNote ? ` (auto-fix: ${retryNote})` : ''}`,
+            meta
+          );
         }
       }
       if (judged?.verdict !== 'confirmed' || confirmPolls < 2) {
