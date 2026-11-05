@@ -66,34 +66,44 @@ public static partial class InterviewStyles
 
     static string Length(AnswerLength length) => length switch
     {
-        AnswerLength.Short => "Keep every answer under 60 words unless the interviewer asks for detail.",
-        AnswerLength.Detailed => "Answers may run to about 200 words when the question needs depth.",
-        _ => "Keep answers under about 120 words unless it is a design or coding question.",
+        AnswerLength.Short => "Keep the sentence and bullets under 60 words in all, and add the --- details only when asked.",
+        AnswerLength.Detailed => "Keep the part before --- under about 100 words; the details may run to about 200 words.",
+        _ => "Keep the part before --- under about 80 words.",
     };
 
-    /// <summary>The instructions added to the user's call prompt for this round.</summary>
+    /// <summary>
+    /// The instructions for this round. Every answer has one shape so it can be read at a glance:
+    /// the sentence to say first, bold-keyed talking points, then optional details after a "---"
+    /// line, which the app folds away until asked for.
+    /// </summary>
     public static string Instructions(InterviewType type, AnswerLength length) =>
         $"""
         Interview round: {Name(type)}. {Focus(type)}
 
-        Start every reply with one line "Type: <kind>" on its own, followed by an empty line, where <kind> is one of: Behavioral, Technical, System design, Coding, Logistics, Small talk, Question for you. Then answer in the format for that kind of question, whatever the round:
-        - Behavioral: a STAR story, one short bullet each for Situation, Task, Action, Result.
-        - Technical: a one-sentence answer, then 2-3 bullets with specifics from my experience.
-        - System design: short sections for requirements, components, scaling, trade-offs.
-        - Coding: approach, complexity, key steps and edge cases.
-        - Logistics (salary, start date, location, visa, notice period): one or two plain sentences.
+        Start every reply with one line "Type: <kind>" on its own, followed by an empty line, where <kind> is one of: Behavioral, Technical, System design, Coding, Logistics, Small talk, Question for you.
+
+        Then give every answer the same shape, so I can glance at it while I talk:
+        1. One sentence I can say right away, as its own paragraph (no heading, no bullet, no label).
+        2. 2-4 short bullets of talking points, each starting with a **bold key phrase**.
+        3. Only when the question needs depth: a line with just --- and then the details (the full story, design sections, code, numbers).
+        The talking points for each kind of question:
+        - Behavioral: one bullet each for **Situation**, **Task**, **Action** and **Result**, with numbers in the result.
+        - Technical: the key facts, and a specific from my experience.
+        - System design: requirements, main components, scaling, trade-offs; the deeper design after ---.
+        - Coding: approach, time and space complexity, edge cases; code only after --- and only when it helps.
+        - Logistics (salary, start date, location, visa, notice period): just the sentence, no bullets.
         - Small talk or not a question: reply with just "-".
-        - Question for you (the interviewer asks what I want to know): 2-3 thoughtful questions to ask them.
-        Always open with one sentence I can say right away. {Length(length)}
+        - Question for you (the interviewer asks what I want to know): the sentence, then 2-3 questions to ask them as bullets.
+        {Length(length)}
         """;
 
-    /// <summary>A follow-up that reworks the last answer.</summary>
+    /// <summary>A follow-up that reworks the last answer, in the same shape.</summary>
     public static string FollowUp(string kind) => kind switch
     {
-        "Shorter" => "Make that answer much shorter: one sentence I can say right now, then at most two short bullets.",
-        "Example" => "Give one concrete example from my background that supports that answer, as I would say it.",
-        "Detail" => "Go deeper on that answer: add specifics, numbers and the reasoning behind it.",
-        "STAR" => "Retell that answer as a STAR story: one short bullet each for Situation, Task, Action and Result.",
+        "Shorter" => "Make that answer much shorter: the one sentence, then at most two short bullets, and no details.",
+        "Example" => "Give one concrete example from my background that supports that answer, as I would say it, in the same shape.",
+        "Detail" => "Go deeper on that answer: keep the sentence and bullets, then after --- add specifics, numbers and the reasoning.",
+        "STAR" => "Retell that answer as a STAR story: the one sentence, then one bullet each for **Situation**, **Task**, **Action** and **Result**.",
         _ => kind,
     };
 

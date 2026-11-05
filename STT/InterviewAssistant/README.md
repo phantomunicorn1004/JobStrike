@@ -6,14 +6,18 @@ A small Windows app with two views:
   call prompt), the live captions, and the next message to send.
 - **Interview view** for the interview itself: a small window laid out like a teleprompter. The
   **answer reader** is on top, near the camera, showing the AI's latest answer in large, clean text as
-  it streams in (its opening sentence, the line to say first, a size larger and brightest). The caption
-  strip and the message box sit in a slim area below.
+  it streams in (its opening sentence, the line to say first, on a highlighted card), with the question
+  it answers just above. A slim strip below shows what is being heard and when it will be sent.
 
 ```
 Live Captions ──UI Automation──> caption strip ──(Send hotkey)──> ChatGPT / DeepSeek page (WebView2)
-                                                                        │
-                                          answer reader <──(reads the latest answer)──┘
+                                                    │                   │
+                                                    │     answer reader <──(reads the latest answer)──┘
+                                                    └──> or an AI API (OpenAI / DeepSeek), streamed into the reader
 ```
+
+Answers come from the chat page (your own account, no key) or, faster, straight from the OpenAI or
+DeepSeek API with your own key (**Settings → Answers**).
 
 ## Requirements
 
@@ -41,20 +45,46 @@ on the chat page, or else the latest answer), **Settings** (gear) and **Intervie
    - Close any other audio (videos, music). Everything the computer plays is captioned and can be sent.
 2. Pick **ChatGPT** or **DeepSeek** and sign in on the chat page once. The login is kept in
    `%LOCALAPPDATA%\InterviewAssistant\WebView2`.
-3. Open **Settings** (five pages in the left rail, all settings in one place):
+3. Open **Settings** (six pages in the left rail, all settings in one place):
    - **Interview**: your profile, the company, the job description and, optionally, your resume
      (paste it, click **Load resume (PDF / Word)…**, or drop a `.pdf`, `.docx`, `.txt` or `.md` file on
      the box). The call prompt below them works as it is; edit it only if you want different answers.
      **Load from JobStrike…** fills them from one of your JobStrike applications (see below).
+   - **Answers**: where answers come from (see below), the interview round and the answer length.
    - **Sending**: what the Send key does (see below).
    - **Display**: see-through overlay or normal window for the interview view (and, for the normal
      window, where the captions go), Dark / Light / Match Windows theme, always on top, hiding the
      Windows Live Captions window.
    - **Voice**: read the answers aloud (see below).
    - **Hotkeys**: click a box and press the combination; Backspace removes one.
-4. Click **New chat + call prompt**. A fresh chat opens, your details are sent, and the caption panel
-   starts empty (a new chat is a new interview; the trash button next to A− / A+ clears it any time).
-5. Click **Interview view ›**.
+4. Press **Start interview** on the start card (below), or click **New chat + call prompt** and then
+   **Interview view ›**. A fresh chat opens, your details are sent, and the caption panel starts empty
+   (a new chat is a new interview; the trash button next to A− / A+ clears it any time).
+
+### Start your interview (the start card)
+
+Until the interview starts, the answer area shows one card with everything to check:
+
+- **Job**: the company and job title, and whether your profile, job description and resume are in.
+  **From JobStrike** loads an application straight away (company, job description, resume);
+  **Edit** opens Settings → Interview.
+- **Round**: Screening / recruiter, HR / behavioral, Technical, System design, Coding, Final / manager.
+  It sets what the answers focus on (also on the button above each answer).
+- **Answers from**: the chat page or the API and model, with a green tick once a key is saved;
+  **Change** opens Settings → Answers.
+- **Ready check**: Live Captions running (**Start** if not), your details filled in (**Add** if not).
+- **Send questions automatically** (on by default) and **Read answers aloud**.
+- **Start interview** opens a fresh chat and switches to the interview view.
+
+### Answers from an AI API (Settings → Answers)
+
+- **ChatGPT or DeepSeek page**: your account in the app's browser; no key.
+- **OpenAI API** / **DeepSeek API**: answers start in about a second and need no page. Paste your key,
+  press **Check key** to list the models it can use (quick, inexpensive ones first; `gpt-4o-mini`
+  suits a live interview), pick one, **Save**. Keys are stored encrypted for your Windows account.
+  With an API, Send always sends straight away, and **New chat** starts a fresh conversation (your
+  details and the round go with every question).
+- **Interview round** and **Answer length** (Short / Normal / Detailed) shape the answers.
 
 ### Load from JobStrike (Settings → Interview)
 
@@ -81,31 +111,47 @@ The app only reads from JobStrike; it changes nothing there.
 - **Captions**: the Live Captions text exactly as shown. In full view each pause in speech is a card
   with the time it started; the card with words still waiting to be sent is highlighted and tagged
   **Waiting to send**, and the waiting words are in the accent colour (violet). Interview view shows the
-  same text as plain lines (grey = sent). The panel keeps the latest 300 paragraphs and follows the
+  same text as plain lines (faded = sent). The panel keeps the latest 300 paragraphs and follows the
   newest line unless you scroll up; **↓ Latest** jumps back.
 - **Answer** (on top): the latest AI answer in large text (about 70 characters per line), with headings,
-  bullets, **bold key terms** and code kept, updated live; the opening sentence is a size larger. Its
-  one-line header shows what is happening, then the question the answer is for: **Listening** (grey),
+  bullets, **bold key terms** and code kept, updated live; the question it answers sits above it
+  (**Q**: its last two lines, where the question is; hover for all of it). One slim bar above both
+  shows only the status and the question's kind; the round, **Copy**, **🔊 Listen**, **A− / A+** and
+  earlier answers appear there while the mouse is over the answer, so nothing crowds the text during
+  the call. The status: **Listening** (grey),
   **● Thinking… 5s** (amber) from the moment a message is submitted until the first words arrive (the
   previous answer is faded so it is not mistaken for the new one), **● Writing…** (blue) while the
   text streams in, **● Reading aloud…**, **✓ Ready** (green) when it has stopped changing. A thin moving
-  bar runs while thinking or writing. If nothing arrives within 2 minutes it says so. **A− / A+**
-  sizes the text.
+  bar runs while thinking or writing. If nothing arrives within 2 minutes it says so.
+- **Answer layout**: the opening sentence, the line to say first, sits on a tinted card, with the
+  talking points below it (key phrases in bold). With an API every answer has this shape, and the
+  question's kind (Behavioral, Technical, System design, Coding, Logistics…) shows as a chip next to
+  the round. Longer details (the full story, design, code) come after a rule and stay folded:
+  **Show full answer** / **Hide details** under the answer.
+- **Rework ▾** appears under a finished answer while the mouse is over it: **Shorter**, **With an
+  example**, **More detail** or **As a STAR story** asks the AI to rework it (**More detail** opens the
+  new answer unfolded).
+- **Earlier answers**: **‹ 2 / 5 ›** (on hover) in the bar above the answer steps back through this interview's
+  answers (Copy and Listen work on the one shown); **Latest**, or any new answer, returns to the newest.
+  A new chat starts the list again.
 - **Message box** (under the captions, and in full view under **Next message**): it shows the
   interviewer's words waiting to be sent. Click into it and type to edit them, or clear it and write
   your own question; from then on new captions do not overwrite your text (they wait for the next
   message, and Automatic mode waits too). **Enter** sends (Shift+Enter starts a new line), **Esc**
   goes back to the interviewer's words, **Discard** throws your text away. **Send** and the Send hotkey
   send whatever is in the box; the caption words that were in it count as sent with it. In interview
-  view the **⌄** button next to it hides the box (the captions get the space, and Send still sends the
-  interviewer's words); the keyboard button in the status line, or the menu, shows it again.
-- **Status line**: Live Captions state and how many words are waiting, with the Send hotkey shown as
-  a key (hover it for the send mode). It turns red when Live Captions is not running or a send fails.
+  view the box is closed until you want to type: the **✎** button in the status line (or the menu)
+  opens it under the answer, **✕** closes it again. The Send hotkey and **Send** work either way.
+- **Status line** (interview view): what is happening with the interviewer's words: **Listening…**,
+  **Hearing the interviewer… 12 words**, then in Automatic mode **Sending in 1.2s…** with a thin bar
+  filling up, or **12 words waiting · press Send**. While words are waiting, **Send** sends them now and
+  **Skip** drops them (small talk, not a question). It turns red when Live Captions is not running or a
+  send fails.
 - **Answer | Chat page** in the status line switches between the clean answer and the ChatGPT /
   DeepSeek page itself (normal-window interview view). The see-through overlay always shows the
   answer, because a see-through window cannot display the embedded browser; use **Full view** there.
-- **🔊 Listen** in the answer header reads the answer out, like Google Translate's Listen button (see below).
-- **Copy** in the answer header copies the text you selected in the answer, or else the whole answer as
+- **🔊 Listen** (in the answer bar, on hover) reads the answer out, like Google Translate's Listen button (see below).
+- **Copy** (in the answer bar, on hover) copies the text you selected in the answer, or else the whole answer as
   plain text (headings, paragraphs, bullets and numbers kept); it shows **✓ Copied** for a moment. The
   pop-up that appears when you select text has Copy too, and so does the ⋯ menu.
 - **⋯ Menu** (or right-click; ⤢ next to it opens Full view) has only what you need during the interview: Send, Discard, Submit,
@@ -196,7 +242,8 @@ keys do the app's action in every program.
 The interview view becomes a borderless window floating above every other window, so you can place
 it over the meeting and still see the video behind it.
 
-- **See-through slider** in its top bar: 0% is solid; drag right to see more of what is behind. Only
+- **See-through** (the ☼ icon in its top bar) shows the slider: 0% is solid; drag right to see more
+  of what is behind; click the icon again to tuck it away. Only
   the background becomes see-through; the text stays solid, with a soft halo so it stays readable over
   video. `Ctrl+Alt+=` / `Ctrl+Alt+-` change it without clicking (also from the meeting app).
 - Move it by dragging the top bar; resize it from any edge or corner; drag the line between captions
@@ -269,11 +316,14 @@ streams.
 | `GoogleSpeech.cs` | Google Cloud Text-to-Speech: audio, voice list, the encrypted API key |
 | `ChatBridge.cs` | Types into ChatGPT / DeepSeek with trusted DevTools input, submits, reads the answer |
 | `AnswerReader.cs` | Answer extraction script, answer model, FlowDocument rendering |
+| `DirectChat.cs` | OpenAI / DeepSeek API: model list and streamed answers |
+| `MarkdownAnswer.cs` | An API answer's Markdown as answer blocks |
+| `InterviewStyles.cs` | Interview rounds, answer shape and length, follow-ups, the "Type:" line |
 | `MainWindow.xaml(.cs)` | Full / interview view, caption docking, answer reader, menus, hotkey actions |
 | `OverlayWindow.xaml(.cs)` | Borderless see-through interview view above other windows |
 | `Assets/AppIcon.ico`, `AppIcon.png` | App logo (caption bubble with an AI spark); redraw with `python Assets/make_logo.py Assets` |
 | `ThemeManager.cs` | Dark / light palettes, applied live through `DynamicResource` |
-| `SetupWindow.xaml(.cs)` | Settings window: Interview, Sending, Display, Voice, Hotkeys tabs |
+| `SetupWindow.xaml(.cs)` | Settings window: Interview, Answers, Sending, Display, Voice, Hotkeys tabs |
 | `AppSettings.cs` | Settings in `%LOCALAPPDATA%\InterviewAssistant\settings.json` and the default call prompt |
 | `Hotkey.cs` | Parsing and validating hotkey text such as `Ctrl+Alt+S` |
 | `ResumeReader.cs` | Text from `.pdf` (PdfPig), `.docx` (read directly from the file's XML), `.txt`, `.md` |

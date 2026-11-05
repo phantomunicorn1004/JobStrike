@@ -201,6 +201,26 @@
     return link;
   }
 
+  /**
+   * Runs in the page's top frame. Clicks a visible "Apply" / "Apply Now"
+   * button or link so the application form appears. Returns true when clicked.
+   */
+  function clickApplyButtonOnPage() {
+    const APPLY_RE = /^apply(\s+(now|for this|for this job|here|today))?[.!]?$/i;
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    for (const el of document.querySelectorAll('a, button, [role="button"], input[type="button"], input[type="submit"]')) {
+      const text = (el.textContent || el.value || '').trim();
+      if (!APPLY_RE.test(text) || !visible(el)) continue;
+      el.scrollIntoView({ block: 'center' });
+      el.click();
+      return true;
+    }
+    return false;
+  }
+
   /** The panel binds a newly active tab and reads its job; overriding before it finishes would be undone. */
   async function waitForPanelBind(tabId) {
     const TS = window.SmartJobTabSession;
@@ -364,6 +384,22 @@
       ].join(' ');
     };
 
+    // Try native <select> first — some Greenhouse forms use a plain select for country.
+    const selects = Array.from(document.querySelectorAll('select'));
+    for (const sel of selects) {
+      if (sel.disabled || sel.closest('[style*="display:none"], [style*="display: none"]')) continue;
+      const lab = labelOf(sel);
+      if (!/\bcountry\b/i.test(lab)) continue;
+      const opts = Array.from(sel.options);
+      const us = opts.find((o) => /^(united states( of america)?|usa|us)$/i.test(o.textContent.trim()));
+      if (us && sel.value !== us.value) {
+        sel.value = us.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        sel.dispatchEvent(new Event('input', { bubbles: true }));
+        return { fixed: true };
+      }
+    }
+
     const combos = Array.from(document.querySelectorAll('input[role="combobox"]'));
     const input =
       combos.find((el) => el.closest('.phone-input__country, fieldset.phone-input') && !picked(el)) ||
@@ -408,33 +444,187 @@
    */
   function fixGdprConsent() {
     const cbs = document.querySelectorAll('input[type="checkbox"]');
+    const tryCheck = (cb) => {
+      cb.click();
+      cb.checked = true;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+      return { fixed: true };
+    };
+    // Pass 1: checkbox whose name contains gdpr or demographic consent
+    for (const cb of cbs) {
+      if (cb.checked || cb.disabled) continue;
+      const name = cb.getAttribute('name') || cb.id || '';
+      if (/gdpr|demographic.?data.?consent/i.test(name)) return tryCheck(cb);
+    }
+    // Pass 2: wrapper text contains demographic/gdpr AND consent/agree
     for (const cb of cbs) {
       if (cb.checked || cb.disabled) continue;
       const wrapper = cb.closest('[class*="field"], label, fieldset, div');
       const text = (wrapper?.textContent || '').toLowerCase();
-      if (/demographic|gdpr/i.test(text) && /consent|agree|accept/i.test(text)) {
-        cb.click();
-        cb.checked = true;
-        cb.dispatchEvent(new Event('change', { bubbles: true }));
-        return { fixed: true };
-      }
+      if (/demographic|gdpr/i.test(text) && /consent|agree|accept|acknowledge/i.test(text)) return tryCheck(cb);
     }
-    // Broader: any consent checkbox near demographic questions
+    // Pass 3: label or aria-label mentions consent + data/demographic/response
     for (const cb of cbs) {
       if (cb.checked || cb.disabled) continue;
       const label = cb.getAttribute('aria-label') || cb.closest('label')?.textContent || '';
-      if (/consent|agree|accept|acknowledge/i.test(label) && /data|demographic|response|information/i.test(label)) {
-        cb.click();
-        cb.checked = true;
-        cb.dispatchEvent(new Event('change', { bubbles: true }));
-        return { fixed: true };
-      }
+      if (/consent|agree|accept|acknowledge/i.test(label) && /data|demographic|response|information|voluntar/i.test(label)) return tryCheck(cb);
+    }
+    // Pass 4: any remaining unchecked required checkbox whose ancestor text mentions consent
+    for (const cb of cbs) {
+      if (cb.checked || cb.disabled) continue;
+      if (!cb.required && !cb.getAttribute('aria-required')) continue;
+      const section = cb.closest('fieldset, [class*="consent" i], [class*="gdpr" i], [class*="demographic" i]');
+      if (section) return tryCheck(cb);
     }
     return { fixed: false, reason: 'no GDPR consent checkbox found' };
   }
 
+  /**
+   * Runs in the form's frame. Attempts to fill Ashby fields that were reported
+   * as missing after submit (location, yes/no, etc.). Returns a summary of
+   * what was fixed.
+   */
+  async function fixAshbyMissingFields(profileCity) {
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    const visible = (el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const fixed = [];
+
+    // Fix unfilled location/city typeahead inputs
+    if (profileCity) {
+      const entries = document.querySelectorAll('[data-field-path]');
+      for (const entry of entries) {
+        const path = (entry.getAttribute('data-field-path') || '').toLowerCase();
+        const labelEl = entry.querySelector('label, [class*="label" i]');
+        const labelText = (labelEl?.textContent || '').toLowerCase();
+        const isLocation = /location|city|state|where.*based|reside|work.*from/i.test(path) ||
+          /location|city|state|where.*based|reside|work.*from/i.test(labelText);
+        if (!isLocation) continue;
+
+        const input = entry.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])');
+        if (!input || !visible(input)) continue;
+        const currentVal = (input.value || '').trim();
+        if (currentVal && currentVal.length > 2) continue;
+
+        input.focus();
+        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        if (nativeSetter) nativeSetter.call(input, profileCity);
+        else input.value = profileCity;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+
+        let picked = false;
+        for (let i = 0; i < 25; i++) {
+          await delay(120);
+          const opts = document.querySelectorAll('[role="option"], [role="listbox"] li, [class*="suggestion" i], [class*="option" i]:not(select option)');
+          for (const opt of opts) {
+            if (!visible(opt)) continue;
+            const t = (opt.textContent || '').trim();
+            if (!t) continue;
+            opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+            opt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
+            opt.click();
+            picked = true;
+            break;
+          }
+          if (picked) break;
+        }
+        if (picked) fixed.push('location');
+        await delay(200);
+      }
+    }
+
+    // Fix unfilled yes/no button groups (background check, certify, etc.)
+    const yesnoEntries = document.querySelectorAll('[data-field-path]');
+    for (const entry of yesnoEntries) {
+      const yesno = entry.querySelector('[class*="yesno" i], [class*="_yesno_" i]');
+      if (!yesno) continue;
+      const buttons = Array.from(entry.querySelectorAll('button')).filter((b) => visible(b) && (b.textContent || '').trim());
+      if (!buttons.length) continue;
+      const alreadySelected = buttons.some((b) =>
+        b.getAttribute('aria-pressed') === 'true' || b.classList.contains('selected') ||
+        getComputedStyle(b).backgroundColor !== getComputedStyle(buttons[0]).backgroundColor
+      );
+      if (alreadySelected) continue;
+      const labelText = (entry.querySelector('label, [class*="label" i]')?.textContent || '').toLowerCase();
+      const isPositive = /willing|background check|certif|agree|consent|authori[sz]/i.test(labelText);
+      const target = isPositive
+        ? buttons.find((b) => /^yes$/i.test(b.textContent.trim())) || buttons[0]
+        : buttons.find((b) => /^no$/i.test(b.textContent.trim())) || buttons[buttons.length - 1];
+      if (target) {
+        const rect = target.getBoundingClientRect();
+        const evtOpts = { bubbles: true, cancelable: true, button: 0, clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2, view: window };
+        target.dispatchEvent(new PointerEvent('pointerdown', evtOpts));
+        target.dispatchEvent(new MouseEvent('mousedown', evtOpts));
+        target.dispatchEvent(new PointerEvent('pointerup', evtOpts));
+        target.dispatchEvent(new MouseEvent('mouseup', evtOpts));
+        target.click();
+        fixed.push(`yesno:${labelText.slice(0, 40)}`);
+        await delay(150);
+      }
+    }
+
+    return { fixed: fixed.length > 0, fields: fixed, reason: fixed.length ? undefined : 'no fixable fields found' };
+  }
+
+  /**
+   * Runs in the form's frame. Checks required consent checkboxes and clicks
+   * "Yes" on required Ashby yes/no consent fields (background check, certify,
+   * privacy) that Autofill may have missed.
+   */
+  function fixConsentFields() {
+    const CONSENT_RE = /consent|agree|acknowledge|certify|attest|authoriz|background check|privacy|terms|i (have read|understand|confirm)/i;
+    const fixed = [];
+    // 1. Required unchecked checkboxes that look like consent
+    for (const cb of document.querySelectorAll('input[type="checkbox"]')) {
+      if (cb.checked || cb.disabled) continue;
+      if (!cb.matches('[required], [aria-required="true"]')) continue;
+      const wrapper = cb.closest('[data-field-path], .ashby-application-form-field-entry, [class*="field"], label, fieldset, li');
+      const text = (wrapper?.textContent || cb.getAttribute('aria-label') || '').toLowerCase();
+      if (CONSENT_RE.test(text) || text.length < 200) {
+        cb.click();
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+        fixed.push('checkbox: ' + text.replace(/\s+/g, ' ').trim().slice(0, 60));
+      }
+    }
+    // 2. Ashby yes/no button groups where no button is pressed
+    for (const entry of document.querySelectorAll('.ashby-application-form-field-entry, [data-field-path]')) {
+      const yesno = entry.querySelector('[class*="yesno" i], [class*="_yesno_" i]');
+      if (!yesno) continue;
+      const buttons = Array.from(entry.querySelectorAll('button')).filter((b) => {
+        const t = (b.textContent || '').trim();
+        return t && b.offsetWidth > 0 && b.offsetHeight > 0;
+      });
+      if (!buttons.length) continue;
+      const selected = buttons.find((b) =>
+        b.getAttribute('aria-pressed') === 'true' || b.classList.contains('selected') ||
+        getComputedStyle(b).backgroundColor !== getComputedStyle(buttons.find((x) => x !== b) || b).backgroundColor
+      );
+      if (selected) continue;
+      const label = (entry.querySelector('label, [class*="label" i]')?.textContent || '').trim();
+      const yes = buttons.find((b) => /^yes$/i.test((b.textContent || '').trim()));
+      if (yes) {
+        const rect = yes.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+        yes.dispatchEvent(new PointerEvent('pointerdown', opts));
+        yes.dispatchEvent(new MouseEvent('mousedown', opts));
+        yes.dispatchEvent(new PointerEvent('pointerup', opts));
+        yes.dispatchEvent(new MouseEvent('mouseup', opts));
+        yes.dispatchEvent(new MouseEvent('click', opts));
+        fixed.push('yes/no: ' + label.slice(0, 60));
+      }
+    }
+    return { fixed };
+  }
+
   const COUNTRY_ERROR_RE = /select a country|country.*required/i;
   const GDPR_ERROR_RE = /gdpr|demographic.*consent/i;
+  const ASHBY_CORRECTIONS_RE = /form needs corrections|missing entry for required field/i;
 
   /**
    * Runs in the form's frame. Labels of required fields that are empty on the
@@ -460,7 +650,12 @@
     for (const el of document.querySelectorAll('input, select, textarea')) {
       // aria-hidden: react-select's own stand-in, there while its dropdown has no value.
       if (el.disabled || el.getAttribute('aria-hidden') === 'true' || !el.matches('[required], [aria-required="true"]')) continue;
-      if (/^(hidden|file|checkbox|radio|submit|button)$/i.test(el.type || '')) continue;
+      if (/^(hidden|file|submit|button)$/i.test(el.type || '')) continue;
+      if (el.type === 'checkbox') {
+        if (visible(el) && !el.checked) empty.push(labelOf(el));
+        continue;
+      }
+      if (el.type === 'radio') continue;
       // react-select: the input holds only search text; a choice is shown beside it.
       const choices = el.closest('[class*="value-container"], [class*="ValueContainer"]');
       if (choices) {
@@ -526,11 +721,24 @@
         visible(frame) &&
         frame.getBoundingClientRect().height > 100
     );
-    const errors = [
+    const errorEls = [
       ...document.querySelectorAll(
         '[aria-invalid="true"], .field_with_errors, .field-error, .error-message, [class*="error-message"], [class*="errorMessage"], .application-error, .helper-text--error'
       ),
-    ]
+    ];
+    // Ashby shows "Your form needs corrections" in a banner with missing-field messages
+    const ashbyBanner = document.querySelector('[class*="formCorrections" i], [class*="form-corrections" i], [class*="formError" i]');
+    if (ashbyBanner && visible(ashbyBanner)) errorEls.push(ashbyBanner);
+    // Fallback: any visible element whose text starts with "Your form needs corrections"
+    if (!ashbyBanner) {
+      for (const el of document.querySelectorAll('div, section, p, span')) {
+        if (/^your form needs corrections/i.test((el.textContent || '').trim()) && visible(el)) {
+          errorEls.push(el);
+          break;
+        }
+      }
+    }
+    const errors = errorEls
       .filter(visible)
       .map((el) => String(el.innerText || el.getAttribute('aria-label') || el.getAttribute('name') || '').replace(/\s+/g, ' ').trim())
       .filter((t) => t && t.length < 200);
@@ -561,8 +769,8 @@
   }
 
   const CONFIRM_TEXT_RE =
-    /thank(s| you)( so much)? for (applying|your application|submitting|your interest)|application (has been |was )?(successfully )?(submitted|received|sent|complete)|we('ve| have) received your application|successfully (applied|submitted)|you('ve| have) (successfully )?applied|submission (received|successful)/i;
-  const CONFIRM_PATH_RE = /\/(confirmation|thanks|thank-you|thank_you|submitted|success)(\/|$)/i;
+    /thank(s| you)( so much)? for (applying|your application|submitting|your interest|your submission|taking the time)|application (has been |was )?(successfully )?(submitted|received|sent|complete|recorded)|we('ve| have) received your application|successfully (applied|submitted)|you('ve| have) (successfully )?applied|submission (received|successful|complete)|your (application|submission) (is|has been) (received|submitted|complete|recorded)|we (will|('ll)) (review|be in touch|get back)/i;
+  const CONFIRM_PATH_RE = /\/(confirmation|thanks|thank-you|thank_you|submitted|success|applied|complete)(\/|$|\?)/i;
   /** A refusal of the whole application (not one field): it was not sent. */
   /**
    * Greenhouse's "A verification code was sent to … enter the 8-character code to
@@ -757,6 +965,14 @@
 
       setStep('Opening the application form…');
       const url = applicationFormUrl(job.job_link);
+      try {
+        const jobHost = new URL(url).hostname.toLowerCase();
+        if (!SUBMIT_HOST_RE.test(jobHost)) {
+          throw new Stop('failed', `Filled. Auto-submit covers Greenhouse, Lever and Ashby; this form is on ${jobHost}. It should not have been queued.`);
+        }
+      } catch (e) {
+        if (e instanceof Stop) throw e;
+      }
       const tab = await chrome.tabs.create({ url, active: true, windowId });
       tabId = tab.id;
       meta.openedUrl = url;
@@ -818,9 +1034,23 @@
         if (shown) meta.shownAfterFill = shown;
         checkStop();
       }
-      const formFound = typeof scanFoundApplicationForm === 'function' ? scanFoundApplicationForm() : currentFields.length > 0;
+      let formFound = typeof scanFoundApplicationForm === 'function' ? scanFoundApplicationForm() : currentFields.length > 0;
       if (!formFound) {
-        // The scan's own error, when it had one, says more than "no form".
+        // Many Greenhouse pages show an "Apply" button before the form.
+        try {
+          const [clicked] = await chrome.scripting.executeScript({
+            target: { tabId, frameIds: [0] },
+            func: clickApplyButtonOnPage,
+          });
+          if (clicked?.result) {
+            setStep('Clicked Apply — waiting for the form…');
+            await sleep(3000);
+            await autofillThisPage({ useAi: true });
+            formFound = typeof scanFoundApplicationForm === 'function' ? scanFoundApplicationForm() : currentFields.length > 0;
+          }
+        } catch (_) {}
+      }
+      if (!formFound) {
         const why = typeof lastAutofillError === 'string' && lastAutofillError ? ` Scan: ${lastAutofillError.slice(0, 160)}` : '';
         throw new Stop('needs_you', `No application form found on the page (it may need a login or an Apply click).${why}`, meta);
       }
@@ -841,6 +1071,15 @@
         meta.botCheck = rowLabel(ownWords);
         throw new Stop('needs_you', `${OWN_WORDS_STOP} ("${rowLabel(ownWords)}")`, meta);
       }
+      // Check consent checkboxes and Ashby yes/no that Autofill may have missed.
+      try {
+        const [consent] = await chrome.scripting.executeScript({
+          target: { tabId, frameIds: [autofillFrameId || 0] },
+          func: fixConsentFields,
+        });
+        if (consent?.result?.fixed?.length) meta.consentFixed = consent.result.fixed;
+      } catch (_) {}
+
       const open = currentPlan.filter((row) => row.field?.required && row.fillOutcome !== 'filled');
       meta.fields = currentPlan.length;
       meta.filled = currentPlan.filter((row) => row.fillOutcome === 'filled').length;
@@ -1007,12 +1246,16 @@
         if (judged.verdict === 'failed') {
           throw new Stop('needs_you', `The site showed an error after Submit, so it was most likely not sent.${shown}`, meta);
         }
-        errorPolls = judged.verdict === 'errors' ? errorPolls + 1 : 0;
+        // Detect errors from standard error elements OR from Ashby “form needs corrections” in new text
+        const hasStdErrors = judged.verdict === 'errors';
+        const ashbyCorrections = !hasStdErrors && ASHBY_CORRECTIONS_RE.test(judged.newText || '');
+        errorPolls = (hasStdErrors || ashbyCorrections) ? errorPolls + 1 : 0;
         if (errorPolls >= 2) {
-          const errorText = judged.errors.join(' ');
+          const errorText = [...judged.errors, judged.newText || ''].join(' ');
           const isCountry = COUNTRY_ERROR_RE.test(errorText);
           const isGdpr = GDPR_ERROR_RE.test(errorText);
-          if ((isCountry || isGdpr) && !meta.formRetried) {
+          const isAshby = ashbyCorrections || ASHBY_CORRECTIONS_RE.test(errorText);
+          if ((isCountry || isGdpr || isAshby) && !meta.formRetried) {
             meta.formRetried = true;
             setStep('Fixing rejected field and resubmitting…');
             try {
@@ -1030,7 +1273,19 @@
                 });
                 meta.gdprRetry = fix?.result || {};
               }
-              if (meta.countryRetry?.fixed || meta.gdprRetry?.fixed) {
+              if (isAshby) {
+                const profileCity = [
+                  currentProfile?.city,
+                  currentProfile?.state,
+                ].filter(Boolean).join(', ') || '';
+                const [fix] = await chrome.scripting.executeScript({
+                  target: { tabId, frameIds: [autofillFrameId || 0] },
+                  func: fixAshbyMissingFields,
+                  args: [profileCity],
+                });
+                meta.ashbyRetry = fix?.result || {};
+              }
+              if (meta.countryRetry?.fixed || meta.gdprRetry?.fixed || meta.ashbyRetry?.fixed) {
                 await sleep(500);
                 const [reclick] = await chrome.scripting.executeScript({
                   target: { tabId, frameIds: [autofillFrameId || 0] },
@@ -1046,11 +1301,11 @@
               }
             } catch (_) {}
           }
-          meta.pageErrors = judged.errors;
-          const retryNote = [meta.countryRetry?.reason, meta.gdprRetry?.reason].filter(Boolean).join('; ');
+          meta.pageErrors = judged.errors.length ? judged.errors : [judged.newText?.slice(0, 200) || 'form errors'];
+          const retryNote = [meta.countryRetry?.reason, meta.gdprRetry?.reason, meta.ashbyRetry?.reason].filter(Boolean).join('; ');
           throw new Stop(
             'needs_you',
-            `The site rejected the form: ${judged.errors.slice(0, 3).join('; ')}${retryNote ? ` (auto-fix: ${retryNote})` : ''}`,
+            `The site rejected the form: ${(meta.pageErrors).slice(0, 3).join('; ')}${retryNote ? ` (auto-fix: ${retryNote})` : ''}`,
             meta
           );
         }
@@ -1291,9 +1546,7 @@
       const once = !dryRun && Boolean(isRunning() && wf.config?.once);
       logLine(`${dryRun ? 'Dry run' : once ? 'Test run (one job)' : 'Applying'}: ${job.company} · ${job.job_title} (#${job.id}).`);
       const outcome = await applyToJob(job, win?.id);
-      // The gap follows every pressed Submit, sent or not: six Submits in
-      // fourteen minutes had Greenhouse asking for an emailed code each time.
-      next = outcome === 'submitted' || state.lastSubmitClicked
+      next = outcome === 'submitted'
         ? gapAfterSubmitMs()
         : Math.max(5, Number(state.prefs.gapSeconds) || 30) * 1000;
       if (outcome === 'pause') {
@@ -1338,12 +1591,12 @@
   }
 
   /**
-   * After a sent application, a pause picked at random in the setup's range
-   * (2–5 minutes by default): a person's pace, not 30 applications an hour.
+   * After a sent application, a short random pause so consecutive submissions
+   * to the same site don't look automated. The setup's gapMin/gapMax override.
    */
   function gapAfterSubmitMs() {
-    const min = Math.max(0, Number(wf.config?.gapMin ?? 2));
-    const max = Math.max(min, Number(wf.config?.gapMax ?? 5));
+    const min = Math.max(0, Number(wf.config?.gapMin ?? 0.5));
+    const max = Math.max(min, Number(wf.config?.gapMax ?? 1.5));
     const minutes = min + Math.random() * (max - min);
     return Math.max(5000, Math.round(minutes * 60 * 1000));
   }

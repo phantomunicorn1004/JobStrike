@@ -42,6 +42,8 @@ public partial class OverlayWindow : Window
             _settings.OverlayOpacity = Math.Round(1 - e.NewValue, 2);
             ApplyLook();
         };
+        SeeThroughButton.Click += (_, _) => SeeThroughPanel.Visibility =
+            SeeThroughPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         MenuButton.Click += (_, _) => MenuRequested?.Invoke(MenuButton);
         ExitButton.Click += (_, _) => ExitRequested?.Invoke();
         // Double-clicking the top bar (or Win+Up) would maximize a borderless window with no way back.

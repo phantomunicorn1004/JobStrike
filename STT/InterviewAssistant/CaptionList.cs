@@ -172,8 +172,9 @@ sealed class CaptionList(Panel host)
         body.Inlines.Add(sent);
         body.Inlines.Add(waiting);
         // Waiting words stand out in the accent colour (a background would look like selected text).
-        waiting.SetResourceReference(TextElement.ForegroundProperty, "Highlight");
-        sent.SetResourceReference(TextElement.ForegroundProperty, _compact ? "Muted" : "Text");
+        // The interview view's strip stays calm: waiting words in plain text, sent ones faded.
+        waiting.SetResourceReference(TextElement.ForegroundProperty, _compact ? "Text" : "Highlight");
+        sent.SetResourceReference(TextElement.ForegroundProperty, _compact ? "Faint" : "Text");
 
         var time = new TextBlock
         {

@@ -109,8 +109,8 @@ public sealed class AppSettings
     public bool CompactMode { get; set; }
     /// <summary>In interview view, show the real chat page instead of the answer reader.</summary>
     public bool CompactShowsChatPage { get; set; }
-    /// <summary>Interview view shows the message box under the captions (it can be hidden).</summary>
-    public bool CompactMessageBox { get; set; } = true;
+    /// <summary>Interview view shows the message box under the captions (opened to type, then it can be hidden).</summary>
+    public bool CompactMessageBox { get; set; }
     public double AnswerFontSize { get; set; } = 18;
 
     public AppTheme Theme { get; set; } = AppTheme.Dark;
@@ -290,6 +290,15 @@ public sealed class AppSettings
                 CompactCaptionDock = CaptionDock.Bottom;
             }
             LayoutVersion = 2;
+        }
+        if (LayoutVersion < 3)
+        {
+            // Live focus: the interview view's message box opens only to type (the pencil button),
+            // so the strip gives back the room it had for the box.
+            CompactMessageBox = false;
+            CompactCaptionHeight = Math.Max(50, CompactCaptionHeight - MessageBoxHeight);
+            OverlayCaptionHeight = Math.Max(40, OverlayCaptionHeight - MessageBoxHeight);
+            LayoutVersion = 3;
         }
         ChatZoom = Clamp(ChatZoom, 0.25, 5, 1);
         CompactChatZoom = Clamp(CompactChatZoom, 0.25, 5, 0.85);

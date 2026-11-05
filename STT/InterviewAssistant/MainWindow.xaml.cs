@@ -369,6 +369,7 @@ public partial class MainWindow : Window
         CompactDot.ToolTip = connected ? "Live Captions connected" : "Live Captions is not running";
         SourceText.Text = connected ? "Connected" : "Not running";
         StartLcButton.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+        UpdateSessionCard();
         if (connected && _settings.HideLiveCaptionsWindow)
         {
             _lcMover.Hide(_reader.WindowHandle);
@@ -569,11 +570,11 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Hidden, the box leaves its space to the captions and a keyboard button in the status line brings it back.</summary>
+    /// <summary>Interview view: the box sits under the answer while open; the pencil in the status line opens it.</summary>
     void ApplyCompactMessageBox()
     {
         bool show = _settings.CompactMessageBox;
-        CompactComposer.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        CompactComposer.Visibility = show && _settings.CompactMode ? Visibility.Visible : Visibility.Collapsed;
         ShowMessageBoxButton.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -675,15 +676,24 @@ public partial class MainWindow : Window
         SetText(CompactKeyText, sendText);
         SendKeyChip.Visibility = sendKey ? Visibility.Visible : Visibility.Collapsed;
 
+        // Interview view: what is being heard, and when it goes. The countdown runs once the
+        // interviewer pauses with enough words waiting.
         bool showStatus = DateTime.UtcNow < _compactStatusUntil;
+        bool counting = auto && !echo && !_draftEdited && words >= _settings.MinWords;
         SetText(CompactInfo, showStatus ? StatusText.Text
             : !_captionsConnected ? "Live Captions is not running · Menu ▸ Start Live Captions"
             : _draftEdited ? "Your message · Enter sends · Esc = captions"
             : echo ? "Reading the answer aloud · its captions are skipped"
             : words == 0 ? "Listening…"
-            : auto ? $"{wordsText} waiting · sends when the interviewer pauses"
-            : $"{wordsText} waiting");
-        CompactKeyChip.Visibility = sendKey && !showStatus && _captionsConnected ? Visibility.Visible : Visibility.Collapsed;
+            : silent < 0.6 ? $"Hearing the interviewer… {wordsText}"
+            : counting ? $"Sending in {Math.Max(0, pause - silent):0.0}s…"
+            : auto ? $"{wordsText} · waiting for {_settings.MinWords}+ words"
+            : $"{wordsText} waiting · press Send");
+        CompactPauseProgress.Value = counting ? Math.Min(1, silent / pause) : 0;
+        CompactPauseProgress.Visibility = counting ? Visibility.Visible : Visibility.Hidden;
+        WaitingActions.Visibility = words > 0 && !_draftEdited && _captionsConnected ? Visibility.Visible : Visibility.Collapsed;
+        CompactKeyChip.Visibility = sendKey && !showStatus && _captionsConnected && WaitingActions.Visibility != Visibility.Visible
+            ? Visibility.Visible : Visibility.Collapsed;
         CompactInfo.ToolTip = showStatus ? StatusText.Text : ModeSummary(shortForm: false);
         CompactInfo.Foreground = (Brush)FindResource(showStatus ? (_compactStatusIsError ? "Danger" : "Text")
             : !_captionsConnected ? "Danger" : "Muted");
@@ -984,19 +994,27 @@ public partial class MainWindow : Window
     /// menu) while this is still running is ignored: otherwise the same call prompt would be
     /// typed into the new chat twice.
     /// </summary>
-    async void OnNewChatClick(object sender, RoutedEventArgs e)
+    async void OnNewChatClick(object sender, RoutedEventArgs e) => await StartNewChatAsync();
+
+    /// <summary>Starts the interview afresh; false when it could not start.</summary>
+    async Task<bool> StartNewChatAsync()
     {
         if (_startingNewChat)
         {
-            return;
+            return false;
         }
         if (!HasInterviewDetails())
         {
             SetStatus("Add your profile and the job description in Settings first.", error: true);
             OpenSettings("interview");
-            return;
+            return false;
         }
 
+        _sessionStarted = true;
+        ClearAnswerHistory();
+        _lastAnswer = null;
+        _currentType = null;
+        _detailOpen = _openDetailNext = false;
         var provider = _settings.Provider;
         string name = ChatBridge.DisplayName(provider);
         _startingNewChat = true;
@@ -1013,7 +1031,7 @@ public partial class MainWindow : Window
             if (ApiMode)
             {
                 StartApiConversation();
-                return;
+                return true;
             }
             SetStatus($"Opening a new {name} chat…");
             try
@@ -1035,12 +1053,13 @@ public partial class MainWindow : Window
             catch (Exception ex)
             {
                 SetStatus($"Could not open a new chat: {ex.Message}", error: true);
-                return;
+                return false;
             }
             _tracker.DiscardPending();
             _lastSentQuestion = null;
             RenderCaptions();
             await SendCallPromptAsync();
+            return true;
         }
         finally
         {
@@ -1118,9 +1137,19 @@ public partial class MainWindow : Window
         }
         if (reader)
         {
-            _answerId = null;
-            _answerCount = -1;
+            if (_viewingPast >= 0)
+            {
+                LeaveHistory();
+            }
+            // A page is read again from scratch; an API answer is already here (and keeping its id
+            // keeps it out of the earlier answers until the next one arrives).
+            if (!ApiMode)
+            {
+                _answerId = null;
+                _answerCount = -1;
+            }
             UpdateReaderPlaceholder();
+            ShowAnswerState(_renderedAnswerKeys.Count > 0, writing: false);
             OnAnswerTick(null, EventArgs.Empty);
         }
     }
@@ -1173,6 +1202,7 @@ public partial class MainWindow : Window
                 snapshot = snapshot with { Blocks = blocks };
             }
         }
+        var previous = _lastAnswer;
         _lastAnswer = snapshot;
         bool wasAwaiting = _awaitingAnswer;
         // Pages that build only part of the conversation (DeepSeek) change how many messages exist
@@ -1182,14 +1212,23 @@ public partial class MainWindow : Window
             : snapshot.MessageId != _answerId || snapshot.MessageCount != _answerCount;
         int length = snapshot.Blocks.Sum(b => b.Runs.Sum(r => r.Text.Length));
         bool firstLook = _answerId == null;
+        if (isNew && _viewingPast >= 0)
+        {
+            LeaveHistory(); // a new answer always shows
+        }
+        if (isNew && !firstLook)
+        {
+            if (previous != null)
+            {
+                RememberAnswer(previous, _currentType);
+            }
+            _currentType = null;
+            _detailOpen = _openDetailNext;
+            _openDetailNext = false;
+        }
         if (questionType != null)
         {
-            QuestionTypeText.Text = questionType;
-            QuestionTypeChip.Visibility = Visibility.Visible;
-        }
-        else if (isNew && !firstLook)
-        {
-            QuestionTypeChip.Visibility = Visibility.Collapsed;
+            _currentType = questionType;
         }
         if (isNew)
         {
@@ -1201,6 +1240,9 @@ public partial class MainWindow : Window
             // An answer that was already there when the reader opened is not "being written".
             _answerLength = firstLook ? length : 0;
         }
+        // While an earlier answer is shown, the latest one is still followed (state, reading aloud)
+        // but not drawn.
+        bool live = _viewingPast < 0;
         bool grew = length != _answerLength;
         if (grew)
         {
@@ -1228,34 +1270,26 @@ public partial class MainWindow : Window
             _answerTimedOut = true;
         }
 
-        int same = 0;
-        while (same < _renderedAnswerKeys.Count && same < snapshot.Blocks.Count
-               && _renderedAnswerKeys[same] == snapshot.Blocks[same].Key)
+        if (live)
         {
-            same++;
-        }
-        while (document.Blocks.Count > same)
-        {
-            document.Blocks.Remove(document.Blocks.LastBlock);
-        }
-        _renderedAnswerKeys.RemoveRange(same, _renderedAnswerKeys.Count - same);
-        for (int i = same; i < snapshot.Blocks.Count; i++)
-        {
-            document.Blocks.Add(AnswerRenderer.Render(snapshot.Blocks[i], _settings.AnswerFontSize, Application.Current.Resources,
-                lead: i == 0 && snapshot.Blocks[i].Kind == "p"));
-            _renderedAnswerKeys.Add(snapshot.Blocks[i].Key);
-        }
-        if (isNew)
-        {
-            AnswerBox.ScrollToHome();
+            RenderAnswer(snapshot.Blocks, fold: true);
+            if (isNew)
+            {
+                AnswerBox.ScrollToHome();
+            }
         }
 
         bool hasAnswer = snapshot.Blocks.Count > 0;
         // Writing = the page shows its stop button, or the text grew a moment ago (DeepSeek's stop
-        // button carries no label, and every page's text grows while it streams).
+        // button carries no label, and every page's text grows while it streams). An API answer
+        // says itself when it is done, and is not looked at again afterwards.
         bool writing = !_awaitingAnswer && hasAnswer
-            && (snapshot.Generating || DateTime.UtcNow - _answerGrewAt < TimeSpan.FromSeconds(1.5));
-        ShowAnswerState(hasAnswer, writing);
+            && (snapshot.Generating || (!ApiMode && DateTime.UtcNow - _answerGrewAt < TimeSpan.FromSeconds(1.5)));
+        if (live)
+        {
+            ShowQuestionType(_currentType);
+            ShowAnswerState(hasAnswer, writing);
+        }
 
         // Read aloud: the reply to a question just sent, or a new answer that appears while
         // watching; never an answer that was already there. While waiting for the reply the page
@@ -1270,10 +1304,269 @@ public partial class MainWindow : Window
         }
 
         // While waiting, the question just sent is the one that matters, not the old answer's.
-        string? question = _awaitingAnswer ? _lastSentQuestion : snapshot.Question ?? _lastSentQuestion;
-        QuestionText.Text = string.IsNullOrWhiteSpace(question) ? "" : "“" + CaptionTracker.CleanForSending(question) + "”";
-        QuestionText.ToolTip = question;
-        QuestionText.Visibility = string.IsNullOrWhiteSpace(question) ? Visibility.Collapsed : Visibility.Visible;
+        if (live)
+        {
+            ShowQuestion(_awaitingAnswer ? _lastSentQuestion : snapshot.Question ?? _lastSentQuestion);
+        }
+    }
+
+    void ShowQuestion(string? question)
+    {
+        bool none = string.IsNullOrWhiteSpace(question) || question == "Call prompt";
+        string text = none ? "" : CaptionTracker.CleanForSending(question!);
+        QuestionText.Text = QuestionTail(text);
+        QuestionText.ToolTip = none ? null : text;
+        QuestionRow.Visibility = none ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>
+    /// The end of what the interviewer said, where the actual question is (captions often carry a
+    /// long lead-in): about two lines, starting at a word.
+    /// </summary>
+    static string QuestionTail(string text)
+    {
+        const int Keep = 130;
+        if (text.Length <= Keep)
+        {
+            return text;
+        }
+        int start = text.IndexOf(' ', text.Length - Keep);
+        return "…" + text[(start < 0 ? text.Length - Keep : start + 1)..];
+    }
+
+    // The mouse is over the answer: Copy, Listen, text size and the reworks show.
+    bool _readerHover;
+
+    void OnReaderMouseEnter(object sender, MouseEventArgs e) => SetReaderHover(true);
+
+    void OnReaderMouseLeave(object sender, MouseEventArgs e) => SetReaderHover(false);
+
+    // A menu opened from the answer bar (Rework, round) keeps its tools shown while it is open.
+    bool _readerMenuOpen;
+
+    void OpenReaderMenu(ContextMenu menu, object sender, PlacementMode placement)
+    {
+        _readerMenuOpen = true;
+        menu.Closed += (_, _) =>
+        {
+            _readerMenuOpen = false;
+            SetReaderHover(ReaderPanel.IsMouseOver);
+        };
+        OpenMenu(menu, sender, placement);
+    }
+
+    void SetReaderHover(bool hover)
+    {
+        _readerHover = hover || _readerMenuOpen;
+        hover = _readerHover;
+        bool tools = hover && SessionCard.Visibility != Visibility.Visible;
+        ReaderHoverTools.Visibility = tools ? Visibility.Visible : Visibility.Collapsed;
+        InterviewTypeButton.Visibility = tools ? Visibility.Visible : Visibility.Collapsed;
+        UpdateHistoryNav();
+        UpdateAnswerActions();
+    }
+
+    void ShowQuestionType(string? type)
+    {
+        QuestionTypeText.Text = type ?? "";
+        QuestionTypeChip.Visibility = type != null ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Draws an answer, redrawing only the blocks that changed so the text does not jump while it
+    /// streams in. With <paramref name="fold"/>, an API answer's details (after its "---" line) stay
+    /// folded until asked for.
+    /// </summary>
+    void RenderAnswer(IReadOnlyList<AnswerBlock> blocks, bool fold)
+    {
+        int rule = -1;
+        if (ApiMode)
+        {
+            for (int i = 1; i < blocks.Count; i++)
+            {
+                if (blocks[i].Kind == "hr")
+                {
+                    rule = i;
+                    break;
+                }
+            }
+        }
+        _detailBlocks = rule >= 0 ? blocks.Count - rule - 1 : 0;
+        int end = rule >= 0 && fold && !_detailOpen ? rule : blocks.Count;
+        bool lead = blocks.Count > 0 && blocks[0].Kind == "p";
+        var shown = blocks.Take(end).ToList();
+
+        var document = AnswerBox.Document;
+        int same = 0;
+        while (same < _renderedAnswerKeys.Count && same < shown.Count && _renderedAnswerKeys[same] == shown[same].Key)
+        {
+            same++;
+        }
+        while (document.Blocks.Count > same)
+        {
+            document.Blocks.Remove(document.Blocks.LastBlock);
+        }
+        _renderedAnswerKeys.RemoveRange(same, _renderedAnswerKeys.Count - same);
+        for (int i = same; i < shown.Count; i++)
+        {
+            document.Blocks.Add(AnswerRenderer.Render(shown[i], _settings.AnswerFontSize, Application.Current.Resources,
+                lead: lead && ReferenceEquals(shown[i], blocks[0])));
+            _renderedAnswerKeys.Add(shown[i].Key);
+        }
+        UpdateAnswerActions();
+    }
+
+    // The latest answer is done, so it can be reworked (Shorter, Example, More detail, STAR).
+    bool _followUpsReady;
+
+    /// <summary>
+    /// The row under the answer: the details toggle whenever there are details, and the reworks
+    /// while the mouse is over a finished answer (so they never crowd the text during the call).
+    /// </summary>
+    void UpdateAnswerActions()
+    {
+        bool live = _viewingPast < 0;
+        bool details = live && _detailBlocks > 0;
+        bool reworks = live && _followUpsReady && _readerHover;
+        DetailToggle.Visibility = details ? Visibility.Visible : Visibility.Collapsed;
+        DetailToggleText.Text = _detailOpen ? "Hide details" : "Show full answer";
+        DetailToggleGlyph.Text = _detailOpen ? "" : "";
+        ReworkButton.Visibility = reworks ? Visibility.Visible : Visibility.Collapsed;
+        AnswerActions.Visibility = details || reworks ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void OnDetailToggleClick(object sender, RoutedEventArgs e)
+    {
+        _detailOpen = !_detailOpen;
+        if (_lastAnswer != null)
+        {
+            RenderAnswer(_lastAnswer.Blocks, fold: true);
+        }
+    }
+
+    // ---------------------------------------------------------------- earlier answers
+
+    sealed record PastAnswer(AnswerSnapshot Answer, string? Type);
+
+    // The earlier answers of this interview, oldest first, and the one shown (-1: the latest).
+    readonly List<PastAnswer> _history = [];
+    int _viewingPast = -1;
+    const int HistoryLimit = 40;
+
+    // The latest answer's question type, whether its details are unfolded (and the next one's, after
+    // "More detail"), and how many detail blocks it has.
+    string? _currentType;
+    bool _detailOpen;
+    bool _openDetailNext;
+    int _detailBlocks;
+
+    AnswerSnapshot? ShownAnswer => _viewingPast >= 0 ? _history[_viewingPast].Answer : _lastAnswer;
+
+    void RememberAnswer(AnswerSnapshot answer, string? type)
+    {
+        // Replies too short to be an answer (the call prompt's "Ready") are not kept.
+        if (answer.Blocks.Count == 0 || CaptionTracker.CountWords(PlainText(answer)) < 4)
+        {
+            return;
+        }
+        if (answer.MessageId.Length > 0 && _history.Count > 0 && _history[^1].Answer.MessageId == answer.MessageId)
+        {
+            _history[^1] = new PastAnswer(answer, type);
+        }
+        else
+        {
+            _history.Add(new PastAnswer(answer, type));
+        }
+        if (_history.Count > HistoryLimit)
+        {
+            _history.RemoveAt(0);
+        }
+        UpdateHistoryNav();
+    }
+
+    void ClearAnswerHistory()
+    {
+        _history.Clear();
+        _viewingPast = -1;
+        UpdateHistoryNav();
+    }
+
+    void UpdateHistoryNav()
+    {
+        int total = _history.Count + 1;
+        int position = _viewingPast < 0 ? total : _viewingPast + 1;
+        // On hover, and always while an earlier answer is shown (the way back).
+        HistoryNav.Visibility = _history.Count > 0 && (_readerHover || _viewingPast >= 0) ? Visibility.Visible : Visibility.Collapsed;
+        HistoryText.Text = $"{position} / {total}";
+        HistoryPrev.IsEnabled = position > 1;
+        HistoryNext.IsEnabled = _viewingPast >= 0;
+        HistoryLatest.Visibility = _viewingPast >= 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void ShowPast(int index)
+    {
+        _viewingPast = index;
+        var past = _history[index];
+        SelectionPopup.IsOpen = false;
+        AnswerBox.Document.Blocks.Clear();
+        _renderedAnswerKeys.Clear();
+        RenderAnswer(past.Answer.Blocks, fold: false);
+        AnswerBox.ScrollToHome();
+        ShowQuestionType(past.Type);
+        ShowQuestion(past.Answer.Question);
+        AnswerState.Text = "Earlier";
+        AnswerState.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
+        SessionCard.Visibility = Visibility.Collapsed;
+        ReaderEmptyPanel.Visibility = Visibility.Collapsed;
+        AnswerBox.Opacity = 1;
+        SetLoadingBar(false);
+        UpdateAnswerActions();
+        UpdateHistoryNav();
+    }
+
+    /// <summary>Back to the latest answer, drawn again in place of the earlier one.</summary>
+    void LeaveHistory()
+    {
+        _viewingPast = -1;
+        AnswerBox.Document.Blocks.Clear();
+        _renderedAnswerKeys.Clear();
+        if (_lastAnswer != null)
+        {
+            RenderAnswer(_lastAnswer.Blocks, fold: true);
+            ShowQuestion(_lastAnswer.Question ?? _lastSentQuestion);
+        }
+        ShowQuestionType(_currentType);
+        UpdateHistoryNav();
+    }
+
+    void OnHistoryPrevClick(object sender, RoutedEventArgs e)
+    {
+        if (_history.Count > 0)
+        {
+            ShowPast(_viewingPast < 0 ? _history.Count - 1 : Math.Max(0, _viewingPast - 1));
+        }
+    }
+
+    void OnHistoryNextClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewingPast >= 0 && _viewingPast < _history.Count - 1)
+        {
+            ShowPast(_viewingPast + 1);
+        }
+        else
+        {
+            OnHistoryLatestClick(sender, e);
+        }
+    }
+
+    void OnHistoryLatestClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewingPast < 0)
+        {
+            return;
+        }
+        LeaveHistory();
+        ShowAnswerState(_lastAnswer is { Blocks.Count: > 0 }, writing: false);
     }
 
     /// <summary>
@@ -1284,7 +1577,11 @@ public partial class MainWindow : Window
     /// </summary>
     void ShowAnswerState(bool hasAnswer, bool writing)
     {
-        FollowUpChips.Visibility = hasAnswer && !_awaitingAnswer && !writing ? Visibility.Visible : Visibility.Collapsed;
+        if (_viewingPast >= 0)
+        {
+            return; // an earlier answer is shown; its header stays until the latest is shown again
+        }
+        _followUpsReady = hasAnswer && !_awaitingAnswer && !writing;
         string text, brush;
         if (_awaitingAnswer)
         {
@@ -1319,9 +1616,21 @@ public partial class MainWindow : Window
         }
         AnswerState.Text = text;
         AnswerState.SetResourceReference(TextBlock.ForegroundProperty, brush);
-        ReaderEmptyPanel.Visibility = hasAnswer || _awaitingAnswer ? Visibility.Collapsed : Visibility.Visible;
+        // Before the interview starts the start card fills the reader; after that, a short hint.
+        bool idle = !hasAnswer && !_awaitingAnswer;
+        bool showStart = idle && !_sessionStarted;
+        if (showStart && SessionCard.Visibility != Visibility.Visible)
+        {
+            SessionCard.Visibility = Visibility.Visible;
+            UpdateSessionCard();
+        }
+        SessionCard.Visibility = showStart ? Visibility.Visible : Visibility.Collapsed;
+        ReaderEmptyPanel.Visibility = idle && !showStart ? Visibility.Visible : Visibility.Collapsed;
+        ReaderHoverTools.Visibility = _readerHover && !showStart ? Visibility.Visible : Visibility.Collapsed;
+        InterviewTypeButton.Visibility = ReaderHoverTools.Visibility;
         AnswerBox.Opacity = _awaitingAnswer ? 0.3 : 1;
         SetLoadingBar(_awaitingAnswer || writing);
+        UpdateAnswerActions();
     }
 
     /// <summary>
@@ -1331,6 +1640,10 @@ public partial class MainWindow : Window
     /// </summary>
     void BeginAwaitingAnswer(string? answerIdBefore)
     {
+        if (_viewingPast >= 0)
+        {
+            LeaveHistory();
+        }
         _speaker.Stop();
         _awaitingAnswer = true;
         _answerTimedOut = false;
@@ -1339,8 +1652,7 @@ public partial class MainWindow : Window
         if (ReaderVisible)
         {
             ShowAnswerState(hasAnswer: _renderedAnswerKeys.Count > 0, writing: false);
-            QuestionText.Text = string.IsNullOrWhiteSpace(_lastSentQuestion) ? "" : "“" + CaptionTracker.CleanForSending(_lastSentQuestion) + "”";
-            QuestionText.Visibility = string.IsNullOrWhiteSpace(_lastSentQuestion) ? Visibility.Collapsed : Visibility.Visible;
+            ShowQuestion(_lastSentQuestion);
         }
     }
 
@@ -1383,6 +1695,7 @@ public partial class MainWindow : Window
             + $"Send the interviewer's question with {HotkeyOr(keys.Send, "the menu ▸ Send")}"
             + (SendSubmits ? "." : $", then submit with {HotkeyOr(keys.SubmitChatBox, "the menu ▸ Submit chat box")}.")
             + (scrollKeys ? $"\nScroll the answer with {down} / {up}." : "\nScroll the answer with the mouse wheel.");
+        UpdateSessionCard();
     }
 
     static string HotkeyOr(string combo, string fallback) => Hotkey.TryParse(combo, out var hotkey) ? hotkey.ToString() : fallback;
@@ -1417,6 +1730,11 @@ public partial class MainWindow : Window
 
     void RedrawAnswer()
     {
+        if (_viewingPast >= 0)
+        {
+            ShowPast(_viewingPast);
+            return;
+        }
         if (ApiMode)
         {
             if (_lastAnswer != null)
@@ -2085,8 +2403,7 @@ public partial class MainWindow : Window
     {
         // Global hotkeys would swallow the keys pressed while recording new ones.
         _hotkeys?.UnregisterAll();
-        // While the overlay is up this window is minimized, and a dialog owned by it would be hidden.
-        var dialog = new SetupWindow(_settings, tab) { Owner = OverlayActive && _overlay != null ? _overlay : this };
+        var dialog = new SetupWindow(_settings, tab) { Owner = DialogOwner };
         dialog.TestVoiceChanged += (speaking, heard) =>
         {
             _testVoiceSpeaking = speaking;
@@ -2101,14 +2418,191 @@ public partial class MainWindow : Window
             ApplyChosenSettings(dialog, speakAnswersBefore);
             _settings.Save();
         }
+        if (RestoreHotkeys() && saved)
+        {
+            SetStatus("Settings saved.");
+        }
+        UpdateSessionCard();
+    }
+
+    // While the overlay is up this window is minimized, and a dialog owned by it would be hidden.
+    Window DialogOwner => OverlayActive && _overlay != null ? _overlay : this;
+
+    /// <summary>Registers the hotkeys again after a dialog; false (with a message) when some are taken.</summary>
+    bool RestoreHotkeys()
+    {
         var failed = RegisterHotkeys();
         if (failed.Count > 0)
         {
             SetStatus($"Hotkeys already used by another app: {string.Join(", ", failed)}. Pick different ones in Settings.", error: true);
         }
-        else if (saved)
+        return failed.Count == 0;
+    }
+
+    // ---------------------------------------------------------------- start card
+
+    // The interview was started (Start or New chat); until then the empty reader shows the start card.
+    bool _sessionStarted;
+
+    /// <summary>Fills the start card: the job, the round, where answers come from, and what still needs doing.</summary>
+    void UpdateSessionCard()
+    {
+        if (SessionCard.Visibility != Visibility.Visible)
         {
-            SetStatus("Settings saved.");
+            return;
+        }
+        if (SessionRounds.Children.Count == 0)
+        {
+            foreach (var type in InterviewStyles.All)
+            {
+                var chip = new RadioButton
+                {
+                    Content = InterviewStyles.Name(type),
+                    Tag = type,
+                    GroupName = "SessionRound",
+                    Style = (Style)FindResource("ChoiceChip"),
+                };
+                chip.Checked += (_, _) =>
+                {
+                    if (_settings.InterviewType != type)
+                    {
+                        SetInterviewType(type);
+                    }
+                };
+                SessionRounds.Children.Add(chip);
+            }
+        }
+        foreach (RadioButton chip in SessionRounds.Children)
+        {
+            chip.IsChecked = (InterviewType)chip.Tag == _settings.InterviewType;
+        }
+
+        string company = _settings.Company.Trim();
+        string title = JobTitleLine().Match(_settings.JobDescription) is { Success: true } match ? match.Groups[1].Value : "";
+        SessionJobText.Text = string.Join(" · ", new[] { company, title }.Where(s => s.Length > 0)) is { Length: > 0 } job
+            ? job : "No job chosen yet";
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(_settings.Profile)) missing.Add("your profile");
+        if (string.IsNullOrWhiteSpace(_settings.JobDescription)) missing.Add("the job description");
+        if (string.IsNullOrWhiteSpace(_settings.Resume)) missing.Add("your resume");
+        SessionJobDetail.Text = missing.Count == 0 ? "Profile, job description and resume are ready."
+            : "Missing: " + string.Join(", ", missing) + ".";
+
+        bool api = ApiMode;
+        bool keyReady = !api || ApiKey != null;
+        SessionEngineText.Text = api
+            ? DirectChat.DisplayName(_settings.AnswerEngine) + (ApiModel.Length > 0 ? " · " + ApiModel : "")
+            : $"{ChatBridge.DisplayName(_settings.Provider)} page";
+        SessionEngineDetail.Text = !api ? "Your own account in the app's browser: sign in under Full view first."
+            : keyReady ? "Answers start in about a second." : "Add your API key to start.";
+        SessionEngineGlyph.Text = keyReady ? "" : "";
+        SessionEngineGlyph.SetResourceReference(TextBlock.ForegroundProperty, keyReady ? "Success" : "Warning");
+
+        SessionChecks.Children.Clear();
+        AddSessionCheck(_captionsConnected, _captionsConnected ? "Live captions connected" : "Live Captions is not running",
+            "Start", TryLaunchLiveCaptions);
+        AddSessionCheck(HasInterviewDetails(), HasInterviewDetails() ? "Your details are ready" : "Add your profile or the job description",
+            "Add", () => OpenSettings("interview"));
+
+        SessionSpeak.IsChecked = _settings.SpeakAnswers;
+        SessionHint.Text = $"You can also send a question yourself with {HotkeyOr(_settings.Hotkeys.Send, "the Send button")}.";
+    }
+
+    void AddSessionCheck(bool ok, string text, string action, Action fix)
+    {
+        var row = new DockPanel { Margin = new Thickness(0, 6, 0, 0) };
+        if (!ok)
+        {
+            var button = new Button { Content = action, Style = (Style)FindResource("SmallButton"), Padding = new Thickness(10, 2, 10, 2), Margin = new Thickness(10, 0, 0, 0) };
+            button.Click += (_, _) => fix();
+            DockPanel.SetDock(button, Dock.Right);
+            row.Children.Add(button);
+        }
+        var glyph = new TextBlock
+        {
+            Text = ok ? "" : "",
+            FontFamily = (FontFamily)FindResource("IconFont"),
+            FontSize = 13,
+            Margin = new Thickness(0, 1, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        glyph.SetResourceReference(TextBlock.ForegroundProperty, ok ? "Success" : "Warning");
+        DockPanel.SetDock(glyph, Dock.Left);
+        row.Children.Add(glyph);
+        var label = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        label.SetResourceReference(TextBlock.ForegroundProperty, ok ? "Text" : "Strong");
+        row.Children.Add(label);
+        SessionChecks.Children.Add(row);
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\s*Job title:\s*(.+?)\s*$",
+        System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex JobTitleLine();
+
+    void OnSessionEditDetailsClick(object sender, RoutedEventArgs e) => OpenSettings("interview");
+
+    void OnSessionChangeEngineClick(object sender, RoutedEventArgs e) => OpenSettings("answers");
+
+    void OnSessionSpeakClick(object sender, RoutedEventArgs e) => SetSpeakAnswers(SessionSpeak.IsChecked == true);
+
+    /// <summary>Loads the job, description and resume of a JobStrike application straight into the settings.</summary>
+    void OnSessionJobStrikeClick(object sender, RoutedEventArgs e)
+    {
+        // Typing in the sign-in boxes must not trigger the hotkeys.
+        _hotkeys?.UnregisterAll();
+        var dialog = new JobStrikeWindow(_settings, profileIsEmpty: string.IsNullOrWhiteSpace(_settings.Profile)) { Owner = DialogOwner };
+        bool chosen = dialog.ShowDialog() == true;
+        RestoreHotkeys();
+        if (!chosen || dialog.Result is not { } loaded)
+        {
+            return;
+        }
+        var application = loaded.Application;
+        if (application.Company.Length > 0)
+        {
+            _settings.Company = application.Company;
+        }
+        string description = application.JobDescriptionText();
+        if (description.Length > 0)
+        {
+            _settings.JobDescription = description;
+        }
+        if (loaded.Resume.Length > 0)
+        {
+            _settings.Resume = loaded.Resume;
+        }
+        if (dialog.ReplaceProfile && loaded.Profile.Length > 0)
+        {
+            _settings.Profile = loaded.Profile;
+        }
+        _settings.Save();
+        UpdateSessionCard();
+        string name = string.Join(" · ", new[] { application.Company, application.JobTitle }.Where(s => s.Length > 0));
+        SetStatus($"Loaded {(name.Length > 0 ? name : "the application")} from JobStrike."
+            + (loaded.ResumeProblem != null ? " " + loaded.ResumeProblem : ""), error: loaded.ResumeProblem != null);
+    }
+
+    /// <summary>Starts the interview: automatic sending as chosen, a fresh chat, then the interview view.</summary>
+    async void OnSessionStartClick(object sender, RoutedEventArgs e)
+    {
+        if (ApiMode && ApiKey == null)
+        {
+            SetStatus($"Add your {DirectChat.DisplayName(_settings.AnswerEngine)} key first.", error: true);
+            OpenSettings("answers");
+            return;
+        }
+        bool auto = SessionAutoSend.IsChecked == true;
+        if (auto != _settings.AutoSend)
+        {
+            SetAutoSend(auto);
+        }
+        if (!await StartNewChatAsync())
+        {
+            return;
+        }
+        if (!_settings.CompactMode)
+        {
+            ToggleCompact();
         }
     }
 
@@ -2250,10 +2744,6 @@ public partial class MainWindow : Window
             ShowApiAnswer(id, text.ToString(), writing: false, question);
             _conversation.Add(new ChatMessage("assistant", text.ToString()));
             Log.Write($"[{DirectChat.DisplayName(engine)}] answered with {text.Length} characters ({model})");
-            if (_settings.SpeakAnswers && _lastAnswer != null)
-            {
-                _speaker.Listen(AnswerKey(_lastAnswer), SpeechText(_lastAnswer), complete: true, slowly: false);
-            }
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested)
         {
@@ -2343,7 +2833,7 @@ public partial class MainWindow : Window
         _answerId = null;
         _lastAnswer = null;
         _awaitingAnswer = false;
-        QuestionText.Visibility = Visibility.Collapsed;
+        ShowQuestion(null);
         QuestionTypeChip.Visibility = Visibility.Collapsed;
         ShowAnswerState(hasAnswer: false, writing: false);
         string key = ApiKey == null ? " Add your key in Settings ▸ Answers first." : "";
@@ -2366,6 +2856,7 @@ public partial class MainWindow : Window
             ? "Start a fresh conversation (your details and the interview round go with every question)"
             : "Open a fresh chat and send your call prompt (profile, company, job description, resume)";
         InterviewTypeText.Text = InterviewStyles.Name(_settings.InterviewType);
+        UpdateSessionCard();
     }
 
     void OnInterviewTypeClick(object sender, RoutedEventArgs e)
@@ -2375,7 +2866,7 @@ public partial class MainWindow : Window
         {
             menu.Items.Add(MenuItemFor(InterviewStyles.Name(type), () => SetInterviewType(type), type == _settings.InterviewType));
         }
-        OpenMenu(menu, sender, PlacementMode.Bottom);
+        OpenReaderMenu(menu, sender, PlacementMode.Bottom);
     }
 
     void SetInterviewType(InterviewType type)
@@ -2389,14 +2880,24 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Shorter / Example / More detail / STAR: asks the AI to rework its last answer.</summary>
-    async void OnFollowUpClick(object sender, RoutedEventArgs e)
+    void OnReworkClick(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu();
+        foreach (var (label, kind) in new[] { ("Shorter", "Shorter"), ("With an example", "Example"), ("More detail", "Detail"), ("As a STAR story", "STAR") })
+        {
+            menu.Items.Add(MenuItemFor(label, () => _ = ReworkAsync(kind)));
+        }
+        OpenReaderMenu(menu, sender, PlacementMode.Top);
+    }
+
+    async Task ReworkAsync(string kind)
     {
         if (_lastAnswer is not { Blocks.Count: > 0 })
         {
             SetStatus("No answer to rework yet.");
             return;
         }
-        string kind = (string)((Button)sender).Tag;
+        _openDetailNext = kind == "Detail"; // asked for detail: show the reworked answer unfolded
         await SendTextAsync(InterviewStyles.FollowUp(kind), "follow-up", submit: true);
     }
 
@@ -2456,13 +2957,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        AnswerSnapshot? snapshot = ApiMode ? _lastAnswer : bridge == null ? null : await bridge.ReadAnswerAsync();
-        if (snapshot != null && !ApiMode)
-        {
-            var blocks = snapshot.Blocks.ToList();
-            InterviewStyles.TakeQuestionType(blocks);
-            snapshot = snapshot with { Blocks = blocks };
-        }
+        bool past = _viewingPast >= 0;
+        AnswerSnapshot? snapshot = ApiMode || past ? ShownAnswer : bridge == null ? null : await bridge.ReadAnswerAsync();
         if (snapshot == null || snapshot.Blocks.Count == 0)
         {
             SetStatus("No answer to listen to yet.");
@@ -2474,7 +2970,8 @@ public partial class MainWindow : Window
         // Finished only if the reader has been watching it stop growing; otherwise the page is read on
         // (IsFollowing) and the next look decides, so an answer still being written is read to its end.
         bool watched = ReaderVisible || _settings.SpeakAnswers;
-        bool complete = watched && !snapshot.Generating && !_awaitingAnswer && DateTime.UtcNow - _answerGrewAt > TimeSpan.FromSeconds(1.5);
+        bool complete = past
+            || (watched && !snapshot.Generating && !_awaitingAnswer && DateTime.UtcNow - _answerGrewAt > TimeSpan.FromSeconds(1.5));
         if (_speaker.Listen(id, SpeechText(snapshot), complete, slowly))
         {
             SetStatus(slowly ? "Listening again, slower." : "Listening…");
@@ -2570,7 +3067,7 @@ public partial class MainWindow : Window
     {
         string selection = SelectedAnswerText();
         string text = selection.Length > 0 ? selection
-            : _lastAnswer is { Blocks.Count: > 0 } answer ? PlainText(answer) : "";
+            : ShownAnswer is { Blocks.Count: > 0 } answer ? PlainText(answer) : "";
         if (text.Length == 0)
         {
             SetStatus("No answer to copy yet.");

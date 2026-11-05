@@ -20,7 +20,22 @@ public sealed record JobStrikeApplication(
     string Date,
     string JobLink,
     string JobDescription,
-    bool HasResume);
+    bool HasResume)
+{
+    /// <summary>The job description with its title and link on top; empty when JobStrike has none.</summary>
+    public string JobDescriptionText()
+    {
+        if (JobDescription.Length == 0)
+        {
+            return "";
+        }
+        var header = new List<string>();
+        if (JobTitle.Length > 0) header.Add($"Job title: {JobTitle}");
+        if (JobLink.Length > 0) header.Add($"Job link: {JobLink}");
+        header.Add("");
+        return string.Join(Environment.NewLine, header) + JobDescription;
+    }
+}
 
 /// <summary>A pipeline stage as JobStrike names it (Screening, HR, Technical…).</summary>
 public sealed record JobStrikeStage(string Id, string Name);

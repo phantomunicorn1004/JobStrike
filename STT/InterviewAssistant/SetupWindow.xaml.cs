@@ -538,18 +538,8 @@ public partial class SetupWindow : Window
         var application = loaded.Application;
         var kept = new List<string>();
         if (application.Company.Length > 0) CompanyBox.Text = application.Company; else kept.Add("company");
-        if (application.JobDescription.Length > 0)
-        {
-            var header = new List<string>();
-            if (application.JobTitle.Length > 0) header.Add($"Job title: {application.JobTitle}");
-            if (application.JobLink.Length > 0) header.Add($"Job link: {application.JobLink}");
-            header.Add("");
-            JobDescriptionBox.Text = string.Join(Environment.NewLine, header) + application.JobDescription;
-        }
-        else
-        {
-            kept.Add("job description");
-        }
+        string description = application.JobDescriptionText();
+        if (description.Length > 0) JobDescriptionBox.Text = description; else kept.Add("job description");
         if (loaded.Resume.Length > 0)
         {
             ResumeBox.Text = loaded.Resume;

@@ -439,6 +439,24 @@
       'Questions about experience with a skill, tool or kind of work ("Do you have 2+ years of …?", "How many years of …?", "Are you comfortable working in …?") are answered from Work experience:',
       'a skill named in a role (its title, summary, bullets or technologies) counts for that role\'s dates; add those years up and pick the matching option.',
       'Answer No (or the lowest range) when the work experience does not show it; use needs_input for these only when there is no work experience at all.',
+      // Safe-default questions: these have known-safe answers that do not need profile data.
+      'Questions about criminal history, convictions, felonies, or pardons: answer "No" (or the negative option).',
+      'Questions about government officials in the family or politically exposed persons: answer "No".',
+      'Questions about non-compete, non-solicitation, or confidentiality/NDA agreements: answer "No" (or the negative option).',
+      'Questions about willingness to undergo a background check or drug test: answer "Yes" (or the affirmative option).',
+      '"How did you hear about us/this role/this company?" or referral source: answer "Job Board" or "LinkedIn" (pick whichever option is closest).',
+      '"Have you been a customer/user of [company]?" or "Have you used [product]?": answer "No" unless the profile or saved answers say otherwise.',
+      '"What pronouns do you use?": answer "He/Him" when the profile name is clearly masculine, "She/Her" when clearly feminine, otherwise "They/Them" or "Prefer not to say" if that option exists.',
+      '"Current employer" or "Most recent employer": use the first entry from Work experience.',
+      '"Start date" or "When can you start?": answer "Immediately" or the nearest option to now.',
+      '"Website", "Personal website", or "Portfolio URL" (when not LinkedIn or GitHub): answer with the LinkedIn URL from the profile if present, otherwise leave empty and set needs_input.',
+      'Availability or schedule questions ("Are you available to work [specific hours]?", "Can you work [shift]?"): answer "Yes" unless it is an overnight/graveyard shift.',
+      'Questions asking about the candidate\'s location, city, or state of residence: use the city and state from the profile.',
+      '"Have you previously worked at/for/been employed by [company]?" or "Are you a former employee?": answer "No" unless that company appears in Work experience.',
+      '"What experience do you have with [specific product/tool]?" when the product is NOT in the resume: answer "I have not used [product] before, but I am a quick learner with strong technical aptitude." Do not return needs_input.',
+      '"Do you have experience in [industry]?" or "experience in fintech/healthcare/etc.": check Work experience for related roles; answer honestly from what is shown.',
+      'For U.S. citizenship, work authorization, or "Are you legally authorized to work in the US?" questions: answer from the profile\'s citizenship and authorization fields. If those fields exist and contain a value, use it. Only return needs_input when the profile has no citizenship or authorization data at all.',
+      '"Tell us about your relationship with [topic]" or other open-ended opinion questions: give a brief, genuine, first-person answer drawing on general professional experience. Do not return needs_input for these.',
     ];
 
     if (qType === 'behavioral') {

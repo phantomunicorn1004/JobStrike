@@ -23,14 +23,18 @@
                              VerticalAlignment="Center" ToolTip="Green: Live Captions connected" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <TextBlock Text="See-through" FontSize="11" Foreground="{DynamicResource Muted}"
-                               VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <Slider x:Name="OpacitySlider" Width="90" Minimum="0" Maximum="0.85" SmallChange="0.05"
-                            LargeChange="0.1" VerticalAlignment="Center"
-                            WindowChrome.IsHitTestVisibleInChrome="True"
-                            ToolTip="Drag right to see more of the window behind (the text stays solid)" />
-                    <TextBlock x:Name="OpacityLabel" Width="36" FontSize="11" Foreground="{DynamicResource Muted}"
-                               VerticalAlignment="Center" TextAlignment="Right" Margin="0,0,10,0" />
+                    <!-- See-through: one icon; the slider slides out next to it while needed -->
+                    <StackPanel x:Name="SeeThroughPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
+                        <Slider x:Name="OpacitySlider" Width="90" Minimum="0" Maximum="0.85" SmallChange="0.05"
+                                LargeChange="0.1" VerticalAlignment="Center"
+                                WindowChrome.IsHitTestVisibleInChrome="True"
+                                ToolTip="Drag right to see more of the window behind (the text stays solid)" />
+                        <TextBlock x:Name="OpacityLabel" Width="34" FontSize="11" Foreground="{DynamicResource Muted}"
+                                   VerticalAlignment="Center" TextAlignment="Right" Margin="0,0,4,0" />
+                    </StackPanel>
+                    <Button AutomationProperties.Name="See-through" x:Name="SeeThroughButton" Content="&#xE706;"
+                            Style="{StaticResource IconButton}" WindowChrome.IsHitTestVisibleInChrome="True"
+                            ToolTip="See-through: show or hide the slider" />
                     <Button AutomationProperties.Name="Menu" x:Name="MenuButton" Content="&#xE712;" Style="{StaticResource IconButton}"
                             WindowChrome.IsHitTestVisibleInChrome="True"
                             ToolTip="Menu: send, see-through, text size, new chat, Settings" />

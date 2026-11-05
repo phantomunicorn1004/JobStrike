@@ -202,7 +202,7 @@ public sealed record AnswerSnapshot(
 /// <summary>
 /// Turns answer blocks into a readable FlowDocument: large type, hanging bullets, bright bold terms.
 /// The <paramref name="lead"/> paragraph (the answer's opening, the line to say first) is a size
-/// larger and in the brightest colour, like a teleprompter line.
+/// larger, in the brightest colour and on a tinted card, like a teleprompter line.
 /// </summary>
 public static partial class AnswerRenderer
 {
@@ -278,7 +278,11 @@ public static partial class AnswerRenderer
                 {
                     paragraph.FontSize = fontSize * 1.18;
                     paragraph.LineHeight = Math.Round(paragraph.FontSize * 1.45);
-                    paragraph.Margin = new Thickness(0, 0, 0, fontSize * 0.8);
+                    paragraph.Margin = new Thickness(0, 0, 0, fontSize * 0.9);
+                    paragraph.Padding = new Thickness(fontSize * 0.75, fontSize * 0.5, fontSize * 0.75, fontSize * 0.55);
+                    paragraph.Background = (Brush)theme["PendingBg"];
+                    paragraph.BorderBrush = accent;
+                    paragraph.BorderThickness = new Thickness(3, 0, 0, 0);
                     text = strong;
                 }
                 break;

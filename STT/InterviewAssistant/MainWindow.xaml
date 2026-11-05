@@ -1,4 +1,4 @@
-﻿<Window x:Class="InterviewAssistant.MainWindow"
+<Window x:Class="InterviewAssistant.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
@@ -203,32 +203,10 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Interview view: one status line -->
+                <!-- Interview view: what is being heard and when it goes, with Send / Skip -->
                 <Border x:Name="CompactBar" Grid.Row="2" Visibility="Collapsed" Background="{DynamicResource PanelBg}"
-                        BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0" Padding="12,6,8,6">
+                        BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0" Padding="12,6,8,4">
                     <StackPanel>
-                    <!-- The same message box as in full view, two lines high; it can be hidden -->
-                    <DockPanel x:Name="CompactComposer" Margin="0,0,0,5">
-                        <Button DockPanel.Dock="Right" Content="&#xE70D;" Style="{StaticResource IconButton}" FontSize="12"
-                                Width="26" Height="26" Margin="4,0,0,2" VerticalAlignment="Bottom" Click="OnHideMessageBoxClick"
-                                AutomationProperties.Name="Hide the message box"
-                                ToolTip="Hide the message box (the Send hotkey still sends the interviewer's words)" />
-                        <Button x:Name="CompactSendButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Margin="6,0,0,0"
-                                Padding="12,4" VerticalAlignment="Bottom" Click="OnSendNowClick" AutomationProperties.Name="Send message">
-                            <TextBlock Text="&#xE724;" FontFamily="{StaticResource IconFont}" FontSize="12" />
-                        </Button>
-                        <Grid>
-                            <TextBox x:Name="CompactDraftBox" Height="48" FontSize="13" Padding="10,5" AcceptsReturn="True"
-                                     TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" TextChanged="OnDraftChanged"
-                                     PreviewKeyDown="OnDraftKeyDown" GotKeyboardFocus="OnDraftFocused" LostKeyboardFocus="OnDraftUnfocused"
-                                     AutomationProperties.Name="Message to send (interview view)"
-                                     ToolTip="Enter sends · Shift+Enter new line · Esc goes back to the interviewer's words" />
-                            <ScrollViewer x:Name="CompactDraftPreviewScroll" VerticalScrollBarVisibility="Hidden" Focusable="False"
-                                          IsHitTestVisible="False" Margin="12,6,12,4">
-                                <TextBlock x:Name="CompactDraftPreview" TextWrapping="Wrap" FontSize="13" />
-                            </ScrollViewer>
-                        </Grid>
-                    </DockPanel>
                     <DockPanel>
                         <Button AutomationProperties.Name="Full view" x:Name="CompactFullButton" DockPanel.Dock="Right" Content="&#xE740;" Style="{StaticResource IconButton}" Margin="0"
                                 Click="OnToggleCompactClick" ToolTip="Full view: the toolbar and the chat page" />
@@ -244,18 +222,31 @@
                                              Style="{StaticResource MiniTab}" Checked="OnInterviewPaneChecked" />
                             </StackPanel>
                         </Border>
-                        <Button x:Name="ShowMessageBoxButton" DockPanel.Dock="Right" Content="&#xE765;" Style="{StaticResource IconButton}"
+                        <Button x:Name="ShowMessageBoxButton" DockPanel.Dock="Right" Content="&#xE70F;" Style="{StaticResource IconButton}"
                                 FontSize="13" Visibility="Collapsed" Click="OnShowMessageBoxClick"
-                                AutomationProperties.Name="Show the message box" ToolTip="Show the message box, to type or edit a message" />
+                                AutomationProperties.Name="Show the message box" ToolTip="Type a message (or edit the interviewer's words)" />
+                        <!-- While the interviewer's words are waiting: send them now, or drop them -->
+                        <StackPanel x:Name="WaitingActions" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
+                                    Margin="8,0,6,0" Visibility="Collapsed">
+                            <Button x:Name="LiveSendButton" Content="Send" Style="{StaticResource PrimaryButton}" Padding="12,3" FontSize="12"
+                                    Margin="0,0,4,0" Click="OnSendNowClick" AutomationProperties.Name="Send now"
+                                    ToolTip="Send the interviewer's words now" />
+                            <Button x:Name="LiveSkipButton" Content="Skip" Style="{StaticResource SmallButton}" Padding="10,3" FontSize="12"
+                                    Margin="0" Click="OnDiscardClick" AutomationProperties.Name="Skip"
+                                    ToolTip="Drop these words: not a question" />
+                        </StackPanel>
                         <Ellipse x:Name="CompactDot" Width="7" Height="7" Fill="{DynamicResource Danger}"
                                  VerticalAlignment="Center" Margin="0,0,8,0" />
                         <Border x:Name="CompactKeyChip" DockPanel.Dock="Right" Style="{StaticResource KeyChip}"
-                                Margin="6,0,8,0" VerticalAlignment="Center" ToolTip="Send hotkey">
+                                Margin="6,0,0,0" VerticalAlignment="Center" ToolTip="Send hotkey">
                             <TextBlock x:Name="CompactKeyText" />
                         </Border>
-                        <TextBlock x:Name="CompactInfo" FontSize="11.5" Foreground="{DynamicResource Muted}"
+                        <TextBlock x:Name="CompactInfo" FontSize="12" Foreground="{DynamicResource Muted}"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     </DockPanel>
+                    <!-- Automatic sending: fills up while the interviewer pauses, then the words go -->
+                    <ProgressBar x:Name="CompactPauseProgress" Height="3" Margin="0,5,0,0" Minimum="0" Maximum="1"
+                                 Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Accent}" Visibility="Hidden" />
                     </StackPanel>
                 </Border>
             </Grid>
@@ -270,67 +261,64 @@
             <!-- Chat page, and in interview view the answer reader in its place. The chat page keeps
                  running (shrunk to a pixel) because messages are typed into it and answers read from it. -->
             <Grid x:Name="ChatHost">
-                <Border x:Name="ReaderPanel" Background="{DynamicResource WindowBg}" Visibility="Collapsed">
+                <Border x:Name="ReaderPanel" Background="{DynamicResource WindowBg}" Visibility="Collapsed"
+                        MouseEnter="OnReaderMouseEnter" MouseLeave="OnReaderMouseLeave">
                     <DockPanel>
-                        <!-- One slim line, so the answer starts near the top of the window (near the camera):
-                             the status, the question it answers, and the controls. -->
+                        <!-- One slim bar, so the answer starts near the top of the window (near the camera):
+                             what is happening, the round and the question's kind, earlier answers. Copy,
+                             Listen and text size appear only while the mouse is over the answer. -->
                         <Border x:Name="ReaderHeader" DockPanel.Dock="Top" Background="{DynamicResource PanelBg}"
-                                BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="14,6,8,6">
+                                BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="10,5,8,5">
                             <DockPanel>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
-                                    <!-- Copy: the selected text, or else the whole answer -->
-                                    <Button x:Name="CopyButton" AutomationProperties.Name="Copy answer" Style="{StaticResource SmallButton}"
-                                            Padding="12,3" Margin="0,0,6,0" VerticalAlignment="Center" Click="OnCopyAnswerClick">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock x:Name="CopyGlyph" Text="&#xE8C8;" FontFamily="{StaticResource IconFont}" FontSize="12"
-                                                       VerticalAlignment="Center" Margin="0,1,6,0" Foreground="{DynamicResource Accent}" />
-                                            <TextBlock x:Name="CopyText" Text="Copy" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Button>
-                                    <!-- Listen / Stop, like Google Translate's speaker button (text set in code) -->
-                                    <Button x:Name="ListenButton" AutomationProperties.Name="Listen" Style="{StaticResource SmallButton}"
-                                            Padding="12,3" Margin="0,0,8,0" VerticalAlignment="Center" Click="OnListenClick">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock x:Name="ListenGlyph" Text="&#xE767;" FontFamily="{StaticResource IconFont}" FontSize="12"
-                                                       VerticalAlignment="Center" Margin="0,1,6,0" Foreground="{DynamicResource Accent}" />
-                                            <TextBlock x:Name="ListenText" Text="Listen" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Button AutomationProperties.Name="Smaller answer text" Content="A−" Style="{StaticResource IconButton}" FontFamily="{StaticResource UiFont}" FontSize="12.5" Click="OnAnswerFontSmaller" ToolTip="Smaller answer text" />
-                                    <Button AutomationProperties.Name="Larger answer text" Content="A+" Style="{StaticResource IconButton}" FontFamily="{StaticResource UiFont}" FontSize="12.5" Margin="0" Click="OnAnswerFontLarger" ToolTip="Larger answer text" />
+                                <StackPanel x:Name="HistoryNav" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
+                                            Visibility="Collapsed">
+                                    <Button x:Name="HistoryLatest" Content="Latest" Style="{StaticResource SmallButton}" Padding="8,1"
+                                            Margin="6,0,4,0" Click="OnHistoryLatestClick" Visibility="Collapsed"
+                                            ToolTip="Back to the newest answer" />
+                                    <Button x:Name="HistoryPrev" Content="&#xE76B;" Style="{StaticResource IconButton}" Width="26" Height="24"
+                                            FontSize="11" Margin="0" Click="OnHistoryPrevClick"
+                                            AutomationProperties.Name="Earlier answer" ToolTip="Earlier answer" />
+                                    <TextBlock x:Name="HistoryText" FontSize="11.5" Foreground="{DynamicResource Muted}"
+                                               VerticalAlignment="Center" Margin="4,0" />
+                                    <Button x:Name="HistoryNext" Content="&#xE76C;" Style="{StaticResource IconButton}" Width="26" Height="24"
+                                            FontSize="11" Margin="0" Click="OnHistoryNextClick"
+                                            AutomationProperties.Name="Later answer" ToolTip="Later answer" />
                                 </StackPanel>
-                                <DockPanel VerticalAlignment="Center">
-                                    <Border DockPanel.Dock="Left" Style="{StaticResource Pill}" Padding="8,2" VerticalAlignment="Center"
-                                            ToolTip="What the AI is doing: thinking, writing, reading aloud, or done">
+                                <StackPanel x:Name="ReaderHoverTools" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
+                                            Margin="8,0,4,0" Visibility="Collapsed">
+                                    <!-- Copy: the selected text, or else the whole answer (label kept for the Copied state) -->
+                                    <Button x:Name="CopyButton" AutomationProperties.Name="Copy answer" Style="{StaticResource IconButton}"
+                                            Width="28" Height="26" Click="OnCopyAnswerClick" ToolTip="Copy the answer, or the selected text">
+                                        <Grid>
+                                            <TextBlock x:Name="CopyGlyph" Text="&#xE8C8;" FontSize="13" Foreground="{DynamicResource Accent}" />
+                                            <TextBlock x:Name="CopyText" Text="Copy" Visibility="Collapsed" />
+                                        </Grid>
+                                    </Button>
+                                    <!-- Listen / Stop, like Google Translate's speaker button (glyph and tooltip set in code) -->
+                                    <Button x:Name="ListenButton" AutomationProperties.Name="Listen" Style="{StaticResource IconButton}"
+                                            Width="28" Height="26" Click="OnListenClick">
+                                        <Grid>
+                                            <TextBlock x:Name="ListenGlyph" Text="&#xE767;" FontSize="13" Foreground="{DynamicResource Accent}" />
+                                            <TextBlock x:Name="ListenText" Text="Listen" Visibility="Collapsed" />
+                                        </Grid>
+                                    </Button>
+                                    <Button AutomationProperties.Name="Smaller answer text" Content="A−" Style="{StaticResource IconButton}" Width="28" Height="26" FontFamily="{StaticResource UiFont}" FontSize="12.5" Click="OnAnswerFontSmaller" ToolTip="Smaller answer text" />
+                                    <Button AutomationProperties.Name="Larger answer text" Content="A+" Style="{StaticResource IconButton}" Width="28" Height="26" FontFamily="{StaticResource UiFont}" FontSize="12.5" Margin="0" Click="OnAnswerFontLarger" ToolTip="Larger answer text" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Style="{StaticResource Pill}" Padding="8,2" VerticalAlignment="Center" Margin="0,0,6,0"
+                                            ToolTip="What is happening: listening, thinking, writing, reading aloud, or ready">
                                         <TextBlock x:Name="AnswerState" Text="Waiting" FontSize="11.5" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource Muted}" />
                                     </Border>
-                                    <!-- The question this answer is for -->
-                                    <TextBlock x:Name="QuestionText" FontSize="12.5" Foreground="{DynamicResource Muted}"
-                                               TextTrimming="CharacterEllipsis" Margin="10,0,0,0" VerticalAlignment="Center"
-                                               Visibility="Collapsed" />
-                                </DockPanel>
-                            </DockPanel>
-                        </Border>
-                        <!-- Moving bar while the AI is thinking or writing (brush animated in code) -->
-                        <!-- The interview round, the kind of question this answer is for, and quick reworks -->
-                        <Border x:Name="ReaderTools" DockPanel.Dock="Top" Background="{DynamicResource PanelBg}"
-                                BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="10,4,8,4">
-                            <DockPanel>
-                                <StackPanel x:Name="FollowUpChips" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
-                                            Visibility="Collapsed">
-                                    <Button Content="Shorter" Tag="Shorter" Style="{StaticResource SmallButton}" Padding="8,1" Click="OnFollowUpClick"
-                                            ToolTip="Ask again, much shorter" />
-                                    <Button Content="Example" Tag="Example" Style="{StaticResource SmallButton}" Padding="8,1" Click="OnFollowUpClick"
-                                            ToolTip="Add a concrete example from your background" />
-                                    <Button Content="More detail" Tag="Detail" Style="{StaticResource SmallButton}" Padding="8,1" Click="OnFollowUpClick"
-                                            ToolTip="Go deeper, with specifics and numbers" />
-                                    <Button Content="STAR" Tag="STAR" Style="{StaticResource SmallButton}" Padding="8,1" Margin="0" Click="OnFollowUpClick"
-                                            ToolTip="Retell as a STAR story: Situation, Task, Action, Result" />
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border x:Name="QuestionTypeChip" Style="{StaticResource Pill}" Padding="7,1" Margin="0,0,6,0"
+                                            VerticalAlignment="Center" Visibility="Collapsed"
+                                            ToolTip="The kind of question this answer is for; the answer's format follows it">
+                                        <TextBlock x:Name="QuestionTypeText" FontSize="11" Foreground="{DynamicResource Accent}" />
+                                    </Border>
+                                    <!-- Shown while the mouse is over the answer -->
                                     <Button x:Name="InterviewTypeButton" Style="{StaticResource SmallButton}" Padding="8,1" Click="OnInterviewTypeClick"
-                                            AutomationProperties.Name="Interview round"
+                                            AutomationProperties.Name="Interview round" Visibility="Collapsed"
                                             ToolTip="The kind of interview round: it sets what the answers focus on">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock x:Name="InterviewTypeText" VerticalAlignment="Center" />
@@ -338,15 +326,66 @@
                                                        VerticalAlignment="Center" Foreground="{DynamicResource Muted}" />
                                         </StackPanel>
                                     </Button>
-                                    <Border x:Name="QuestionTypeChip" Style="{StaticResource Pill}" Padding="7,1" Margin="4,0,0,0"
-                                            VerticalAlignment="Center" Visibility="Collapsed"
-                                            ToolTip="The kind of question this answer is for; the answer's format follows it">
-                                        <TextBlock x:Name="QuestionTypeText" FontSize="11" Foreground="{DynamicResource Accent}" />
-                                    </Border>
                                 </StackPanel>
                             </DockPanel>
                         </Border>
-                        <Border x:Name="LoadingBar" DockPanel.Dock="Top" Height="4" Visibility="Hidden" />
+                        <!-- Moving bar while the AI is thinking or writing (brush animated in code) -->
+                        <Border x:Name="LoadingBar" DockPanel.Dock="Top" Height="3" Visibility="Hidden" />
+                        <!-- The question this answer is for: its end (where the question is), two lines at most -->
+                        <DockPanel x:Name="QuestionRow" DockPanel.Dock="Top" Margin="16,8,16,0" Visibility="Collapsed">
+                            <TextBlock DockPanel.Dock="Left" Text="Q" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource Accent}"
+                                       Margin="0,1,8,0" />
+                            <TextBlock x:Name="QuestionText" FontSize="12.5" Foreground="{DynamicResource Muted}" TextWrapping="Wrap"
+                                       TextTrimming="CharacterEllipsis" MaxHeight="38" LineHeight="18" />
+                        </DockPanel>
+                        <!-- Interview view: the message box, opened with the pencil to type your own message
+                             (the same text as in full view); it takes room from the answer, not the captions -->
+                        <DockPanel x:Name="CompactComposer" DockPanel.Dock="Bottom" Margin="12,4,10,10" Visibility="Collapsed">
+                            <Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource IconButton}" FontSize="11"
+                                    Width="26" Height="26" Margin="4,0,0,2" VerticalAlignment="Bottom" Click="OnHideMessageBoxClick"
+                                    AutomationProperties.Name="Hide the message box"
+                                    ToolTip="Close the message box (the Send hotkey still sends the interviewer's words)" />
+                            <Button x:Name="CompactSendButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Margin="6,0,0,0"
+                                    Padding="12,4" VerticalAlignment="Bottom" Click="OnSendNowClick" AutomationProperties.Name="Send message">
+                                <TextBlock Text="&#xE724;" FontFamily="{StaticResource IconFont}" FontSize="12" />
+                            </Button>
+                            <Grid>
+                                <TextBox x:Name="CompactDraftBox" Height="48" FontSize="13" Padding="10,5" AcceptsReturn="True"
+                                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" TextChanged="OnDraftChanged"
+                                         PreviewKeyDown="OnDraftKeyDown" GotKeyboardFocus="OnDraftFocused" LostKeyboardFocus="OnDraftUnfocused"
+                                         AutomationProperties.Name="Message to send (interview view)"
+                                         ToolTip="Enter sends · Shift+Enter new line · Esc goes back to the interviewer's words" />
+                                <ScrollViewer x:Name="CompactDraftPreviewScroll" VerticalScrollBarVisibility="Hidden" Focusable="False"
+                                              IsHitTestVisible="False" Margin="12,6,12,4">
+                                    <TextBlock x:Name="CompactDraftPreview" TextWrapping="Wrap" FontSize="13" />
+                                </ScrollViewer>
+                            </Grid>
+                        </DockPanel>
+                        <!-- Under the answer: unfold its details; the reworks appear while the mouse is over the answer -->
+                        <Border x:Name="AnswerActions" DockPanel.Dock="Bottom" Padding="12,6,12,0" Visibility="Collapsed">
+                            <DockPanel>
+                                <Button x:Name="DetailToggle" DockPanel.Dock="Left" Style="{StaticResource SmallButton}" Padding="12,5"
+                                        FontSize="12.5" Margin="0,0,12,6" VerticalAlignment="Top" Click="OnDetailToggleClick"
+                                        Visibility="Collapsed" ToolTip="The full story, design or code behind the talking points">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="DetailToggleGlyph" Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="10"
+                                                   VerticalAlignment="Center" Margin="0,1,7,0" Foreground="{DynamicResource Accent}" />
+                                        <TextBlock x:Name="DetailToggleText" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <!-- Rework: Shorter, Example, More detail, STAR (a menu, so one button instead of four) -->
+                                <Button x:Name="ReworkButton" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Style="{StaticResource SmallButton}" Padding="12,5" FontSize="12.5" Margin="0,0,0,6"
+                                        Click="OnReworkClick" Visibility="Collapsed" AutomationProperties.Name="Rework"
+                                        ToolTip="Ask for this answer shorter, with an example, in more detail, or as a STAR story">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Rework" VerticalAlignment="Center" />
+                                        <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="7,1,0,0"
+                                                   VerticalAlignment="Center" Foreground="{DynamicResource Muted}" />
+                                    </StackPanel>
+                                </Button>
+                            </DockPanel>
+                        </Border>
                         <Grid>
                             <!-- The selection stays visible while another app is in front, so the Listen
                                  hotkey can read it from there. -->
@@ -396,6 +435,92 @@
                                 <TextBlock x:Name="ReaderEmpty" Foreground="{DynamicResource Muted}" FontSize="12.5"
                                            TextWrapping="Wrap" TextAlignment="Center" LineHeight="20" />
                             </StackPanel>
+
+                            <!-- Start interview: the job, the round, where answers come from and a ready check, then one button -->
+                            <ScrollViewer x:Name="SessionCard" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                          Focusable="False" Visibility="Collapsed">
+                                <ContentControl Style="{StaticResource Card}" MaxWidth="560" Margin="16,20" Padding="24,20,24,22"
+                                                VerticalAlignment="Center">
+                                    <StackPanel>
+                                        <TextBlock Text="Start your interview" FontFamily="{StaticResource DisplayFont}" FontSize="19"
+                                                   FontWeight="SemiBold" Foreground="{DynamicResource Strong}" />
+                                        <TextBlock Text="Check these, then press Start. Each question is answered as the interviewer asks it."
+                                                   Foreground="{DynamicResource Muted}" FontSize="12.5" TextWrapping="Wrap" Margin="0,4,0,18" />
+
+                                        <TextBlock Text="JOB" Style="{StaticResource SectionLabel}" Margin="0,0,0,6" />
+                                        <Border Background="{DynamicResource InputBg}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                                                CornerRadius="10" Padding="12,10">
+                                            <DockPanel>
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                                                    <Button Content="From JobStrike" Style="{StaticResource SmallButton}" Padding="10,4"
+                                                            Click="OnSessionJobStrikeClick"
+                                                            ToolTip="Load the company, job description and resume of one of your JobStrike applications" />
+                                                    <Button Content="Edit" Style="{StaticResource SmallButton}" Padding="10,4" Margin="0"
+                                                            Click="OnSessionEditDetailsClick" ToolTip="Your profile, the job description and your resume" />
+                                                </StackPanel>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock x:Name="SessionJobText" FontSize="13.5" FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource Strong}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock x:Name="SessionJobDetail" FontSize="11.5" Foreground="{DynamicResource Muted}"
+                                                               TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <TextBlock Text="ROUND" Style="{StaticResource SectionLabel}" Margin="0,16,0,6" />
+                                        <WrapPanel x:Name="SessionRounds" Margin="0,0,0,-6" />
+
+                                        <TextBlock Text="ANSWERS FROM" Style="{StaticResource SectionLabel}" Margin="0,16,0,6" />
+                                        <Border Background="{DynamicResource InputBg}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                                                CornerRadius="10" Padding="12,10">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="Change" Style="{StaticResource SmallButton}" Padding="10,4"
+                                                        Margin="10,0,0,0" VerticalAlignment="Center" Click="OnSessionChangeEngineClick"
+                                                        ToolTip="Settings ▸ Answers: the chat page, or an AI API and its key" />
+                                                <TextBlock x:Name="SessionEngineGlyph" DockPanel.Dock="Left" FontFamily="{StaticResource IconFont}"
+                                                           FontSize="14" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock x:Name="SessionEngineText" FontSize="13.5" FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource Strong}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock x:Name="SessionEngineDetail" FontSize="11.5" Foreground="{DynamicResource Muted}"
+                                                               TextWrapping="Wrap" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+
+                                        <TextBlock Text="READY CHECK" Style="{StaticResource SectionLabel}" Margin="0,16,0,4" />
+                                        <StackPanel x:Name="SessionChecks" />
+
+                                        <Border Height="1" Background="{DynamicResource Border}" Margin="0,12,0,12" />
+                                        <CheckBox x:Name="SessionAutoSend" Style="{StaticResource ToggleSwitch}" IsChecked="True">
+                                            <StackPanel>
+                                                <TextBlock Text="Send questions automatically" FontWeight="SemiBold" />
+                                                <TextBlock Text="When the interviewer pauses after speaking." FontSize="11.5"
+                                                           Foreground="{DynamicResource Muted}" Margin="0,1,0,0" />
+                                            </StackPanel>
+                                        </CheckBox>
+                                        <CheckBox x:Name="SessionSpeak" Style="{StaticResource ToggleSwitch}" Margin="0,10,0,0"
+                                                  Click="OnSessionSpeakClick">
+                                            <StackPanel>
+                                                <TextBlock Text="Read answers aloud" FontWeight="SemiBold" />
+                                                <TextBlock Text="Into your headphones, as each answer arrives." FontSize="11.5"
+                                                           Foreground="{DynamicResource Muted}" Margin="0,1,0,0" />
+                                            </StackPanel>
+                                        </CheckBox>
+
+                                        <Button x:Name="SessionStartButton" Style="{StaticResource PrimaryButton}" Padding="0,11" Margin="0,20,0,0"
+                                                FontSize="14" Click="OnSessionStartClick" AutomationProperties.Name="Start interview">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" FontSize="13"
+                                                           VerticalAlignment="Center" Margin="0,1,10,0" />
+                                                <TextBlock Text="Start interview" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+                                        <TextBlock x:Name="SessionHint" FontSize="11.5" Foreground="{DynamicResource Muted}"
+                                                   TextWrapping="Wrap" TextAlignment="Center" Margin="0,10,0,0" />
+                                    </StackPanel>
+                                </ContentControl>
+                            </ScrollViewer>
                         </Grid>
                     </DockPanel>
                 </Border>

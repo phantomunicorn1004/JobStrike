@@ -16,6 +16,7 @@ const AUTOGEN_SELECTORS = {
   promptBox: "#prompt-textarea",
   composer: "form[data-chatgpt-composer]",
   composerBox: 'div.ProseMirror[contenteditable="true"][role="textbox"][aria-label="Ask ChatGPT"]',
+  composerBoxAlt: 'div.ProseMirror[contenteditable="true"][role="textbox"]',
   sendButton: 'button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"], button[type="submit"][aria-label="Send"]',
   legacySendButton: '[data-testid="send-button"]',
   modelTrigger: 'button[aria-label="Select ChatGPT model"]',
@@ -875,7 +876,10 @@ function autogenIsVisible(el) {
 const AUTOGEN_PROMPT_BOX_FALLBACKS = [
   'div.ProseMirror[contenteditable="true"]',
   '[contenteditable="true"][role="textbox"]',
+  '[contenteditable="true"][data-placeholder]',
   'textarea[name="prompt-textarea"]',
+  'textarea[placeholder*="ChatGPT" i]',
+  'textarea[placeholder*="Message" i]',
   "form textarea",
 ];
 const AUTOGEN_CONVERSATION_PART = '[data-message-author-role], [data-testid^="conversation-turn-"]';
@@ -888,6 +892,16 @@ function autogenFindPromptBox() {
   for (const form of forms) {
     const box = form.querySelector(AUTOGEN_SELECTORS.composerBox);
     if (box && autogenIsVisible(box)) return box;
+  }
+  // Try alt composerBox (without aria-label, in case OpenAI renamed it)
+  for (const form of forms) {
+    const box = form.querySelector(AUTOGEN_SELECTORS.composerBoxAlt);
+    if (box && autogenIsVisible(box)) return box;
+  }
+  // Any form with a contenteditable or textarea inside it
+  for (const form of document.querySelectorAll("form")) {
+    const ed = form.querySelector('[contenteditable="true"], textarea');
+    if (ed && autogenIsVisible(ed) && !ed.closest(AUTOGEN_CONVERSATION_PART)) return ed;
   }
   // ChatGPT renames labels and attributes often: take the lowest visible editor
   // that is not inside the conversation (editing an old message opens one there).

@@ -2680,7 +2680,6 @@
     }
     const path = getAshbyFieldPath(el);
     if (path && path.includes('autofill')) return true;
-    if (/consent/i.test(el.getAttribute('name') || '')) return true;
     return false;
   }
 
@@ -4762,7 +4761,10 @@
       if (ariaMulti || isWorkdayMultiselectInput(el)) return 'multi-combobox';
       if (isYesNoOptions(options)) return 'yes-no';
       if (!options.length && looksLikeYesNoQuestion(el.__questionTextHint, category)) return 'yes-no';
-      if (isGreenhouseLocationCombobox(el) || isRipplingLocationInput(el) || (category === 'city' && isReactSelectCombobox(el))) {
+      if (isGreenhouseLocationCombobox(el) || isRipplingLocationInput(el) || (category === 'city' && (isReactSelectCombobox(el) || isAshbyFormContext()))) {
+        return 'search-autocomplete';
+      }
+      if (isAshbyFormContext() && /\b(location|city|state|where.*based|reside|work.*from|metro)\b/i.test(el.__questionTextHint || '')) {
         return 'search-autocomplete';
       }
       return 'combobox';
@@ -4803,6 +4805,9 @@
 
     if (tagName === 'INPUT') {
       if ((inputType === 'text' || inputType === 'search') && (isSearchAutocomplete(el) || isLeverLocationInput(el))) {
+        return 'search-autocomplete';
+      }
+      if ((inputType === 'text' || inputType === 'search') && isAshbyFormContext() && (category === 'city' || /\b(location|city|state|where.*based|reside|work.*from|metro)\b/i.test(el.__questionTextHint || ''))) {
         return 'search-autocomplete';
       }
       const map = {
