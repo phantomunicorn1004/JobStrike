@@ -711,6 +711,34 @@ export function AutobidMonitorClient() {
     }
   };
 
+  const failedResumes = useMemo(() => list.filter((job) => job.stage === "gen_failed"), [list]);
+  const [retryingAll, setRetryingAll] = useState(false);
+
+  const retryFailedResumes = async () => {
+    setRetryingAll(true);
+    try {
+      const ids = failedResumes.map((job) => job.id);
+      let queued = 0;
+      for (let i = 0; i < ids.length; i += 200) {
+        const res = await fetch("/api/autogen/enqueue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ ids: ids.slice(i, i + 200) }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { queued?: number; error?: string };
+        if (!res.ok) throw new Error(data.error || "Could not retry.");
+        queued += Number(data.queued) || 0;
+      }
+      toast.success(`${queued} resume${queued === 1 ? "" : "s"} will be written again.`);
+      void load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not retry.");
+    } finally {
+      setRetryingAll(false);
+    }
+  };
+
   const foundList = (found ?? []).filter((f) => activeProfileId === null || f.profileId === activeProfileId);
   const matched = foundList.filter((f) => f.status === "queued" || f.status === "passed").length;
 
@@ -828,7 +856,21 @@ export function AutobidMonitorClient() {
               ))}
             </TabsList>
             </div>
-            <div className="relative sm:w-64">
+            <div className="flex items-center gap-2">
+            {tab === "attention" && failedResumes.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0"
+                disabled={retryingAll}
+                onClick={() => void retryFailedResumes()}
+                title="Write the resume again for every job whose resume failed"
+              >
+                {retryingAll ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+                Retry {failedResumes.length} failed resume{failedResumes.length === 1 ? "" : "s"}
+              </Button>
+            )}
+            <div className="relative flex-1 sm:w-64 sm:flex-none">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
@@ -836,6 +878,7 @@ export function AutobidMonitorClient() {
                 placeholder="Search company or title"
                 className="h-9 pl-8"
               />
+            </div>
             </div>
           </div>
 

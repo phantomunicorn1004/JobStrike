@@ -302,7 +302,7 @@ function autogenIsGenerating() {
   for (const btn of nodes) {
     if (autogenIsVisible(btn)) return true;
   }
-  const form = document.querySelector(AUTOGEN_SELECTORS.composer);
+  const form = document.querySelector(AUTOGEN_SELECTORS.composer) || autogenComposerOf(autogenFindPromptBox());
   if (!form) return false;
   for (const btn of form.querySelectorAll("button")) {
     const label = (btn.getAttribute("aria-label") || "").trim().toLowerCase();
@@ -711,7 +711,8 @@ function autogenPruneOldTurns() {
 
 function autogenComposerHasPayload(box) {
   if (box?.textContent && box.textContent.trim()) return true;
-  const form = box?.closest?.("form");
+  if (typeof box?.value === "string" && box.value.trim()) return true;
+  const form = autogenComposerOf(box);
   if (!form) return false;
   if (form.querySelector('[data-testid*="attachment"], [data-testid*="file"]')) return true;
   return /pasted text/i.test(form.innerText || "");
@@ -870,6 +871,15 @@ function autogenIsVisible(el) {
   return rect.width > 0 && rect.height > 0;
 }
 
+/** Editors ChatGPT's composer has used, tried when the exact selectors above no longer match. */
+const AUTOGEN_PROMPT_BOX_FALLBACKS = [
+  'div.ProseMirror[contenteditable="true"]',
+  '[contenteditable="true"][role="textbox"]',
+  'textarea[name="prompt-textarea"]',
+  "form textarea",
+];
+const AUTOGEN_CONVERSATION_PART = '[data-message-author-role], [data-testid^="conversation-turn-"]';
+
 /** Visible `#prompt-textarea` when that is the on-screen editor; otherwise the composer ProseMirror. */
 function autogenFindPromptBox() {
   const legacy = document.querySelector(AUTOGEN_SELECTORS.promptBox);
@@ -879,7 +889,22 @@ function autogenFindPromptBox() {
     const box = form.querySelector(AUTOGEN_SELECTORS.composerBox);
     if (box && autogenIsVisible(box)) return box;
   }
+  // ChatGPT renames labels and attributes often: take the lowest visible editor
+  // that is not inside the conversation (editing an old message opens one there).
+  for (const selector of AUTOGEN_PROMPT_BOX_FALLBACKS) {
+    let best = null;
+    for (const el of document.querySelectorAll(selector)) {
+      if (!autogenIsVisible(el) || el.closest(AUTOGEN_CONVERSATION_PART)) continue;
+      if (!best || el.getBoundingClientRect().bottom > best.getBoundingClientRect().bottom) best = el;
+    }
+    if (best) return best;
+  }
   return null;
+}
+
+/** The composer around the prompt box: ChatGPT's marked form, else the nearest form. */
+function autogenComposerOf(box) {
+  return box?.closest?.(AUTOGEN_SELECTORS.composer) || box?.closest?.("form") || null;
 }
 
 function autogenWaitForPromptBox(timeoutMs) {
@@ -902,9 +927,12 @@ function autogenWaitForPromptBox(timeoutMs) {
 
 /** Send replaces Start Voice only after the composer has text. Dictate is a different control. */
 function autogenFindSendButton(box) {
-  const form = box?.closest?.(AUTOGEN_SELECTORS.composer);
+  const form = autogenComposerOf(box);
   if (form) {
-    return form.querySelector(AUTOGEN_SELECTORS.sendButton) || form.querySelector(AUTOGEN_SELECTORS.legacySendButton);
+    const labelled = [...form.querySelectorAll("button")].find((btn) =>
+      /^send\b/i.test((btn.getAttribute("aria-label") || "").trim()),
+    );
+    return form.querySelector(AUTOGEN_SELECTORS.sendButton) || form.querySelector(AUTOGEN_SELECTORS.legacySendButton) || labelled || null;
   }
   return document.querySelector(AUTOGEN_SELECTORS.sendButton) || document.querySelector(AUTOGEN_SELECTORS.legacySendButton);
 }
