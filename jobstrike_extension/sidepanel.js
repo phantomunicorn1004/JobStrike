@@ -190,7 +190,9 @@ const STANDARD_ELIGIBILITY = {
   citizenship: 'US citizen',
   securityClearance: 'No',
   languages: 'English',
-  country: 'United States'
+  country: 'United States',
+  howDidYouHear: 'Company Website',
+  noticePeriod: 'Immediately'
 };
 
 /**
@@ -4393,6 +4395,15 @@ function isSelfIdQuestion(row) {
   return SELF_ID_QUESTION_RE.test(text);
 }
 
+const DECLINE_RE = /decline|prefer not|do not wish|don.?t wish|choose not|rather not|not (to )?disclose/i;
+function pickDeclineOption(options) {
+  if (!Array.isArray(options)) return '';
+  for (const opt of options) {
+    if (DECLINE_RE.test(String(opt))) return String(opt).trim();
+  }
+  return '';
+}
+
 /**
  * AI is for questions nothing else can answer. A field the profile is meant to
  * supply (name, links, salary, work authorisation, …) is a profile field even
@@ -4604,6 +4615,11 @@ function recordUsedExample(value) {
     if (sessionUsedExamples.length > 12) sessionUsedExamples.shift(); // keep last 12
   }
 }
+
+const AI_FALLBACK_CATEGORIES = new Set([
+  'how_heard', 'notice_period', 'salary', 'relocation', 'experience_years',
+  'current_company', 'education', 'school', 'degree', 'graduation_year'
+]);
 
 /** Categories that should never invent values — use profile (or skip) instead of AI prose. */
 const DETERMINISTIC_PROFILE_CATEGORIES = new Set([
@@ -5560,8 +5576,29 @@ async function fillSelectedFieldsWithAi({ only = null } = {}) {
         continue;
       }
 
-      // Self-identification is never guessed: it is answered from the profile or not at all.
+      // Self-identification is never guessed: it is answered from the profile
+      // or, for required fields with a "Decline" option, auto-declined.
       if (isSelfIdQuestion(row) && !isRowFillable(row)) {
+        if (row.field?.required && row.field?.options?.length) {
+          const decline = pickDeclineOption(row.field.options);
+          if (decline) {
+            row.suggestedValue = decline;
+            row.source = 'profile';
+            row.status = 'Ready — decline to self-identify';
+            const payload = [buildFillPayloadFromRow(row)];
+            const thresholds = {
+              selectMatchThreshold: currentSettings.selectMatchThreshold ?? defaultSettings.selectMatchThreshold,
+              radioMatchThreshold: currentSettings.radioMatchThreshold ?? defaultSettings.radioMatchThreshold
+            };
+            const { response } = await sendToFormFrame({ action: 'fillApplicationFields', fields: payload, thresholds });
+            const result = (response?.results || [])[0];
+            applyFillResultToPlanRow(row, result || { success: false }, { usedAi: false });
+            updateFieldRowAppearance(rowEl, row);
+            if (result?.success) filled += 1; else failed += 1;
+            await delay(200);
+            continue;
+          }
+        }
         row.status = 'Left blank — set it in the profile to answer';
         updateFieldRowAppearance(rowEl, row);
         continue;
@@ -5584,12 +5621,17 @@ async function fillSelectedFieldsWithAi({ only = null } = {}) {
         continue;
       }
 
-      // A profile field with no value stays empty and says where to add it.
+      // A profile field with no value: most are skipped, but certain categories
+      // can be answered from the resume / extra facts by the AI.
       if (!rowNeedsAi(row) && !isRowFillable(row)) {
-        if (isProfileField(row)) row.status = 'Missing in profile — add it under Autofill details';
-        updateFieldRowAppearance(rowEl, row);
-        skippedProfile += 1;
-        continue;
+        if (isProfileField(row) && AI_FALLBACK_CATEGORIES.has(row.field?.fieldCategory)) {
+          // Fall through — let AI answer from the resume and extra facts.
+        } else {
+          if (isProfileField(row)) row.status = 'Missing in profile — add it under Autofill details';
+          updateFieldRowAppearance(rowEl, row);
+          skippedProfile += 1;
+          continue;
+        }
       }
 
       // Keep trusted profile / kit / custom answers — don't overwrite with LLM.

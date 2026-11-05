@@ -1080,13 +1080,18 @@
       await finish(job, stop.outcome, detail, { ...meta, ...stop.meta, submitClicked: submitClicked || undefined });
       logLine(`Needs you — ${job.company} · ${job.job_title} (#${job.id}): ${detail}`);
       // Left open for the user (a failed one too: it shows what happened).
-      if (tabId) keepTabOpen(tabId, PERSON_CHECK_RE.test(detail));
+      const isPerson = PERSON_CHECK_RE.test(detail);
+      if (tabId) keepTabOpen(tabId, isPerson);
+      if (tabId && isPerson && stop.outcome === 'needs_you') {
+        const before = await probeOutcome(tabId).catch(() => ({ hrefs: [], lines: [], formPresent: false, captcha: false, errors: [] }));
+        watchTab(tabId, job, before);
+      }
       return stop.outcome;
     }
   }
 
-  /** A stop the user finishes in the tab: a code to enter, a CAPTCHA, Ashby's Submit. */
-  const PERSON_CHECK_RE = /verification code|CAPTCHA|Ready for your click/i;
+  /** A stop the user finishes in the tab: a code, a CAPTCHA, Ashby's Submit, or an unsupported host where Submit is manual. */
+  const PERSON_CHECK_RE = /verification code|CAPTCHA|Ready for your click|Auto-submit covers/i;
 
   /**
    * Running all day, stopped jobs would fill the window: only the newest few
@@ -1103,6 +1108,92 @@
       chrome.tabs.remove(state[list].shift()).catch(() => {});
     }
   }
+
+  // ───────────────────── Tab watcher (auto-resume) ─────────────────────
+  //
+  // Person-check tabs (Ashby Submit, CAPTCHA, verification code) are polled
+  // in the background. When the user completes the action and the page shows
+  // a confirmation, the watcher promotes the job from needs_you → submitted
+  // via the /confirm API, then registers it in Resume DB and closes the tab.
+
+  const TAB_WATCH_POLL_MS = 10_000;
+  const TAB_WATCH_TIMEOUT_MS = 30 * 60_000;
+  const watchedTabs = new Map();
+  let tabWatchTimer = null;
+
+  function watchTab(tabId, job, before) {
+    watchedTabs.set(tabId, {
+      job,
+      before,
+      startedAt: Date.now(),
+      confirmPolls: 0,
+    });
+    if (!tabWatchTimer) {
+      tabWatchTimer = setInterval(() => void tabWatchTick(), TAB_WATCH_POLL_MS);
+    }
+  }
+
+  async function tabWatchTick() {
+    if (!watchedTabs.size) {
+      clearInterval(tabWatchTimer);
+      tabWatchTimer = null;
+      return;
+    }
+    for (const [tabId, ctx] of watchedTabs) {
+      if (Date.now() - ctx.startedAt > TAB_WATCH_TIMEOUT_MS) {
+        watchedTabs.delete(tabId);
+        logLine(`Tab watcher: timed out on #${ctx.job.id} (${ctx.job.company}).`);
+        continue;
+      }
+      try {
+        await chrome.tabs.get(tabId);
+      } catch (_) {
+        watchedTabs.delete(tabId);
+        continue;
+      }
+      try {
+        const outcome = await probeOutcome(tabId);
+        const judged = judgeAfterSubmit(ctx.before, outcome);
+        if (judged.verdict === 'confirmed') {
+          ctx.confirmPolls = judged.by === 'form_replaced' ? ctx.confirmPolls + 1 : 2;
+          if (ctx.confirmPolls < 2) continue;
+          watchedTabs.delete(tabId);
+          state.personTabs = state.personTabs.filter((id) => id !== tabId);
+          try {
+            await bid().autobidFetch(`/api/autobid/${ctx.job.id}/confirm`, {
+              method: 'POST',
+              body: { confirmedBy: judged.by, confirmText: judged.newText },
+            });
+            logLine(`Tab watcher: confirmed #${ctx.job.id} (${ctx.job.company}) — ${judged.by}.`);
+            toast(`${ctx.job.company}: application confirmed after your action.`, 'success');
+          } catch (e) {
+            logLine(`Tab watcher: could not confirm #${ctx.job.id}: ${e?.message || e}`);
+          }
+          try {
+            await bid().registerForAutobid();
+            logLine(`Tab watcher: registered #${ctx.job.id} in Resume DB.`);
+          } catch (_) {
+            logLine(`Tab watcher: #${ctx.job.id} confirmed but Register failed — do it from the Bid tab.`);
+          }
+          await chrome.tabs.remove(tabId).catch(() => {});
+        } else {
+          ctx.confirmPolls = 0;
+        }
+      } catch (_) {
+        // Tab not ready: try next tick.
+      }
+    }
+    if (!watchedTabs.size) {
+      clearInterval(tabWatchTimer);
+      tabWatchTimer = null;
+    }
+  }
+
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    watchedTabs.delete(tabId);
+    state.personTabs = state.personTabs.filter((id) => id !== tabId);
+    state.tabsLeftOpen = state.tabsLeftOpen.filter((id) => id !== tabId);
+  });
 
   // ───────────────────────────── Loop ─────────────────────────────
 

@@ -316,6 +316,48 @@ export async function finishBid(
   return Boolean(data);
 }
 
+/**
+ * Promotes a needs_you job to submitted: the user took the required action
+ * (clicked Submit on Ashby, solved a CAPTCHA, entered a verification code)
+ * and the tab watcher saw the confirmation. Reads the current meta first so
+ * the step history is kept.
+ */
+export async function confirmBid(
+  userId: string,
+  id: number,
+  confirmedBy: string,
+  confirmText: string,
+): Promise<boolean> {
+  const at = new Date().toISOString();
+  const { data: raw } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .select("bid_meta")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .eq("bid_state", "needs_you")
+    .maybeSingle();
+  if (!raw) return false;
+  const prev: Record<string, unknown> = ((raw as { bid_meta: unknown }).bid_meta as Record<string, unknown>) ?? {};
+  const { error } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .update({
+      bid_state: "submitted",
+      bid_error: "",
+      bid_meta: {
+        ...prev,
+        confirmedAt: at,
+        confirmedBy,
+        confirmText: String(confirmText || "").slice(0, 400),
+        tabWatcher: true,
+      },
+    } as never)
+    .eq("id", id)
+    .eq("user_id", userId)
+    .eq("bid_state", "needs_you");
+  if (error) rethrow(error.message);
+  return true;
+}
+
 /** Gives a claimed row back untouched (the runner stopped before Submit). */
 export async function releaseBid(userId: string, id: number, claimedAt: string): Promise<boolean> {
   const { data, error } = await getSupabaseAdminClient()
