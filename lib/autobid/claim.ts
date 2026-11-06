@@ -537,6 +537,7 @@ export async function autoRetryBids(
     .eq("user_id", userId)
     .eq("bid_state", "needs_you")
     .eq("apply", QUEUED_APPLY)
+    .or(ON_AUTOBID_SITE)
     .or("bid_meta->>submitClicked.is.null,bid_meta->>submitClicked.neq.true")
     .order("id", { ascending: false })
     .limit(50);

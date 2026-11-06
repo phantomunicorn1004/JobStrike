@@ -489,12 +489,21 @@
         return { fixed: true };
       }
     }
-    // Pass 6: any unchecked checkbox anywhere (not just in named sections)
+    // Pass 6: any unchecked checkbox whose nearest wrapper mentions terms/consent/agree
     for (const cb of cbs) {
       if (cb.checked || cb.disabled) continue;
-      const wrapper = cb.closest('div, fieldset, section') || document.body;
+      const wrapper = cb.closest('label, li, fieldset, [class*="field" i], div') || document.body;
       const text = (wrapper?.textContent || '').toLowerCase();
-      if (/accept the terms|accept.*proceed|consent.*demographic|demographic.*consent/i.test(text)) return tryCheck(cb);
+      if (/accept.{0,20}terms|accept.*proceed|consent.*demographic|demographic.*consent|agree.*privacy|must.*agree|i (have read|understand|confirm)/i.test(text)) return tryCheck(cb);
+    }
+    // Pass 7: any unchecked checkbox near an error message (the site rejected and pointed at it)
+    for (const cb of cbs) {
+      if (cb.checked || cb.disabled) continue;
+      const entry = cb.closest('[class*="error" i], [class*="invalid" i], [aria-invalid="true"]')
+        || cb.closest('[class*="field" i], li, label');
+      if (!entry) continue;
+      const hasError = entry.querySelector('[class*="error" i], [role="alert"], .invalid, [aria-invalid="true"]');
+      if (hasError) return tryCheck(cb);
     }
     return { fixed: false, reason: 'no GDPR consent checkbox found' };
   }
@@ -641,6 +650,37 @@
       await delay(150);
     }
 
+    // Fix unfilled consent checkboxes (Socure "Do you consent…", privacy, etc.)
+    const CONSENT_LABEL_RE = /consent|agree|acknowledge|certify|authoriz|privacy|terms|background check/i;
+    for (const entry of document.querySelectorAll('[data-field-path]')) {
+      if (!wanted(entry)) continue;
+      const labelText = (entry.querySelector('label, [class*="label" i]')?.textContent || '').toLowerCase();
+      if (!CONSENT_LABEL_RE.test(labelText)) continue;
+      if (fixed.some(f => f.includes(labelText.slice(0, 20)))) continue;
+      const cb = entry.querySelector('input[type="checkbox"]');
+      if (cb && !cb.checked && !cb.disabled) {
+        cb.click();
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+        fixed.push(`consent-cb:${labelText.slice(0, 40)}`);
+        await delay(100);
+        continue;
+      }
+      // Radio buttons: pick "Yes" or the affirmative option
+      const radios = Array.from(entry.querySelectorAll('input[type="radio"]'));
+      if (radios.length && !radios.some(r => r.checked)) {
+        const yes = radios.find(r => /^yes$/i.test((r.labels?.[0]?.textContent || r.nextSibling?.textContent || '').trim()));
+        const pick = yes || radios[0];
+        if (pick) {
+          pick.click();
+          pick.checked = true;
+          pick.dispatchEvent(new Event('change', { bubbles: true }));
+          fixed.push(`consent-radio:${labelText.slice(0, 40)}`);
+          await delay(100);
+        }
+      }
+    }
+
     return { fixed: fixed.length > 0, fields: fixed, reason: fixed.length ? undefined : 'no fixable fields found' };
   }
 
@@ -663,6 +703,19 @@
         cb.checked = true;
         cb.dispatchEvent(new Event('change', { bubbles: true }));
         fixed.push('checkbox: ' + text.replace(/\s+/g, ' ').trim().slice(0, 60));
+      }
+    }
+    // 1b. Non-required unchecked checkboxes whose label is clearly consent (sites that reject without marking required)
+    for (const cb of document.querySelectorAll('input[type="checkbox"]')) {
+      if (cb.checked || cb.disabled) continue;
+      if (cb.matches('[required], [aria-required="true"]')) continue;
+      const wrapper = cb.closest('[data-field-path], .ashby-application-form-field-entry, [class*="field"], label, fieldset, li');
+      const text = (wrapper?.textContent || cb.getAttribute('aria-label') || '').toLowerCase();
+      if (CONSENT_RE.test(text) && /accept|proceed|submit|continue|agree|i (have read|understand|confirm)/i.test(text)) {
+        cb.click();
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+        fixed.push('consent-cb: ' + text.replace(/\s+/g, ' ').trim().slice(0, 60));
       }
     }
     // 2. Ashby yes/no button groups where no button is pressed
@@ -698,7 +751,7 @@
   }
 
   const COUNTRY_ERROR_RE = /select a country|country.*required/i;
-  const GDPR_ERROR_RE = /gdpr|demographic.*consent/i;
+  const GDPR_ERROR_RE = /gdpr|demographic.*consent|accept.{0,20}terms|consent.{0,20}required|must.{0,20}agree/i;
   const ASHBY_CORRECTIONS_RE = /form needs corrections|missing entry for required field/i;
   const COVER_ERROR_RE = /cover letter.{0,20}(is )?required/i;
 
@@ -1271,6 +1324,13 @@
       checkStop();
 
       const useFullSequence = FULL_CLICK_HOST_RE.test(meta.formHost);
+      // Lever triggers CAPTCHAs on fast submissions: pause 3–8s to look human.
+      if (/lever\.co$/i.test(meta.formHost || '')) {
+        const pauseMs = 3000 + Math.random() * 5000;
+        setStep(`Pausing ${(pauseMs / 1000).toFixed(0)}s before Submit…`);
+        await sleep(pauseMs);
+        checkStop();
+      }
       setStep('Submitting…');
       const before = await probeOutcome(tabId);
       if (before.navigating || !before.formPresent) {
@@ -1397,6 +1457,7 @@
           );
         }
         if (judged.verdict === 'captcha') {
+          notify('captcha', `CAPTCHA: ${job.company}`, `Solve the CAPTCHA in the open tab to finish applying to ${job.job_title}.`);
           throw new Stop('needs_you', 'A CAPTCHA appeared after Submit. Solve it in the tab, submit, then Register.', meta);
         }
         if (judged.verdict === 'failed') {
