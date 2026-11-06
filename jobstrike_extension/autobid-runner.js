@@ -546,27 +546,34 @@
         const currentVal = (input.value || '').trim();
         if (currentVal && currentVal.length > 2) continue;
 
-        input.focus();
         const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        if (nativeSetter) nativeSetter.call(input, profileCity);
-        else input.value = profileCity;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-
-        let picked = false;
-        for (let i = 0; i < 25; i++) {
-          await delay(120);
-          const opts = document.querySelectorAll('[role="option"], [role="listbox"] li, [class*="suggestion" i], [class*="option" i]:not(select option)');
-          for (const opt of opts) {
-            if (!visible(opt)) continue;
-            const t = (opt.textContent || '').trim();
-            if (!t) continue;
-            opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
-            opt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
-            opt.click();
-            picked = true;
-            break;
+        const tryTypeahead = async (term) => {
+          input.focus();
+          if (nativeSetter) nativeSetter.call(input, term);
+          else input.value = term;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          for (let i = 0; i < 25; i++) {
+            await delay(120);
+            const opts = document.querySelectorAll('[role="option"], [role="listbox"] li, [class*="suggestion" i], [class*="option" i]:not(select option)');
+            for (const opt of opts) {
+              if (!visible(opt)) continue;
+              const t = (opt.textContent || '').trim();
+              if (!t) continue;
+              opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+              opt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
+              opt.click();
+              return true;
+            }
           }
+          return false;
+        };
+        // Try full "city, state", then city alone, then "Remote"
+        const cityOnly = profileCity.split(',')[0].trim();
+        const terms = [profileCity, ...(cityOnly !== profileCity ? [cityOnly] : []), 'Remote'];
+        let picked = false;
+        for (const term of terms) {
+          picked = await tryTypeahead(term);
           if (picked) break;
         }
         if (picked) fixed.push(`location:${labelText.slice(0, 40)}`);
@@ -587,7 +594,7 @@
       );
       if (alreadySelected) continue;
       const labelText = (entry.querySelector('label, [class*="label" i]')?.textContent || '').toLowerCase();
-      const isPositive = /willing|background check|certif|agree|consent|authori[sz]/i.test(labelText);
+      const isPositive = /willing|background check|certif|agree|consent|authori[sz]|visa|sponsor|work.*permit|eligible.*work|lawful|confirm/i.test(labelText);
       // A "No" guessed before Submit could be untrue ("Are you located in the US?"): only consent-like Yes.
       if (requiredOnly && !isPositive) continue;
       const target = isPositive
@@ -690,7 +697,7 @@
    * privacy) that Autofill may have missed.
    */
   function fixConsentFields() {
-    const CONSENT_RE = /consent|agree|acknowledge|certify|attest|authoriz|background check|privacy|terms|i (have read|understand|confirm)/i;
+    const CONSENT_RE = /consent|agree|acknowledge|certify|attest|authoriz|background check|privacy|terms|i (have read|understand|confirm)|visa|sponsor|work.*permit|eligible.*work|please confirm/i;
     const fixed = [];
     // 1. Required unchecked checkboxes that look like consent
     for (const cb of document.querySelectorAll('input[type="checkbox"]')) {
@@ -1505,6 +1512,19 @@
                   args: [profileCity],
                 });
                 meta.ashbyRetry = fix?.result || {};
+                // Mechanical fixer couldn't help: re-run AI-fill on the unfilled fields.
+                if (!meta.ashbyRetry?.fixed && !meta.ashbyAiFilled) {
+                  meta.ashbyAiFilled = true;
+                  try {
+                    setStep('AI-filling missing Ashby fields…');
+                    if (typeof invalidateAiContextCache === 'function') invalidateAiContextCache();
+                    setAutofillJobAnswers(job.answers || null);
+                    try { await autofillThisPage({ useAi: true }); } finally { setAutofillJobAnswers(null); }
+                    meta.ashbyRetry = { ...meta.ashbyRetry, aiFilled: true };
+                  } catch (aiErr) {
+                    meta.ashbyRetry = { ...meta.ashbyRetry, aiFilled: false, aiError: String(aiErr?.message || aiErr).slice(0, 120) };
+                  }
+                }
               }
               if (coverRow) {
                 try {
@@ -1516,7 +1536,7 @@
                   meta.coverRetry = { fixed: false, reason: `cover letter not written: ${error?.message || error}` };
                 }
               }
-              if (meta.countryRetry?.fixed || meta.gdprRetry?.fixed || meta.ashbyRetry?.fixed || meta.coverRetry?.fixed) {
+              if (meta.countryRetry?.fixed || meta.gdprRetry?.fixed || meta.ashbyRetry?.fixed || meta.ashbyRetry?.aiFilled || meta.coverRetry?.fixed) {
                 await sleep(500);
                 const [reclick] = await chrome.scripting.executeScript({
                   target: { tabId, frameIds: [autofillFrameId || 0] },
@@ -1553,7 +1573,20 @@
               args: [profileCity],
             });
             meta.ashbyRetry = fix?.result || {};
-            if (meta.ashbyRetry?.fixed) {
+            // Mechanical fixer couldn't help: re-run AI-fill on the unfilled fields.
+            if (!meta.ashbyRetry?.fixed && !meta.ashbyAiFilled) {
+              meta.ashbyAiFilled = true;
+              try {
+                setStep('AI-filling missing Ashby fields…');
+                if (typeof invalidateAiContextCache === 'function') invalidateAiContextCache();
+                setAutofillJobAnswers(job.answers || null);
+                try { await autofillThisPage({ useAi: true }); } finally { setAutofillJobAnswers(null); }
+                meta.ashbyRetry = { ...meta.ashbyRetry, aiFilled: true };
+              } catch (aiErr) {
+                meta.ashbyRetry = { ...meta.ashbyRetry, aiFilled: false, aiError: String(aiErr?.message || aiErr).slice(0, 120) };
+              }
+            }
+            if (meta.ashbyRetry?.fixed || meta.ashbyRetry?.aiFilled) {
               await sleep(500);
               const [reclick] = await chrome.scripting.executeScript({
                 target: { tabId, frameIds: [autofillFrameId || 0] },
