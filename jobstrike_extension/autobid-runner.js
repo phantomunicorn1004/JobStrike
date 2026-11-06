@@ -35,7 +35,7 @@
   const MAX_TABS_LEFT_OPEN = 6;
   const MAX_PERSON_TABS_OPEN = 12;
   /** Sites Auto-bid presses Submit on. Others are filled and left for the user. */
-  const SUBMIT_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com)$/i;
+  const SUBMIT_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|rippling\.com|workable\.com|bamboohr\.com|smartrecruiters\.com|pinpointhq\.com)$/i;
   /** Sites whose Submit button needs a full pointer-event sequence (bare .click() is ignored). */
   const FULL_CLICK_HOST_RE = /(^|\.)ashbyhq\.com$/i;
   /** Another panel's report newer than this means it is open now (reports go out at least every minute). */
@@ -407,7 +407,16 @@
     const combos = Array.from(document.querySelectorAll('input[role="combobox"]'));
     const input =
       combos.find((el) => el.closest('.phone-input__country, fieldset.phone-input') && !picked(el)) ||
-      combos.find((el) => /\bcountry\b/i.test(labelOf(el)) && !picked(el));
+      combos.find((el) => /\bcountry\b/i.test(labelOf(el)) && !picked(el)) ||
+      combos.find((el) => {
+        const c = containerOf(el);
+        const ph = c?.querySelector('[class*="placeholder" i]');
+        return ph && /\bcountry\b/i.test(ph.textContent || '') && !picked(el);
+      }) ||
+      combos.find((el) => {
+        const wrapper = el.closest('[class*="field"], [class*="Field"], fieldset, .form-group, [data-field]');
+        return wrapper && /\bcountry\b/i.test(wrapper.textContent || '') && !picked(el);
+      });
     if (!input) return { fixed: false, reason: 'no empty country picker found' };
 
     input.focus();
@@ -438,7 +447,11 @@
     option.dispatchEvent(new MouseEvent('mousedown', evtOpts));
     option.dispatchEvent(new MouseEvent('mouseup', evtOpts));
     option.click();
-    await delay(200);
+    await delay(300);
+    if (picked(input)) return { fixed: true };
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+    await delay(300);
     return picked(input) ? { fixed: true } : { fixed: false, reason: 'the form did not keep "United States"' };
   }
 
@@ -1150,7 +1163,7 @@
       try {
         const jobHost = new URL(url).hostname.toLowerCase();
         if (!SUBMIT_HOST_RE.test(jobHost)) {
-          throw new Stop('failed', `Filled. Auto-submit covers Greenhouse, Lever and Ashby; this form is on ${jobHost}. It should not have been queued.`);
+          throw new Stop('failed', `Filled. Auto-submit does not cover ${jobHost}. It should not have been queued.`);
         }
       } catch (e) {
         if (e instanceof Stop) throw e;
@@ -1291,6 +1304,15 @@
           if (pre?.result?.fixed) meta.ashbyPreFix = pre.result.fields;
         } catch (_) {}
       }
+      if (/(^|\.)(greenhouse\.io)$/i.test(preHost)) {
+        try {
+          const [fix] = await chrome.scripting.executeScript({
+            target: { tabId, frameIds: [autofillFrameId || 0] },
+            func: fixCountryDropdown,
+          });
+          if (fix?.result?.fixed) meta.countryPreFix = true;
+        } catch (_) {}
+      }
 
       let open = currentPlan.filter((row) => row.field?.required && row.fillOutcome !== 'filled');
       if (open.length && meta.ashbyPreFix?.length) {
@@ -1302,14 +1324,36 @@
       meta.aiAnswers = currentPlan.filter((row) => row.source === 'ai' && row.fillOutcome === 'filled').length;
       const notFilled = (labels) =>
         `Required ${labels.length === 1 ? 'field' : 'fields'} not filled: ${labels.slice(0, 5).join('; ')}${labels.length > 5 ? '…' : ''}`;
+      let emptyOnPage = [];
+      if (!open.length) {
+        await sleep(1000);
+        emptyOnPage = await emptyRequiredOnPage(tabId);
+      }
+      if ((open.length || emptyOnPage.length) && !meta.preSubmitAiRetried) {
+        meta.preSubmitAiRetried = true;
+        setStep('AI-filling remaining required fields…');
+        try {
+          if (typeof invalidateAiContextCache === 'function') invalidateAiContextCache();
+          setAutofillJobAnswers(job.answers || null);
+          try { await autofillThisPage({ useAi: true }); } finally { setAutofillJobAnswers(null); }
+        } catch (_) {}
+        open = currentPlan.filter((row) => row.field?.required && row.fillOutcome !== 'filled');
+        if (open.length && meta.ashbyPreFix?.length) {
+          const fixedLabels = meta.ashbyPreFix.map((f) => f.split(':').slice(1).join(':').trim().slice(0, 20)).filter(Boolean);
+          open = open.filter((row) => !fixedLabels.some((label) => rowLabel(row).toLowerCase().startsWith(label)));
+        }
+        meta.filled = currentPlan.filter((row) => row.fillOutcome === 'filled').length;
+        meta.aiAnswers = currentPlan.filter((row) => row.source === 'ai' && row.fillOutcome === 'filled').length;
+        emptyOnPage = [];
+        if (!open.length) {
+          await sleep(1000);
+          emptyOnPage = await emptyRequiredOnPage(tabId);
+        }
+      }
       if (open.length) {
         meta.openFields = open.map(rowLabel);
         throw new Stop('needs_you', notFilled(meta.openFields), meta);
       }
-      // What Autofill counted as filled, read back from the page (a dropdown
-      // with typed text but no option chosen is still empty).
-      await sleep(1000);
-      const emptyOnPage = await emptyRequiredOnPage(tabId);
       if (emptyOnPage.length) {
         meta.openFields = emptyOnPage;
         markEmptyOnPage(meta.fieldReport, emptyOnPage);
@@ -1321,7 +1365,7 @@
       if (!SUBMIT_HOST_RE.test(meta.formHost)) {
         throw new Stop(
           'needs_you',
-          `Filled. Auto-submit covers Greenhouse, Lever and Ashby; this form is on ${meta.formHost || 'another site'}. Review it, submit, then Register.`,
+          `Filled. Auto-submit does not cover ${meta.formHost || 'another site'}. Review it, submit, then Register.`,
           meta
         );
       }
@@ -1562,9 +1606,10 @@
         }
       }
       if (judged?.verdict !== 'confirmed' || confirmPolls < 2) {
-        if (!meta.formRetried && ASHBY_CORRECTIONS_RE.test(judged?.newText || '')) {
+        const ashbyNoResponse = /(^|\.)ashbyhq\.com$/i.test(meta.formHost) && !judged?.newText;
+        if (!meta.formRetried && (ASHBY_CORRECTIONS_RE.test(judged?.newText || '') || ashbyNoResponse)) {
           meta.formRetried = true;
-          setStep('Fixing Ashby corrections and resubmitting…');
+          setStep(ashbyNoResponse ? 'Ashby did not respond — retrying with AI fill…' : 'Fixing Ashby corrections and resubmitting…');
           try {
             const profileCity = [currentProfile?.city, currentProfile?.state].filter(Boolean).join(', ') || '';
             const [fix] = await chrome.scripting.executeScript({

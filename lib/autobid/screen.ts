@@ -8,7 +8,7 @@ import type { ProfileAutofill } from "@/lib/resume-db/profile-autofill";
  * occupation, a location it cannot tell) is left to the AI fit check.
  */
 
-export type ScreenSite = "Greenhouse" | "Lever" | "Ashby";
+export type ScreenSite = "Greenhouse" | "Lever" | "Ashby" | "Rippling" | "Workable" | "BambooHR" | "SmartRecruiters" | "Pinpoint";
 
 export type ScreenInput = {
   jobLink: string;
@@ -36,6 +36,11 @@ export function siteOf(jobLink: string): ScreenSite | "" {
   if (on("greenhouse.io")) return "Greenhouse";
   if (on("lever.co")) return "Lever";
   if (on("ashbyhq.com")) return "Ashby";
+  if (on("rippling.com")) return "Rippling";
+  if (on("workable.com")) return "Workable";
+  if (on("bamboohr.com")) return "BambooHR";
+  if (on("smartrecruiters.com")) return "SmartRecruiters";
+  if (on("pinpointhq.com")) return "Pinpoint";
   return "";
 }
 
