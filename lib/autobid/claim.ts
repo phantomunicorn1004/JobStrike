@@ -33,7 +33,7 @@ function rethrow(message: string): never {
  * stay in Resume DB for the Bid tab. A coarse SQL match; the exact host is
  * checked with siteOf wherever a row is used.
  */
-const ON_AUTOBID_SITE = "job_link.ilike.*.greenhouse.io/*,job_link.ilike.*.lever.co/*,job_link.ilike.*.ashbyhq.com/*,job_link.ilike.*.rippling.com/*,job_link.ilike.*.workable.com/*,job_link.ilike.*.bamboohr.com/*,job_link.ilike.*.smartrecruiters.com/*,job_link.ilike.*.pinpointhq.com/*";
+const ON_AUTOBID_SITE = "job_link.ilike.*.greenhouse.io/*,job_link.ilike.*.lever.co/*,job_link.ilike.*.ashbyhq.com/*,job_link.ilike.*.rippling.com/*,job_link.ilike.*.workable.com/*,job_link.ilike.*.bamboohr.com/*,job_link.ilike.*.smartrecruiters.com/*,job_link.ilike.*.pinpointhq.com/*,job_link.ilike.*.myworkdayjobs.com/*,job_link.ilike.*.myworkdaysite.com/*,job_link.ilike.*.icims.com/*";
 
 /** One job for the runner: everything it needs to apply, with the claim it holds. */
 export type BidJob = {

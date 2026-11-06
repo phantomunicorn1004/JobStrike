@@ -330,13 +330,13 @@
 
   // Jobright is read with the user's own account, so it is asked for little and
   // left alone at the first sign of a limit.
-  // Five full reads of the feed (a full read is about 30 requests).
-  const JR_DAILY_REQUESTS = 150;
+  // About six full reads of the feed per day (a full read is ~52 requests).
+  const JR_DAILY_REQUESTS = 320;
   // What one full read needs; a run with less than this left is asked about first.
   // A full read of the unordered feed: 50 pages of 20 rows, one request each.
   const JR_FULL_READ_REQUESTS = 52;
-  const JR_MIN_GAP_MS = 3 * 60 * 60 * 1000;
-  const JR_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+  const JR_MIN_GAP_MS = 90 * 60 * 1000;
+  const JR_COOLDOWN_MS = 2 * 60 * 60 * 1000;
 
   function localDayKey(ms = Date.now()) {
     const d = new Date(ms);
@@ -2557,8 +2557,8 @@ ${groupSheetStyles()}
   const LIVE_CHALLENGE_WAIT_MS = 10 * 60 * 1000;
   /** This many parked live checks in a row: the site really wants a person; stay paused. */
   const LIVE_CHALLENGE_MAX = 3;
-  /** Jobright: a full read at most this often (also its own 3-hour safety gap). */
-  const LIVE_JR_EVERY_MS = 3 * 60 * 60 * 1000;
+  /** Jobright: a full read at most this often. */
+  const LIVE_JR_EVERY_MS = 90 * 60 * 1000;
   /** Jobs posted longer ago than this leave the Live list. */
   const LIVE_MAX_AGE_HOURS = 48;
   const LIVE_QUEUE_SHOW = 60;
@@ -2680,7 +2680,11 @@ ${groupSheetStyles()}
   async function postFoundJobs(jobs, profileId) {
     const api = window.SmartJobRegisterResumeDb;
     if (!api?.autobidFetch || !api?.describeForAutobid) return;
-    for (const job of jobs) postedToServer.add(liveKey(job));
+    for (const job of jobs) {
+      postedToServer.add(liveKey(job));
+      if (job.apply_url) learnBoardToken(job.apply_url, job.company_name);
+    }
+    void persistBoards();
     let answer;
     try {
       answer = await api.autobidFetch('/api/autobid/found', {
@@ -2775,8 +2779,8 @@ ${groupSheetStyles()}
   }
 
   /**
-   * Full auto on: Live on, new jobs queued for `profile` (Greenhouse, Lever and
-   * Ashby only), and the new jobs already in the list queued now. Off: stops
+   * Full auto on: Live on, new jobs queued for `profile` on supported ATS
+   * platforms, and the new jobs already in the list queued now. Off: stops
    * queuing; Live keeps checking and alerting.
    */
   async function setAutoQueue(profile) {
@@ -2796,8 +2800,8 @@ ${groupSheetStyles()}
 
   /**
    * The all-in-one Auto-bid (autobid-runner.js) runs Live with its setup:
-   * hours, HiringCafe interval, sources, and new Greenhouse / Lever / Ashby
-   * jobs queued for AutoGen for `profile`. null = stop queueing, and switch
+   * hours, HiringCafe interval, sources, and new jobs on supported ATS
+   * platforms queued for AutoGen for `profile`. null = stop queueing, and switch
    * Live off again if Auto-bid had switched it on.
    */
   async function applyWorkflow(setup) {
@@ -2863,6 +2867,121 @@ ${groupSheetStyles()}
     }
   }
 
+  // ── Direct board polling: Greenhouse + Lever public APIs ───────────
+  const BOARDS_STORAGE_KEY = 'job_scraper_boards_v1';
+  const BOARDS_POLL_MS = 30 * 60 * 1000;
+  const BOARDS_MAX = 40;
+  let boardsState = { tokens: {}, lastPollAt: 0, loaded: false };
+
+  async function loadBoards() {
+    if (boardsState.loaded) return;
+    try {
+      const stored = (await storageGet(BOARDS_STORAGE_KEY))?.[BOARDS_STORAGE_KEY];
+      if (stored?.tokens) boardsState.tokens = stored.tokens;
+      if (stored?.lastPollAt) boardsState.lastPollAt = stored.lastPollAt;
+    } catch (_) {}
+    boardsState.loaded = true;
+  }
+
+  async function persistBoards() {
+    await storageSet({ [BOARDS_STORAGE_KEY]: { tokens: boardsState.tokens, lastPollAt: boardsState.lastPollAt } });
+  }
+
+  function extractBoardToken(url) {
+    try {
+      const u = new URL(url);
+      const h = u.hostname.toLowerCase();
+      if (/(^|\.)greenhouse\.io$/i.test(h)) {
+        const forParam = u.searchParams.get('for');
+        if (forParam) return { type: 'gh', token: forParam.toLowerCase() };
+        const seg = u.pathname.split('/').filter(Boolean)[0];
+        if (seg && seg !== 'embed') return { type: 'gh', token: seg.toLowerCase() };
+      }
+      if (/(^|\.)lever\.co$/i.test(h)) {
+        const seg = u.pathname.split('/').filter(Boolean)[0];
+        if (seg) return { type: 'lv', token: seg.toLowerCase() };
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function learnBoardToken(jobUrl, company) {
+    const info = extractBoardToken(jobUrl);
+    if (!info) return;
+    const key = `${info.type}:${info.token}`;
+    const existing = boardsState.tokens[key];
+    boardsState.tokens[key] = {
+      type: info.type,
+      token: info.token,
+      company: company || existing?.company || '',
+      lastSeen: Date.now(),
+    };
+    const entries = Object.entries(boardsState.tokens);
+    if (entries.length > BOARDS_MAX) {
+      entries.sort((a, b) => (a[1].lastSeen || 0) - (b[1].lastSeen || 0));
+      for (const [k] of entries.slice(0, entries.length - BOARDS_MAX)) delete boardsState.tokens[k];
+    }
+  }
+
+  async function pollDirectBoards() {
+    if (!state.prefs.liveAutoQueue || !state.prefs.liveAutoQueueProfileId) return 0;
+    await loadBoards();
+    const boards = Object.values(boardsState.tokens)
+      .filter((b) => Date.now() - (b.lastSeen || 0) < 14 * 24 * 3600000)
+      .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
+      .slice(0, 20);
+    if (!boards.length) return 0;
+
+    let added = 0;
+    const jobs = [];
+    for (const board of boards) {
+      try {
+        const boardJobs = board.type === 'gh' ? await fetchGreenhouseBoard(board) : await fetchLeverBoard(board);
+        for (const j of boardJobs) {
+          if (!isSeenJob(j, 'boards')) jobs.push(j);
+        }
+      } catch (_) {}
+    }
+    if (jobs.length) {
+      markJobsSeen(jobs);
+      void postFoundJobs(jobs, state.prefs.liveAutoQueueProfileId);
+      added = jobs.length;
+    }
+    boardsState.lastPollAt = Date.now();
+    await persistBoards();
+    return added;
+  }
+
+  async function fetchGreenhouseBoard(board) {
+    const url = `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board.token)}/jobs`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.jobs || []).map((j) => ({
+      apply_url: j.absolute_url || `https://boards.greenhouse.io/${board.token}/jobs/${j.id}`,
+      title: j.title || '',
+      company_name: board.company || board.token,
+      origin: 'boards',
+      estimated_publish_date: j.updated_at || '',
+      id: `gh-${board.token}-${j.id}`,
+    }));
+  }
+
+  async function fetchLeverBoard(board) {
+    const url = `https://api.lever.co/v0/postings/${encodeURIComponent(board.token)}?mode=json`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (Array.isArray(data) ? data : []).map((j) => ({
+      apply_url: j.hostedUrl || `https://jobs.lever.co/${board.token}/${j.id}`,
+      title: j.text || '',
+      company_name: board.company || board.token,
+      origin: 'boards',
+      estimated_publish_date: j.createdAt ? new Date(j.createdAt).toISOString() : '',
+      id: `lv-${board.token}-${j.id}`,
+    }));
+  }
+
   /** Decide whether a check is due, and run it. Called every 30 s and on demand. */
   async function liveTick({ force = false } = {}) {
     if (!state.prefs.liveEnabled) {
@@ -2893,17 +3012,31 @@ ${groupSheetStyles()}
       jobrightRequestsLeft() >= JR_FULL_READ_REQUESTS &&
       now - (guard.lastRunAt || 0) >= Math.max(LIVE_JR_EVERY_MS, JR_MIN_GAP_MS);
     const hcDue = useHc && (force || now - (state.live.lastHcAt || 0) >= liveHcEveryMs());
+
+    // Direct board polling runs on its own 30-min timer, even between HC/JR checks.
+    await loadBoards();
+    const boardsDue = now - (boardsState.lastPollAt || 0) >= BOARDS_POLL_MS && Object.keys(boardsState.tokens).length > 0;
+    if (boardsDue && !jrDue && !hcDue) {
+      try {
+        setLiveStatus('Polling Greenhouse / Lever boards…');
+        const added = await pollDirectBoards();
+        if (added > 0) noteLiveCheck(added);
+      } catch (_) {}
+    }
+
     if (!jrDue && !hcDue) {
       const wait = Math.max(1, Math.round((state.live.lastHcAt + liveHcEveryMs() - now) / 60000));
-      setLiveStatus(useHc ? `Next check in ${wait} min` : 'Waiting for Jobright (every 3 h, while requests last)');
+      setLiveStatus(useHc ? `Next check in ${wait} min` : 'Waiting for Jobright (every 90 min, while requests last)');
       return;
     }
     state.live.running = true;
     state.live.lastHcAt = useHc ? now : state.live.lastHcAt;
     await persistLive();
-    setLiveStatus(jrDue ? 'Checking Jobright and HiringCafe…' : 'Checking HiringCafe…');
+    const boardLabel = boardsDue ? ' + boards' : '';
+    setLiveStatus(jrDue ? `Checking Jobright and HiringCafe${boardLabel}…` : `Checking HiringCafe${boardLabel}…`);
     try {
       await runScrape({ live: { jr: jrDue, hc: useHc } });
+      if (boardsDue) await pollDirectBoards();
     } finally {
       state.live.running = false;
       renderLiveCard();
@@ -2975,7 +3108,7 @@ ${groupSheetStyles()}
       const last = state.live.lastCheckAt
         ? `Last check ${new Date(state.live.lastCheckAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · +${state.live.lastAdded} new`
         : 'No check yet';
-      meta.textContent = on ? last : 'Checks HiringCafe every 30 min and Jobright every 3 h during your hours.';
+      meta.textContent = on ? last : 'Checks HiringCafe every 15 min and Jobright every 90 min during your hours.';
     }
     if (!on) setLiveStatus('Off');
     else if (!state.live.status || state.live.status === 'Off') setLiveStatus('Starting…');

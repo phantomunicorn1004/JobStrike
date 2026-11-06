@@ -417,7 +417,7 @@
                   <span aria-hidden="true"></span>
                 </label>
               </div>
-              <p class="js-live-meta" id="jsLiveMeta">Checks HiringCafe every 30 min and Jobright every 3 h during your hours.</p>
+              <p class="js-live-meta" id="jsLiveMeta">Checks HiringCafe every 15 min and Jobright every 90 min during your hours.</p>
               <details class="js-live-settings">
                 <summary>Live settings</summary>
                 <label class="js-live-field">
@@ -440,7 +440,7 @@
                   <input type="checkbox" id="jsLiveAutoQueueSupported" checked> Only Greenhouse, Lever and Ashby jobs
                 </label>
                 <button type="button" class="btn-secondary-full" id="jsLiveCheckNow">Check now</button>
-                <p class="js-live-note">Jobright is read every 3 hours while today's requests allow a full read. Checks run only while this panel is open.</p>
+                <p class="js-live-note">Jobright is read every 90 min while today's requests allow a full read. Checks run only while this panel is open.</p>
               </details>
             </div>
             <!-- Auto-bid: applies to jobs whose resume AutoGen generated (autobid-runner.js). -->
@@ -779,7 +779,7 @@
               <input type="number" id="wfEvery" class="js-input" min="15" max="120" step="5">
             </label>
             <label class="js-live-check"><input type="checkbox" id="wfHc"> HiringCafe</label>
-            <label class="js-live-check"><input type="checkbox" id="wfJr"> Jobright (a full read every 3 h, while requests last)</label>
+            <label class="js-live-check"><input type="checkbox" id="wfJr"> Jobright (a full read every 90 min, while requests last)</label>
             <p class="js-live-note">Keep this panel open in its own window: jobs are opened here. AutoGen opens its own ChatGPT windows. Changes are saved at once and also apply while running.</p>
           </div>
 

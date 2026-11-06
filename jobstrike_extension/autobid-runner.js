@@ -35,9 +35,12 @@
   const MAX_TABS_LEFT_OPEN = 6;
   const MAX_PERSON_TABS_OPEN = 12;
   /** Sites Auto-bid presses Submit on. Others are filled and left for the user. */
-  const SUBMIT_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|rippling\.com|workable\.com|bamboohr\.com|smartrecruiters\.com|pinpointhq\.com)$/i;
+  const SUBMIT_HOST_RE = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|rippling\.com|workable\.com|bamboohr\.com|smartrecruiters\.com|pinpointhq\.com|myworkdayjobs\.com|myworkdaysite\.com|workday\.com|icims\.com)$/i;
   /** Sites whose Submit button needs a full pointer-event sequence (bare .click() is ignored). */
-  const FULL_CLICK_HOST_RE = /(^|\.)ashbyhq\.com$/i;
+  const FULL_CLICK_HOST_RE = /(^|\.)(ashbyhq\.com|myworkdayjobs\.com|myworkdaysite\.com|workday\.com)$/i;
+  const WORKDAY_HOST_RE = /(^|\.)(myworkdayjobs\.com|myworkdaysite\.com|workday\.com)$/i;
+  const WORKDAY_MAX_PAGES = 8;
+  const WORKDAY_PAGE_WAIT_MS = 5000;
   /** Another panel's report newer than this means it is open now (reports go out at least every minute). */
   const OTHER_PANEL_MS = 150 * 1000;
   const INSTANCE_KEY = 'autobid_instance';
@@ -225,6 +228,317 @@
     return false;
   }
 
+  // ───────────────────── Workday page-injected helpers ─────────────────────
+
+  /** Runs in page: detects Workday sign-in/create-account page. */
+  function detectWorkdaySignInPage() {
+    const signIn = document.querySelector(
+      '[data-automation-id="signInLink"], [data-automation-id="createAccountLink"], ' +
+      '[data-automation-id="signIn"], [data-automation-id="emailInput"], ' +
+      'button[data-automation-id="signInSubmitButton"]'
+    );
+    const emailInput = document.querySelector(
+      'input[data-automation-id="email"], input[data-automation-id="emailInput"], ' +
+      'input[data-automation-id="createAccount-email"], input[type="email"]'
+    );
+    const passwordInput = document.querySelector(
+      'input[data-automation-id="password"], input[type="password"]'
+    );
+    const createLink = document.querySelector('[data-automation-id="createAccountLink"]');
+    const applyManually = document.querySelector('[data-automation-id="applyManually"]');
+    return {
+      isSignIn: Boolean(signIn || (emailInput && !document.querySelector('[data-automation-id="applyFlowPage"]'))),
+      hasEmailInput: Boolean(emailInput),
+      hasPasswordInput: Boolean(passwordInput),
+      hasCreateLink: Boolean(createLink),
+      hasApplyManually: Boolean(applyManually),
+    };
+  }
+
+  /** Runs in page: fills Workday sign-in email and clicks Continue/Create. */
+  function fillWorkdaySignIn(email) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    function setVal(el, val) {
+      if (setter) setter.call(el, val);
+      else el.value = val;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const emailInput = document.querySelector(
+      'input[data-automation-id="email"], input[data-automation-id="emailInput"], ' +
+      'input[data-automation-id="createAccount-email"], input[type="email"]'
+    );
+    if (!emailInput) return { filled: false, reason: 'no email field' };
+    setVal(emailInput, email);
+
+    const passwordInput = document.querySelector(
+      'input[data-automation-id="password"], input[type="password"]'
+    );
+
+    const submitBtn = document.querySelector(
+      'button[data-automation-id="signInSubmitButton"], ' +
+      'button[data-automation-id="createAccountSubmitButton"], ' +
+      'button[data-automation-id="utilityButtonContinue"], ' +
+      'button[data-automation-id="bottom-navigation-next-button"]'
+    ) || [...document.querySelectorAll('button')].find(
+      (b) => /sign in|create account|continue|next/i.test(b.textContent || '')
+    );
+    if (submitBtn) {
+      submitBtn.scrollIntoView({ block: 'center' });
+      submitBtn.click();
+    }
+    return { filled: true, hasPassword: Boolean(passwordInput), clickedButton: Boolean(submitBtn) };
+  }
+
+  /** Runs in page: clicks "Apply Manually" or "Apply" on Workday posting page. */
+  function clickWorkdayApply() {
+    const applyManually = document.querySelector('[data-automation-id="applyManually"]');
+    if (applyManually) {
+      applyManually.scrollIntoView({ block: 'center' });
+      applyManually.click();
+      return { clicked: true, which: 'applyManually' };
+    }
+    const applyBtn = document.querySelector(
+      'a[data-automation-id="jobPostingApplyButton"], button[data-automation-id="jobPostingApplyButton"], ' +
+      'a[data-automation-id="applyButton"], button[data-automation-id="applyButton"]'
+    );
+    if (applyBtn) {
+      applyBtn.scrollIntoView({ block: 'center' });
+      applyBtn.click();
+      return { clicked: true, which: 'applyButton' };
+    }
+    return { clicked: false };
+  }
+
+  /** Runs in page: detects which Workday wizard page we are on and whether Next/Submit is available. */
+  function detectWorkdayWizardState() {
+    const progressItems = document.querySelectorAll('[data-automation-id="progressItem"], [data-automation-id="progressBarItem"]');
+    const currentStep = [...progressItems].findIndex((el) =>
+      el.getAttribute('aria-current') === 'step' || el.classList.contains('css-1dbjc4n') ||
+      el.querySelector('[aria-current="step"]')
+    );
+    const stepLabels = [...progressItems].map((el) => (el.textContent || '').trim());
+
+    const nextBtn = document.querySelector('button[data-automation-id="bottom-navigation-next-button"]');
+    const submitBtn = document.querySelector(
+      'button[data-automation-id="bottom-navigation-next-button"][aria-label*="Submit" i], ' +
+      'button[data-automation-id="submitButton"]'
+    ) || [...document.querySelectorAll('button[data-automation-id="bottom-navigation-next-button"], button')].find(
+      (b) => /^submit$/i.test((b.textContent || '').trim())
+    );
+
+    const hasFormFields = document.querySelectorAll('[data-automation-id^="formField-"]').length;
+    const hasResumeUpload = Boolean(document.querySelector(
+      '[data-automation-id="file-upload-drop-zone"], [data-automation-id="resumeUpload"], ' +
+      'input[data-automation-id="file-upload-input-ref"]'
+    ));
+    const hasErrorBanner = Boolean(document.querySelector(
+      '[data-automation-id="errorBanner"], [data-automation-id="inlineBanner"], .error-message-container'
+    ));
+    const errorTexts = [...document.querySelectorAll(
+      '[data-automation-id="errorMessage"], [data-automation-id="formField-error"], ' +
+      '.css-ferh5a, [role="alert"]'
+    )].map((el) => (el.textContent || '').trim()).filter(Boolean);
+
+    const pageTitle = (document.querySelector(
+      '[data-automation-id="pageHeaderTitle"], [data-automation-id="stepTitle"], h2'
+    ) || {}).textContent || '';
+
+    return {
+      currentStep,
+      totalSteps: progressItems.length,
+      stepLabels,
+      pageTitle: pageTitle.trim(),
+      hasNextButton: Boolean(nextBtn) && !nextBtn.disabled,
+      hasSubmitButton: Boolean(submitBtn),
+      hasFormFields,
+      hasResumeUpload,
+      hasErrorBanner,
+      errorTexts,
+      isReviewPage: /review/i.test(pageTitle),
+    };
+  }
+
+  /** Runs in page: clicks Workday Next button. */
+  function clickWorkdayNext() {
+    const btn = document.querySelector('button[data-automation-id="bottom-navigation-next-button"]');
+    if (!btn || btn.disabled) return { clicked: false, reason: btn ? 'disabled' : 'not found' };
+    btn.scrollIntoView({ block: 'center' });
+    const rect = btn.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
+    btn.focus();
+    try { btn.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (_) {}
+    try { btn.dispatchEvent(new MouseEvent('mousedown', opts)); } catch (_) {}
+    try { btn.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (_) {}
+    try { btn.dispatchEvent(new MouseEvent('mouseup', opts)); } catch (_) {}
+    try { btn.dispatchEvent(new MouseEvent('click', opts)); } catch (_) {}
+    return { clicked: true, label: (btn.textContent || '').trim() };
+  }
+
+  // clickWorkdaySubmit merged into clickSubmitButton — Workday selectors added there.
+
+  // ───────────── Workday multi-page orchestration (runs in runner) ─────────────
+
+  async function handleWorkdaySignInWall(tabId, job, meta) {
+    const [detect] = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      func: detectWorkdaySignInPage,
+    });
+    const signInState = detect?.result;
+    if (!signInState?.isSignIn) return false;
+
+    setStep('Workday sign-in page detected — entering email…');
+    meta.workdaySignIn = true;
+    const email = currentProfile?.email;
+    if (!email) throw new Stop('needs_you', 'No email set in the profile — cannot sign in to Workday.', meta);
+
+    const [fill] = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      func: fillWorkdaySignIn,
+      args: [email],
+    });
+    if (!fill?.result?.filled) {
+      throw new Stop('needs_you', 'Could not fill the Workday sign-in form. Sign in manually and re-run.', meta);
+    }
+
+    await sleep(3000);
+
+    if (fill.result.hasPassword) {
+      throw new Stop('needs_you', 'Workday requires a password (returning applicant). Sign in manually, then re-run.', meta);
+    }
+
+    const verifyUntil = Date.now() + VERIFY_CODE_WAIT_MS;
+    while (Date.now() < verifyUntil) {
+      const href = await frameHref(tabId, 0);
+      const [recheck] = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [0] },
+        func: detectWorkdaySignInPage,
+      });
+      if (!recheck?.result?.isSignIn) return true;
+
+      const [wizard] = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [0] },
+        func: detectWorkdayWizardState,
+      });
+      if (wizard?.result?.hasFormFields) return true;
+
+      try {
+        const { code } = await bid().autobidFetch(
+          `/api/autobid/verify-code?profileId=${encodeURIComponent(job.profile_id)}`
+        );
+        if (code) {
+          setStep(`Entering Workday verification code ${code}…`);
+          const [entry] = await chrome.scripting.executeScript({
+            target: { tabId, allFrames: true },
+            func: enterVerificationCode,
+            args: [code],
+          });
+          if (entry?.result?.entered) {
+            meta.workdayCodeEntered = code;
+            await sleep(3000);
+            return true;
+          }
+        }
+      } catch (_) {}
+
+      await sleep(VERIFY_CODE_POLL_MS);
+      checkStop();
+    }
+    throw new Stop('needs_you', 'Workday sign-in: could not get past the login wall. Sign in manually.', meta);
+  }
+
+  async function runWorkdayWizard(tabId, job, meta) {
+    meta.workdayPages = [];
+
+    for (let page = 0; page < WORKDAY_MAX_PAGES; page++) {
+      checkStop();
+      await sleep(2000);
+
+      const [wizard] = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [0] },
+        func: detectWorkdayWizardState,
+      });
+      const ws = wizard?.result;
+      if (!ws) throw new Stop('needs_you', 'Lost contact with the Workday page.', meta);
+
+      meta.workdayPages.push({ page, title: ws.pageTitle, fields: ws.hasFormFields, step: ws.currentStep });
+      setStep(`Workday page ${page + 1}: ${ws.pageTitle || 'filling'}…`);
+
+      if (ws.hasErrorBanner && ws.errorTexts.length && page > 0) {
+        meta.workdayErrors = ws.errorTexts;
+        throw new Stop('needs_you', `Workday rejected a page: ${ws.errorTexts.slice(0, 3).join('; ')}`, meta);
+      }
+
+      if (ws.isReviewPage || ws.hasSubmitButton) {
+        setStep('Workday review page — submitting…');
+        return;
+      }
+
+      if (ws.hasFormFields) {
+        if (typeof invalidateAiContextCache === 'function') invalidateAiContextCache();
+        setAutofillJobAnswers(job.answers || null);
+        try { await autofillThisPage({ useAi: true }); } finally { setAutofillJobAnswers(null); }
+        checkStop();
+
+        if (ws.hasResumeUpload) {
+          meta.workdayResumeUpload = true;
+          await sleep(2000);
+        }
+      }
+
+      if (!ws.hasNextButton && !ws.hasSubmitButton) {
+        if (ws.hasFormFields) return;
+        throw new Stop('needs_you', `Workday page "${ws.pageTitle}" has no Next button. Complete it manually.`, meta);
+      }
+
+      if (ws.hasSubmitButton) return;
+
+      setStep(`Clicking Next on "${ws.pageTitle}"…`);
+      const [next] = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [0] },
+        func: clickWorkdayNext,
+      });
+      if (!next?.result?.clicked) {
+        throw new Stop('needs_you', `Could not advance past Workday page "${ws.pageTitle}".`, meta);
+      }
+
+      await sleep(WORKDAY_PAGE_WAIT_MS);
+
+      const loadUntil = Date.now() + 15000;
+      while (Date.now() < loadUntil) {
+        const [check] = await chrome.scripting.executeScript({
+          target: { tabId, frameIds: [0] },
+          func: detectWorkdayWizardState,
+        });
+        if (check?.result?.hasErrorBanner) {
+          meta.workdayErrors = check.result.errorTexts;
+          setStep('Workday page error — AI-refilling…');
+          if (typeof invalidateAiContextCache === 'function') invalidateAiContextCache();
+          setAutofillJobAnswers(job.answers || null);
+          try { await autofillThisPage({ useAi: true }); } finally { setAutofillJobAnswers(null); }
+          await sleep(1000);
+          const [retry] = await chrome.scripting.executeScript({
+            target: { tabId, frameIds: [0] },
+            func: clickWorkdayNext,
+          });
+          if (!retry?.result?.clicked) {
+            throw new Stop('needs_you', `Workday page "${ws.pageTitle}" errors not resolved: ${(check.result.errorTexts || []).slice(0, 3).join('; ')}`, meta);
+          }
+          await sleep(WORKDAY_PAGE_WAIT_MS);
+          break;
+        }
+        if (check?.result && (check.result.currentStep !== ws.currentStep || check.result.pageTitle !== ws.pageTitle)) {
+          break;
+        }
+        await sleep(1000);
+      }
+    }
+
+    throw new Stop('needs_you', 'Workday wizard exceeded maximum pages. Complete it manually.', meta);
+  }
+
   /** The panel binds a newly active tab and reads its job; overriding before it finishes would be undone. */
   async function waitForPanelBind(tabId) {
     const TS = window.SmartJobTabSession;
@@ -298,6 +612,9 @@
       'button#btn-submit',
       '[data-qa="btn-submit"]',
       'button.ashby-application-form-submit-button',
+      'button[data-automation-id="submitButton"]',
+      'button[data-automation="apply-button"]',
+      'button[data-automation="submit-application"]',
       'form button[type="submit"]',
       'form input[type="submit"]',
     ];
@@ -310,12 +627,19 @@
         return { clicked: true, label: text || selector };
       }
     }
-    for (const el of document.querySelectorAll('button')) {
+    for (const el of document.querySelectorAll('button, [role="button"], a.btn, a.button')) {
       const text = label(el);
-      if (/^submit( (your )?application)?$/i.test(text) && visible(el) && !el.disabled) {
+      if (/^(submit|apply|send)( (your |my )?(application|submission))?$/i.test(text) && visible(el) && !el.disabled) {
         fireClick(el);
         return { clicked: true, label: text };
       }
+    }
+    // Workday: the wizard's "Next" button on the review page acts as Submit.
+    // On some Workday sites the label stays "Next" even on the last page.
+    const wdNext = document.querySelector('button[data-automation-id="bottom-navigation-next-button"]');
+    if (wdNext && visible(wdNext) && !wdNext.disabled) {
+      fireClick(wdNext);
+      return { clicked: true, label: label(wdNext) || 'workday-next' };
     }
     return { clicked: false };
   }
@@ -865,10 +1189,15 @@
     ].some((el) => visible(el) && /submit|send application/i.test(String(el.innerText || el.value || el.getAttribute('aria-label') || '')));
     const fields = [...document.querySelectorAll('form input:not([type="hidden"]), form textarea, form select')].filter(visible).length;
     const captcha = [...document.querySelectorAll('iframe')].some(
-      (frame) =>
-        /recaptcha\/(api2|enterprise)\/bframe|hcaptcha\.com\/.*(challenge|hcaptcha)|challenges\.cloudflare\.com/i.test(frame.src || '') &&
-        visible(frame) &&
-        frame.getBoundingClientRect().height > 100
+      (frame) => {
+        const src = frame.src || '';
+        if (!/recaptcha\/(api2|enterprise)\/bframe|hcaptcha\.com\/.*(challenge|hcaptcha)|challenges\.cloudflare\.com/i.test(src)) return false;
+        if (visible(frame) && frame.getBoundingClientRect().height > 50) return true;
+        // Invisible CAPTCHAs (hCaptcha checkbox-invisible, reCAPTCHA Enterprise) may
+        // be 0×0 or hidden. Their presence in the DOM after Submit still means a challenge.
+        if (/challenge|bframe/i.test(src)) return true;
+        return false;
+      }
     );
     const errorEls = [
       ...document.querySelectorAll(
@@ -1175,6 +1504,70 @@
       await waitForPanelBind(tabId);
       checkStop();
 
+      // ──────────── Workday: multi-page wizard with sign-in ────────────
+      const isWorkdayJob = WORKDAY_HOST_RE.test(hostOf(url));
+      if (isWorkdayJob) {
+        setStep('Workday detected — preparing…');
+        meta.workday = true;
+
+        setStep('Applying the generated resume…');
+        profileSelect.value = String(job.profile_id);
+        profileSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(1000);
+        bid().setRegisterFieldValue('regJobLink', job.job_link, 'autobid');
+        bid().setRegisterFieldValue('regJobTitle', job.job_title, 'autobid');
+        bid().setRegisterFieldValue('regCompany', job.company, 'autobid');
+        bid().setRegisterFieldValue('regNote', job.job_description, 'autobid');
+        let pretty = job.built_resume_json;
+        try { pretty = JSON.stringify(JSON.parse(job.built_resume_json), null, 2); } catch (_) {}
+        const jsonBox = document.getElementById('regResumeJson');
+        if (jsonBox) jsonBox.value = pretty;
+        const applied = bid().applyResumeJsonToRegisterForm(pretty, { silent: true });
+        if (!applied?.ok) throw new Stop('failed', `The generated resume JSON was not accepted: ${applied?.error || 'invalid'}.`);
+
+        setStep('Generating Word files (json2docx)…');
+        const health = await json2docxHealth();
+        if (health && !health.ok) {
+          throw new Stop('pause', `json2docx is ${health.error === 'disabled' ? 'disabled in Settings' : 'offline'}: start it on this machine (start_server.bat).`);
+        }
+        await bid().generateFilesFromResumeJson(null);
+        checkStop();
+
+        if (!(typeof isAiModeEnabled === 'function' && isAiModeEnabled())) {
+          throw new Stop('pause', 'AI answers are off: turn on Settings → Autofill with AI, with an OpenAI key.');
+        }
+
+        // Click Apply on the posting page first.
+        try {
+          const [applyClick] = await chrome.scripting.executeScript({
+            target: { tabId, frameIds: [0] },
+            func: clickWorkdayApply,
+          });
+          if (applyClick?.result?.clicked) {
+            meta.workdayApplyClicked = applyClick.result.which;
+            await sleep(4000);
+            await bid().waitForTabLoaded(tabId, PAGE_LOAD_MS);
+          }
+        } catch (_) {}
+        checkStop();
+
+        // Handle sign-in/account-creation wall.
+        await handleWorkdaySignInWall(tabId, job, meta);
+        checkStop();
+
+        // Navigate the multi-page wizard: fill each page, click Next.
+        await runWorkdayWizard(tabId, job, meta);
+        checkStop();
+
+        // At this point we are on the review or final page — fall through to submit.
+        meta.fieldReport = fieldReport();
+        meta.fields = currentPlan.length;
+        meta.filled = currentPlan.filter((row) => row.fillOutcome === 'filled').length;
+        meta.aiAnswers = currentPlan.filter((row) => row.source === 'ai' && row.fillOutcome === 'filled').length;
+      }
+
+      // ──────────── Standard (non-Workday) flow ────────────
+      if (!isWorkdayJob) {
       setStep('Applying the generated resume…');
       profileSelect.value = String(job.profile_id);
       profileSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1359,6 +1752,8 @@
         markEmptyOnPage(meta.fieldReport, emptyOnPage);
         throw new Stop('needs_you', notFilled(emptyOnPage), meta);
       }
+
+      } // end if (!isWorkdayJob)
 
       const formHref = (await frameHref(tabId, autofillFrameId)) || url;
       meta.formHost = hostOf(formHref);
