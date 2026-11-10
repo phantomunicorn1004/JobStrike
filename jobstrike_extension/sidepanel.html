@@ -1087,5 +1087,35 @@
   <script src="register-resume-db.js"></script>
   <script src="sidepanel.js"></script>
   <script src="autobid-runner.js"></script>
+  <script>
+  // Inline sanitizer — auto-clean garbled ChatGPT JSON on paste into Edit JSON modal
+  (function () {
+    function cleanChatGptJson(text) {
+      var s = text;
+      s = s.replace(/&#x([0-9a-fA-F]+);/g, function (_, hex) { return String.fromCharCode(parseInt(hex, 16)); });
+      s = s.replace(/&#(\d+);/g, function (_, dec) { return String.fromCharCode(Number(dec)); });
+      s = s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+      s = s.replace(/\\\r\n/g, '\r\n');
+      s = s.replace(/\\\n/g, '\n');
+      s = s.replace(/\\\\"/g, '\\"');
+      s = s.replace(/\\([^"\\\/bfnrtu])/g, '$1');
+      return s;
+    }
+    document.addEventListener('paste', function (e) {
+      var ta = document.getElementById('rbMaxModalTextarea');
+      if (!ta || e.target !== ta) return;
+      var clip = (e.clipboardData || window.clipboardData || {}).getData('text') || '';
+      if (/&#x[0-9a-fA-F]+;/.test(clip) || /\\\n/.test(clip) || /\\\./.test(clip) || /\\@/.test(clip) || /\\\\"/.test(clip)) {
+        e.preventDefault();
+        var cleaned = cleanChatGptJson(clip);
+        var start = ta.selectionStart || 0;
+        var end = ta.selectionEnd || 0;
+        ta.value = ta.value.substring(0, start) + cleaned + ta.value.substring(end);
+        ta.selectionStart = ta.selectionEnd = start + cleaned.length;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+  })();
+  </script>
 </body>
 </html>

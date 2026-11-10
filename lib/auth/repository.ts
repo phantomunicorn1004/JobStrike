@@ -7,6 +7,10 @@ import { normalizeUsername, DEFAULT_ADMIN_USERNAME } from "@/lib/auth/constants"
 import type { AppUser, UserRole } from "@/lib/auth/types";
 import { DEFAULT_TIMEZONE, normalizeTimeZone } from "@/lib/timezone";
 
+function rethrow(error: { message: string }): never {
+  throw new Error(error.message);
+}
+
 type AppUserRow = {
   id: string;
   username: string;
@@ -39,7 +43,7 @@ export async function findUserByUsername(
     .select("*")
     .eq("username", normalized)
     .maybeSingle();
-  if (error) throw error;
+  if (error) rethrow(error);
   return (data as AppUserRow | null) ?? null;
 }
 
@@ -54,7 +58,7 @@ export async function findUserByExtensionApiKey(
     .select("id, username, role, timezone, created_at, updated_at")
     .eq("extension_api_key", key)
     .maybeSingle();
-  if (error) throw error;
+  if (error) rethrow(error);
   return data ? mapRow(data as AppUserRow) : null;
 }
 
@@ -65,7 +69,7 @@ export async function findUserById(id: string): Promise<AppUser | null> {
     .select("id, username, role, timezone, created_at, updated_at")
     .eq("id", id)
     .maybeSingle();
-  if (error) throw error;
+  if (error) rethrow(error);
   return data ? mapRow(data as AppUserRow) : null;
 }
 
@@ -75,7 +79,7 @@ export async function listAppUsers(): Promise<AppUser[]> {
     .from("app_users")
     .select("id, username, role, timezone, created_at, updated_at")
     .order("created_at", { ascending: true });
-  if (error) throw error;
+  if (error) rethrow(error);
   return ((data ?? []) as AppUserRow[]).map(mapRow);
 }
 
@@ -100,7 +104,7 @@ export async function createAppUser(input: {
     } as never)
     .select("id, username, role, timezone, created_at, updated_at")
     .single();
-  if (error) throw error;
+  if (error) rethrow(error);
   return mapRow(data as AppUserRow);
 }
 
@@ -123,7 +127,7 @@ export async function ensureExtensionApiKey(userId: string): Promise<string> {
     .select("extension_api_key")
     .eq("id", userId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) rethrow(error);
 
   const row = data as { extension_api_key: string | null } | null;
   const existing = row?.extension_api_key?.trim();
@@ -164,14 +168,14 @@ export async function updateAppUser(
     .eq("id", id)
     .select("id, username, role, timezone, created_at, updated_at")
     .single();
-  if (error) throw error;
+  if (error) rethrow(error);
   return mapRow(data as AppUserRow);
 }
 
 export async function deleteAppUser(id: string): Promise<void> {
   const supabase = getSupabaseServiceRoleClient();
   const { error } = await supabase.from("app_users").delete().eq("id", id);
-  if (error) throw error;
+  if (error) rethrow(error);
 }
 
 /**

@@ -260,5 +260,28 @@ def replace_placeholders_in_docx(template_docx: Path, replacements: Dict[str, Di
                         changed = True
                         break
 
+    # Post-replacement cleanup
+    for p in list(doc.paragraphs):
+        full = "".join(r.text for r in p.runs)
+        # Remove empty bullet paragraphs (list items with no visible text)
+        if not full.strip() and p._element.pPr is not None and p._element.pPr.find(qn("w:numPr")) is not None:
+            p._element.getparent().remove(p._element)
+            continue
+        # Clean up leftover " ()" from empty work-arrangement placeholders.
+        # The parens may be split across runs (e.g. " (" in one, ")" in next).
+        if " ()" in full:
+            runs = list(p.runs)
+            for ri, r in enumerate(runs):
+                if r.text.rstrip() == "(" or r.text.endswith(" ("):
+                    r.text = r.text[:r.text.rfind("(")].rstrip()
+                    for rj in range(ri + 1, len(runs)):
+                        if ")" in runs[rj].text:
+                            runs[rj].text = runs[rj].text.replace(")", "", 1)
+                            break
+                    break
+                if " ()" in r.text:
+                    r.text = r.text.replace(" ()", "")
+                    break
+
     out_docx.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(out_docx))

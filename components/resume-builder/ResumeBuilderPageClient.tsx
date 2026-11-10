@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { CheckCircle2, Loader2, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { generationReadiness, type GenerationReadiness } from "@/lib/autogen/kit";
+import { sanitizeChatGptJson } from "@/lib/autogen/extract-json";
 import { REQUIRED_BUILT_RESUME_JSON_FIELDS } from "@/lib/promptBuilder";
 import {
   emptyProfilePromptKit,
@@ -51,6 +52,7 @@ function FieldBlock({
   value,
   onChange,
   onClear,
+  onPaste,
   placeholder,
   mono = false,
   rows = 8,
@@ -63,6 +65,7 @@ function FieldBlock({
   value: string;
   onChange?: (value: string) => void;
   onClear?: () => void;
+  onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   mono?: boolean;
   rows?: number;
@@ -95,6 +98,7 @@ function FieldBlock({
         id={id}
         value={value}
         onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+        onPaste={onPaste}
         disabled={disabled}
         placeholder={placeholder}
         rows={rows}
@@ -288,6 +292,15 @@ export function ResumeBuilderPageClient() {
     setKit((prev) => ({ ...prev, ...partial }));
   };
 
+  const handleJsonPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const raw = e.clipboardData.getData("text/plain");
+    if (!raw.includes("&#x") && !raw.includes("\\\n") && !raw.includes("\\\r\n")) return;
+    e.preventDefault();
+    const cleaned = sanitizeChatGptJson(raw);
+    patchKit({ resumeTemplateJson: cleaned });
+    toast.success("Pasted and auto-cleaned ChatGPT artifacts");
+  };
+
   const handleSave = async () => {
     if (profileId == null) {
       toast.error("Select a profile first.");
@@ -461,10 +474,11 @@ export function ResumeBuilderPageClient() {
           <FieldBlock
             id="rb-resume-template-json"
             label="resume_template_json"
-            hint='Include "resume_template" (e.g. Jose / Oscar) in the base JSON when possible.'
+            hint='Include "resume_template" (e.g. Jose / Oscar) in the base JSON when possible. Garbled ChatGPT output (&#x20;, backslash escapes) is auto-cleaned on paste.'
             value={kit.resumeTemplateJson}
             onChange={(value) => patchKit({ resumeTemplateJson: value })}
             onClear={() => patchKit({ resumeTemplateJson: "" })}
+            onPaste={handleJsonPaste}
             placeholder='{"resume_template":"Jose","profile_title":{...}}'
             mono
             rows={10}

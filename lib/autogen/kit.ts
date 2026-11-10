@@ -3,6 +3,8 @@
  * holds the kit to. Pure: no I/O, so the tests can run it directly.
  */
 
+import { sanitizeChatGptJson } from "@/lib/autogen/extract-json";
+
 /** Top-level fields that are facts about the candidate, copied from the kit into every resume. */
 export const LOCKED_TOP_LEVEL_FIELDS = [
   "schema_version",
@@ -32,12 +34,12 @@ export const LOCKED_ROLE_FIELDS = [
   "employment_type",
 ] as const;
 
-/** Role facts that must be filled in the kit whenever the kit has the field. */
-const REQUIRED_ROLE_FACTS: Array<{ key: (typeof LOCKED_ROLE_FIELDS)[number]; label: string }> = [
-  { key: "company", label: "employer" },
-  { key: "role_title", label: "job title" },
-  { key: "work_arrangement", label: "work arrangement" },
-];
+/**
+ * Role facts that were once required to be pre-filled but are now optional:
+ * a prompt may instruct the model to generate them per-job.
+ */
+const _PREVIOUSLY_REQUIRED_ROLE_FACTS = ["company", "role_title", "work_arrangement"] as const;
+void _PREVIOUSLY_REQUIRED_ROLE_FACTS;
 
 export type KitRunMode = "verified_candidate" | "fictional_benchmark" | "unknown";
 
@@ -125,14 +127,17 @@ export function generationReadiness(template: string, resumeTemplateJson: string
 }
 
 export function parseKitResumeJson(raw: string): Record<string, unknown> | null {
-  try {
-    const value = JSON.parse(String(raw || ""));
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
+  const text = String(raw || "");
+  for (const source of [text, sanitizeChatGptJson(text)]) {
+    try {
+      const value = JSON.parse(source);
+      if (value && typeof value === "object" && !Array.isArray(value))
+        return value as Record<string, unknown>;
+    } catch {
+      // try next
+    }
   }
+  return null;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -155,9 +160,9 @@ export function experienceKeys(workExperience: unknown): string[] {
 }
 
 /**
- * Why this kit cannot generate resumes, or [] when it can. Each role's
- * employer, title and arrangement must already be the candidate's own:
- * generation never fills them in.
+ * Why this kit cannot generate resumes, or [] when it can. Blank role
+ * fields (company, title, location, etc.) are allowed: the prompt may
+ * instruct the model to generate them per-job.
  */
 export function kitProblems(kit: Record<string, unknown>): string[] {
   const problems: string[] = [];
@@ -167,21 +172,6 @@ export function kitProblems(kit: Record<string, unknown>): string[] {
   const roles = experienceKeys(kit.work_experience);
   if (!roles.length) {
     problems.push("The kit's resume JSON has no work_experience.experience_N roles.");
-  }
-  const work = isRecord(kit.work_experience) ? kit.work_experience : {};
-  for (const role of roles) {
-    const entry = work[role] as Record<string, unknown>;
-    for (const key of LOCKED_ROLE_FIELDS) {
-      if (!(key in entry) || fieldText(entry[key])) continue;
-      const required = REQUIRED_ROLE_FACTS.find((fact) => fact.key === key);
-      // A printed placeholder (<<Company-Location-1>>) left blank would print empty.
-      const printed = isRecord(entry[key]) && typeof (entry[key] as { placeholder?: unknown }).placeholder === "string";
-      if (required || printed) {
-        problems.push(
-          `work_experience.${role}.${key} is blank: fill in the candidate's real ${required?.label ?? key.replace(/_/g, " ")} in the kit.`,
-        );
-      }
-    }
   }
   return problems;
 }

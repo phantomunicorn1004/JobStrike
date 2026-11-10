@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AnswerParseError, extractBuiltResumeJson } from "@/lib/autogen/extract-json";
+import { AnswerParseError, extractBuiltResumeJson, sanitizeChatGptJson } from "@/lib/autogen/extract-json";
 
 const resume = (extra: Record<string, unknown> = {}) => ({
   resume_template: "William",
@@ -65,5 +65,46 @@ describe("extractBuiltResumeJson", () => {
     expect(reason(() => extractBuiltResumeJson("   "))).toBe("empty");
     expect(reason(() => extractBuiltResumeJson("Sorry, I can't help with that."))).toBe("no_json");
     expect(reason(() => extractBuiltResumeJson(JSON.stringify(resume()).slice(0, 60)))).toBe("malformed");
+  });
+
+  it("handles ChatGPT HTML entities and line-continuation backslashes", () => {
+    const garbled = '{\\  \n&#x20; "resume_template": "Jacob",\\\n&#x20; "job_title": "Engineer",\\\n&#x20; "company_name": "Initech",\\\n&#x20; "job_description": "JD",\\\n&#x20; "summary": "hello"\\\n}';
+    const result = extractBuiltResumeJson(garbled);
+    expect(result.resume_template).toBe("Jacob");
+    expect(result.company_name).toBe("Initech");
+  });
+
+  it("fixes unnecessary backslash escapes from ChatGPT", () => {
+    const raw = '{"resume_template":"Jacob","job_title":"Eng","company_name":"Co","job_description":"JD","summary":"x","contact":{"email":"jacob\\.matthew\\.pribisco\\@outlook\\.com"}}';
+    const result = extractBuiltResumeJson(raw);
+    expect((result.contact as { email: string }).email).toBe("jacob.matthew.pribisco@outlook.com");
+  });
+
+  it("fixes double-escaped quotes from ChatGPT", () => {
+    const raw = '{"resume_template":"Jacob","job_title":"Eng","company_name":"Co","job_description":"audit on \\\\"Decision Tools\\\\"","summary":"x"}';
+    const result = extractBuiltResumeJson(raw);
+    expect(result.job_description).toBe('audit on "Decision Tools"');
+  });
+});
+
+describe("sanitizeChatGptJson", () => {
+  it("replaces &#x20; with spaces", () => {
+    expect(sanitizeChatGptJson('&#x20;"name": "test"')).toBe(' "name": "test"');
+  });
+
+  it("removes line-continuation backslashes", () => {
+    expect(sanitizeChatGptJson('"hello",\\\n"world"')).toBe('"hello",\n"world"');
+  });
+
+  it("strips unnecessary backslash escapes", () => {
+    expect(sanitizeChatGptJson('jacob\\.matthew\\@outlook\\.com')).toBe("jacob.matthew@outlook.com");
+  });
+
+  it("preserves valid JSON escapes", () => {
+    expect(sanitizeChatGptJson('say \\"hi\\" and use \\\\')).toBe('say \\"hi\\" and use \\\\');
+  });
+
+  it("reduces double-escaped quotes to single-escaped", () => {
+    expect(sanitizeChatGptJson('on \\\\"Decision Tools\\\\"')).toBe('on \\"Decision Tools\\"');
   });
 });

@@ -4,6 +4,10 @@ import { getSupabaseServiceRoleClient } from "@/lib/supabase/admin";
 import { normalizeGoogleDriveFolderId } from "@/lib/google-drive/urls";
 import { decryptSecret, encryptSecretIfConfigured } from "@/lib/crypto/secret-box";
 
+function rethrow(error: { message: string }): never {
+  throw new Error(error.message);
+}
+
 /** Stored secrets are encrypted once TOKEN_ENCRYPTION_KEY is set; older plain values still read. */
 function readSecret(stored: string | null | undefined): string | null {
   const value = stored?.trim();
@@ -49,7 +53,7 @@ export async function getUserGoogleOAuthCredentials(
     .eq("id", userId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) rethrow(error);
   const row = (data as Pick<
     GoogleRow,
     "google_oauth_client_id" | "google_oauth_client_secret"
@@ -81,7 +85,7 @@ export async function updateUserGoogleOAuthCredentials(
     .update(patch as never)
     .eq("id", userId);
 
-  if (error) throw error;
+  if (error) rethrow(error);
 }
 
 export async function getUserGoogleDriveConnection(
@@ -102,7 +106,7 @@ export async function getUserGoogleDriveConnection(
     .eq("id", userId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) rethrow(error);
   if (!data) return null;
 
   const row = data as GoogleRow;
@@ -148,7 +152,7 @@ export async function saveUserGoogleDriveConnection(
     } as never)
     .eq("id", userId);
 
-  if (error) throw error;
+  if (error) rethrow(error);
 }
 
 export async function clearUserGoogleDriveConnection(
@@ -166,7 +170,7 @@ export async function clearUserGoogleDriveConnection(
     .eq("id", userId);
 
 
-  if (error) throw error;
+  if (error) rethrow(error);
 }
 
 export async function updateUserGoogleDrivePreferences(
@@ -197,5 +201,5 @@ export async function updateUserGoogleDrivePreferences(
     .update(patch as never)
     .eq("id", userId);
 
-  if (error) throw error;
+  if (error) rethrow(error);
 }

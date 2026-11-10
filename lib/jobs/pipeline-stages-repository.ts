@@ -2,6 +2,10 @@ import "server-only";
 
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
+function rethrow(error: { message: string }): never {
+  throw new Error(error.message);
+}
+
 /** A board column. The table is shared by all users (it has no user_id yet). */
 export type PipelineStageRow = {
   id: string;
@@ -30,7 +34,7 @@ export async function listPipelineStages(): Promise<PipelineStageRow[]> {
     .from("pipeline_stages")
     .select("id, name, sort_order, is_visible")
     .order("sort_order", { ascending: true });
-  if (error) throw error;
+  if (error) rethrow(error);
   if (!data || data.length === 0) {
     const { error: insertError } = await supabase
       .from("pipeline_stages")
@@ -56,7 +60,7 @@ export async function createPipelineStage(name: string): Promise<PipelineStageRo
   }
   const row: PipelineStageRow = { id, name: trimmed, sort_order: sortOrder, is_visible: true };
   const { error } = await supabase.from("pipeline_stages").insert(row as never);
-  if (error) throw error;
+  if (error) rethrow(error);
   return row;
 }
 
@@ -82,7 +86,7 @@ export async function updatePipelineStage(
     .from("pipeline_stages")
     .update(update as never)
     .eq("id", id);
-  if (error) throw error;
+  if (error) rethrow(error);
 }
 
 /** Saves the board order: <paramref name="orderedIds"/> lists every stage id, first to last. */
@@ -94,12 +98,12 @@ export async function reorderPipelineStages(orderedIds: string[]): Promise<void>
     ),
   );
   const failed = results.find((r) => r.error);
-  if (failed?.error) throw failed.error;
+  if (failed?.error) rethrow(failed.error);
 }
 
 /** Deletes a stage. Cards in it must have been moved first (POST /api/pipeline reassignStage). */
 export async function deletePipelineStage(id: string): Promise<void> {
   if (id === "applied") throw new Error("The Applied stage cannot be removed.");
   const { error } = await getSupabaseAdminClient().from("pipeline_stages").delete().eq("id", id);
-  if (error) throw error;
+  if (error) rethrow(error);
 }

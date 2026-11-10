@@ -3488,6 +3488,31 @@
       const outputMode =
         config?.outputMode === 'pdf' ? 'both' : config?.outputMode || 'both';
 
+      // Inject locked PII fields that are stripped from the prompt template
+      // (so ChatGPT never sees real personal info and refuses).
+      const piiByTemplate = {
+        Jacob: {
+          profile: 'Jacob Matthew Pribisco',
+          candidate: 'Jacob Matthew Pribisco',
+          email: 'jacob.matthew.pribisco@outlook.com',
+          phone_number: '+1 904-413-8680',
+          current_location: 'Jacksonville, FL',
+          education: {
+            institution: 'University of North Florida',
+            degree: 'Bachelor of Science in Computer Science',
+            location: 'Jacksonville, FL',
+            date_range: 'Aug 2014 - Apr 2018',
+          },
+        },
+      };
+      const tplName = parsed.data.resume_template || '';
+      const pii = piiByTemplate[tplName];
+      if (pii) {
+        for (const [k, v] of Object.entries(pii)) {
+          if (!parsed.data[k]) parsed.data[k] = v;
+        }
+      }
+
       const result = await api.generateAndDownloadFiles(parsed.data, {
         outputMode,
         onProgress: ({ percent, message }) => {
@@ -4898,11 +4923,29 @@
       maxTargetId = null;
     }
 
+    function sanitizeJsonPaste(text) {
+      let s = text;
+      s = s.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+      s = s.replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)));
+      s = s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+      s = s.replace(/\\\r\n/g, '\r\n');
+      s = s.replace(/\\\n/g, '\n');
+      s = s.replace(/\\\\"/g, '\\"');
+      s = s.replace(/\\([^"\\\/bfnrtu])/g, '$1');
+      return s;
+    }
+
     function applyMax() {
       if (!maxTargetId || !modalTextarea) return;
       const target = document.getElementById(maxTargetId);
       if (!target) return;
-      target.value = modalTextarea.value;
+      let text = modalTextarea.value;
+      if (maxTargetId === 'regResumeJson' && (/&#x[0-9a-fA-F]+;/.test(text) || /\\\n/.test(text) || /\\\\"/.test(text))) {
+        text = sanitizeJsonPaste(text);
+        modalTextarea.value = text;
+      }
+      target.value = text;
       target.dispatchEvent(new Event('input', { bubbles: true }));
       target.dispatchEvent(new Event('change', { bubbles: true }));
       closeMax();

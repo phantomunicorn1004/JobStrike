@@ -32,9 +32,7 @@ describe("generationReadiness", () => {
     expect(generationReadiness(PROMPT, "{not json").problems).toEqual(["The resume JSON is not a valid JSON object."]);
     const kit = makeKit() as any;
     kit.work_experience.experience_1.company.text = "";
-    expect(generationReadiness(PROMPT, JSON.stringify(kit)).problems).toEqual([
-      expect.stringContaining("experience_1.company is blank"),
-    ]);
+    expect(generationReadiness(PROMPT, JSON.stringify(kit)).ready).toBe(true);
   });
 });
 
@@ -62,23 +60,18 @@ describe("kitProblems", () => {
     expect(kitProblems(makeKit())).toEqual([]);
   });
 
-  it("rejects a blank employer, title or arrangement", () => {
+  it("accepts blank employer, title or arrangement (the model fills them per-job)", () => {
     const kit = makeKit() as any;
     kit.work_experience.experience_1.company.text = "";
     kit.work_experience.experience_2.role_title.text = "  ";
     kit.work_experience.experience_2.work_arrangement.text = "";
-    const problems = kitProblems(kit);
-    expect(problems).toHaveLength(3);
-    expect(problems[0]).toContain("experience_1.company");
-    expect(problems.join(" ")).toContain("real job title");
+    expect(kitProblems(kit)).toEqual([]);
   });
 
-  it("rejects any other printed fact placeholder left blank", () => {
+  it("accepts a blank printed fact placeholder (the model fills it per-job)", () => {
     const kit = makeKit() as any;
     kit.work_experience.experience_1.location.text = "";
-    expect(kitProblems(kit)).toEqual([
-      expect.stringContaining("experience_1.location is blank"),
-    ]);
+    expect(kitProblems(kit)).toEqual([]);
   });
 
   it("allows a blank plain-string fact that is not printed", () => {

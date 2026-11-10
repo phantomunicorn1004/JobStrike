@@ -15,6 +15,20 @@
     return String(value == null ? '' : value).trim();
   }
 
+  /** Strip ChatGPT rendering artifacts that break JSON.parse. */
+  function sanitizeChatGptJson(text) {
+    let s = text;
+    s = s.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    s = s.replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)));
+    s = s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+    s = s.replace(/\\\r\n/g, '\r\n');
+    s = s.replace(/\\\n/g, '\n');
+    s = s.replace(/\\\\"/g, '\\"');
+    s = s.replace(/\\([^"\\\/bfnrtu])/g, '$1');
+    return s;
+  }
+
   function nestedText(obj, path) {
     let cur = obj;
     for (const key of path) {
@@ -212,28 +226,35 @@
       return data;
     };
 
-    try {
-      return { ok: true, data: tryParse(raw) };
-    } catch (_) {
-      // continue
-    }
+    // Try raw text first, then sanitized (strips &#x20;, \-continuations, bad escapes).
+    const sanitized = sanitizeChatGptJson(raw);
+    const candidates = [raw];
+    if (sanitized !== raw) candidates.push(sanitized);
 
-    const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(raw);
-    if (fenced?.[1]) {
+    for (const source of candidates) {
       try {
-        return { ok: true, data: tryParse(fenced[1].trim()) };
+        return { ok: true, data: tryParse(source) };
       } catch (_) {
         // continue
       }
-    }
 
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    if (start !== -1 && end > start) {
-      try {
-        return { ok: true, data: tryParse(raw.slice(start, end + 1)) };
-      } catch (err) {
-        return { ok: false, error: err.message || 'Invalid JSON' };
+      const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(source);
+      if (fenced?.[1]) {
+        try {
+          return { ok: true, data: tryParse(fenced[1].trim()) };
+        } catch (_) {
+          // continue
+        }
+      }
+
+      const start = source.indexOf('{');
+      const end = source.lastIndexOf('}');
+      if (start !== -1 && end > start) {
+        try {
+          return { ok: true, data: tryParse(source.slice(start, end + 1)) };
+        } catch (_) {
+          // continue
+        }
       }
     }
 

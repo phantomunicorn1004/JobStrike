@@ -114,12 +114,20 @@ describe("finalizeBuiltResume", () => {
     expect((result.resume as any).work_experience.experience_3).toBeUndefined();
   });
 
-  it("refuses to run on a kit with a blank employer", () => {
+  it("keeps the model's value when the kit's role field is blank", () => {
     const kit = makeKit() as any;
     kit.work_experience.experience_1.company.text = "";
-    const result = run(makeAnswer(), kit);
-    expect(result.ok).toBe(false);
-    expect(result.errors[0]).toMatch(/^Kit: work_experience\.experience_1\.company is blank/);
+    kit.work_experience.experience_1.location.text = "";
+    const answer = makeAnswer() as any;
+    answer.work_experience.experience_1.company.text = "Generated Corp";
+    answer.work_experience.experience_1.location.text = "San Francisco, CA";
+    const result = run(answer, kit);
+    expect(result.ok).toBe(true);
+    const role1 = (result.resume as any).work_experience.experience_1;
+    expect(role1.company.text).toBe("Generated Corp");
+    expect(role1.location.text).toBe("San Francisco, CA");
+    expect(result.restored).not.toContain("work_experience.experience_1.company");
+    expect(result.restored).not.toContain("work_experience.experience_1.location");
   });
 
   it("rejects a non-object answer", () => {

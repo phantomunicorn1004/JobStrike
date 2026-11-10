@@ -14,7 +14,12 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const fresh = await findUserById(session.id);
+  let fresh: Awaited<ReturnType<typeof findUserById>> = null;
+  try {
+    fresh = await findUserById(session.id);
+  } catch (error) {
+    console.error("Dashboard: findUserById failed:", error);
+  }
   const user = {
     id: session.id,
     username: session.username,

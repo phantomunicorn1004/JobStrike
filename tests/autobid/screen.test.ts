@@ -13,7 +13,8 @@ describe("siteOf", () => {
     expect(siteOf("https://boards.greenhouse.io/x/jobs/1")).toBe("Greenhouse");
     expect(siteOf("https://jobs.lever.co/x/abc")).toBe("Lever");
     expect(siteOf("https://jobs.ashbyhq.com/x/abc")).toBe("Ashby");
-    expect(siteOf("https://x.wd5.myworkdayjobs.com/en-US/jobs/1")).toBe("");
+    expect(siteOf("https://x.wd5.myworkdayjobs.com/en-US/jobs/1")).toBe("Workday");
+    expect(siteOf("https://x.icims.com/jobs/1")).toBe("iCIMS");
     expect(siteOf("https://clever.com/jobs")).toBe("");
     expect(siteOf("not a link")).toBe("");
   });
@@ -27,8 +28,8 @@ describe("screenCandidate: lite pass", () => {
     });
   });
 
-  it("skips other sites and the European board, passes Ashby", () => {
-    expect(screenCandidate({ jobLink: "https://x.icims.com/jobs/1", jobTitle: "Engineer" }, citizen)).toMatchObject({ ok: false });
+  it("skips unsupported sites and the European board, passes Ashby and iCIMS", () => {
+    expect(screenCandidate({ jobLink: "https://x.icims.com/jobs/1", jobTitle: "Engineer" }, citizen)).toMatchObject({ ok: true, site: "iCIMS" });
     expect(
       screenCandidate({ jobLink: "https://jobs.ashbyhq.com/x/1", jobTitle: "Engineer" }, citizen),
     ).toMatchObject({ ok: true, site: "Ashby" });

@@ -110,6 +110,7 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
     }
     for (const field of LOCKED_ROLE_FIELDS) {
       if (!(field in kitRole)) continue;
+      if (!fieldText(kitRole[field])) continue;
       if (field in builtRole && !same(builtRole[field], kitRole[field])) {
         restored.push(`work_experience.${role}.${field}`);
       }

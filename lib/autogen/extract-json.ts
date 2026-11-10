@@ -28,6 +28,25 @@ function scoreResumeJson(value: unknown): number {
   return REGISTRATION_KEYS.reduce((score, key) => score + (fieldFilled(obj[key]) ? 1 : 0), 0);
 }
 
+/**
+ * Strip common ChatGPT rendering artifacts that break JSON.parse:
+ * - HTML entities (&#x20; &#xa; &amp; &lt; &gt; &quot; &apos;)
+ * - Line-continuation backslashes (\ at end of line)
+ * - Unnecessary backslash escapes (\. \@ \< \> etc.)
+ */
+export function sanitizeChatGptJson(text: string): string {
+  let s = text;
+  s = s.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+  s = s.replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)));
+  s = s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  s = s.replace(/\\\r\n/g, "\r\n");
+  s = s.replace(/\\\n/g, "\n");
+  s = s.replace(/\\\\"/g, '\\"');
+  s = s.replace(/\\([^"\\\/bfnrtu])/g, "$1");
+  return s;
+}
+
 function stripFences(text: string): string {
   return text.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
 }
@@ -140,9 +159,10 @@ export function extractBuiltResumeJson(raw: string): Record<string, unknown> {
   const text = String(raw ?? "").trim();
   if (!text) throw new AnswerParseError("The answer is empty.", "empty");
 
-  const unfenced = stripFences(text);
+  const sanitized = sanitizeChatGptJson(text);
+  const unfenced = stripFences(sanitized);
   const straightened = straightenQuotes(unfenced);
-  const attempts = [text, unfenced, escapeStrayQuotes(unfenced), straightened, escapeStrayQuotes(straightened)];
+  const attempts = [text, sanitized, unfenced, escapeStrayQuotes(unfenced), straightened, escapeStrayQuotes(straightened)];
   const seen = new Set<string>();
   for (const source of attempts) {
     if (seen.has(source)) continue;
