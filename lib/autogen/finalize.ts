@@ -123,6 +123,21 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
     warnings.push(`Removed work_experience.${role}, which the kit does not have.`);
   }
 
+  // 2b. Reject obvious placeholder / instruction text the model copied verbatim.
+  //     Runs after restoration so it only fires for fields the kit could not fix.
+  const VERBATIM_PLACEHOLDER = /\bExtracted Company\b|\[JD[\s\w]*\]|^City,\s*ST$/i;
+  for (const role of experienceKeys(resumeWork)) {
+    const r = resumeWork[role] as Record<string, unknown>;
+    for (const field of ["company", "role_title", "location"] as const) {
+      const text = fieldText(r[field]);
+      if (text && VERBATIM_PLACEHOLDER.test(text)) {
+        errors.push(
+          `work_experience.${role}.${field} contains template placeholder text ("${text.slice(0, 60)}").`,
+        );
+      }
+    }
+  }
+
   // 3. The target job, as registered (not as the model read it).
   if (target.jobTitle.trim()) resume.job_title = target.jobTitle.trim();
   if (target.company.trim()) resume.company_name = target.company.trim();
@@ -153,6 +168,9 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
       : "";
     if (!text.trim() && kitText.trim()) errors.push(`${placeholder} is empty.`);
     else if (LEFTOVER.test(text)) errors.push(`${placeholder} still contains an unfilled placeholder.`);
+    else if (kitText.trim().length > 20 && text.trim() === kitText.trim()) {
+      errors.push(`${placeholder} still contains the template instruction text — the model did not replace it.`);
+    }
   }
 
   // 5. Bold words must appear verbatim (json2docx bolds exact, case-sensitive matches).
