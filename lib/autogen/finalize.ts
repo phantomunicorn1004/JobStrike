@@ -148,7 +148,10 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
       continue;
     }
     const text = typeof entry.obj.text === "string" ? entry.obj.text : "";
-    if (!text.trim()) errors.push(`${placeholder} is empty.`);
+    const kitText = typeof kitPlaceholders.get(placeholder)?.obj.text === "string"
+      ? (kitPlaceholders.get(placeholder)!.obj.text as string)
+      : "";
+    if (!text.trim() && kitText.trim()) errors.push(`${placeholder} is empty.`);
     else if (LEFTOVER.test(text)) errors.push(`${placeholder} still contains an unfilled placeholder.`);
   }
 

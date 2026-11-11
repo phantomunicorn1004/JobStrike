@@ -114,6 +114,16 @@ describe("finalizeBuiltResume", () => {
     expect((result.resume as any).work_experience.experience_3).toBeUndefined();
   });
 
+  it("accepts an intentionally empty placeholder when the kit text is also empty", () => {
+    const kit = makeKit() as any;
+    kit.work_experience.experience_2.work_arrangement.text = "";
+    const answer = makeAnswer() as any;
+    answer.work_experience.experience_2.work_arrangement.text = "";
+    const result = run(answer, kit);
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
   it("keeps the model's value when the kit's role field is blank", () => {
     const kit = makeKit() as any;
     kit.work_experience.experience_1.company.text = "";
