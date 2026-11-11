@@ -70,12 +70,12 @@ function money(n: number, unit: PostedPay["unit"]): string {
   return unit === "hour" ? `$${Math.round(n)}` : `$${Math.round(n).toLocaleString("en-US")}`;
 }
 
-/** The middle of the posted range: inside what the employer budgets, without asking for the minimum. */
+/** The low end of the posted range: stays within the employer's budget without leaving money on the table at the midpoint. */
 export function salaryAnswer(pay: PostedPay): string {
-  const middle = (pay.min + pay.max) / 2;
-  if (pay.unit === "hour") return `${money(middle, "hour")} per hour`;
-  if (pay.unit === "month") return `${money(Math.round(middle / 100) * 100, "month")} per month`;
-  return money(Math.round(middle / 1000) * 1000, "year");
+  const low = pay.min;
+  if (pay.unit === "hour") return `${money(low, "hour")} per hour`;
+  if (pay.unit === "month") return `${money(Math.round(low / 100) * 100, "month")} per month`;
+  return money(Math.round(low / 1000) * 1000, "year");
 }
 
 export function jobAnswers(builtResumeJson: string, jobDescription: string): JobAnswers {

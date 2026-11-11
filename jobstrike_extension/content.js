@@ -5052,6 +5052,7 @@
       return { category: 'school', confidence: 0.88 };
     }
     if (/^(degree|degree type)$/.test(text)) return { category: 'degree', confidence: 0.88 };
+    if (/^gpa$/.test(text) || has('grade point average', 'cumulative gpa', 'overall gpa')) return { category: 'gpa', confidence: 0.88 };
     if (has('degree', 'education')) return { category: 'education', confidence: 0.78 };
 
     const isLongQuestion = text.length > 45 || /\?$/.test(trim(rawText));

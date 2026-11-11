@@ -473,6 +473,7 @@ const categoryToProfileKey = {
   pronouns: 'pronouns',
   school: 'school',
   degree: 'degree',
+  gpa: 'gpa',
   graduation_year: 'graduationYear'
 };
 
@@ -4693,7 +4694,7 @@ const DETERMINISTIC_PROFILE_CATEGORIES = new Set([
   'current_company', 'experience_years',
   'work_authorization', 'work_authorization_us', 'work_authorization_ca', 'work_authorization_uk',
   'sponsorship', 'lgbtq_identity', 'salary', 'relocation', 'notice_period', 'how_heard',
-  'education', 'school', 'degree', 'graduation_year',
+  'education', 'school', 'degree', 'gpa', 'graduation_year',
   'gender', 'gender_identity', 'sexual_orientation', 'race', 'hispanic_latino',
   'transgender', 'veteran_status', 'disability_status', 'pronouns'
 ]);
