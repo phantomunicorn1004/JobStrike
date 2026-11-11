@@ -2493,6 +2493,7 @@
    */
   function classifyEligibilityQuestion(text) {
     const t = String(text || '').toLowerCase();
+    if (/which countr|list.*countr|name.*countr|countries you are authori[sz]ed/.test(t)) return null;
     const sponsor = /sponsor/.test(t);
     const authorized =
       /authori[sz]ed to work|legally authori[sz]ed|eligible to work|work authori[sz]ation|right to work|legally (?:able|permitted|entitled) to work/.test(t);
