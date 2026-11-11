@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Shapes;
@@ -25,7 +26,6 @@ public partial class OverlayWindow : Window
         _settings = settings;
         // The slider shows how see-through the background is: 0 = solid, right = more see-through.
         OpacitySlider.Value = 1 - Math.Clamp(settings.OverlayOpacity, MinOpacity, 1);
-        CaptionRow.Height = new GridLength(Math.Max(40, settings.OverlayCaptionHeight));
 
         var area = SystemParameters.WorkArea;
         var bounds = settings.OverlayBounds
@@ -56,6 +56,11 @@ public partial class OverlayWindow : Window
         };
         ThemeManager.Changed += ApplyLook;
         ApplyLook();
+        SourceInitialized += (_, _) =>
+        {
+            if (settings.HideFromCapture)
+                NativeMethods.SetCaptureExclusion(new WindowInteropHelper(this).Handle, true);
+        };
     }
 
     public void Host(UIElement captions, UIElement reader)
@@ -76,10 +81,6 @@ public partial class OverlayWindow : Window
 
     public void SaveState()
     {
-        if (CaptionRow.ActualHeight > 0)
-        {
-            _settings.OverlayCaptionHeight = CaptionRow.ActualHeight;
-        }
         if (WindowState == WindowState.Normal && IsVisible)
         {
             _settings.OverlayBounds = new WindowBounds(Left, Top, Width, Height);

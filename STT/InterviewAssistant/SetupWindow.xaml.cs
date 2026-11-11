@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using Microsoft.Win32;
 
@@ -28,6 +29,7 @@ public partial class SetupWindow : Window
     public CaptionDock ChosenCaptionDock { get; private set; }
     public AppTheme ChosenTheme { get; private set; }
     public bool ChosenAlwaysOnTop { get; private set; }
+    public bool ChosenHideFromCapture { get; private set; }
     public bool ChosenHideLiveCaptions { get; private set; }
 
     // Plays the Test sentence; the main window keeps its own speaker.
@@ -49,7 +51,8 @@ public partial class SetupWindow : Window
         InitializeComponent();
         _settings = settings;
         _hotkeyBoxes = [HotkeySendBox, HotkeyDiscardBox, HotkeySubmitBox, HotkeyClearBox, HotkeyAutoBox, HotkeyCompactBox,
-            HotkeyScrollDownBox, HotkeyScrollUpBox, HotkeyLessSeeThroughBox, HotkeyMoreSeeThroughBox, HotkeyVoiceBox, HotkeyStopVoiceBox];
+            HotkeyScrollDownBox, HotkeyScrollUpBox, HotkeyLessSeeThroughBox, HotkeyMoreSeeThroughBox, HotkeyVoiceBox, HotkeyStopVoiceBox,
+            HotkeyShowHideBox];
         _docks =
         [
             (DockTop, CaptionDock.Top), (DockBottom, CaptionDock.Bottom), (DockLeft, CaptionDock.Left),
@@ -73,6 +76,7 @@ public partial class SetupWindow : Window
         (_docks.FirstOrDefault(d => d.Dock == settings.CompactCaptionDock).Button ?? DockBottom).IsChecked = true;
         (settings.Theme switch { AppTheme.Light => ThemeLight, AppTheme.System => ThemeSystem, _ => ThemeDark }).IsChecked = true;
         TopmostToggle.IsChecked = settings.AlwaysOnTop;
+        HideFromCaptureToggle.IsChecked = settings.HideFromCapture;
         HideLcToggle.IsChecked = settings.HideLiveCaptionsWindow;
 
         // Answers
@@ -114,7 +118,8 @@ public partial class SetupWindow : Window
         // Hotkeys
         var keys = settings.Hotkeys;
         string[] current = [keys.Send, keys.Discard, keys.SubmitChatBox, keys.ClearChatBox, keys.ToggleAutoSend, keys.ToggleCompact,
-            keys.ScrollAnswerDown, keys.ScrollAnswerUp, keys.LessSeeThrough, keys.MoreSeeThrough, keys.ToggleVoice, keys.StopVoice];
+            keys.ScrollAnswerDown, keys.ScrollAnswerUp, keys.LessSeeThrough, keys.MoreSeeThrough, keys.ToggleVoice, keys.StopVoice,
+            keys.ShowHide];
         for (int i = 0; i < _hotkeyBoxes.Length; i++)
         {
             var box = _hotkeyBoxes[i];
@@ -130,6 +135,11 @@ public partial class SetupWindow : Window
         HotkeysEverywhereToggle.IsChecked = settings.CommonHotkeysEverywhere;
         UpdateHotkeyWarning();
 
+        SourceInitialized += (_, _) =>
+        {
+            if (settings.HideFromCapture)
+                NativeMethods.SetCaptureExclusion(new WindowInteropHelper(this).Handle, true);
+        };
         (tab switch { "sending" => TabSending, "display" => TabDisplay, "answers" => TabAnswers, "voice" => TabVoice, "hotkeys" => TabHotkeys, _ => TabInterview }).IsChecked = true;
         OnTabChecked(this, new RoutedEventArgs()); // the page that was already selected raises no event
     }
@@ -468,6 +478,7 @@ public partial class SetupWindow : Window
             MoreSeeThrough = hotkeys[9],
             ToggleVoice = hotkeys[10],
             StopVoice = hotkeys[11],
+            ShowHide = hotkeys[12],
         };
         var engine = ChosenEngine;
         if (engine != AnswerEngine.ChatPage)
@@ -513,6 +524,7 @@ public partial class SetupWindow : Window
             ?? CaptionDock.Bottom;
         ChosenTheme = ThemeLight.IsChecked == true ? AppTheme.Light : ThemeSystem.IsChecked == true ? AppTheme.System : AppTheme.Dark;
         ChosenAlwaysOnTop = TopmostToggle.IsChecked == true;
+        ChosenHideFromCapture = HideFromCaptureToggle.IsChecked == true;
         ChosenHideLiveCaptions = HideLcToggle.IsChecked == true;
         DialogResult = true;
     }

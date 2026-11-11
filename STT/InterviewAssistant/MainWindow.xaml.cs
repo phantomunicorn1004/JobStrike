@@ -63,9 +63,13 @@ public partial class MainWindow : Window
     bool _captionsConnected;
     bool _syncingPane;
     bool _followCaptions = true;
-    DefinitionBase? _captionDefinition;
+    ColumnDefinition? _captionDefinition;
     Window? _floatingWindow;
     OverlayWindow? _overlay;
+    // The overlay holds the captions and the answer (it may be hidden with the Show / hide hotkey).
+    bool _inOverlay;
+    // The window's state before the Show / hide hotkey minimized it.
+    WindowState _stateBeforeHide = WindowState.Normal;
     CaptionDock? _lastDocked;
     string? _answerId;
     int _answerCount = -1;
@@ -102,7 +106,12 @@ public partial class MainWindow : Window
         ReaderPanel.ContextMenu = _mainMenu;
         ReaderPanel.ContextMenuOpening += (_, _) => FillMainMenu();
         AnswerBox.Document.FontFamily = (FontFamily)FindResource("UiFont");
-        SourceInitialized += (_, _) => NativeMethods.ApplyWindowChrome(this);
+        SourceInitialized += (_, _) =>
+        {
+            NativeMethods.ApplyWindowChrome(this);
+            if (_settings.HideFromCapture)
+                NativeMethods.SetCaptureExclusion(new WindowInteropHelper(this).Handle, true);
+        };
         (_settings.Provider == ChatProvider.DeepSeek ? DeepSeekTab : ChatGptTab).IsChecked = true;
         ApplyAnswerWidth();
         ApplyLayout(_settings.CompactMode);
@@ -233,7 +242,7 @@ public partial class MainWindow : Window
     {
         SaveCaptionSize();
         SaveBounds();
-        if (_overlay is { IsVisible: true })
+        if (_overlay != null && _inOverlay)
         {
             _overlay.SaveState();
         }
@@ -265,6 +274,38 @@ public partial class MainWindow : Window
         yield return ("Overlay more see-through", keys.MoreSeeThrough, () => ChangeSeeThrough(+0.1));
         yield return ("Automatic reading", keys.ToggleVoice, () => SetSpeakAnswers(!_settings.SpeakAnswers));
         yield return ("Listen / stop", keys.StopVoice, () => _ = ListenAsync());
+        yield return ("Show / hide", keys.ShowHide, ToggleAppVisible);
+    }
+
+    /// <summary>
+    /// The Show / hide hotkey: the overlay disappears and comes back where it was; the window is
+    /// minimized and restored (the chat page keeps working either way).
+    /// </summary>
+    void ToggleAppVisible()
+    {
+        if (_inOverlay && _overlay != null)
+        {
+            if (_overlay.IsVisible)
+            {
+                _overlay.Hide();
+            }
+            else
+            {
+                _overlay.Show();
+                _overlay.Activate();
+            }
+            return;
+        }
+        if (WindowState != WindowState.Minimized)
+        {
+            _stateBeforeHide = WindowState;
+            WindowState = WindowState.Minimized;
+        }
+        else
+        {
+            WindowState = _stateBeforeHide;
+            Activate();
+        }
     }
 
     /// <summary>Only the overlay can be see-through; the normal window cannot show what is behind it.</summary>
@@ -298,11 +339,12 @@ public partial class MainWindow : Window
             {
                 continue;
             }
-            // Switching views brings a window to the front, which only a real Windows hotkey may do.
-            // Everyday shortcuts (Ctrl+X, Ctrl+Space, …) only act as hotkeys in the meeting and in this
-            // app, so they keep their normal job everywhere else.
+            // Switching views and showing the app bring a window to the front, which only a real
+            // Windows hotkey may do. Everyday shortcuts (Ctrl+X, Ctrl+Space, …) only act as hotkeys in
+            // the meeting and in this app, so they keep their normal job everywhere else.
             bool scoped = hotkey.IsCommonShortcut && !_settings.CommonHotkeysEverywhere;
-            if (_hotkeys.Register(hotkey, action, activates: combo == _settings.Hotkeys.ToggleCompact, scoped))
+            bool activates = name is "Interview view" or "Show / hide";
+            if (_hotkeys.Register(hotkey, action, activates, scoped))
             {
                 all.Add($"{name}: {hotkey}");
                 _activeHotkeys.Add(name);
@@ -613,7 +655,7 @@ public partial class MainWindow : Window
         {
             CaptionScroll.ScrollToEnd();
         }
-        JumpLatestButton.Visibility = _followCaptions ? Visibility.Collapsed : Visibility.Visible;
+        JumpLatestButton.Visibility = _followCaptions || CaptionLine ? Visibility.Collapsed : Visibility.Visible;
     }
 
     void OnJumpLatestClick(object sender, RoutedEventArgs e)
@@ -676,19 +718,19 @@ public partial class MainWindow : Window
         SetText(CompactKeyText, sendText);
         SendKeyChip.Visibility = sendKey ? Visibility.Visible : Visibility.Collapsed;
 
-        // Interview view: what is being heard, and when it goes. The countdown runs once the
-        // interviewer pauses with enough words waiting.
+        // Interview view: the interviewer's latest words (as many as fit, newest last), and once they
+        // pause with enough words waiting, the countdown to sending them.
         bool showStatus = DateTime.UtcNow < _compactStatusUntil;
         bool counting = auto && !echo && !_draftEdited && words >= _settings.MinWords;
+        bool hearing = !showStatus && _captionsConnected && !_draftEdited && !echo && words > 0;
+        string heard = hearing ? LatestWords(_tracker.Pending) : "";
         SetText(CompactInfo, showStatus ? StatusText.Text
             : !_captionsConnected ? "Live Captions is not running · Menu ▸ Start Live Captions"
             : _draftEdited ? "Your message · Enter sends · Esc = captions"
             : echo ? "Reading the answer aloud · its captions are skipped"
             : words == 0 ? "Listening…"
-            : silent < 0.6 ? $"Hearing the interviewer… {wordsText}"
-            : counting ? $"Sending in {Math.Max(0, pause - silent):0.0}s…"
-            : auto ? $"{wordsText} · waiting for {_settings.MinWords}+ words"
-            : $"{wordsText} waiting · press Send");
+            : counting && silent >= 0.6 ? $"Sending in {Math.Max(0, pause - silent):0.0}s · {heard}"
+            : heard);
         CompactPauseProgress.Value = counting ? Math.Min(1, silent / pause) : 0;
         CompactPauseProgress.Visibility = counting ? Visibility.Visible : Visibility.Hidden;
         WaitingActions.Visibility = words > 0 && !_draftEdited && _captionsConnected ? Visibility.Visible : Visibility.Collapsed;
@@ -696,13 +738,17 @@ public partial class MainWindow : Window
             ? Visibility.Visible : Visibility.Collapsed;
         CompactInfo.ToolTip = showStatus ? StatusText.Text : ModeSummary(shortForm: false);
         CompactInfo.Foreground = (Brush)FindResource(showStatus ? (_compactStatusIsError ? "Danger" : "Text")
-            : !_captionsConnected ? "Danger" : "Muted");
+            : !_captionsConnected ? "Danger" : hearing ? "Text" : "Muted");
 
         if (auto && !echo && !_draftEdited && words >= _settings.MinWords && silent >= pause && DateTime.UtcNow >= _autoSendBlockedUntil)
         {
             _ = SendPendingAsync();
         }
     }
+
+    /// <summary>The end of <paramref name="text"/>, about as much as fits on the status line (with room for the countdown).</summary>
+    string LatestWords(string text) =>
+        Tail(text, Math.Max(24, (int)(CompactInfo.ActualWidth / (CompactInfo.FontSize * 0.5)) - 20));
 
     async Task SendPendingAsync()
     {
@@ -942,6 +988,8 @@ public partial class MainWindow : Window
                 Content = popupView,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
             };
+            if (_settings.HideFromCapture)
+                popup.SourceInitialized += (_, _) => NativeMethods.SetCaptureExclusion(new WindowInteropHelper(popup).Handle, true);
             popup.Show();
             await popupView.EnsureCoreWebView2Async(await _environment!);
             var shown = popup;
@@ -1014,7 +1062,7 @@ public partial class MainWindow : Window
         ClearAnswerHistory();
         _lastAnswer = null;
         _currentType = null;
-        _detailOpen = _openDetailNext = false;
+        _detailOpen = false;
         var provider = _settings.Provider;
         string name = ChatBridge.DisplayName(provider);
         _startingNewChat = true;
@@ -1223,8 +1271,7 @@ public partial class MainWindow : Window
                 RememberAnswer(previous, _currentType);
             }
             _currentType = null;
-            _detailOpen = _openDetailNext;
-            _openDetailNext = false;
+            _detailOpen = false;
         }
         if (questionType != null)
         {
@@ -1314,34 +1361,30 @@ public partial class MainWindow : Window
     {
         bool none = string.IsNullOrWhiteSpace(question) || question == "Call prompt";
         string text = none ? "" : CaptionTracker.CleanForSending(question!);
-        QuestionText.Text = QuestionTail(text);
+        QuestionText.Text = Tail(text, 130); // the end, where the question is (captions often carry a long lead-in)
         QuestionText.ToolTip = none ? null : text;
         QuestionRow.Visibility = none ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    /// <summary>
-    /// The end of what the interviewer said, where the actual question is (captions often carry a
-    /// long lead-in): about two lines, starting at a word.
-    /// </summary>
-    static string QuestionTail(string text)
+    /// <summary>The last <paramref name="keep"/> characters or so of <paramref name="text"/>, starting at a word.</summary>
+    static string Tail(string text, int keep)
     {
-        const int Keep = 130;
-        if (text.Length <= Keep)
+        if (text.Length <= keep)
         {
             return text;
         }
-        int start = text.IndexOf(' ', text.Length - Keep);
-        return "…" + text[(start < 0 ? text.Length - Keep : start + 1)..];
+        int start = text.IndexOf(' ', text.Length - keep);
+        return "…" + text[(start < 0 ? text.Length - keep : start + 1)..];
     }
 
-    // The mouse is over the answer: Copy, Listen, text size and the reworks show.
+    // The mouse is over the answer: the round, Copy, Listen, text size and earlier answers show.
     bool _readerHover;
 
     void OnReaderMouseEnter(object sender, MouseEventArgs e) => SetReaderHover(true);
 
     void OnReaderMouseLeave(object sender, MouseEventArgs e) => SetReaderHover(false);
 
-    // A menu opened from the answer bar (Rework, round) keeps its tools shown while it is open.
+    // A menu opened from the answer bar (the round) keeps its tools shown while it is open.
     bool _readerMenuOpen;
 
     void OpenReaderMenu(ContextMenu menu, object sender, PlacementMode placement)
@@ -1363,7 +1406,7 @@ public partial class MainWindow : Window
         ReaderHoverTools.Visibility = tools ? Visibility.Visible : Visibility.Collapsed;
         InterviewTypeButton.Visibility = tools ? Visibility.Visible : Visibility.Collapsed;
         UpdateHistoryNav();
-        UpdateAnswerActions();
+        UpdateDetailToggle();
     }
 
     void ShowQuestionType(string? type)
@@ -1413,26 +1456,16 @@ public partial class MainWindow : Window
                 lead: lead && ReferenceEquals(shown[i], blocks[0])));
             _renderedAnswerKeys.Add(shown[i].Key);
         }
-        UpdateAnswerActions();
+        UpdateDetailToggle();
     }
 
-    // The latest answer is done, so it can be reworked (Shorter, Example, More detail, STAR).
-    bool _followUpsReady;
-
-    /// <summary>
-    /// The row under the answer: the details toggle whenever there are details, and the reworks
-    /// while the mouse is over a finished answer (so they never crowd the text during the call).
-    /// </summary>
-    void UpdateAnswerActions()
+    /// <summary>The details toggle under the answer, whenever the latest answer has details.</summary>
+    void UpdateDetailToggle()
     {
-        bool live = _viewingPast < 0;
-        bool details = live && _detailBlocks > 0;
-        bool reworks = live && _followUpsReady && _readerHover;
+        bool details = _viewingPast < 0 && _detailBlocks > 0;
         DetailToggle.Visibility = details ? Visibility.Visible : Visibility.Collapsed;
         DetailToggleText.Text = _detailOpen ? "Hide details" : "Show full answer";
         DetailToggleGlyph.Text = _detailOpen ? "" : "";
-        ReworkButton.Visibility = reworks ? Visibility.Visible : Visibility.Collapsed;
-        AnswerActions.Visibility = details || reworks ? Visibility.Visible : Visibility.Collapsed;
     }
 
     void OnDetailToggleClick(object sender, RoutedEventArgs e)
@@ -1453,11 +1486,9 @@ public partial class MainWindow : Window
     int _viewingPast = -1;
     const int HistoryLimit = 40;
 
-    // The latest answer's question type, whether its details are unfolded (and the next one's, after
-    // "More detail"), and how many detail blocks it has.
+    // The latest answer's question type, whether its details are unfolded, and how many detail blocks it has.
     string? _currentType;
     bool _detailOpen;
-    bool _openDetailNext;
     int _detailBlocks;
 
     AnswerSnapshot? ShownAnswer => _viewingPast >= 0 ? _history[_viewingPast].Answer : _lastAnswer;
@@ -1520,7 +1551,7 @@ public partial class MainWindow : Window
         ReaderEmptyPanel.Visibility = Visibility.Collapsed;
         AnswerBox.Opacity = 1;
         SetLoadingBar(false);
-        UpdateAnswerActions();
+        UpdateDetailToggle();
         UpdateHistoryNav();
     }
 
@@ -1581,7 +1612,6 @@ public partial class MainWindow : Window
         {
             return; // an earlier answer is shown; its header stays until the latest is shown again
         }
-        _followUpsReady = hasAnswer && !_awaitingAnswer && !writing;
         string text, brush;
         if (_awaitingAnswer)
         {
@@ -1630,7 +1660,7 @@ public partial class MainWindow : Window
         InterviewTypeButton.Visibility = ReaderHoverTools.Visibility;
         AnswerBox.Opacity = _awaitingAnswer ? 0.3 : 1;
         SetLoadingBar(_awaitingAnswer || writing);
-        UpdateAnswerActions();
+        UpdateDetailToggle();
     }
 
     /// <summary>
@@ -1945,7 +1975,6 @@ public partial class MainWindow : Window
         LayoutRoot.RowDefinitions.Clear();
         LayoutRoot.ColumnDefinitions.Clear();
         ColumnSplitter.Visibility = Visibility.Collapsed;
-        RowSplitter.Visibility = Visibility.Collapsed;
         _captionDefinition = null;
         Grid.SetRow(ChatHost, 0);
         Grid.SetColumn(ChatHost, 0);
@@ -1953,7 +1982,9 @@ public partial class MainWindow : Window
 
         SetOverlayBackgrounds(true);
         _overlay.Host(CaptionPanel, ReaderPanel);
+        ApplyCaptionLine();
         _overlay.SetCaptionsConnected(_captionsConnected);
+        _inOverlay = true;
         _overlay.Show();
         _overlay.Activate();
         WindowState = WindowState.Minimized;
@@ -1961,10 +1992,11 @@ public partial class MainWindow : Window
 
     void ExitOverlay()
     {
-        if (_overlay is not { IsVisible: true })
+        if (_overlay == null || !_inOverlay)
         {
             return;
         }
+        _inOverlay = false;
         _overlay.SaveState();
         _overlay.Release();
         ChatHost.Children.Insert(0, ReaderPanel);
@@ -2003,7 +2035,7 @@ public partial class MainWindow : Window
     /// <summary>Restoring the minimized main window (taskbar) while the overlay is up returns to full view.</summary>
     void OnMainWindowStateChanged(object? sender, EventArgs e)
     {
-        if (OverlayActive && WindowState != WindowState.Minimized && _overlay is { IsVisible: true })
+        if (OverlayActive && WindowState != WindowState.Minimized && _inOverlay)
         {
             ToggleCompact();
         }
@@ -2065,7 +2097,6 @@ public partial class MainWindow : Window
     // ---------------------------------------------------------------- caption position
 
     const double MinCaptionWidth = 160;
-    const double MinCaptionHeight = 50;
 
     /// <summary>Full view keeps the captions on the left; interview view's position is set in Settings.</summary>
     CaptionDock CurrentDock
@@ -2092,22 +2123,6 @@ public partial class MainWindow : Window
             else
             {
                 _settings.CaptionPanelWidth = value;
-            }
-        }
-    }
-
-    double CaptionHeight
-    {
-        get => _settings.CompactMode ? _settings.CompactCaptionHeight : _settings.CaptionPanelHeight;
-        set
-        {
-            if (_settings.CompactMode)
-            {
-                _settings.CompactCaptionHeight = value;
-            }
-            else
-            {
-                _settings.CaptionPanelHeight = value;
             }
         }
     }
@@ -2139,13 +2154,13 @@ public partial class MainWindow : Window
         LayoutRoot.RowDefinitions.Clear();
         LayoutRoot.ColumnDefinitions.Clear();
         ColumnSplitter.Visibility = Visibility.Collapsed;
-        RowSplitter.Visibility = Visibility.Collapsed;
         _captionDefinition = null;
-        foreach (UIElement element in new UIElement[] { ChatHost, ColumnSplitter, RowSplitter, CaptionPanel })
+        foreach (UIElement element in new UIElement[] { ChatHost, ColumnSplitter, CaptionPanel })
         {
             Grid.SetRow(element, 0);
             Grid.SetColumn(element, 0);
         }
+        ApplyCaptionLine();
 
         if (dock == CaptionDock.Floating)
         {
@@ -2158,35 +2173,46 @@ public partial class MainWindow : Window
 
         bool beside = dock is CaptionDock.Left or CaptionDock.Right;
         bool captionsFirst = dock is CaptionDock.Left or CaptionDock.Top;
-        int captionIndex = captionsFirst ? 0 : 2;
-        int chatIndex = captionsFirst ? 2 : 0;
-        double chatMin = _settings.CompactMode ? 0 : 300;
 
         if (beside)
         {
             var caption = new ColumnDefinition { Width = new GridLength(Math.Max(MinCaptionWidth, CaptionWidth)), MinWidth = MinCaptionWidth };
-            var chat = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = chatMin };
+            var chat = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = _settings.CompactMode ? 0 : 300 };
             LayoutRoot.ColumnDefinitions.Add(captionsFirst ? caption : chat);
             LayoutRoot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5) });
             LayoutRoot.ColumnDefinitions.Add(captionsFirst ? chat : caption);
-            Grid.SetColumn(CaptionPanel, captionIndex);
-            Grid.SetColumn(ChatHost, chatIndex);
+            Grid.SetColumn(CaptionPanel, captionsFirst ? 0 : 2);
+            Grid.SetColumn(ChatHost, captionsFirst ? 2 : 0);
             Grid.SetColumn(ColumnSplitter, 1);
             ColumnSplitter.Visibility = Visibility.Visible;
             _captionDefinition = caption;
         }
         else
         {
-            var caption = new RowDefinition { Height = new GridLength(Math.Max(MinCaptionHeight, CaptionHeight)), MinHeight = MinCaptionHeight };
-            var chat = new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = chatMin / 2 };
-            LayoutRoot.RowDefinitions.Add(captionsFirst ? caption : chat);
-            LayoutRoot.RowDefinitions.Add(new RowDefinition { Height = new GridLength(5) });
-            LayoutRoot.RowDefinitions.Add(captionsFirst ? chat : caption);
-            Grid.SetRow(CaptionPanel, captionIndex);
-            Grid.SetRow(ChatHost, chatIndex);
-            Grid.SetRow(RowSplitter, 1);
-            RowSplitter.Visibility = Visibility.Visible;
-            _captionDefinition = caption;
+            // Above or below the answer (interview view only), the captions are one line: the strip
+            // is just as tall as that line.
+            LayoutRoot.RowDefinitions.Add(new RowDefinition { Height = captionsFirst ? GridLength.Auto : new GridLength(1, GridUnitType.Star) });
+            LayoutRoot.RowDefinitions.Add(new RowDefinition { Height = captionsFirst ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
+            Grid.SetRow(CaptionPanel, captionsFirst ? 0 : 1);
+            Grid.SetRow(ChatHost, captionsFirst ? 1 : 0);
+        }
+    }
+
+    /// <summary>
+    /// Interview view with the captions above or below the answer (and the overlay): the captions
+    /// are one line in the status row (the interviewer's latest words), so the answer gets the room.
+    /// Beside the answer or in their own window they stay a list.
+    /// </summary>
+    bool CaptionLine => _settings.CompactMode
+        && (_settings.OverlayMode || CurrentDock is CaptionDock.Top or CaptionDock.Bottom);
+
+    void ApplyCaptionLine()
+    {
+        bool line = CaptionLine;
+        CaptionScroll.Visibility = line ? Visibility.Collapsed : Visibility.Visible;
+        if (line)
+        {
+            JumpLatestButton.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -2242,13 +2268,9 @@ public partial class MainWindow : Window
 
     void SaveCaptionSize()
     {
-        if (_captionDefinition is ColumnDefinition column && column.ActualWidth > 0)
+        if (_captionDefinition is { ActualWidth: > 0 } column)
         {
             CaptionWidth = column.ActualWidth;
-        }
-        else if (_captionDefinition is RowDefinition row && row.ActualHeight > 0)
-        {
-            CaptionHeight = row.ActualHeight;
         }
         if (_floatingWindow is { IsVisible: true, WindowState: WindowState.Normal } floating)
         {
@@ -2347,6 +2369,7 @@ public partial class MainWindow : Window
         Add("New chat + call prompt", () => OnNewChatClick(this, new RoutedEventArgs()));
         Add("Settings…", () => OnSetupClick(this, new RoutedEventArgs()));
         Add(_settings.CompactMode ? "Full view" : "Interview view", ToggleCompact, keys.ToggleCompact);
+        Add("Hide", ToggleAppVisible, keys.ShowHide);
     }
 
     // ---------------------------------------------------------------- options
@@ -2372,6 +2395,20 @@ public partial class MainWindow : Window
         if (_floatingWindow != null)
         {
             _floatingWindow.Topmost = value;
+        }
+    }
+
+    void SetHideFromCapture(bool value)
+    {
+        _settings.HideFromCapture = value;
+        NativeMethods.SetCaptureExclusion(new WindowInteropHelper(this).Handle, value);
+        if (_floatingWindow != null)
+        {
+            NativeMethods.SetCaptureExclusion(new WindowInteropHelper(_floatingWindow).Handle, value);
+        }
+        if (_overlay != null)
+        {
+            NativeMethods.SetCaptureExclusion(new WindowInteropHelper(_overlay).Handle, value);
         }
     }
 
@@ -2622,6 +2659,10 @@ public partial class MainWindow : Window
         {
             SetAlwaysOnTop(dialog.ChosenAlwaysOnTop);
         }
+        if (dialog.ChosenHideFromCapture != _settings.HideFromCapture)
+        {
+            SetHideFromCapture(dialog.ChosenHideFromCapture);
+        }
         if (dialog.ChosenHideLiveCaptions != _settings.HideLiveCaptionsWindow)
         {
             SetHideLiveCaptions(dialog.ChosenHideLiveCaptions);
@@ -2806,7 +2847,7 @@ public partial class MainWindow : Window
     string ApiInstructions() =>
         ReadyLine().Replace(_settings.BuildCallPrompt(), "").Trim()
         + "\n\n" + InterviewStyles.Instructions(_settings.InterviewType, _settings.AnswerLength)
-        + "\n\nEvery message from now on is what the interviewer just said (or my request to rework your last answer).";
+        + "\n\nEvery message from now on is what the interviewer just said.";
 
     /// <summary>The call prompt for the chat page, with the rules for this round before its "reply Ready" line.</summary>
     string WithInterviewStyle(string prompt)
@@ -2877,28 +2918,6 @@ public partial class MainWindow : Window
         SetStatus(ApiMode
             ? $"{InterviewStyles.Name(type)} round: the next answers follow it."
             : $"{InterviewStyles.Name(type)} round: the chat page gets it with the next New chat + call prompt.");
-    }
-
-    /// <summary>Shorter / Example / More detail / STAR: asks the AI to rework its last answer.</summary>
-    void OnReworkClick(object sender, RoutedEventArgs e)
-    {
-        var menu = new ContextMenu();
-        foreach (var (label, kind) in new[] { ("Shorter", "Shorter"), ("With an example", "Example"), ("More detail", "Detail"), ("As a STAR story", "STAR") })
-        {
-            menu.Items.Add(MenuItemFor(label, () => _ = ReworkAsync(kind)));
-        }
-        OpenReaderMenu(menu, sender, PlacementMode.Top);
-    }
-
-    async Task ReworkAsync(string kind)
-    {
-        if (_lastAnswer is not { Blocks.Count: > 0 })
-        {
-            SetStatus("No answer to rework yet.");
-            return;
-        }
-        _openDetailNext = kind == "Detail"; // asked for detail: show the reworked answer unfolded
-        await SendTextAsync(InterviewStyles.FollowUp(kind), "follow-up", submit: true);
     }
 
     // ---------------------------------------------------------------- read aloud
@@ -3050,7 +3069,10 @@ public partial class MainWindow : Window
         {
             SelectionPopup.IsOpen = false;
         }
+        AnswerMoreButton.Visibility = e.ExtentHeight - e.ViewportHeight - e.VerticalOffset > 6 ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    void OnAnswerMoreClick(object sender, RoutedEventArgs e) => AnswerBox.PageDown();
 
     void OnSelectionListenClick(object sender, RoutedEventArgs e) => _ = ListenAsync();
 

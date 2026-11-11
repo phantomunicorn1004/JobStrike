@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 
 namespace InterviewAssistant;
@@ -42,6 +43,11 @@ public partial class JobStrikeWindow : Window
             _closing.Cancel();
             _listing?.Cancel();
             _client.Dispose();
+        };
+        SourceInitialized += (_, _) =>
+        {
+            if (settings.HideFromCapture)
+                NativeMethods.SetCaptureExclusion(new WindowInteropHelper(this).Handle, true);
         };
         Loaded += (_, _) => ShowState();
     }

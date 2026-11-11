@@ -65,6 +65,7 @@ public sealed class AppSettings
     public double PauseSeconds { get; set; } = 1.6;
     public int MinWords { get; set; } = 3;
     public bool AlwaysOnTop { get; set; }
+    public bool HideFromCapture { get; set; }
     public bool HideLiveCaptionsWindow { get; set; }
     public double CaptionFontSize { get; set; } = 15;
 
@@ -80,13 +81,12 @@ public sealed class AppSettings
     public string VoiceDeviceId { get; set; } = "";
     public bool VoiceSkipsCaptions { get; set; } = true;
 
-    // Where the captions go in each layout, and their size when docked left/right (width) or
-    // above/below (height) the chat.
+    // Where the captions go in each layout, and their width when docked beside the chat (above or
+    // below the answer they are one line).
     public CaptionDock NormalCaptionDock { get; set; } = CaptionDock.Left;
     // Interview view: the answer on top (near the camera, read like a teleprompter), captions below.
     public CaptionDock CompactCaptionDock { get; set; } = CaptionDock.Bottom;
     public double CaptionPanelWidth { get; set; } = 400;
-    public double CaptionPanelHeight { get; set; } = 240;
     public double CompactCaptionWidth { get; set; } = 200;
     public WindowBounds? FloatingCaptionBounds { get; set; }
 
@@ -120,13 +120,11 @@ public sealed class AppSettings
     /// <summary>Overlay background opacity, 0.15 (mostly see-through) to 1 (solid). Text stays solid.</summary>
     public double OverlayOpacity { get; set; } = 0.6;
     public WindowBounds? OverlayBounds { get; set; }
-    public double OverlayCaptionHeight { get; set; } = 120;
     /// <summary>
-    /// Bumped when a layout change needs older saved settings adjusted (1: the interview view's caption
-    /// area also holds the message box, so it grew by the box's height; 2: captions below the answer).
+    /// Bumped when a layout change needs older saved settings adjusted (2: captions below the answer;
+    /// 3: the interview view's message box closed until opened to type).
     /// </summary>
     public int LayoutVersion { get; set; }
-    public double CompactCaptionHeight { get; set; } = 110;
     public double ChatZoom { get; set; } = 1.0;
     public double CompactChatZoom { get; set; } = 0.85;
     public WindowBounds? NormalBounds { get; set; }
@@ -150,9 +148,6 @@ public sealed class AppSettings
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InterviewAssistant");
 
     static string FilePath => Path.Combine(DataFolder, "settings.json");
-
-    /// <summary>Height of the interview view's message box with its spacing.</summary>
-    const double MessageBoxHeight = 56;
 
     static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -272,16 +267,7 @@ public sealed class AppSettings
         AnswerFontSize = Clamp(AnswerFontSize, 12, 32, 18);
         OverlayOpacity = Clamp(OverlayOpacity, 0.15, 1, 0.6);
         CaptionPanelWidth = Clamp(CaptionPanelWidth, 160, 4000, 400);
-        CaptionPanelHeight = Clamp(CaptionPanelHeight, 50, 4000, 240);
         CompactCaptionWidth = Clamp(CompactCaptionWidth, 160, 4000, 200);
-        CompactCaptionHeight = Clamp(CompactCaptionHeight, 50, 4000, 110);
-        OverlayCaptionHeight = Clamp(OverlayCaptionHeight, 40, 4000, 120);
-        if (LayoutVersion < 1)
-        {
-            CompactCaptionHeight += MessageBoxHeight;
-            OverlayCaptionHeight += MessageBoxHeight;
-            LayoutVersion = 1;
-        }
         if (LayoutVersion < 2)
         {
             // The teleprompter layout: answer above, captions below (other choices are kept).
@@ -293,11 +279,8 @@ public sealed class AppSettings
         }
         if (LayoutVersion < 3)
         {
-            // Live focus: the interview view's message box opens only to type (the pencil button),
-            // so the strip gives back the room it had for the box.
+            // The interview view's message box opens only to type (the pencil button).
             CompactMessageBox = false;
-            CompactCaptionHeight = Math.Max(50, CompactCaptionHeight - MessageBoxHeight);
-            OverlayCaptionHeight = Math.Max(40, OverlayCaptionHeight - MessageBoxHeight);
             LayoutVersion = 3;
         }
         ChatZoom = Clamp(ChatZoom, 0.25, 5, 1);
@@ -332,12 +315,14 @@ public sealed class HotkeySettings
     public string MoreSeeThrough { get; set; } = "Ctrl+Alt+-";
     public string ToggleVoice { get; set; } = "Ctrl+Alt+V";
     public string StopVoice { get; set; } = "Ctrl+Alt+R";
+    public string ShowHide { get; set; } = "Ctrl+Alt+H";
 
     /// <summary>A null entry (hand-edited or older file) means "no hotkey".</summary>
     public void Normalize()
     {
         ToggleVoice ??= "";
         StopVoice ??= "";
+        ShowHide ??= "";
         Send ??= "";
         Discard ??= "";
         ClearChatBox ??= "";

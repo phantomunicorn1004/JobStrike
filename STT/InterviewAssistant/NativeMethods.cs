@@ -223,6 +223,21 @@ static partial class NativeMethods
     const int DwmwaCaptionColor = 35;
     const int DwmwaTextColor = 36;
 
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+
+    const uint WdaNone = 0x00000000;
+    const uint WdaExcludeFromCapture = 0x00000011;
+
+    /// <summary>
+    /// Hides or unhides a window from screen capture, screenshots and screen
+    /// sharing (Windows 10 2004+). When hidden the window is visible on the
+    /// physical display but shows as black in any capture.
+    /// </summary>
+    public static bool SetCaptureExclusion(IntPtr hwnd, bool exclude) =>
+        SetWindowDisplayAffinity(hwnd, exclude ? WdaExcludeFromCapture : WdaNone);
+
     /// <summary>
     /// Title bar in the current theme's panel colour, so it joins the toolbar (Windows 11; older versions keep the dark/light
     /// mode flag and ignore the colours).

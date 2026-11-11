@@ -328,6 +328,13 @@
                                     <TextBlock Text="The overlay always stays on top." Style="{StaticResource ChoiceText}" />
                                 </StackPanel>
                             </CheckBox>
+                            <CheckBox x:Name="HideFromCaptureToggle" Style="{StaticResource ToggleSwitch}" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Hide from screen capture and recording" Style="{StaticResource ChoiceTitle}" />
+                                    <TextBlock Text="The app is invisible in screenshots, screen recordings and screen sharing. It stays visible on your display."
+                                               Style="{StaticResource ChoiceText}" />
+                                </StackPanel>
+                            </CheckBox>
                             <CheckBox x:Name="HideLcToggle" Style="{StaticResource ToggleSwitch}">
                                 <StackPanel>
                                     <TextBlock Text="Hide the Windows Live Captions window" Style="{StaticResource ChoiceTitle}" />
@@ -543,6 +550,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Send" Style="{StaticResource HotkeyLabel}" />
                                 <TextBox x:Name="HotkeySendBox" Grid.Row="0" Grid.Column="1" Style="{StaticResource HotkeyBox}" />
@@ -573,6 +581,10 @@
                                 <TextBox x:Name="HotkeyVoiceBox" Grid.Row="5" Grid.Column="1" Style="{StaticResource HotkeyBox}" />
                                 <TextBlock Grid.Row="5" Grid.Column="2" Text="Listen / stop" Style="{StaticResource HotkeyLabel}" />
                                 <TextBox x:Name="HotkeyStopVoiceBox" Grid.Row="5" Grid.Column="3" Style="{StaticResource HotkeyBox}" Margin="0,4" />
+
+                                <TextBlock Grid.Row="6" Grid.Column="0" Text="Show / hide the app" Style="{StaticResource HotkeyLabel}" />
+                                <TextBox x:Name="HotkeyShowHideBox" Grid.Row="6" Grid.Column="1" Style="{StaticResource HotkeyBox}"
+                                         ToolTip="Hides the interview view (or minimizes the window) and brings it back" />
                             </Grid>
                             <!-- Everyday shortcuts used as hotkeys work only in the meeting (and this app) -->
                             <TextBlock Text="Everyday shortcuts as hotkeys" Style="{StaticResource Label}" Margin="0,18,0,4" />
