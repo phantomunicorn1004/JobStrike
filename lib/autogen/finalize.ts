@@ -123,7 +123,20 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
     warnings.push(`Removed work_experience.${role}, which the kit does not have.`);
   }
 
-  // 2b. Reject obvious placeholder / instruction text the model copied verbatim.
+  // 2b. Fill empty work_arrangement from the job description when the posting is remote.
+  const REMOTE_JD =
+    /\bfully\s+remote\b|\bremote[- ]first\b|\bwork\s+from\s+(?:home|anywhere)\b|\b100%\s+remote\b|\bremote\s+(?:role|position|opportunity)\b/i;
+  if (REMOTE_JD.test(target.jobDescription || "") || REMOTE_JD.test(target.jobTitle || "")) {
+    for (const role of experienceKeys(resumeWork)) {
+      const r = resumeWork[role] as Record<string, unknown>;
+      if (!fieldText(r.work_arrangement)) {
+        setFieldText(r, "work_arrangement", "Remote");
+        warnings.push(`Set ${role}.work_arrangement to "Remote" (detected from JD).`);
+      }
+    }
+  }
+
+  // 2c. Reject obvious placeholder / instruction text the model copied verbatim.
   //     Runs after restoration so it only fires for fields the kit could not fix.
   const VERBATIM_PLACEHOLDER = /\bExtracted Company\b|\[JD[\s\w]*\]|^City,\s*ST$/i;
   for (const role of experienceKeys(resumeWork)) {

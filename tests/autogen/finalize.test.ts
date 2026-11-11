@@ -150,6 +150,40 @@ describe("finalizeBuiltResume", () => {
     run(answer);
     expect(answer.work_experience.experience_1.company.text).toBe("Google");
   });
+
+  it("fills empty work_arrangement with Remote when the JD says fully remote", () => {
+    const kit = makeKit() as any;
+    kit.work_experience.experience_2.work_arrangement.text = "";
+    const answer = makeAnswer() as any;
+    answer.work_experience.experience_2.work_arrangement.text = "";
+    const remoteTarget = { ...TARGET, jobDescription: "This is a fully remote position. Build platforms.", jobTitle: "Staff Platform Engineer" };
+    const result = run(answer, kit, remoteTarget);
+    expect(result.ok).toBe(true);
+    expect((result.resume as any).work_experience.experience_2.work_arrangement.text).toBe("Remote");
+    expect(result.warnings).toContain('Set experience_2.work_arrangement to "Remote" (detected from JD).');
+  });
+
+  it("does not fill work_arrangement when JD is not remote", () => {
+    const kit = makeKit() as any;
+    kit.work_experience.experience_2.work_arrangement.text = "";
+    const answer = makeAnswer() as any;
+    answer.work_experience.experience_2.work_arrangement.text = "";
+    const onsiteTarget = { ...TARGET, jobDescription: "This is an on-site role in Austin, TX." };
+    const result = run(answer, kit, onsiteTarget);
+    expect(result.ok).toBe(true);
+    expect((result.resume as any).work_experience.experience_2.work_arrangement.text).toBe("");
+  });
+
+  it("fills work_arrangement when job title says remote", () => {
+    const kit = makeKit() as any;
+    kit.work_experience.experience_1.work_arrangement.text = "";
+    const answer = makeAnswer() as any;
+    answer.work_experience.experience_1.work_arrangement.text = "";
+    const remoteTitle = { ...TARGET, jobTitle: "Lead Gameplay Engineer | Fully Remote" };
+    const result = run(answer, kit, remoteTitle);
+    expect(result.ok).toBe(true);
+    expect((result.resume as any).work_experience.experience_1.work_arrangement.text).toBe("Remote");
+  });
 });
 
 describe("coverLetterDate", () => {

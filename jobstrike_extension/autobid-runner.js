@@ -489,8 +489,27 @@
       }
 
       if (!ws.hasNextButton && !ws.hasSubmitButton) {
-        if (ws.hasFormFields) return;
-        throw new Stop('needs_you', `Workday page "${ws.pageTitle}" has no Next button. Complete it manually.`, meta);
+        // Workday pages can render the button late — retry for up to 10 seconds.
+        let retryWs = ws;
+        const btnUntil = Date.now() + 10_000;
+        while (!retryWs.hasNextButton && !retryWs.hasSubmitButton && Date.now() < btnUntil) {
+          await sleep(1500);
+          const [recheck] = await chrome.scripting.executeScript({
+            target: { tabId, frameIds: [0] },
+            func: detectWorkdayWizardState,
+          });
+          if (recheck?.result) retryWs = recheck.result;
+        }
+        if (retryWs.hasSubmitButton || retryWs.isReviewPage) {
+          setStep('Workday review page — submitting…');
+          return;
+        }
+        if (!retryWs.hasNextButton) {
+          if (retryWs.hasFormFields) return;
+          throw new Stop('needs_you', `Workday page "${ws.pageTitle}" has no Next button. Complete it manually.`, meta);
+        }
+        // Button appeared after retry — continue to the click below
+        ws = retryWs;
       }
 
       if (ws.hasSubmitButton) return;

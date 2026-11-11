@@ -3,6 +3,7 @@ import "server-only";
 import { generationReadiness, parseKitResumeJson } from "@/lib/autogen/kit";
 import { buildPrompt } from "@/lib/promptBuilder";
 import { getProfilePromptKit } from "@/lib/resume-db/prompt-kit-repository";
+import { adjustKitForSeniority } from "@/lib/autogen/seniority";
 import type { ResumeDbApplication } from "@/lib/resume-db/types";
 
 type PromptBlock =
@@ -66,14 +67,14 @@ export async function renderGenerationPrompt(
 ): Promise<RenderedPrompt> {
   const ready = await loadReadyKit(userId, app.profileId);
   if (!ready.ok) return ready;
-  const { template, resumeJson } = ready;
-  // Rows bid on by hand keep the job description in the Note (the Bid tab puts it there).
+  const { template } = ready;
   const note = String(app.note ?? "").trim();
   const jobDescription =
     String(app.jobDescription ?? "").trim() || (note.length >= MIN_NOTE_AS_JD_CHARS ? note : "");
   if (!jobDescription) {
     return { ok: false, reason: "no_job_description", detail: "The application has no job description." };
   }
+  const resumeJson = adjustKitForSeniority(ready.resumeJson, app.jobTitle || "");
   const { prompt } = buildPrompt(template, resumeJson, jobDescription);
   const kitJson = parseKitResumeJson(resumeJson) as Record<string, unknown>;
   return { ok: true, prompt, kit: kitJson };

@@ -97,16 +97,6 @@ public static partial class InterviewStyles
         {Length(length)}
         """;
 
-    /// <summary>A follow-up that reworks the last answer, in the same shape.</summary>
-    public static string FollowUp(string kind) => kind switch
-    {
-        "Shorter" => "Make that answer much shorter: the one sentence, then at most two short bullets, and no details.",
-        "Example" => "Give one concrete example from my background that supports that answer, as I would say it, in the same shape.",
-        "Detail" => "Go deeper on that answer: keep the sentence and bullets, then after --- add specifics, numbers and the reasoning.",
-        "STAR" => "Retell that answer as a STAR story: the one sentence, then one bullet each for **Situation**, **Task**, **Action** and **Result**.",
-        _ => kind,
-    };
-
     /// <summary>
     /// Takes the leading "Type: …" line off an answer (also while it is still being written) and
     /// returns the type, or null when the answer has none.

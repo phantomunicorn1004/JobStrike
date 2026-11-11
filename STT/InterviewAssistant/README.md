@@ -110,9 +110,11 @@ The app only reads from JobStrike; it changes nothing there.
 
 - **Captions**: the Live Captions text exactly as shown. In full view each pause in speech is a card
   with the time it started; the card with words still waiting to be sent is highlighted and tagged
-  **Waiting to send**, and the waiting words are in the accent colour (violet). Interview view shows the
-  same text as plain lines (faded = sent). The panel keeps the latest 300 paragraphs and follows the
-  newest line unless you scroll up; **↓ Latest** jumps back.
+  **Waiting to send**, and the waiting words are in the accent colour (violet). The panel keeps the
+  latest 300 paragraphs and follows the newest line unless you scroll up; **↓ Latest** jumps back.
+  In interview view (captions below or above the answer, and the overlay) the captions are just one
+  line, the status line below the answer, so the answer gets the room; captions placed beside the
+  answer or in their own window stay a list.
 - **Answer** (on top): the latest AI answer in large text (about 70 characters per line), with headings,
   bullets, **bold key terms** and code kept, updated live; the question it answers sits above it
   (**Q**: its last two lines, where the question is; hover for all of it). One slim bar above both
@@ -122,15 +124,13 @@ The app only reads from JobStrike; it changes nothing there.
   **● Thinking… 5s** (amber) from the moment a message is submitted until the first words arrive (the
   previous answer is faded so it is not mistaken for the new one), **● Writing…** (blue) while the
   text streams in, **● Reading aloud…**, **✓ Ready** (green) when it has stopped changing. A thin moving
-  bar runs while thinking or writing. If nothing arrives within 2 minutes it says so.
+  bar runs while thinking or writing. If nothing arrives within 2 minutes it says so. When an answer
+  does not fit, **More ⌄** at the bottom scrolls to the rest.
 - **Answer layout**: the opening sentence, the line to say first, sits on a tinted card, with the
   talking points below it (key phrases in bold). With an API every answer has this shape, and the
   question's kind (Behavioral, Technical, System design, Coding, Logistics…) shows as a chip next to
   the round. Longer details (the full story, design, code) come after a rule and stay folded:
   **Show full answer** / **Hide details** under the answer.
-- **Rework ▾** appears under a finished answer while the mouse is over it: **Shorter**, **With an
-  example**, **More detail** or **As a STAR story** asks the AI to rework it (**More detail** opens the
-  new answer unfolded).
 - **Earlier answers**: **‹ 2 / 5 ›** (on hover) in the bar above the answer steps back through this interview's
   answers (Copy and Listen work on the one shown); **Latest**, or any new answer, returns to the newest.
   A new chat starts the list again.
@@ -142,11 +142,10 @@ The app only reads from JobStrike; it changes nothing there.
   send whatever is in the box; the caption words that were in it count as sent with it. In interview
   view the box is closed until you want to type: the **✎** button in the status line (or the menu)
   opens it under the answer, **✕** closes it again. The Send hotkey and **Send** work either way.
-- **Status line** (interview view): what is happening with the interviewer's words: **Listening…**,
-  **Hearing the interviewer… 12 words**, then in Automatic mode **Sending in 1.2s…** with a thin bar
-  filling up, or **12 words waiting · press Send**. While words are waiting, **Send** sends them now and
-  **Skip** drops them (small talk, not a question). It turns red when Live Captions is not running or a
-  send fails.
+- **Status line** (interview view): the interviewer's latest words as they come in (**Listening…**
+  while there are none), and in Automatic mode **Sending in 1.2s · …** with a thin bar filling up once
+  they pause. While words are waiting, **Send** sends them now and **Skip** drops them (small talk, not
+  a question). It turns red when Live Captions is not running or a send fails.
 - **Answer | Chat page** in the status line switches between the clean answer and the ChatGPT /
   DeepSeek page itself (normal-window interview view). The see-through overlay always shows the
   answer, because a see-through window cannot display the embedded browser; use **Full view** there.
@@ -198,6 +197,7 @@ keys do the app's action in every program.
 | `Ctrl+Alt+=` / `Ctrl+Alt+-` | Overlay more solid / more see-through (10% per press; the numeric keypad + / − and Shift+= work too) |
 | `Ctrl+Alt+R` | Listen / stop (the Listen button) |
 | `Ctrl+Alt+V` | Automatic reading of new answers on / off |
+| `Ctrl+Alt+H` | Show / hide the app: the overlay disappears and comes back where it was; the window is minimized and restored (also **⋯ ▸ Hide**). The chat page keeps working while hidden |
 
 ### Read aloud (Settings → Voice)
 
@@ -246,8 +246,7 @@ it over the meeting and still see the video behind it.
   of what is behind; click the icon again to tuck it away. Only
   the background becomes see-through; the text stays solid, with a soft halo so it stays readable over
   video. `Ctrl+Alt+=` / `Ctrl+Alt+-` change it without clicking (also from the meeting app).
-- Move it by dragging the top bar; resize it from any edge or corner; drag the line between captions
-  and answer to change the split. Everything is remembered.
+- Move it by dragging the top bar; resize it from any edge or corner. Both are remembered.
 - The main window is minimized meanwhile (the chat page keeps working). **Full view**, the Interview
   view hotkey, or clicking the app in the taskbar brings it back.
 
@@ -318,7 +317,7 @@ streams.
 | `AnswerReader.cs` | Answer extraction script, answer model, FlowDocument rendering |
 | `DirectChat.cs` | OpenAI / DeepSeek API: model list and streamed answers |
 | `MarkdownAnswer.cs` | An API answer's Markdown as answer blocks |
-| `InterviewStyles.cs` | Interview rounds, answer shape and length, follow-ups, the "Type:" line |
+| `InterviewStyles.cs` | Interview rounds, answer shape and length, the "Type:" line |
 | `MainWindow.xaml(.cs)` | Full / interview view, caption docking, answer reader, menus, hotkey actions |
 | `OverlayWindow.xaml(.cs)` | Borderless see-through interview view above other windows |
 | `Assets/AppIcon.ico`, `AppIcon.png` | App logo (caption bubble with an AI spark); redraw with `python Assets/make_logo.py Assets` |

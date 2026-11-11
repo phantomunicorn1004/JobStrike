@@ -44,22 +44,16 @@
                 </StackPanel>
             </Grid>
 
-            <!-- Caption strip and answer reader are moved in here from the main window. -->
-            <!-- The answer on top, right under the bar (near the camera, read like a teleprompter);
-                 captions and the message box below. -->
+            <!-- Caption strip and answer reader are moved in here from the main window: the answer on
+                 top, right under the bar (near the camera, read like a teleprompter), and the one-line
+                 caption strip below it. -->
             <Grid x:Name="ContentHost" Margin="1,0,1,1">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" MinHeight="80" />
-                    <RowDefinition Height="5" />
-                    <RowDefinition x:Name="CaptionRow" Height="120" MinHeight="40" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <ContentControl x:Name="ReaderSlot" Focusable="False" />
-                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" ResizeDirection="Rows"
-                              ResizeBehavior="PreviousAndNext" Background="Transparent"
-                              ToolTip="Drag to show more or fewer caption lines" />
-                <Border Grid.Row="1" Height="1" Margin="14,0" Background="{DynamicResource Border}"
-                        IsHitTestVisible="False" />
-                <ContentControl x:Name="CaptionSlot" Grid.Row="2" Focusable="False" />
+                <ContentControl x:Name="CaptionSlot" Grid.Row="1" Focusable="False" />
             </Grid>
         </DockPanel>
     </Border>

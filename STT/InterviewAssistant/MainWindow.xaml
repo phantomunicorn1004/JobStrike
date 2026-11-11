@@ -32,6 +32,7 @@
                             Margin="0,0,8,0" Click="OnSetupClick"
                             ToolTip="Settings: your details and call prompt, how Send works, display, hotkeys" />
                     <Button Style="{StaticResource PrimaryButton}" Margin="0" Padding="18,7" Click="OnToggleCompactClick"
+                            AutomationProperties.Name="Interview view"
                             ToolTip="Small window for the interview: live captions and the AI answer in large, clean text">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="Interview view" VerticalAlignment="Center" />
@@ -254,9 +255,6 @@
             <GridSplitter x:Name="ColumnSplitter" Width="5" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                           ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" Visibility="Collapsed"
                           DragCompleted="OnSplitterDragCompleted" ToolTip="Drag to resize the captions" />
-            <GridSplitter x:Name="RowSplitter" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                          ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Visibility="Collapsed"
-                          DragCompleted="OnSplitterDragCompleted" ToolTip="Drag to resize the captions" />
 
             <!-- Chat page, and in interview view the answer reader in its place. The chat page keeps
                  running (shrunk to a pixel) because messages are typed into it and answers read from it. -->
@@ -361,31 +359,16 @@
                                 </ScrollViewer>
                             </Grid>
                         </DockPanel>
-                        <!-- Under the answer: unfold its details; the reworks appear while the mouse is over the answer -->
-                        <Border x:Name="AnswerActions" DockPanel.Dock="Bottom" Padding="12,6,12,0" Visibility="Collapsed">
-                            <DockPanel>
-                                <Button x:Name="DetailToggle" DockPanel.Dock="Left" Style="{StaticResource SmallButton}" Padding="12,5"
-                                        FontSize="12.5" Margin="0,0,12,6" VerticalAlignment="Top" Click="OnDetailToggleClick"
-                                        Visibility="Collapsed" ToolTip="The full story, design or code behind the talking points">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock x:Name="DetailToggleGlyph" Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="10"
-                                                   VerticalAlignment="Center" Margin="0,1,7,0" Foreground="{DynamicResource Accent}" />
-                                        <TextBlock x:Name="DetailToggleText" VerticalAlignment="Center" />
-                                    </StackPanel>
-                                </Button>
-                                <!-- Rework: Shorter, Example, More detail, STAR (a menu, so one button instead of four) -->
-                                <Button x:Name="ReworkButton" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Top"
-                                        Style="{StaticResource SmallButton}" Padding="12,5" FontSize="12.5" Margin="0,0,0,6"
-                                        Click="OnReworkClick" Visibility="Collapsed" AutomationProperties.Name="Rework"
-                                        ToolTip="Ask for this answer shorter, with an example, in more detail, or as a STAR story">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="Rework" VerticalAlignment="Center" />
-                                        <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="7,1,0,0"
-                                                   VerticalAlignment="Center" Foreground="{DynamicResource Muted}" />
-                                    </StackPanel>
-                                </Button>
-                            </DockPanel>
-                        </Border>
+                        <!-- Under the answer, when it has details: unfold them -->
+                        <Button x:Name="DetailToggle" DockPanel.Dock="Bottom" HorizontalAlignment="Left" Style="{StaticResource SmallButton}"
+                                Padding="12,5" FontSize="12.5" Margin="12,6,12,6" Click="OnDetailToggleClick"
+                                Visibility="Collapsed" ToolTip="The full story, design or code behind the talking points">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="DetailToggleGlyph" Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="10"
+                                           VerticalAlignment="Center" Margin="0,1,7,0" Foreground="{DynamicResource Accent}" />
+                                <TextBlock x:Name="DetailToggleText" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                         <Grid>
                             <!-- The selection stays visible while another app is in front, so the Listen
                                  hotkey can read it from there. -->
@@ -398,6 +381,17 @@
                                          LostKeyboardFocus="OnAnswerLostFocus" ScrollViewer.ScrollChanged="OnAnswerScrolled">
                                 <FlowDocument PagePadding="0" />
                             </RichTextBox>
+                            <!-- Only when the answer goes on below the window: scrolls down to the rest -->
+                            <Button x:Name="AnswerMoreButton" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"
+                                    Style="{StaticResource SmallButton}" Padding="14,4" FontSize="12" Visibility="Collapsed"
+                                    Click="OnAnswerMoreClick" AutomationProperties.Name="More of the answer"
+                                    ToolTip="The answer continues below">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="More" VerticalAlignment="Center" />
+                                    <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="10" Margin="7,1,0,0"
+                                               VerticalAlignment="Center" Foreground="{DynamicResource Accent}" />
+                                </StackPanel>
+                            </Button>
                             <!-- Small Listen button next to the mouse after text is selected (as on Google Translate) -->
                             <Popup x:Name="SelectionPopup" PlacementTarget="{Binding ElementName=AnswerBox}" Placement="Relative"
                                    AllowsTransparency="True" StaysOpen="True" PopupAnimation="Fade">
