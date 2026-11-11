@@ -2737,6 +2737,9 @@ ${groupSheetStyles()}
           const out = await api.describeForAutobid({ url: job.apply_url, profileId: forProfile });
           if (out.status === 'queued') dropQueuedJob(job, out.jobLink);
           else autogenStates.set(key, { state: out.status === 'passed' ? 'passed' : 'skipped', error: out.reason || '' });
+          if (typeof out.score === 'number' && out.score >= 85 && (out.status === 'queued' || out.status === 'passed')) {
+            notifyHighFitJob(job, out.score);
+          }
         } catch (error) {
           const message = error?.message || String(error);
           autogenStates.set(key, { state: 'error', error: message });
@@ -2849,6 +2852,19 @@ ${groupSheetStyles()}
     } catch (_) {
       /* no badge: the queue still shows them */
     }
+  }
+
+  function notifyHighFitJob(job, score) {
+    if (!chrome.notifications?.create) return;
+    try {
+      chrome.notifications.create(`jobstrike-highfit-${Date.now()}`, {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+        title: `High-fit job found (score ${score})`,
+        message: `${job.title || 'Job'}${job.company_name ? ` at ${job.company_name}` : ''} — queued for auto-bid.`,
+        priority: 2,
+      });
+    } catch (_) {}
   }
 
   function notifyLiveJobs(added) {

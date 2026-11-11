@@ -52,6 +52,7 @@ type CandidateRow = {
   status: CandidateStatus;
   reason: string;
   job_description: string | null;
+  fit_score: number | null;
 };
 
 const COLUMNS = "id, profile_id, url_key, job_link, job_title, company, site, posted_at, found_at, status, reason";
@@ -318,9 +319,10 @@ async function pipelineCounts(user: SessionUser): Promise<{ sentToday: number; i
 export async function fillQueue(user: SessionUser): Promise<{ queued: number[]; expired: number }> {
   const { data: waiting, error } = await db()
     .from(TABLE)
-    .select(`${COLUMNS}, job_description`)
+    .select(`${COLUMNS}, job_description, fit_score`)
     .eq("user_id", user.id)
     .eq("status", "passed")
+    .order("fit_score", { ascending: false, nullsFirst: false })
     .order("posted_at", { ascending: false, nullsFirst: false })
     .order("found_at", { ascending: false })
     .limit(100);
