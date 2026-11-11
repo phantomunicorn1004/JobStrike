@@ -7814,15 +7814,17 @@
     let optionEls = Array.from(listbox.querySelectorAll('[role="option"], option'));
     let { best, bestScore, target } = tryMatch(optionEls);
 
-    if ((!best || bestScore < cutoff) && isDemographicCategory(fieldCategory)) {
-      const filterText = getDemographicCandidates(fieldCategory, pickValue).find((c) => c && c.length >= 3) || pickValue;
+    if (!best || bestScore < cutoff) {
       const filterEl = findRipplingComboboxInput(el) || el;
       if (filterEl.tagName === 'INPUT') {
+        const filterText = isDemographicCategory(fieldCategory)
+          ? (getDemographicCandidates(fieldCategory, pickValue).find((c) => c && c.length >= 3) || pickValue)
+          : pickValue;
         await typeIntoComboboxFilter(filterEl, filterText.slice(0, 24));
+        listbox = await waitForListboxToOpen(el, knownListboxId, 20, 25) || listbox;
+        optionEls = Array.from(listbox.querySelectorAll('[role="option"], option'));
+        ({ best, bestScore, target } = tryMatch(optionEls));
       }
-      listbox = await waitForListboxToOpen(el, knownListboxId, 20, 25) || listbox;
-      optionEls = Array.from(listbox.querySelectorAll('[role="option"], option'));
-      ({ best, bestScore, target } = tryMatch(optionEls));
     }
 
     if (!best || bestScore < cutoff) {
