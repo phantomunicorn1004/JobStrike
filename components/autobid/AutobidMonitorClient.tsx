@@ -81,7 +81,7 @@ const STAGE_LABEL: Record<AutobidStage, string> = {
   applying: "Applying now",
   needs_you: "Needs you",
   failed: "Failed",
-  sent: "Sent, not saved",
+  sent: "Applied (not tracked)",
   expired: "Expired",
   registered: "Applied",
 };
@@ -94,7 +94,7 @@ const STAGE_TONE: Record<AutobidStage, Tone> = {
   applying: "progress",
   needs_you: "attention",
   failed: "danger",
-  sent: "attention",
+  sent: "idle",
   expired: "idle",
   registered: "success",
 };
@@ -138,7 +138,7 @@ function canRetry(job: AutobidJob): boolean {
 }
 
 function canDismiss(job: AutobidJob): boolean {
-  return job.stage === "gen_failed" || job.stage === "needs_you" || job.stage === "failed";
+  return job.stage === "gen_failed" || job.stage === "needs_you" || job.stage === "failed" || job.stage === "sent";
 }
 
 /* ─── System health (shown at the bottom of the control card) ─── */

@@ -30,7 +30,7 @@ export const STAGE_GROUP: Record<AutobidStage, AutobidGroup> = {
   gen_failed: "attention",
   needs_you: "attention",
   failed: "attention",
-  sent: "attention",
+  sent: "done",
   expired: "done",
   registered: "done",
 };
@@ -175,7 +175,7 @@ export function toAutobidJob(row: AutobidRowInput): AutobidJob {
   let reason = "";
   if (stage === "gen_failed") reason = text(row.generation_error) || "Resume generation failed.";
   else if (stage === "needs_you" || stage === "failed") reason = text(row.bid_error) || "Stopped for you.";
-  else if (stage === "sent") reason = "Sent and confirmed, but Register did not save it. Register it from the Bid tab.";
+  else if (stage === "sent") reason = "Applied successfully. Not saved to Resume DB — register it from the Bid tab if needed.";
   else if (stage === "expired") reason = text(row.bid_error) || "Not sent within 24 h of posting.";
 
   const times = [row.created_at, generatedAt, startedAt, finishedAt, registeredAt, log.at(-1)?.at]

@@ -482,7 +482,7 @@ export async function dismissBids(userId: string, ids: number[]): Promise<number
     .eq("user_id", userId)
     .in("id", ids)
     .eq("apply", QUEUED_APPLY)
-    .or("bid_state.in.(needs_you,failed),and(bid_state.eq.none,generation_status.eq.failed)");
+    .or("bid_state.in.(needs_you,failed,submitted),and(bid_state.eq.none,generation_status.eq.failed)");
   if (error) rethrow(error.message);
 
   const at = new Date().toISOString();

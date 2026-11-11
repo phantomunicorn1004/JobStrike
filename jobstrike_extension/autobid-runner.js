@@ -1778,6 +1778,7 @@
         checkStop();
       }
       setStep('Submitting…');
+      const registerDraft = bid().snapshotRegisterDraft();
       const before = await probeOutcome(tabId);
       if (before.navigating || !before.formPresent) {
         // Nothing to compare the page with after Submit: not pressed.
@@ -2076,7 +2077,7 @@
       await finish(job, 'submitted', '', meta);
       setStep('Registering in Resume DB…');
       try {
-        await bid().registerForAutobid();
+        await bid().registerForAutobid(registerDraft);
         logLine(`Sent and registered: ${job.company} · ${job.job_title} (#${job.id}).`);
       } catch (error) {
         logLine(`Sent #${job.id}, but Register failed: ${error?.message || error}. Register it from Resume DB / the Bid tab.`);
