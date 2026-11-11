@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { corsJson, corsOptions } from "@/lib/api/extensionCors";
-import { claimNextApplication } from "@/lib/autogen/claim";
+import { autoRetryGenFailed, claimNextApplication } from "@/lib/autogen/claim";
 import { autogenRoute, claimedResponse } from "@/lib/autogen/route";
 
 export function OPTIONS() {
@@ -14,6 +14,7 @@ export function OPTIONS() {
  */
 export async function GET(request: NextRequest) {
   return autogenRoute(request, "next-application", async (user) => {
+    await autoRetryGenFailed(user.id).catch(() => {});
     const skipped: Array<{ id: number; reason: string }> = [];
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const claimed = await claimNextApplication(user.id);

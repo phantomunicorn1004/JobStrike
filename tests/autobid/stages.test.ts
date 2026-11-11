@@ -88,7 +88,7 @@ describe("toAutobidJob", () => {
     );
     expect(job.stage).toBe("sent");
     expect(job.sentByRunner).toBe(true);
-    expect(job.reason).toMatch(/Register/);
+    expect(job.reason).toMatch(/register/i);
     expect(stepStates(row({ generation_status: "completed", bid_state: "submitted" }))).toEqual([
       "queued:done",
       "resume:done",

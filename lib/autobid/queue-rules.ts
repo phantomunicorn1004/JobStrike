@@ -5,7 +5,7 @@
  */
 
 /** A job older than this is not worth a resume or an application anymore. */
-export const FRESH_HOURS = 24;
+export const FRESH_HOURS = 48;
 
 /** When the job was posted, or when Live found it when the source gives no time. */
 export function jobTimeMs(postedAt: string | null | undefined, foundAt: string | null | undefined): number {

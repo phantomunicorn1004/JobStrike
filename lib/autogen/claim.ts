@@ -248,6 +248,67 @@ export async function listGenerationStates(
   return states;
 }
 
+const PERMANENT_GEN_ERROR_RE =
+  /has no profile|has no saved prompt kit|has no job description|fictional|kit_invalid|Kit:|OPENAI_API_KEY|invalid api key|insufficient_quota/i;
+
+/**
+ * Re-queues gen_failed rows whose errors look retryable (bad model output, not
+ * a missing profile or invalid kit). Each row is retried at most `maxRetries`
+ * times; the count is tracked in generation_meta.autoRetryCount.
+ */
+export async function autoRetryGenFailed(
+  userId: string,
+  maxRetries = 2,
+): Promise<{ retried: number; ids: number[] }> {
+  const supabase = getSupabaseAdminClient();
+  const { data: candidates, error } = await supabase
+    .from(TABLE)
+    .select("id, generation_error, generation_meta")
+    .eq("user_id", userId)
+    .eq("generation_status", "failed")
+    .eq("bid_state", "none")
+    .order("id", { ascending: false })
+    .limit(50);
+  if (error) rethrow(error.message);
+  if (!candidates?.length) return { retried: 0, ids: [] };
+
+  const eligible = (
+    candidates as Array<{
+      id: number;
+      generation_error: string | null;
+      generation_meta: Record<string, unknown> | null;
+    }>
+  ).filter((row) => {
+    if (PERMANENT_GEN_ERROR_RE.test(row.generation_error ?? "")) return false;
+    const count = Number(row.generation_meta?.autoRetryCount ?? 0);
+    return count < maxRetries;
+  });
+  if (!eligible.length) return { retried: 0, ids: [] };
+
+  const results: number[] = [];
+  for (const row of eligible) {
+    const prev = (row.generation_meta ?? {}) as Record<string, unknown>;
+    const count = Number(prev.autoRetryCount ?? 0);
+    const { error: upErr } = await supabase
+      .from(TABLE)
+      .update({
+        generation_status: "queue",
+        generation_error: "",
+        autogen_claimed_at: null,
+        generation_meta: {
+          ...prev,
+          autoRetryCount: count + 1,
+          autoRetryAt: new Date().toISOString(),
+        },
+      } as never)
+      .eq("id", row.id)
+      .eq("user_id", userId)
+      .eq("generation_status", "failed");
+    if (!upErr) results.push(row.id);
+  }
+  return { retried: results.length, ids: results };
+}
+
 /** Puts rows (back) in the queue: new captures, failed rows retried, completed rows regenerated. */
 export async function enqueueApplications(userId: string, ids: number[]): Promise<number> {
   if (!ids.length) return 0;

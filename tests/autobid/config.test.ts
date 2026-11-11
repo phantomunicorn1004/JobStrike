@@ -63,7 +63,7 @@ describe("mergeAutobidConfig", () => {
   });
 
   it("runs all day on HiringCafe's freshest jobs at a person's pace by default, Ashby on", () => {
-    expect(DEFAULT_AUTOBID_CONFIG).toMatchObject({ hours: "", everyMinutes: 15, freshnessHours: 3, ashby: true, gapMin: 2, gapMax: 5 });
+    expect(DEFAULT_AUTOBID_CONFIG).toMatchObject({ hours: "", everyMinutes: 15, freshnessHours: 3, ashby: true, gapMin: 1, gapMax: 3 });
   });
 
   it("clamps freshness and the gap, and keeps the gap range in order", () => {

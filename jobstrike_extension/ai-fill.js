@@ -447,7 +447,7 @@
       '"How did you hear about us/this role/this company?" or referral source: answer "Job Board" or "LinkedIn" (pick whichever option is closest).',
       'Referral name fields ("If you were referred by an employee, provide their name", "Referrer name", "Who referred you?"): leave empty — the candidate was not referred. Return "" (empty string), never the candidate\'s own name.',
       '"Have you been a customer/user of [company]?" or "Have you used [product]?": answer "No" unless the profile or saved answers say otherwise.',
-      '"What pronouns do you use?": answer "He/Him" when the profile name is clearly masculine, "She/Her" when clearly feminine, otherwise "They/Them" or "Prefer not to say" if that option exists.',
+      '"What pronouns do you use?": answer "Prefer not to say" if that option exists, otherwise "They/Them". Never guess pronouns from the candidate\'s name.',
       '"Are you currently employed?" or "Are you currently working?": answer "Yes" when a Current Company or current role exists in the profile, "No" only when Work experience is empty or every role has an end date.',
       '"Current employer" or "Most recent employer": use the first entry from Work experience.',
       '"Start date" or "When can you start?": answer "Immediately" or the nearest option to now.',
@@ -460,7 +460,7 @@
       'For U.S. citizenship, work authorization, or "Are you legally authorized to work in the US?" questions: answer from the profile\'s citizenship and authorization fields. If those fields exist and contain a value, use it. Only return needs_input when the profile has no citizenship or authorization data at all.',
       '"Which countries are you authorized to work in?" or "Confirm which countries you are authorized to work in without sponsorship": answer "United States" (the candidate\'s country of authorization). Do not answer "Yes" — the question asks for country names, not yes/no.',
       '"Tell us about your relationship with [topic]" or other open-ended opinion questions: give a brief, genuine, first-person answer drawing on general professional experience. Do not return needs_input for these.',
-      'Work arrangement, work environment, or office preference questions ("[Company] offers remote/hybrid/in-office", "Where would you prefer to work?", "Select your preferred work arrangement"): pick "Remote" if listed, otherwise the most flexible option. Do not return needs_input.',
+      'Work arrangement, work environment, or office preference questions ("[Company] offers remote/hybrid/in-office", "Where would you prefer to work?", "Select your preferred work arrangement"): pick the option that best matches the job posting\'s stated arrangement (remote/hybrid/on-site). If the posting doesn\'t specify, pick "Remote" if listed, otherwise the most flexible option. Do not return needs_input.',
     ];
 
     if (qType === 'behavioral') {

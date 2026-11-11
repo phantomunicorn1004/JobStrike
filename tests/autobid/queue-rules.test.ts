@@ -9,9 +9,10 @@ describe("freshness", () => {
     expect(jobTimeMs(null, "2026-11-04T11:00:00Z")).toBe(Date.parse("2026-11-04T11:00:00Z"));
   });
 
-  it("is stale after 24 hours, or with no time at all", () => {
+  it("is stale after 48 hours, or with no time at all", () => {
     expect(isStale("2026-11-03T13:00:00Z", null, NOW)).toBe(false);
-    expect(isStale("2026-11-03T11:00:00Z", null, NOW)).toBe(true);
+    expect(isStale("2026-11-02T13:00:00Z", null, NOW)).toBe(false);
+    expect(isStale("2026-11-02T11:00:00Z", null, NOW)).toBe(true);
     expect(isStale(null, null, NOW)).toBe(true);
   });
 });

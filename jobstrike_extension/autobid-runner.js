@@ -2375,18 +2375,18 @@
         setStep(`Daily limit reached (${state.prefs.dailyLimit}). Resumes tomorrow.`);
         return;
       }
+      if (summary.needsYou?.length && Date.now() - (state.lastAutoRetry || 0) > 30 * 60_000) {
+        state.lastAutoRetry = Date.now();
+        try {
+          const ver = chrome.runtime?.getManifest?.().version || '';
+          const { retried } = await bid().autobidFetch('/api/autobid/auto-retry', { method: 'POST', body: { version: ver } });
+          if (retried) {
+            logLine(`Auto-retried ${retried} needs-you job(s) with v${ver}.`);
+            await refreshSummary();
+          }
+        } catch (_) {}
+      }
       if (!summary.ready) {
-        if (summary.needsYou?.length && Date.now() - (state.lastAutoRetry || 0) > 30 * 60_000) {
-          state.lastAutoRetry = Date.now();
-          try {
-            const ver = chrome.runtime?.getManifest?.().version || '';
-            const { retried } = await bid().autobidFetch('/api/autobid/auto-retry', { method: 'POST', body: { version: ver } });
-            if (retried) {
-              logLine(`Auto-retried ${retried} needs-you job(s) with v${ver}.`);
-              await refreshSummary();
-            }
-          } catch (_) {}
-        }
         setStep('Waiting for generated resumes…');
         return;
       }
