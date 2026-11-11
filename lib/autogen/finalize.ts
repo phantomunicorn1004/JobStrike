@@ -90,6 +90,8 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
 
   const resume = clone(built);
 
+  const VERBATIM_PLACEHOLDER = /\bExtracted Company\b|\[JD[\s\w]*\]|^City,\s*ST$/i;
+
   // 1. Candidate facts come from the kit, whatever the model wrote.
   for (const key of LOCKED_TOP_LEVEL_FIELDS) {
     if (!(key in kit)) continue;
@@ -111,6 +113,7 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
     for (const field of LOCKED_ROLE_FIELDS) {
       if (!(field in kitRole)) continue;
       if (!fieldText(kitRole[field])) continue;
+      if (VERBATIM_PLACEHOLDER.test(fieldText(kitRole[field]))) continue;
       if (field in builtRole && !same(builtRole[field], kitRole[field])) {
         restored.push(`work_experience.${role}.${field}`);
       }
@@ -137,8 +140,6 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
   }
 
   // 2c. Reject obvious placeholder / instruction text the model copied verbatim.
-  //     Runs after restoration so it only fires for fields the kit could not fix.
-  const VERBATIM_PLACEHOLDER = /\bExtracted Company\b|\[JD[\s\w]*\]|^City,\s*ST$/i;
   for (const role of experienceKeys(resumeWork)) {
     const r = resumeWork[role] as Record<string, unknown>;
     for (const field of ["company", "role_title", "location"] as const) {
@@ -147,6 +148,19 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
         errors.push(
           `work_experience.${role}.${field} contains template placeholder text ("${text.slice(0, 60)}").`,
         );
+      }
+    }
+  }
+
+  // 2d. Require non-empty company and role_title for every role.
+  //     Empty fields cause the DOCX template to render its default sample text
+  //     ("Extracted Company 1", "Senior [JD Role Family]"), which ATS parsers
+  //     pre-fill into form fields and break auto-fill.
+  for (const role of experienceKeys(resumeWork)) {
+    const r = resumeWork[role] as Record<string, unknown>;
+    for (const field of ["company", "role_title"] as const) {
+      if (!fieldText(r[field])) {
+        errors.push(`work_experience.${role}.${field} is empty — the PDF would show template defaults.`);
       }
     }
   }

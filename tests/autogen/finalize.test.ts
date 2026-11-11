@@ -174,6 +174,41 @@ describe("finalizeBuiltResume", () => {
     expect((result.resume as any).work_experience.experience_2.work_arrangement.text).toBe("");
   });
 
+  it("does not restore kit field when its text is placeholder instruction text", () => {
+    const kit = makeKit() as any;
+    kit.work_experience.experience_1.company.text = "Extracted Company 1";
+    kit.work_experience.experience_1.location.text = "City, ST";
+    kit.work_experience.experience_1.role_title.text = "Senior [JD Role Family]";
+    const answer = makeAnswer() as any;
+    answer.work_experience.experience_1.company.text = "Acme Corp";
+    answer.work_experience.experience_1.location.text = "Austin, TX";
+    answer.work_experience.experience_1.role_title.text = "Senior Software Engineer";
+    const result = run(answer, kit);
+    expect(result.ok).toBe(true);
+    const role1 = (result.resume as any).work_experience.experience_1;
+    expect(role1.company.text).toBe("Acme Corp");
+    expect(role1.location.text).toBe("Austin, TX");
+    expect(role1.role_title.text).toBe("Senior Software Engineer");
+    expect(result.restored).not.toContain("work_experience.experience_1.company");
+  });
+
+  it("rejects empty company or role_title to prevent DOCX template defaults in PDF", () => {
+    const kit = makeKit() as any;
+    kit.work_experience.experience_1.company.text = "";
+    kit.work_experience.experience_1.role_title.text = "";
+    const answer = makeAnswer() as any;
+    answer.work_experience.experience_1.company.text = "";
+    answer.work_experience.experience_1.role_title.text = "";
+    const result = run(answer, kit);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("experience_1.company is empty"),
+        expect.stringContaining("experience_1.role_title is empty"),
+      ]),
+    );
+  });
+
   it("fills work_arrangement when job title says remote", () => {
     const kit = makeKit() as any;
     kit.work_experience.experience_1.work_arrangement.text = "";
