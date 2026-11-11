@@ -4962,7 +4962,7 @@
         !has(
           'company name', 'preferred name', 'pronounc', 'pronunciation', 'school name', 'user name', 'name of',
           'university name', 'college name', 'institution name', 'employer name', 'manager name',
-          'supervisor name', 'reference name', 'referrer name', 'contact name', 'project name', 'team name',
+          'supervisor name', 'reference name', 'referrer name', 'referred by', 'referral', 'contact name', 'project name', 'team name',
           'file name', 'degree name', 'program name', 'domain name'
         ))
     ) {
