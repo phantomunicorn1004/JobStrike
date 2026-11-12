@@ -86,6 +86,7 @@ public partial class MainWindow : Window
     bool _closingApp;
     bool _startingNewChat;
     bool _initializing = true;
+    bool _buyTimeShown;
 
     public MainWindow()
     {
@@ -1361,9 +1362,9 @@ public partial class MainWindow : Window
     {
         bool none = string.IsNullOrWhiteSpace(question) || question == "Call prompt";
         string text = none ? "" : CaptionTracker.CleanForSending(question!);
-        QuestionText.Text = Tail(text, 130); // the end, where the question is (captions often carry a long lead-in)
+        QuestionText.Text = Tail(text, 130);
         QuestionText.ToolTip = none ? null : text;
-        QuestionRow.Visibility = none ? Visibility.Collapsed : Visibility.Visible;
+        QuestionRow.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>The last <paramref name="keep"/> characters or so of <paramref name="text"/>, starting at a word.</summary>
@@ -1401,10 +1402,8 @@ public partial class MainWindow : Window
     void SetReaderHover(bool hover)
     {
         _readerHover = hover || _readerMenuOpen;
-        hover = _readerHover;
-        bool tools = hover && SessionCard.Visibility != Visibility.Visible;
-        ReaderHoverTools.Visibility = tools ? Visibility.Visible : Visibility.Collapsed;
-        InterviewTypeButton.Visibility = tools ? Visibility.Visible : Visibility.Collapsed;
+        bool active = SessionCard.Visibility != Visibility.Visible;
+        ReaderHoverTools.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         UpdateHistoryNav();
         UpdateDetailToggle();
     }
@@ -1457,6 +1456,7 @@ public partial class MainWindow : Window
             _renderedAnswerKeys.Add(shown[i].Key);
         }
         UpdateDetailToggle();
+        UpdateKeyTerms(shown);
     }
 
     /// <summary>The details toggle under the answer, whenever the latest answer has details.</summary>
@@ -1474,6 +1474,59 @@ public partial class MainWindow : Window
         if (_lastAnswer != null)
         {
             RenderAnswer(_lastAnswer.Blocks, fold: true);
+        }
+    }
+
+    // ---------------------------------------------------------------- key terms strip
+
+    void UpdateKeyTerms(IReadOnlyList<AnswerBlock> blocks)
+    {
+        var terms = AnswerRenderer.ExtractKeyTerms(blocks);
+        if (terms.Count == 0)
+        {
+            KeyTermsBar.Visibility = Visibility.Collapsed;
+            return;
+        }
+        KeyTermsBar.Visibility = Visibility.Visible;
+        KeyTermsPanel.Children.Clear();
+        double fontSize = Math.Max(11, _settings.AnswerFontSize * 0.65);
+        foreach (string term in terms)
+        {
+            var chip = new System.Windows.Controls.Border
+            {
+                Background = (Brush)FindResource("Surface"),
+                BorderBrush = (Brush)FindResource("Border"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 3, 8, 3),
+                Margin = new Thickness(0, 0, 5, 4),
+                Child = new TextBlock
+                {
+                    Text = term,
+                    FontSize = fontSize,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = (Brush)FindResource("Highlight"),
+                },
+            };
+            KeyTermsPanel.Children.Add(chip);
+        }
+    }
+
+    // ---------------------------------------------------------------- buy-time phrase
+
+    void UpdateBuyTimePhrase(bool hasAnswer, bool writing)
+    {
+        bool show = _awaitingAnswer && !hasAnswer;
+        if (show && !_buyTimeShown)
+        {
+            _buyTimeShown = true;
+            BuyTimeText.Text = BuyTimePhrases.Pick(_settings.InterviewType);
+            BuyTimeOverlay.Visibility = Visibility.Visible;
+        }
+        else if (!show && _buyTimeShown)
+        {
+            _buyTimeShown = false;
+            BuyTimeOverlay.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -1520,6 +1573,10 @@ public partial class MainWindow : Window
         _history.Clear();
         _viewingPast = -1;
         UpdateHistoryNav();
+        KeyTermsBar.Visibility = Visibility.Collapsed;
+        KeyTermsPanel.Children.Clear();
+        _buyTimeShown = false;
+        BuyTimeOverlay.Visibility = Visibility.Collapsed;
     }
 
     void UpdateHistoryNav()
@@ -1540,6 +1597,7 @@ public partial class MainWindow : Window
         AnswerBox.Document.Blocks.Clear();
         _renderedAnswerKeys.Clear();
         RenderAnswer(past.Answer.Blocks, fold: false);
+        UpdateKeyTerms(past.Answer.Blocks);
         AnswerBox.ScrollToHome();
         ShowQuestionType(past.Type);
         ShowQuestion(past.Answer.Question);
@@ -1654,12 +1712,12 @@ public partial class MainWindow : Window
         }
         SessionCard.Visibility = showStart ? Visibility.Visible : Visibility.Collapsed;
         ReaderEmptyPanel.Visibility = idle && !showStart ? Visibility.Visible : Visibility.Collapsed;
-        ReaderHoverTools.Visibility = _readerHover && !showStart ? Visibility.Visible : Visibility.Collapsed;
-        InterviewTypeButton.Visibility = ReaderHoverTools.Visibility;
+        ReaderHoverTools.Visibility = !showStart ? Visibility.Visible : Visibility.Collapsed;
         AnswerBox.Opacity = _awaitingAnswer ? 0.3 : 1;
         SetLoadingBar(_awaitingAnswer || writing);
         UpdateHistoryNav();
         UpdateDetailToggle();
+        UpdateBuyTimePhrase(hasAnswer, writing);
     }
 
     /// <summary>
@@ -2987,9 +3045,7 @@ public partial class MainWindow : Window
         _lastListenKey = "answer:" + id;
         // Finished only if the reader has been watching it stop growing; otherwise the page is read on
         // (IsFollowing) and the next look decides, so an answer still being written is read to its end.
-        bool watched = ReaderVisible || _settings.SpeakAnswers;
-        bool complete = past
-            || (watched && !snapshot.Generating && !_awaitingAnswer && DateTime.UtcNow - _answerGrewAt > TimeSpan.FromSeconds(1.5));
+        bool complete = past || !snapshot.Generating;
         if (_speaker.Listen(id, SpeechText(snapshot), complete, slowly))
         {
             SetStatus(slowly ? "Listening again, slower." : "Listening…");
@@ -3069,6 +3125,7 @@ public partial class MainWindow : Window
             SelectionPopup.IsOpen = false;
         }
         AnswerMoreButton.Visibility = e.ExtentHeight - e.ViewportHeight - e.VerticalOffset > 6 ? Visibility.Visible : Visibility.Collapsed;
+        AnswerFadeTop.Visibility = e.VerticalOffset > 10 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     void OnAnswerMoreClick(object sender, RoutedEventArgs e) => AnswerBox.PageDown();

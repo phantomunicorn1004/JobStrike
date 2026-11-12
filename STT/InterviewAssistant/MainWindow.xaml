@@ -265,8 +265,8 @@
                         <!-- One slim bar, so the answer starts near the top of the window (near the camera):
                              what is happening, the round and the question's kind, earlier answers. Copy,
                              Listen and text size appear only while the mouse is over the answer. -->
-                        <Border x:Name="ReaderHeader" DockPanel.Dock="Top" Background="{DynamicResource PanelBg}"
-                                BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="10,5,8,5">
+                        <Border x:Name="ReaderHeader" DockPanel.Dock="Top" Background="Transparent"
+                                BorderBrush="{DynamicResource Border}" BorderThickness="0" Padding="14,3,8,3">
                             <DockPanel>
                                 <StackPanel x:Name="HistoryNav" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
                                             Visibility="Collapsed">
@@ -301,7 +301,7 @@
                                     <Button AutomationProperties.Name="Larger answer text" Content="A+" Style="{StaticResource IconButton}" Width="28" Height="26" FontFamily="{StaticResource UiFont}" FontSize="12.5" Margin="0" Click="OnAnswerFontLarger" ToolTip="Larger answer text" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Border Style="{StaticResource Pill}" Padding="8,2" VerticalAlignment="Center" Margin="0,0,6,0"
+                                    <Border x:Name="AnswerStatePill" Style="{StaticResource Pill}" Padding="8,2" VerticalAlignment="Center" Margin="0,0,6,0"
                                             ToolTip="What is happening: listening, thinking, writing, reading aloud, or ready">
                                         <TextBlock x:Name="AnswerState" Text="Waiting" FontSize="11.5" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource Muted}" />
@@ -311,10 +311,9 @@
                                             ToolTip="The kind of question this answer is for; the answer's format follows it">
                                         <TextBlock x:Name="QuestionTypeText" FontSize="11" Foreground="{DynamicResource Accent}" />
                                     </Border>
-                                    <!-- Shown while the mouse is over the answer -->
                                     <Button x:Name="InterviewTypeButton" Style="{StaticResource SmallButton}" Padding="8,1" Click="OnInterviewTypeClick"
-                                            AutomationProperties.Name="Interview round" Visibility="Collapsed"
-                                            ToolTip="The kind of interview round: it sets what the answers focus on">
+                                            AutomationProperties.Name="Interview round"
+                                            ToolTip="The kind of interview round: it sets what the answers focus on and which buy-time phrases appear">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock x:Name="InterviewTypeText" VerticalAlignment="Center" />
                                             <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="6,1,0,0"
@@ -366,20 +365,54 @@
                                 <TextBlock x:Name="DetailToggleText" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                        <Grid>
+                        <Grid x:Name="AnswerGrid">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <!-- Key terms strip: bold phrases from the answer as glanceable chips -->
+                            <Border x:Name="KeyTermsBar" Grid.Row="0" Visibility="Collapsed" Padding="16,5,10,5"
+                                    Background="{DynamicResource WindowBg}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                              Padding="0" Focusable="False">
+                                    <WrapPanel x:Name="KeyTermsPanel" Orientation="Horizontal" />
+                                </ScrollViewer>
+                            </Border>
+                            <!-- Buy-time phrase shown during AI generation latency -->
+                            <Border x:Name="BuyTimeOverlay" Grid.Row="1" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    Padding="24,14" CornerRadius="12" Background="{DynamicResource Surface}"
+                                    BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                <StackPanel HorizontalAlignment="Center" MaxWidth="400">
+                                    <TextBlock x:Name="BuyTimeText" FontSize="17" FontFamily="{StaticResource DisplayFont}"
+                                               FontWeight="SemiBold" Foreground="{DynamicResource Strong}"
+                                               TextWrapping="Wrap" TextAlignment="Center" />
+                                    <TextBlock Text="Say this while the answer loads" FontSize="11" Foreground="{DynamicResource Muted}"
+                                               HorizontalAlignment="Center" Margin="0,6,0,0" />
+                                </StackPanel>
+                            </Border>
                             <!-- The selection stays visible while another app is in front, so the Listen
                                  hotkey can read it from there. -->
-                            <RichTextBox x:Name="AnswerBox" IsReadOnly="True" IsReadOnlyCaretVisible="False"
+                            <RichTextBox x:Name="AnswerBox" Grid.Row="1" IsReadOnly="True" IsReadOnlyCaretVisible="False"
                                          BorderThickness="0" Background="Transparent" Foreground="{DynamicResource Text}"
-                                         Padding="14,14,8,20" VerticalScrollBarVisibility="Auto"
+                                         Padding="16,6,10,20" VerticalScrollBarVisibility="Auto"
                                          FontFamily="{StaticResource UiFont}" SelectionBrush="{DynamicResource Accent}"
                                          IsInactiveSelectionHighlightEnabled="True"
                                          PreviewMouseLeftButtonUp="OnAnswerMouseUp" SelectionChanged="OnAnswerSelectionChanged"
                                          LostKeyboardFocus="OnAnswerLostFocus" ScrollViewer.ScrollChanged="OnAnswerScrolled">
                                 <FlowDocument PagePadding="0" />
                             </RichTextBox>
+                            <!-- Subtle fade at the top when scrolled: dims past content -->
+                            <Rectangle x:Name="AnswerFadeTop" Grid.Row="1" VerticalAlignment="Top" Height="48" IsHitTestVisible="False"
+                                       Visibility="Collapsed" Fill="{DynamicResource WindowBg}">
+                                <Rectangle.OpacityMask>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#FFFFFFFF" Offset="0" />
+                                        <GradientStop Color="#00FFFFFF" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Rectangle.OpacityMask>
+                            </Rectangle>
                             <!-- Only when the answer goes on below the window: scrolls down to the rest -->
-                            <Button x:Name="AnswerMoreButton" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"
+                            <Button x:Name="AnswerMoreButton" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"
                                     Style="{StaticResource SmallButton}" Padding="14,4" FontSize="12" Visibility="Collapsed"
                                     Click="OnAnswerMoreClick" AutomationProperties.Name="More of the answer"
                                     ToolTip="The answer continues below">
@@ -390,7 +423,7 @@
                                 </StackPanel>
                             </Button>
                             <!-- Small Listen button next to the mouse after text is selected (as on Google Translate) -->
-                            <Popup x:Name="SelectionPopup" PlacementTarget="{Binding ElementName=AnswerBox}" Placement="Relative"
+                            <Popup x:Name="SelectionPopup" Grid.Row="1" PlacementTarget="{Binding ElementName=AnswerBox}" Placement="Relative"
                                    AllowsTransparency="True" StaysOpen="True" PopupAnimation="Fade">
                                 <StackPanel Orientation="Horizontal">
                                     <Button x:Name="SelectionListenButton" Style="{StaticResource PrimaryButton}" Focusable="False"
@@ -413,7 +446,7 @@
                                     </Button>
                                 </StackPanel>
                             </Popup>
-                            <StackPanel x:Name="ReaderEmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="28"
+                            <StackPanel x:Name="ReaderEmptyPanel" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="28"
                                         MaxWidth="380" IsHitTestVisible="False">
                                 <Border Width="44" Height="44" CornerRadius="10" Background="{DynamicResource HoverBg}"
                                         HorizontalAlignment="Center">
@@ -428,7 +461,7 @@
                             </StackPanel>
 
                             <!-- Start interview: the job, the round, where answers come from and a ready check, then one button -->
-                            <ScrollViewer x:Name="SessionCard" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                            <ScrollViewer x:Name="SessionCard" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                                           Focusable="False" Visibility="Collapsed">
                                 <ContentControl Style="{StaticResource Card}" MaxWidth="560" Margin="16,20" Padding="24,20,24,22"
                                                 VerticalAlignment="Center">

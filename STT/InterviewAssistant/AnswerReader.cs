@@ -273,17 +273,34 @@ public static partial class AnswerRenderer
                 paragraph.LineHeight = 1;
                 return paragraph;
             default:
-                paragraph.Margin = new Thickness(block.Level * fontSize * 1.3, 0, 0, fontSize * 0.55);
                 if (lead)
                 {
-                    paragraph.FontSize = fontSize * 1.18;
-                    paragraph.LineHeight = Math.Round(paragraph.FontSize * 1.45);
-                    paragraph.Margin = new Thickness(0, 0, 0, fontSize * 0.9);
-                    paragraph.Padding = new Thickness(fontSize * 0.75, fontSize * 0.5, fontSize * 0.75, fontSize * 0.55);
-                    paragraph.Background = (Brush)theme["PendingBg"];
+                    paragraph.FontSize = fontSize * 1.1;
+                    paragraph.LineHeight = Math.Round(paragraph.FontSize * 1.5);
+                    paragraph.Margin = new Thickness(0, 0, 0, fontSize * 0.85);
+                    paragraph.Padding = new Thickness(fontSize * 0.6, 0, 0, 0);
                     paragraph.BorderBrush = accent;
                     paragraph.BorderThickness = new Thickness(3, 0, 0, 0);
                     text = strong;
+                }
+                else if (block.Level == 0)
+                {
+                    double bw = fontSize * 1.1;
+                    paragraph.Margin = new Thickness(bw, 0, 0, fontSize * 0.55);
+                    paragraph.TextIndent = -bw;
+                    paragraph.Inlines.Add(new InlineUIContainer(new System.Windows.Controls.TextBlock
+                    {
+                        Text = "•",
+                        Width = bw,
+                        Foreground = accent,
+                        FontSize = fontSize * 0.7,
+                        Padding = new Thickness(0, fontSize * 0.15, 0, 0),
+                    })
+                    { BaselineAlignment = BaselineAlignment.Baseline });
+                }
+                else
+                {
+                    paragraph.Margin = new Thickness(block.Level * fontSize * 1.3, 0, 0, fontSize * 0.55);
                 }
                 break;
         }
@@ -346,4 +363,29 @@ public static partial class AnswerRenderer
     /// <summary>A pause cue: "/" or "//" with spaces around it, kept as its own piece when splitting.</summary>
     [GeneratedRegex(@"( //? )")]
     private static partial Regex PauseMark();
+
+    /// <summary>
+    /// Extracts bold key terms from answer blocks for the key terms strip. Returns distinct phrases
+    /// in the order they first appear, skipping very short fragments and duplicates.
+    /// </summary>
+    public static List<string> ExtractKeyTerms(IReadOnlyList<AnswerBlock> blocks)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var terms = new List<string>();
+        foreach (var block in blocks)
+        {
+            if (block.Kind is "hr" or "code")
+                continue;
+            foreach (var run in block.Runs)
+            {
+                if (!run.Bold || run.Code)
+                    continue;
+                string trimmed = run.Text.Trim().TrimEnd(':');
+                if (trimmed.Length < 2 || !seen.Add(trimmed))
+                    continue;
+                terms.Add(trimmed);
+            }
+        }
+        return terms;
+    }
 }

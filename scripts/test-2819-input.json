@@ -1,0 +1,287 @@
+{
+  "schema_version": "2.3",
+  "resume_template": "Jacob",
+  "job_title": "Staff Forward Deployed Engineer, EMEA",
+  "company_name": "GitLab",
+  "job_description": "## Job details\nRemote Ireland; Remote, Austria; Remote, France; Remote, Germany; Remote, Netherlands; Remote, Spain; Remote, United Kingdom\n\n## Description\nTag: New\n\nGitLab is the intelligent orchestration platform for DevSecOps. GitLab enables organizations to increase developer productivity, improve operational efficiency, reduce security and compliance risk, and accelerate digital transformation. More than 50 million registered users and more than 50% of the Fortune 100* trust GitLab to ship better, more secure software faster.\nThe same principles built into our products are reflected in how our team works: we embrace AI as a core productivity multiplier, with all team members expected to incorporate AI into their daily workflows to drive efficiency, innovation, and impact. GitLab is where careers accelerate, innovation flourishes, and every voice is valued. Our high-performance culture is driven by our values and continuous knowledge exchange, enabling our team members to reach their full potential while collaborating with industry leaders to solve complex problems. Co-create the future with us as we build technology that transforms how the world develops software.\n*Fortune 500® is a registered trademark of Fortune Media IP Limited, used under license. Claim based on GitLab data. Fortune 100 refers to the top 20% ranked companies in the 2025 Fortune 500 list, published in June 2025. Fortune and Fortune Media IP Limited are not affiliated with, and do not endorse products or services of GitLab.\n\nAn overview of this role\nGitLab’s Forward Deployed Engineering team is a field-situated product engineering function focused on strategic customer outcomes, artificial intelligence (AI) adoption, and direct contributions to GitLab’s product. This isn't a traditional field engineering, solutions architecture, or professional services role. As a Staff Forward Deployed Engineer, you'll work closely with customers while maintaining the technical standards and contribution discipline of a Staff-level product engineer.\nYou'll work where strategic customer urgency, complex technical ambiguity, and GitLab product execution intersect. You'll partner directly with strategic customers and teams across Product, Engineering, Support, Site Reliability Engineering (SRE), Solutions Architecture (SA), Customer Success Architecture (CSA), Customer Success Management (CSM), and Professional Services. You'll diagnose and resolve high-impact adoption blockers, contribute production-quality fixes and features, and turn what you learn into repeatable patterns for GitLab and its customers.\n\nWhy this role exists\nStrategic customers sometimes encounter challenges that are too broad, deep, urgent, or cross-functional for any single team to own from start to finish. These challenges may involve product gaps, performance degradation, scale bottlenecks, AI governance, adoption blockers, architectural constraints, Git usage patterns, continuous integration and continuous delivery (CI/CD) complexity, application programming interface (API) automation, security requirements, or operational instability.\nForward Deployed Engineering provides technical stewardship in these moments. The team doesn't simply observe, report, or escalate. You'll engage directly, diagnose the underlying technical problem, collaborate with the right teams, contribute code or technical solutions where appropriate, and transition the outcome into normal ownership once the customer is stable and the learning can be reused.\n\nWhat you’ll do\n\nProduct contribution\n- Contribute production-quality code to GitLab’s product and adjacent systems.\n- Develop bug fixes, features, integrations, tooling, and performance improvements when strategic customer outcomes require direct engineering work.\n- Work within GitLab’s product and engineering processes, including issue discovery, merge request creation, testing, review, documentation, and maintainability.\n- Partner with Product and Engineering so customer-driven solutions support long-term product direction rather than becoming one-off customizations.\n- Turn blockers discovered in the field into durable product improvements, reference architectures, documentation, and repeatable implementation patterns.\n\nStrategic technical stewardship\n- Engage with strategically important customers when adoption, retention, executive confidence, or public trust is materially at risk.\n- Diagnose complex problems across GitLab product behavior, customer architecture, Git internals, CI/CD workflows, API usage, observability, infrastructure, networking, and cloud environments.\n- Coordinate across Product, Engineering, SRE, Support, SA, CSA, CSM, Professional Services, and customer technical teams to drive resolution from discovery through handoff.\n- Provide recommendations grounded in data, traces, and systems analysis to improve GitLab usage, workflows, automation, and architecture.\n- Create durable outcomes without establishing permanent dependency on Forward Deployed Engineering.\n\nAI adoption and agentic software development lifecycle\n- Drive governed, measurable, and production-oriented adoption of GitLab Duo Agent Platform with strategic customers.\n- Identify and resolve AI adoption blockers involving governance, usage controls, auditability, security, compliance, operating models, workflow design, and integrations.\n- Develop customer-safe adoption patterns for the agentic software development lifecycle (SDLC), AI-assisted development, intent-based review, AI governance, and human-in-the-loop software delivery.\n- Partner with Product, Engineering, Field, and Customer Success teams to turn AI adoption learning into reusable guidance and product improvements.\n\nThought leadership\n- Create technical narratives grounded in customer experience and product reality that can help shape the industry’s approach.\n- Contribute to Well-Architected Frameworks, whitepapers, webinars, reference architectures, technical strategy memos, and adoption frameworks.\n- Guide ideas through discovery, formulation, validation, amplification, and adoption across GitLab.\n- Partner with SA, CSA, Product, Engineering, Marketing, Product Marketing Management, CSM, Support, and executive stakeholders to make technical thought leadership a shared company capability.\n\nWhat you’ll bring\n- Staff-level experience building, operating, or improving complex production software systems.\n- Experience contributing to large, mature product codebases with high standards for testing, maintainability, performance, and security.\n- Strong Ruby on Rails or Go experience and the ability to contribute directly to GitLab’s product and adjacent systems.\n- Experience with AI-assisted software development, agentic workflows, AI governance, model evaluation, context management, prompt and workflow design, or AI adoption in enterprise environments.\n- Experience diagnosing complex system behavior across application code, data stores, infrastructure, observability, networking, APIs, and customer usage patterns.\n- Deep knowledge of modern DevSecOps workflows, including Git, merge requests, CI/CD, security controls, compliance needs, and enterprise software delivery.\n- Experience working with strategic customers or senior technical stakeholders in ambiguous, high-impact situations.\n- The ability to coordinate across product, engineering, field, and customer teams without formal authority.\n- Strong written communication and sound judgment, including the ability to create technical narratives and distinguish reusable product work from customer-specific customization.\n\nStrongly preferred qualifications\n- Direct experience with GitLab as a platform, including GitLab.com, GitLab Dedicated, or GitLab Self-Managed.\n- Production experience with Ruby on Rails, Go, PostgreSQL, Redis, Sidekiq, Vue, TypeScript, Kubernetes, Docker, Linux, or observability tools.\n- Deep familiarity with Git internals, repository performance, large-scale Git usage patterns, or GitLab Runner behavior.\n- Experience creating technical thought-leadership materials, such as whitepapers, technical talks, architecture frameworks, requests for comments, public technical writing, or internal strategy documents.\n- A background in performance engineering, site reliability engineering, platform engineering, infrastructure engineering, or distributed systems.\n- Experience working in open source or highly asynchronous engineering environments.\n\nTechnologies and domains\nDirectly relevant technologies and domains include:\n- Ruby on Rails\n- Go\n- AI-assisted development and the agentic SDLC\n- PostgreSQL\n- Redis and Sidekiq\n- Git internals\n- GitLab CI/CD and Runner architecture\n- Kubernetes and containers\n- Terraform\n- Linux, networking, observability, and performance analysis\n- Vue and TypeScript\n- APIs and automation\n- DevSecOps governance, security, and compliance\n\nWhat this role is not\nThis role isn't:\n- A generic field engineering role.\n- A proof-of-concept factory.\n- A replacement for Solutions Architecture, Customer Success Architecture, Customer Success Management, Professional Services, Support, SRE, Product, or Engineering.\n- A customer-specific customization function.\n- Unbilled Professional Services.\n- A requirements-gathering role that only escalates to Product.\n- An AI evangelism role disconnected from product execution.\n\nSuccess measures\nSuccess in this role may include:\n- Stabilizing strategic customer adoption or retention risks.\n- Fixing product bugs or contributing features.\n- Removing AI adoption blockers for strategic accounts.\n- Creating reusable implementation patterns and transitioning them to long-term owners.\n- Producing or enabling Well-Architected Frameworks, whitepapers, webinars, or technical narratives.\n- Resolving cross-functional customer challenges without creating permanent dependency on Forward Deployed Engineering.\n- Equipping Product, Engineering, Support, CSA, CSM, Professional Services, and SA teams with better guidance based on learning from the field.\n- Increasing adoption and effective use of GitLab capabilities, especially GitLab Duo and GitLab Duo Agent Platform, in targeted accounts.\n\nAbout the team\nThe Forward Deployed Engineering team connects strategic customer needs with GitLab product execution. The team works directly with customers and across GitLab to resolve complex adoption challenges, contribute durable product improvements, and create reusable technical guidance. Its goal is to stabilize urgent situations, improve the product, and transition ongoing ownership to the appropriate team rather than create a permanent dependency.\n\nIdeal candidate profile\nYou're a Staff-level product or platform engineer who can operate in the field without becoming field-only. You're comfortable reading traces, writing production code, debugging architecture, discussing AI governance, leading a customer technical session, opening a merge request, outlining a whitepaper, and coordinating across teams to achieve a strategic customer outcome.\nYou're not simply a strong communicator with technical awareness. You're a credible engineer with the judgment, presence, and narrative ability to turn customer reality into product contributions, adoption guidance, and company-level thought leadership.\nWe welcome candidates with different backgrounds and levels of experience. Many successful candidates don't meet every qualification. If you're excited about this role, we encourage you to apply and let our recruiting team assess your application.\n\nHow GitLab Supports Full-Time Employees\n- Benefits to support your health, finances, and well-being\n- Flexible Paid Time Off\n- Team Member Resource Groups\n- Equity Compensation & Employee Stock Purchase Plan\n- Growth and Development Fund\n- Parental Leave\nPlease note that we welcome interest from candidates with varying levels of experience; many successful candidates do not meet every single requirement. Additionally, studies have shown that people from underrepresented groups are less likely to apply to a job unless they meet every single qualification. If you're excited about this role, please apply and allow our recruiters to assess your application.\nCountry Hiring Guidelines: GitLab hires new team members in countries around the world. All of our roles are remote, however some roles may carry specific location-based eligibility requirements. Our Talent Acquisition team can help answer any questions about location after starting the recruiting process.\nPrivacy Policy: Please review our Recruitment Privacy Policy. Your privacy is important to us.\nGitLab is proud to be an equal opportunity workplace and is an affirmative action employer. GitLab’s policies and practices relating to recruitment, employment, career development and advancement, promotion, and retirement are based solely on merit, regardless of race, color, religion, ancestry, sex (including pregnancy, lactation, sexual orientation, gender identity, or gender expression), national origin, age, citizenship, marital status, mental or physical disability, genetic information (including family medical history), discharge status from the military, protected veteran status (which includes disabled veterans, recently separated veterans, active duty wartime or campaign badge veterans, and Armed Forces service medal veterans), or any other basis protected by law. GitLab will not tolerate discrimination or harassment based on any of these characteristics. See also GitLab’s EEO Policy and EEO is the Law. If you have a disability or special need that requires accommodation, please let us know during the recruiting process.",
+  "placeholder_order": [
+    "<<Summary>>",
+    "<<Skill-Group-1>>",
+    "<<Skill-Items-1>>",
+    "<<Skill-Group-2>>",
+    "<<Skill-Items-2>>",
+    "<<Skill-Group-3>>",
+    "<<Skill-Items-3>>",
+    "<<Skill-Group-4>>",
+    "<<Skill-Items-4>>",
+    "<<Skill-Group-5>>",
+    "<<Skill-Items-5>>",
+    "<<Skill-Group-6>>",
+    "<<Skill-Items-6>>",
+    "<<Role-Title-1>>",
+    "<<Company-1>>",
+    "<<Company-Location-1>>",
+    "<<Work-Arrangement-1>>",
+    "<<Bullet-1-1>>",
+    "<<Bullet-1-2>>",
+    "<<Bullet-1-3>>",
+    "<<Bullet-1-4>>",
+    "<<Bullet-1-5>>",
+    "<<Bullet-1-6>>",
+    "<<Role-Title-2>>",
+    "<<Company-2>>",
+    "<<Company-Location-2>>",
+    "<<Work-Arrangement-2>>",
+    "<<Bullet-2-1>>",
+    "<<Bullet-2-2>>",
+    "<<Bullet-2-3>>",
+    "<<Bullet-2-4>>",
+    "<<Bullet-2-5>>",
+    "<<Role-Title-3>>",
+    "<<Company-3>>",
+    "<<Company-Location-3>>",
+    "<<Work-Arrangement-3>>",
+    "<<Bullet-3-1>>",
+    "<<Bullet-3-2>>",
+    "<<Bullet-3-3>>",
+    "<<Bullet-3-4>>",
+    "<<Cover-Letter-Text>>",
+    "<<Today-Date>>"
+  ],
+  "summary": {
+    "placeholder": "<<Summary>>",
+    "text": "Forward Deployed Engineer with 10 years of experience building and supporting production software across developer platforms, CI/CD, and observability systems. Work has included Ruby on Rails and Go services, PostgreSQL and Redis data paths, Kubernetes deployments, and the less tidy edges of Git-based delivery workflows. Comfortable moving between customer architecture reviews, trace-driven debugging, and reviewed product changes, with a practical focus on AI governance, maintainable fixes, and handoffs that leave teams able to own the result.",
+    "bold_words": [
+      "Ruby on Rails",
+      "Go",
+      "PostgreSQL",
+      "Kubernetes",
+      "AI governance"
+    ]
+  },
+  "technology_stack": {
+    "skill_group_1": {
+      "placeholder": "<<Skill-Group-1>>",
+      "text": "Languages & Frameworks"
+    },
+    "skill_items_1": {
+      "placeholder": "<<Skill-Items-1>>",
+      "text": "Ruby, Go, Ruby on Rails, TypeScript, Vue, JavaScript"
+    },
+    "skill_group_2": {
+      "placeholder": "<<Skill-Group-2>>",
+      "text": "Data & Job Processing"
+    },
+    "skill_items_2": {
+      "placeholder": "<<Skill-Items-2>>",
+      "text": "PostgreSQL, Redis, Sidekiq, Elasticsearch, Kafka, PgBouncer"
+    },
+    "skill_group_3": {
+      "placeholder": "<<Skill-Group-3>>",
+      "text": "Git & Delivery Systems"
+    },
+    "skill_items_3": {
+      "placeholder": "<<Skill-Items-3>>",
+      "text": "Git, GitLab CI/CD, GitLab Runner, Gitaly, Git LFS, merge requests"
+    },
+    "skill_group_4": {
+      "placeholder": "<<Skill-Group-4>>",
+      "text": "Infrastructure & Runtime"
+    },
+    "skill_items_4": {
+      "placeholder": "<<Skill-Items-4>>",
+      "text": "Kubernetes, Docker, Terraform, Linux, Helm, containerd"
+    },
+    "skill_group_5": {
+      "placeholder": "<<Skill-Group-5>>",
+      "text": "Observability & Performance"
+    },
+    "skill_items_5": {
+      "placeholder": "<<Skill-Items-5>>",
+      "text": "Prometheus, Grafana, OpenTelemetry, Jaeger, Loki, pprof"
+    },
+    "skill_group_6": {
+      "placeholder": "<<Skill-Group-6>>",
+      "text": "APIs, Security & Governance"
+    },
+    "skill_items_6": {
+      "placeholder": "<<Skill-Items-6>>",
+      "text": "OpenAPI, OAuth 2.0, OpenID Connect, Open Policy Agent, Semgrep, Trivy"
+    }
+  },
+  "work_experience": {
+    "experience_1": {
+      "company": {
+        "placeholder": "<<Company-1>>",
+        "text": "CircleCI"
+      },
+      "location": {
+        "placeholder": "<<Company-Location-1>>",
+        "text": "San Francisco, CA"
+      },
+      "role_title": {
+        "placeholder": "<<Role-Title-1>>",
+        "text": "Staff Forward Deployed Engineer"
+      },
+      "work_arrangement": {
+        "placeholder": "<<Work-Arrangement-1>>",
+        "text": "Remote"
+      },
+      "start_date": "Mar 2023",
+      "end_date": "Present",
+      "bullets": {
+        "bullet_1": {
+          "placeholder": "<<Bullet-1-1>>",
+          "text": "Go services behind pipeline orchestration occasionally held work after runner loss; I traced the state transitions and added idempotent recovery around job claims and cancellation."
+        },
+        "bullet_2": {
+          "placeholder": "<<Bullet-1-2>>",
+          "text": "Ruby on Rails endpoints used by customer integrations had inconsistent pagination and retry behavior, so I tightened the API contract and added request specs before changing client-facing defaults."
+        },
+        "bullet_3": {
+          "placeholder": "<<Bullet-1-3>>",
+          "text": "PostgreSQL query plans and Redis queue timings narrowed a customer-facing latency regression to one hot lookup; the change cut p95 latency by 18% in the affected path."
+        },
+        "bullet_4": {
+          "placeholder": "<<Bullet-1-4>>",
+          "text": "A recurring part of incident work was reconciling runner logs, customer timestamps, and incomplete reproduction steps; I wrote an intake checklist so investigations started with usable evidence."
+        },
+        "bullet_5": {
+          "placeholder": "<<Bullet-1-5>>",
+          "text": "For a customer piloting AI-assisted code review, I mapped prompt context, repository permissions, audit events, and human approval points into a rollout pattern the product team could support."
+        },
+        "bullet_6": {
+          "placeholder": "<<Bullet-1-6>>",
+          "text": "When container jobs stalled behind intermittent network resets, I correlated traces with Linux socket metrics and left a runbook for the owning SRE rotation."
+        }
+      }
+    },
+    "experience_2": {
+      "company": {
+        "placeholder": "<<Company-2>>",
+        "text": "Sourcegraph"
+      },
+      "location": {
+        "placeholder": "<<Company-Location-2>>",
+        "text": "San Francisco, CA"
+      },
+      "role_title": {
+        "placeholder": "<<Role-Title-2>>",
+        "text": "Senior Forward Deployed Engineer"
+      },
+      "work_arrangement": {
+        "placeholder": "<<Work-Arrangement-2>>",
+        "text": "Remote"
+      },
+      "start_date": "Apr 2019",
+      "end_date": "Feb 2023",
+      "bullets": {
+        "bullet_1": {
+          "placeholder": "<<Bullet-2-1>>",
+          "text": "I kept a dedicated runner pool separate from shared execution after customer traces showed noisy-neighbor effects; the trade-off cost some utilization but made workload isolation easier to reason about."
+        },
+        "bullet_2": {
+          "placeholder": "<<Bullet-2-2>>",
+          "text": "The older webhook delivery path had accumulated retry and state-handling exceptions, so I moved the affected flow to a bounded retry model and documented the compatibility edge cases."
+        },
+        "bullet_3": {
+          "placeholder": "<<Bullet-2-3>>",
+          "text": "Queue-age alerts and a bounded retry policy brought weekly pages for stuck webhook jobs down from 11 to 4, though the remaining failures still needed manual inspection."
+        },
+        "bullet_4": {
+          "placeholder": "<<Bullet-2-4>>",
+          "text": "A teammate was blocked by unclear repository-index state transitions; I reproduced the race, wrote down the sequence, and paired on a small fix instead of sending another broad design document."
+        },
+        "bullet_5": {
+          "placeholder": "<<Bullet-2-5>>",
+          "text": "CI jobs were running against inconsistent service fixtures, so I added deterministic integration tests and a canary stage that caught configuration drift before wider rollout."
+        }
+      }
+    },
+    "experience_3": {
+      "company": {
+        "placeholder": "<<Company-3>>",
+        "text": "Sentry"
+      },
+      "location": {
+        "placeholder": "<<Company-Location-3>>",
+        "text": "San Francisco, CA"
+      },
+      "role_title": {
+        "placeholder": "<<Role-Title-3>>",
+        "text": "Forward Deployed Engineer"
+      },
+      "work_arrangement": {
+        "placeholder": "<<Work-Arrangement-3>>",
+        "text": ""
+      },
+      "start_date": "Mar 2016",
+      "end_date": "Mar 2019",
+      "bullets": {
+        "bullet_1": {
+          "placeholder": "<<Bullet-3-1>>",
+          "text": "A small Bash utility compared deployment markers with error-volume changes and attached the relevant release metadata to incident notes, replacing a repetitive manual check."
+        },
+        "bullet_2": {
+          "placeholder": "<<Bullet-3-2>>",
+          "text": "The rare failure appeared only when an event arrived before its project metadata had replicated; I followed the ordering through the queue consumer and added a safe retry for the missing record."
+        },
+        "bullet_3": {
+          "placeholder": "<<Bullet-3-3>>",
+          "text": "I built an initial event-ingestion worker and its replay script, reducing a routine backfill from about 20 minutes to 6 minutes while keeping the old path available during rollout."
+        },
+        "bullet_4": {
+          "placeholder": "<<Bullet-3-4>>",
+          "text": "On-call notes were often stale after releases, so I took a turn maintaining the runbooks and added the checks that the rotation actually used during noisy overnight alerts."
+        }
+      }
+    }
+  },
+  "cover_letter_text": {
+    "placeholder": "<<Cover-Letter-Text>>",
+    "text": "I’m applying for the Staff Forward Deployed Engineer role at GitLab. My recent work has sat between production engineering and customer-facing incident resolution: reading the system, making the code change where warranted, and leaving behind a fix or operating pattern that the owning team can maintain.\n\nOn developer platform systems, I have worked in Ruby on Rails and Go services, traced PostgreSQL and Redis behavior, and debugged CI/CD issues that crossed application code, runners, networking, and customer configuration. In one case, trace and query analysis isolated a high-percentile latency regression; in another, I replaced a customer-specific workaround with a supported diagnostic path and a documented handoff. That mix maps to GitLab’s expectation that field discoveries become production contributions rather than permanent exceptions.\n\nI have also worked through the less code-centric side of adoption: defining repository permissions, audit events, review gates, and escalation paths for AI-assisted development workflows. Those discussions are most useful when grounded in concrete controls and measured usage, not broad promises. I can contribute to technical narratives and reusable reference patterns while keeping the underlying implementation and operational constraints visible.\n\nThe Staff Forward Deployed Engineer role is a good match for the work I have done across product, platform, and customer engineering. I would welcome a conversation about where the team needs hands-on product contribution and technical stewardship.",
+    "bold_words": [
+      "Ruby on Rails",
+      "Go",
+      "PostgreSQL",
+      "CI/CD",
+      "AI-assisted development"
+    ]
+  },
+  "today_date": {
+    "placeholder": "<<Today-Date>>",
+    "text": "November 12, 2026"
+  },
+  "extraction_context": {
+    "selected_companies": [
+      {
+        "company": "CircleCI",
+        "hq": "San Francisco, CA",
+        "role": "Staff Forward Deployed Engineer"
+      },
+      {
+        "company": "Sourcegraph",
+        "hq": "San Francisco, CA",
+        "role": "Senior Forward Deployed Engineer"
+      },
+      {
+        "company": "Sentry",
+        "hq": "San Francisco, CA",
+        "role": "Forward Deployed Engineer"
+      }
+    ],
+    "jd_company": "GitLab",
+    "jd_role": "Staff Forward Deployed Engineer"
+  },
+  "profile": "Jacob Matthew Pribisco",
+  "candidate": "Jacob Matthew Pribisco",
+  "email": "jacob.matthew.pribisco@outlook.com",
+  "phone_number": "+1 904-413-8680",
+  "current_location": "Jacksonville, FL",
+  "education": {
+    "institution": "University of North Florida",
+    "degree": "Bachelor of Science in Computer Science",
+    "location": "Jacksonville, FL",
+    "date_range": "Aug 2014 - Apr 2018"
+  }
+}

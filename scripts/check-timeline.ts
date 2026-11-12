@@ -1,50 +1,71 @@
 import { createClient } from "@supabase/supabase-js";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(url, key);
+const sb = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+);
 
 async function main() {
-  // Check when the 5 registered apps were created and generated
-  const ids = [2757, 2752, 2737, 2728, 2725];
-  const { data: apps } = await supabase
+  // Row #2819 full details
+  const { data: row } = await sb
     .from("resume_db_applications")
-    .select("id, company, created_at, generation_status, generation_meta, apply, bid_state")
-    .in("id", ids)
-    .order("created_at", { ascending: false });
+    .select("id, company, job_title, created_at, applied_at, generation_status, generation_meta, bid_state, bid_meta, resume_drive_file_id, resume_url")
+    .eq("id", 2819)
+    .single();
 
-  console.log("=== APP TIMELINE ===\n");
-  for (const app of apps || []) {
-    const gm = app.generation_meta as any;
-    console.log(`#${app.id} ${app.company}`);
-    console.log(`  created_at: ${app.created_at}`);
-    console.log(`  gen_status: ${app.generation_status}`);
-    console.log(`  apply: ${app.apply}`);
-    console.log(`  bid_state: ${app.bid_state}`);
-    if (gm?.generatedAt) console.log(`  generatedAt: ${gm.generatedAt}`);
-    if (gm?.completedAt) console.log(`  completedAt: ${gm.completedAt}`);
-    if (gm?.finalized_at) console.log(`  finalized_at: ${gm.finalized_at}`);
-    if (gm?.model) console.log(`  model: ${gm.model}`);
-    console.log(`  meta keys: ${Object.keys(gm || {}).join(", ")}`);
-    console.log();
+  if (!row) { console.log("Row not found"); return; }
+
+  console.log("=== Row #2819 ===");
+  console.log("company:", row.company);
+  console.log("job_title:", row.job_title);
+  console.log("created_at:", row.created_at);
+  console.log("applied_at:", row.applied_at);
+  console.log("generation_status:", row.generation_status);
+  console.log("bid_state:", row.bid_state);
+  console.log("resume_drive_file_id:", row.resume_drive_file_id);
+  console.log("resume_url:", row.resume_url);
+  console.log("\ngeneration_meta:", JSON.stringify(row.generation_meta, null, 2));
+  console.log("\nbid_meta:", JSON.stringify(row.bid_meta, null, 2));
+
+  // All profile 4 rows with Drive files — sorted by applied_at
+  const { data: allWithDrive } = await sb
+    .from("resume_db_applications")
+    .select("id, company, job_title, created_at, applied_at, generation_status, generation_meta, bid_state, resume_drive_file_id")
+    .eq("profile_id", 4)
+    .not("resume_drive_file_id", "is", null)
+    .order("applied_at", { ascending: true })
+    .limit(50);
+
+  console.log("\n=== Profile 4 rows with Drive files (by applied_at) ===");
+  for (const r of allWithDrive ?? []) {
+    const gm = r.generation_meta ?? {} as any;
+    console.log(`#${r.id} ${(r.company ?? "").padEnd(20)} created=${r.created_at} applied=${r.applied_at} gen_completed=${gm.completedAt ?? "?"} bid=${r.bid_state}`);
   }
 
-  // Also check the Profile 4 kit update time
-  console.log("=== KIT HISTORY ===\n");
-  const { data: kit } = await supabase
+  // Profile 4 rows created before the placeholder checks (Nov 11 16:16 UTC = 11:16 EST)
+  const { data: earlyRows } = await sb
+    .from("resume_db_applications")
+    .select("id, company, job_title, created_at, generation_status, generation_meta, bid_state")
+    .eq("profile_id", 4)
+    .lt("created_at", "2026-11-11T16:16:00Z")
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  console.log("\n=== Profile 4 rows created BEFORE placeholder checks (Nov 11 11:16 EST) ===");
+  for (const r of earlyRows ?? []) {
+    const gm = r.generation_meta ?? {} as any;
+    console.log(`#${r.id} ${(r.company ?? "").padEnd(20)} created=${r.created_at} gen_status=${r.generation_status} gen_completed=${gm.completedAt ?? "?"} bid=${r.bid_state}`);
+  }
+
+  // Check when profile 4 kit was last updated
+  const { data: kit } = await sb
     .from("profile_prompt_kits")
     .select("updated_at, profile_id")
     .eq("profile_id", 4)
     .single();
   if (kit) {
-    console.log(`Profile 4 kit updated_at: ${kit.updated_at}`);
+    console.log("\nProfile 4 kit updated_at:", kit.updated_at);
   }
-
-  // Fix timeline reference
-  console.log("\n=== CODE FIX TIMELINE ===");
-  console.log("Commit 8b1155f (placeholder skip + empty reject): deployed ~Nov 11");
-  console.log("Commit c4fcd7e (instruction text detection): deployed ~Nov 12");
-  console.log("Kit updated to empty companies: ~Nov 11 ~2:45 PM");
 }
 
 main().catch(console.error);
