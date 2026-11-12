@@ -86,6 +86,40 @@ describe("finalizeBuiltResume", () => {
     );
   });
 
+  it("allows skill group name that matches kit when it is a valid value, not instruction", () => {
+    const kit = makeKit() as any;
+    kit.technology_stack.skill_group_1.text = "Programming Languages";
+    const answer = makeAnswer() as any;
+    answer.technology_stack.skill_group_1.text = "Programming Languages";
+    const result = run(answer, kit);
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects skill group that copies instruction text verbatim", () => {
+    const kit = makeKit() as any;
+    kit.technology_stack.skill_group_1.text = "Category name from JD";
+    const answer = makeAnswer() as any;
+    answer.technology_stack.skill_group_1.text = "Category name from JD";
+    const result = run(answer, kit);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.stringContaining("<<Skill-Group-1>> still contains the template instruction text")]),
+    );
+  });
+
+  it("rejects skill items that copy instruction text verbatim", () => {
+    const kit = makeKit() as any;
+    kit.technology_stack.skill_items_1.text = "5-7 comma-separated languages from/inferred from JD";
+    const answer = makeAnswer() as any;
+    answer.technology_stack.skill_items_1.text = "5-7 comma-separated languages from/inferred from JD";
+    const result = run(answer, kit);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.stringContaining("<<Skill-Items-1>> still contains the template instruction text")]),
+    );
+  });
+
   it("rejects text that still holds a placeholder", () => {
     const answer = makeAnswer() as any;
     answer.cover_letter.cover_letter_text.text = "Dear <<Recipient-Name>>, …";

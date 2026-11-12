@@ -41,6 +41,14 @@ export type FinalizeResult = {
 
 const LEFTOVER = /<<[^<>]+>>|\{resume_template_json\}|\{job_description\}/;
 
+const INSTRUCTION_KEYWORDS =
+  /\bfrom JD\b|\bcomma.separated\b|\bcategory name\b|\binferred from\b|\breplace\b|\b\d+-\d+\s|^Bullet\b/i;
+
+function looksLikeInstruction(text: string): boolean {
+  const t = text.trim();
+  return t.length > 20 && INSTRUCTION_KEYWORDS.test(t);
+}
+
 function clone<T>(value: T): T {
   return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
 }
@@ -195,7 +203,7 @@ export function finalizeBuiltResume({ built, kit, target, todayText }: FinalizeI
       : "";
     if (!text.trim() && kitText.trim()) errors.push(`${placeholder} is empty.`);
     else if (LEFTOVER.test(text)) errors.push(`${placeholder} still contains an unfilled placeholder.`);
-    else if (kitText.trim().length > 20 && text.trim() === kitText.trim()) {
+    else if (text.trim() === kitText.trim() && looksLikeInstruction(kitText)) {
       errors.push(`${placeholder} still contains the template instruction text — the model did not replace it.`);
     }
   }
