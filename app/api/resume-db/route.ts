@@ -27,7 +27,13 @@ import {
   setApplicationPipelineStage,
 } from "@/lib/resume-db/pipeline-stages";
 import { recordPipelineEvent } from "@/lib/pipeline-events/repository";
-import { BID_STATES, type BidState, type ResumeDbApplicationInput } from "@/lib/resume-db/types";
+import {
+  BID_STATES,
+  toSortDir,
+  toSortKey,
+  type BidState,
+  type ResumeDbApplicationInput,
+} from "@/lib/resume-db/types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 import { formatIsoInTimeZone, normalizeTimeZone } from "@/lib/timezone";
@@ -181,11 +187,8 @@ export async function GET(request: NextRequest) {
       searchParams.get("statusFilter") ??
       searchParams.get("status") ??
       "__all__";
-    const sortKeyRaw = searchParams.get("sortKey") ?? "";
-    const sortDir: "asc" | "desc" =
-      (searchParams.get("sortDir") ?? "asc").toString() === "desc"
-        ? "desc"
-        : "asc";
+    const sortKey = toSortKey(searchParams.get("sortKey"));
+    const sortDir = toSortDir(searchParams.get("sortDir"));
     const includeOrphans = searchParams.get("includeOrphans") === "1";
     // "bidding,needs_you" — unknown names are dropped; all-unknown yields an
     // empty array, which matches nothing rather than quietly listing everything.
@@ -198,10 +201,6 @@ export async function GET(request: NextRequest) {
       : undefined;
     const atsPlatform = (searchParams.get("atsFilter") ?? searchParams.get("ats") ?? "").trim();
     const includeAtsPlatforms = searchParams.get("includeAtsPlatforms") === "1";
-    const sortKey =
-      sortKeyRaw === "company" || sortKeyRaw === "jobTitle" || sortKeyRaw === "pipeline"
-        ? (sortKeyRaw as "company" | "jobTitle" | "pipeline")
-        : null;
 
     function parseIdsFromMarkerText(text: string | null | undefined): number[] {
       if (!text) return [];

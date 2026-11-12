@@ -7,6 +7,8 @@ import {
   type ProfileListItem,
   type ResumeDbApplication,
   type ResumeDbApplicationInput,
+  type ResumeDbSortDir,
+  type ResumeDbSortKey,
 } from "@/lib/resume-db/types";
 import { DEFAULT_TIMEZONE, endOfDayUtcIso, normalizeTimeZone, startOfDayUtcIso } from "@/lib/timezone";
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
@@ -303,8 +305,8 @@ export type ResumeDbApplicationsListQuery = {
   statusExcludeIds?: number[]; // exclude these application ids (legacy fallback)
   /** Auto-bid states to keep; empty array matches nothing, undefined means no filter. */
   bidStates?: BidState[];
-  sortKey?: "company" | "jobTitle" | "pipeline" | null;
-  sortDir?: "asc" | "desc";
+  sortKey?: ResumeDbSortKey | null;
+  sortDir?: ResumeDbSortDir;
   page?: number; // 1-based
   pageSize?: number;
   /** Leave out the Note (whole job descriptions), for callers that never show it. */
@@ -461,6 +463,47 @@ export async function countApplicationsWithFilters(
   return count ?? 0;
 }
 
+/**
+ * The table column behind each sort key. "pipeline" is absent on purpose: stage
+ * order lives in pipeline_stages.sort_order and pipeline_stage_id carries no
+ * foreign key to it, so PostgREST cannot order by it — the route sorts that key
+ * in memory instead, over the loaded page only.
+ */
+const SORT_COLUMNS: Record<Exclude<ResumeDbSortKey, "pipeline">, string> = {
+  company: "company",
+  jobTitle: "job_title",
+  applied: "applied_at",
+  // Ordering the raw state happens to match the alphabetical order of the labels
+  // in BID_STATE_LABELS, so the column reads the way it sorts. Renaming a label
+  // can break that; renaming a state value cannot.
+  bid: "bid_state",
+};
+
+/**
+ * Orders a list query, always with `id DESC` behind the chosen key so equal values
+ * keep a stable order and paging cannot repeat or skip a row. Keys this query
+ * cannot order by fall back to that default rather than throwing: unlike a dropped
+ * filter, a default order shows the right rows, just not in the asked-for order.
+ */
+function applySortOrder(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  builder: any,
+  sortKey: ResumeDbSortKey | null,
+  sortDir: ResumeDbSortDir,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  const column =
+    sortKey && sortKey !== "pipeline" && !(sortKey === "bid" && bidStateColumnMissing)
+      ? SORT_COLUMNS[sortKey]
+      : null;
+  if (!column) return builder.order("id", { ascending: false });
+  return builder
+    // nullsFirst: false keeps rows with no value — never applied, no bid row — at
+    // the bottom whichever way the column is sorted, instead of flooding the top.
+    .order(column, { ascending: sortDir === "asc", nullsFirst: false })
+    .order("id", { ascending: false });
+}
+
 export async function listApplicationsWithFilters(
   userId: string,
   query: ResumeDbApplicationsListQuery,
@@ -491,16 +534,7 @@ export async function listApplicationsWithFilters(
   const sortKey = query.sortKey ?? null;
   const sortDir = query.sortDir ?? "asc";
 
-  if (sortKey === "company") {
-    builder = builder.order("company", { ascending: sortDir === "asc" });
-    builder = builder.order("id", { ascending: false });
-  } else if (sortKey === "jobTitle") {
-    builder = builder.order("job_title", { ascending: sortDir === "asc" });
-    builder = builder.order("id", { ascending: false });
-  } else {
-    // Default stable sort: most recently created first.
-    builder = builder.order("id", { ascending: false });
-  }
+  builder = applySortOrder(builder, sortKey, sortDir);
 
   let { data, error } = await builder.range(start, end);
   if (error && !atsPlatformColumnMissing && isMissingAtsPlatformColumn(error.message)) {
@@ -533,15 +567,7 @@ export async function listApplicationsWithFilters(
       userId,
       query,
     );
-    if (sortKey === "company") {
-      fallback = fallback.order("company", { ascending: sortDir === "asc" });
-      fallback = fallback.order("id", { ascending: false });
-    } else if (sortKey === "jobTitle") {
-      fallback = fallback.order("job_title", { ascending: sortDir === "asc" });
-      fallback = fallback.order("id", { ascending: false });
-    } else {
-      fallback = fallback.order("id", { ascending: false });
-    }
+    fallback = applySortOrder(fallback, sortKey, sortDir);
     const retry = await fallback.range(start, end);
     data = retry.data;
     error = retry.error;

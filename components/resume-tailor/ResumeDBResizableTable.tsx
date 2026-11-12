@@ -164,6 +164,7 @@ export function ResizableSortableHead({
   active,
   direction,
   onSort,
+  title,
   className,
   align = "left",
 }: Omit<BaseProps, "children"> & {
@@ -171,6 +172,8 @@ export function ResizableSortableHead({
   active: boolean;
   direction: SortDir;
   onSort: () => void;
+  /** What the next click will do; shown on hover. */
+  title?: string;
 }) {
   const Icon = active ? (direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
   const beginResize = useColumnResize(
@@ -184,8 +187,9 @@ export function ResizableSortableHead({
   return (
     <TableHead
       style={percentStyle(widthPercent)}
+      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
       className={cn(
-        "relative border-r border-border/50 px-2 py-2.5 last:border-r-0",
+        "group/sort relative border-r border-border/50 px-2 py-2.5 last:border-r-0",
         align === "center" && "text-center",
         align === "right" && "text-right",
         className,
@@ -194,15 +198,27 @@ export function ResizableSortableHead({
       <button
         type="button"
         onClick={onSort}
+        title={title}
         className={cn(
-          "inline-flex max-w-full items-center gap-1 truncate text-xs font-semibold uppercase tracking-wide transition-colors",
+          "group/sortbtn inline-flex max-w-full items-center gap-1 truncate text-xs font-semibold uppercase tracking-wide transition-colors",
           active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
           align === "center" && "mx-auto",
           align === "right" && "ml-auto",
         )}
       >
         <span className="truncate">{label}</span>
-        <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
+        <Icon
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 transition-opacity",
+            // Faint rather than hidden when idle: five sortable headers at full
+            // strength is noise, but hiding the arrow until hover leaves no way to
+            // tell which columns sort without sweeping the pointer over them.
+            active
+              ? "opacity-80"
+              : "opacity-25 group-hover/sort:opacity-60 group-focus-visible/sortbtn:opacity-60",
+          )}
+          aria-hidden="true"
+        />
       </button>
       {rightColumnId ? (
         <ResizeHandle

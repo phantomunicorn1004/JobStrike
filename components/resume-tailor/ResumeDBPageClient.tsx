@@ -82,7 +82,16 @@ import {
   Gavel,
   X,
 } from "lucide-react";
-import { BID_STATES, BID_STATE_LABELS, type BidState } from "@/lib/resume-db/types";
+import {
+  BID_STATES,
+  BID_STATE_LABELS,
+  nextSortState,
+  toSortDir,
+  toSortKey,
+  type BidState,
+  type ResumeDbSortDir,
+  type ResumeDbSortKey,
+} from "@/lib/resume-db/types";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TONE_TEXT } from "@/lib/ui/tone";
@@ -154,8 +163,8 @@ function parsePageSize(value: string | null): number {
     : DEFAULT_PAGE_SIZE;
 }
 
-type SortKey = "company" | "jobTitle" | "pipeline" | null;
-type SortDir = "asc" | "desc";
+type SortKey = ResumeDbSortKey | null;
+type SortDir = ResumeDbSortDir;
 
 function getDocumentViewUrl(url: string): string {
   const fileId = extractGoogleDriveFileId(url);
@@ -1111,12 +1120,8 @@ export function ResumeDBPageClient() {
         .filter((s): s is BidState => (BID_STATES as readonly string[]).includes(s)),
     [bidFilterParam],
   );
-  const sortKeyRaw = searchParams.get("sortKey") ?? "";
-  const sortKey: SortKey =
-    sortKeyRaw === "company" || sortKeyRaw === "jobTitle" || sortKeyRaw === "pipeline"
-      ? sortKeyRaw
-      : null;
-  const sortDir: SortDir = searchParams.get("sortDir") === "desc" ? "desc" : "asc";
+  const sortKey: SortKey = toSortKey(searchParams.get("sortKey"));
+  const sortDir: SortDir = toSortDir(searchParams.get("sortDir"));
 
   const [rows, setRows] = useState<ResumeDbRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1284,18 +1289,27 @@ export function ResumeDBPageClient() {
   );
 
   const handleSort = (key: Exclude<SortKey, null>) => {
-    if (sortKey === key) {
-      updateParams({
-        sortDir: sortDir === "asc" ? "desc" : "asc",
-        page: "1",
-      });
-    } else {
-      updateParams({
-        sortKey: key,
-        sortDir: "asc",
-        page: "1",
-      });
-    }
+    const next = nextSortState({ key: sortKey, dir: sortDir }, key);
+    updateParams({
+      sortKey: next.key,
+      sortDir: next.key ? next.dir : null,
+      page: "1",
+    });
+  };
+
+  /** Spells out what the next click does, for the header tooltip. */
+  const sortHint = (key: Exclude<SortKey, null>, label: string, note?: string) => {
+    const next = nextSortState({ key: sortKey, dir: sortDir }, key);
+    if (!next.key) return "Clear sort — back to newest first";
+    const dirWord =
+      key === "applied"
+        ? next.dir === "asc"
+          ? "oldest first"
+          : "newest first"
+        : next.dir === "asc"
+          ? "A → Z"
+          : "Z → A";
+    return `Sort by ${label} (${dirWord})${note ? ` — ${note}` : ""}`;
   };
 
   const hasActiveFilters = Boolean(
@@ -1994,6 +2008,7 @@ export function ResumeDBPageClient() {
                         active={sortKey === "company"}
                         direction={sortDir}
                         onSort={() => handleSort("company")}
+                        title={sortHint("company", "company")}
                       />
                       <ResizableSortableHead
                         {...columnResizeProps("jobTitle")}
@@ -2001,6 +2016,7 @@ export function ResumeDBPageClient() {
                         active={sortKey === "jobTitle"}
                         direction={sortDir}
                         onSort={() => handleSort("jobTitle")}
+                        title={sortHint("jobTitle", "job title")}
                       />
                       <ResizableTableHead
                         {...columnResizeProps("resume")}
@@ -2020,17 +2036,26 @@ export function ResumeDBPageClient() {
                         active={sortKey === "pipeline"}
                         direction={sortDir}
                         onSort={() => handleSort("pipeline")}
+                        title={sortHint("pipeline", "stage", "orders this page only")}
                         align="center"
                       />
-                      <ResizableTableHead
+                      <ResizableSortableHead
                         {...columnResizeProps("bid")}
+                        label="Bid"
+                        active={sortKey === "bid"}
+                        direction={sortDir}
+                        onSort={() => handleSort("bid")}
+                        title={sortHint("bid", "bid status")}
                         align="center"
-                      >
-                        Bid
-                      </ResizableTableHead>
-                      <ResizableTableHead {...columnResizeProps("applied")}>
-                        Applied
-                      </ResizableTableHead>
+                      />
+                      <ResizableSortableHead
+                        {...columnResizeProps("applied")}
+                        label="Applied"
+                        active={sortKey === "applied"}
+                        direction={sortDir}
+                        onSort={() => handleSort("applied")}
+                        title={sortHint("applied", "applied date")}
+                      />
                       <ResizableTableHead
                         {...columnResizeProps("actions")}
                         align="center"

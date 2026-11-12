@@ -60,6 +60,68 @@ export function toBidState(value: unknown): BidState {
   return (BID_STATES as readonly string[]).includes(raw) ? (raw as BidState) : "none";
 }
 
+/**
+ * Columns the Resume DB table can sort by. Shared so the table head, the route's
+ * query parsing and the repository cannot drift out of step.
+ */
+export const RESUME_DB_SORT_KEYS = [
+  "company",
+  "jobTitle",
+  "pipeline",
+  "applied",
+  "bid",
+] as const;
+
+export type ResumeDbSortKey = (typeof RESUME_DB_SORT_KEYS)[number];
+
+export type ResumeDbSortDir = "asc" | "desc";
+
+/**
+ * Where the first click on a header lands. A date column reads newest-first, which
+ * is what people want from "Applied"; names read A→Z.
+ */
+export const RESUME_DB_SORT_FIRST_DIR: Record<ResumeDbSortKey, ResumeDbSortDir> = {
+  company: "asc",
+  jobTitle: "asc",
+  pipeline: "asc",
+  applied: "desc",
+  bid: "asc",
+};
+
+/** null for anything unrecognised, which the callers read as "default order". */
+export function toSortKey(value: unknown): ResumeDbSortKey | null {
+  const raw = String(value ?? "").trim();
+  return (RESUME_DB_SORT_KEYS as readonly string[]).includes(raw)
+    ? (raw as ResumeDbSortKey)
+    : null;
+}
+
+export function toSortDir(value: unknown): ResumeDbSortDir {
+  return String(value ?? "").trim().toLowerCase() === "desc" ? "desc" : "asc";
+}
+
+export type ResumeDbSortState = {
+  key: ResumeDbSortKey | null;
+  dir: ResumeDbSortDir;
+};
+
+/**
+ * Where a click on `key` lands, given the sort now in effect. Three stops per
+ * column: the direction that reads naturally for it, the reverse, then off. That
+ * third stop is what makes the default order reachable without editing the URL.
+ */
+export function nextSortState(
+  current: ResumeDbSortState,
+  key: ResumeDbSortKey,
+): ResumeDbSortState {
+  const firstDir = RESUME_DB_SORT_FIRST_DIR[key];
+  if (current.key !== key) return { key, dir: firstDir };
+  if (current.dir === firstDir) {
+    return { key, dir: firstDir === "asc" ? "desc" : "asc" };
+  }
+  return { key: null, dir: firstDir };
+}
+
 /** apply value of a job queued for resume generation and not yet sent: not a bid, so not counted. */
 export const QUEUED_APPLY = "Queued";
 
