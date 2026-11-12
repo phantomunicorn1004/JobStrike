@@ -1658,6 +1658,7 @@ public partial class MainWindow : Window
         InterviewTypeButton.Visibility = ReaderHoverTools.Visibility;
         AnswerBox.Opacity = _awaitingAnswer ? 0.3 : 1;
         SetLoadingBar(_awaitingAnswer || writing);
+        UpdateHistoryNav();
         UpdateDetailToggle();
     }
 
