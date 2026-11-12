@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
 from constants import SECTION_COVER_LETTER, SECTION_RESUME
+from docx_utils import read_docx_paragraph_text
 from generator import generate_document
 from json_io import extract_json, prepare_generation_plan
 from output_mode import OutputMode
 from progress import Progress
 from template_json_converter import is_template_json, summarize_template_json
 from templates import TemplateBundle, downloads_dir
+
+_PLACEHOLDER_TEXT_RE = re.compile(
+    r"\bExtracted Company\b|\[JD[\s\w]*\]", re.IGNORECASE
+)
 
 # Step weights (must sum to 100 per workflow variant).
 _WEIGHTS_RESUME_ONLY = (
@@ -129,6 +135,17 @@ def process_json(
         )
         saved.extend(resume_paths)
         outputs.extend(SavedOutput(kind="resume", path=p) for p in resume_paths)
+        for rp in resume_paths:
+            if rp.suffix.lower() == ".docx":
+                text = read_docx_paragraph_text(rp)
+                m = _PLACEHOLDER_TEXT_RE.search(text)
+                if m:
+                    progress.fail(f'Resume DOCX contains placeholder text: "{m.group()}"')
+                    for p in saved:
+                        p.unlink(missing_ok=True)
+                    return ProcessResult(
+                        ok=False, saved_files=[], error=f'Placeholder text in resume: "{m.group()}"'
+                    )
         if plan.cover_name and plan.cover_repl:
             cover_idx = 4
             label, weight = weights[cover_idx]

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -36,8 +37,20 @@ ALLOWED_DOWNLOAD_SUFFIXES = {".docx", ".pdf"}
 
 ROOT = Path(__file__).resolve().parent
 
-# Absolute paths of files produced by this server process (best-effort allowlist).
-_GENERATED_PATHS: set[str] = set()
+# Absolute paths of files produced by this server process, with creation time.
+_GENERATED_FILES: dict[str, float] = {}
+_STALE_AGE_SECS = 600  # purge generated files older than 10 minutes
+
+
+def _purge_stale_generated() -> None:
+    cutoff = time.monotonic() - _STALE_AGE_SECS
+    stale = [p for p, t in _GENERATED_FILES.items() if t < cutoff]
+    for p in stale:
+        _GENERATED_FILES.pop(p, None)
+        try:
+            Path(p).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 app = FastAPI(title="json2docx local server", version=APP_VERSION)
 app.add_middleware(
@@ -111,13 +124,14 @@ def _is_under_downloads(path: Path) -> bool:
 
 
 def _register_generated(paths: list[Path]) -> None:
+    now = time.monotonic()
     for path in paths:
         try:
             resolved = path.resolve()
         except OSError:
             continue
         if _is_under_downloads(resolved) and resolved.is_file():
-            _GENERATED_PATHS.add(str(resolved))
+            _GENERATED_FILES[str(resolved)] = now
 
 
 def _resolve_download_target(*, path: str | None, filename: str | None) -> Path:
@@ -185,6 +199,7 @@ def templates() -> dict[str, Any]:
 
 @app.post("/generate")
 def generate(body: GenerateRequest) -> JSONResponse:
+    _purge_stale_generated()
     try:
         data = _as_json_object(body.resume_json)
     except (ValueError, json.JSONDecodeError) as exc:

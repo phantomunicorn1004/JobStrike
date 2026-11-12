@@ -1501,6 +1501,9 @@
     let submitClicked = false;
     try {
       if (!job.built_resume_json) throw new Stop('failed', 'No generated resume JSON.');
+      if (/\bExtracted Company\b|\[JD[\s\w]*\]/i.test(job.built_resume_json)) {
+        throw new Stop('failed', 'The generated resume JSON contains placeholder text (Extracted Company / [JD …]). Re-queue this job for regeneration.');
+      }
       const profileSelect = document.getElementById('regProfileId');
       if (![...(profileSelect?.options || [])].some((o) => o.value === String(job.profile_id))) {
         throw new Stop('pause', `Profile #${job.profile_id} is not in the Bid tab's list. Sign in as the same user, then turn Auto-bid on again.`);

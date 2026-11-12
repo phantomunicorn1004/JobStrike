@@ -33,7 +33,8 @@ async function main() {
   const ids = bad.map(a => a.id);
   console.log(`\nRe-queuing ${ids.length} apps for regeneration: [${ids.join(", ")}]`);
 
-  // Reset them to queue status so they regenerate with the new kit
+  // Reset them to queue status so they regenerate with the new kit.
+  // Also clear Drive file references so the stale DOCX is not served.
   const { data: updated, error } = await supabase
     .from("resume_db_applications")
     .update({
@@ -41,6 +42,10 @@ async function main() {
       generation_error: "",
       autogen_claimed_at: null,
       built_resume_json: null,
+      resume_drive_file_id: null,
+      resume_url: null,
+      cover_letter_drive_file_id: null,
+      cover_letter_url: null,
     })
     .in("id", ids)
     .select("id");

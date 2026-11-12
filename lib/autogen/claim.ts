@@ -314,7 +314,16 @@ export async function enqueueApplications(userId: string, ids: number[]): Promis
   if (!ids.length) return 0;
   const { data, error } = await getSupabaseAdminClient()
     .from(TABLE)
-    .update({ generation_status: "queue", generation_error: "", autogen_claimed_at: null } as never)
+    .update({
+      generation_status: "queue",
+      generation_error: "",
+      autogen_claimed_at: null,
+      built_resume_json: null,
+      resume_drive_file_id: null,
+      resume_url: null,
+      cover_letter_drive_file_id: null,
+      cover_letter_url: null,
+    } as never)
     .eq("user_id", userId)
     .in("id", ids)
     .neq("generation_status", "generating")
