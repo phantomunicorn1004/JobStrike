@@ -349,6 +349,9 @@ export async function finishBid(
       ...(fields && { bid_fields: fields }),
       bid_state: outcome,
       bid_claimed_at: null,
+      // applied_at defaults to the insert, which for an auto-bid row is when the
+      // scraper queued it — hours before Submit. Restamp it with the real send time.
+      ...(outcome === "submitted" && { applied_at: at }),
       bid_error: outcome === "submitted" ? "" : String(detail || "Stopped.").slice(0, 4000),
       bid_meta: {
         ...withLoggedStep(current, detail && outcome !== "submitted" ? `${OUTCOME_STEP[outcome]} — ${detail}` : OUTCOME_STEP[outcome], at),
@@ -394,6 +397,7 @@ export async function confirmBid(
     .update({
       bid_state: "submitted",
       bid_error: "",
+      applied_at: at,
       bid_meta: {
         ...prev,
         confirmedAt: at,
