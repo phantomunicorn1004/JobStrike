@@ -1,6 +1,8 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   GENERATION_STATUSES,
+  toBidState,
+  type BidState,
   type GenerationStatus,
   type ProfileListItem,
   type ResumeDbApplication,
@@ -42,6 +44,9 @@ type DbRow = {
   generation_error?: string | null;
   generation_meta?: Record<string, unknown> | null;
   built_resume_json?: string | null;
+  /** Absent until scripts/add-autobid-to-resume-db.sql has run. */
+  bid_state?: string | null;
+  bid_error?: string | null;
 };
 
 function toGenerationStatus(value: unknown): GenerationStatus {
@@ -58,6 +63,13 @@ let atsPlatformColumnMissing = false;
 
 function isMissingAtsPlatformColumn(message: string): boolean {
   return /ats_platform/i.test(message);
+}
+
+/** Set once a query shows the bid_state column is not there yet (its script has not run). */
+let bidStateColumnMissing = false;
+
+function isMissingBidStateColumn(message: string): boolean {
+  return /bid_state/i.test(message);
 }
 
 type ProfileRow = {
@@ -110,6 +122,8 @@ function mapRow(row: DbRow): ResumeDbApplication {
     generationError: row.generation_error ?? "",
     generationMeta: row.generation_meta ?? null,
     builtResumeJson: row.built_resume_json ?? null,
+    bidState: toBidState(row.bid_state),
+    bidError: row.bid_error ?? "",
   };
 }
 
@@ -287,6 +301,8 @@ export type ResumeDbApplicationsListQuery = {
   pipelineStageIsNull?: boolean;
   statusIncludeIds?: number[]; // only these application ids (legacy fallback)
   statusExcludeIds?: number[]; // exclude these application ids (legacy fallback)
+  /** Auto-bid states to keep; empty array matches nothing, undefined means no filter. */
+  bidStates?: BidState[];
   sortKey?: "company" | "jobTitle" | "pipeline" | null;
   sortDir?: "asc" | "desc";
   page?: number; // 1-based
@@ -384,6 +400,11 @@ function applyCommonFilters(
     builder = builder.not("id", "in", `(${q.statusExcludeIds.join(",")})`);
   }
 
+  if (q.bidStates) {
+    if (q.bidStates.length === 0) builder = builder.eq("id", -1);
+    else builder = builder.in("bid_state", q.bidStates);
+  }
+
   return builder;
 }
 
@@ -453,9 +474,10 @@ export async function listApplicationsWithFilters(
   const listColumns = query.withoutNote
     ? RESUME_DB_LIST_COLUMNS.replace("note, ", "")
     : RESUME_DB_LIST_COLUMNS;
-  let builder = supabase
-    .from("resume_db_applications")
-    .select(atsPlatformColumnMissing ? listColumns : `${listColumns}, ats_platform`);
+  let selectColumns = listColumns;
+  if (!atsPlatformColumnMissing) selectColumns += ", ats_platform";
+  if (!bidStateColumnMissing) selectColumns += ", bid_state, bid_error";
+  let builder = supabase.from("resume_db_applications").select(selectColumns);
 
   builder = applyCommonFilters(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -485,6 +507,13 @@ export async function listApplicationsWithFilters(
     // The column's script has not run: list without it; the platform is then
     // worked out from each job link.
     atsPlatformColumnMissing = true;
+    return listApplicationsWithFilters(userId, query);
+  }
+  if (error && !bidStateColumnMissing && isMissingBidStateColumn(error.message)) {
+    // Auto-bid's script has not run. Fail if the caller filtered by bid state
+    // rather than silently returning rows the filter should have excluded.
+    if (query.bidStates) throw new Error(error.message);
+    bidStateColumnMissing = true;
     return listApplicationsWithFilters(userId, query);
   }
   if (error && /pipeline_stage_id/i.test(error.message)) {

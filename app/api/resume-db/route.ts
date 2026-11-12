@@ -27,7 +27,7 @@ import {
   setApplicationPipelineStage,
 } from "@/lib/resume-db/pipeline-stages";
 import { recordPipelineEvent } from "@/lib/pipeline-events/repository";
-import type { ResumeDbApplicationInput } from "@/lib/resume-db/types";
+import { BID_STATES, type BidState, type ResumeDbApplicationInput } from "@/lib/resume-db/types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fetchAllByRange } from "@/lib/supabase/fetch-all";
 import { formatIsoInTimeZone, normalizeTimeZone } from "@/lib/timezone";
@@ -69,6 +69,8 @@ function mapForList(
     pipelineJobId: app.pipelineJobId,
     pipelineStageId,
     inPipeline: pipelineStageId != null,
+    bidState: app.bidState ?? "none",
+    bidError: app.bidError ?? "",
     roleTitle: app.jobTitle || app.candidateName || `Application ${app.id}`,
   };
 }
@@ -185,6 +187,15 @@ export async function GET(request: NextRequest) {
         ? "desc"
         : "asc";
     const includeOrphans = searchParams.get("includeOrphans") === "1";
+    // "bidding,needs_you" — unknown names are dropped; all-unknown yields an
+    // empty array, which matches nothing rather than quietly listing everything.
+    const bidFilterRaw = (searchParams.get("bidFilter") ?? "").trim();
+    const bidStates = bidFilterRaw
+      ? (bidFilterRaw
+          .split(",")
+          .map((s) => s.trim().toLowerCase())
+          .filter((s): s is BidState => (BID_STATES as readonly string[]).includes(s)))
+      : undefined;
     const atsPlatform = (searchParams.get("atsFilter") ?? searchParams.get("ats") ?? "").trim();
     const includeAtsPlatforms = searchParams.get("includeAtsPlatforms") === "1";
     const sortKey =
@@ -278,6 +289,7 @@ export async function GET(request: NextRequest) {
       pipelineStageIsNull,
       statusIncludeIds,
       statusExcludeIds,
+      bidStates,
       sortKey,
       sortDir,
       pageSize,

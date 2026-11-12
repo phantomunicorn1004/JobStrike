@@ -79,8 +79,10 @@ import {
   Trash2,
   Workflow,
   Globe,
+  Gavel,
   X,
 } from "lucide-react";
+import { BID_STATES, BID_STATE_LABELS, type BidState } from "@/lib/resume-db/types";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TONE_TEXT } from "@/lib/ui/tone";
@@ -960,6 +962,133 @@ function StatusFilter({
   );
 }
 
+/** Multi-select filter over the Auto-bid runner's state; empty selection means no filter. */
+function BidStatusFilter({
+  value,
+  onApply,
+  onClear,
+}: {
+  value: BidState[];
+  onApply: (next: BidState[]) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<BidState[]>(value);
+  const active = value.length > 0;
+
+  useEffect(() => {
+    if (open) setDraft(value);
+  }, [open, value]);
+
+  const toggle = (state: BidState) => {
+    setDraft((prev) =>
+      prev.includes(state) ? prev.filter((s) => s !== state) : [...prev, state],
+    );
+  };
+
+  const apply = () => {
+    onApply(draft);
+    setOpen(false);
+  };
+
+  const clear = () => {
+    setDraft([]);
+    onClear();
+    setOpen(false);
+  };
+
+  const label = active
+    ? value.length === 1
+      ? BID_STATE_LABELS[value[0]]
+      : `${value.length} states`
+    : "All bid states";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={active ? `Bid filter: ${label}` : "Filter by bid status"}
+              className={cn(
+                "relative h-9 w-9 rounded-xl shrink-0",
+                active && "border-primary/60 bg-primary/5 text-primary",
+              )}
+            >
+              <Gavel className="h-4 w-4" />
+              {active && (
+                <span
+                  className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary"
+                  aria-hidden
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {active ? `Bid status: ${label}` : "Filter by bid status"}
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent className="w-60 p-3" align="start">
+        <p className="text-sm font-medium mb-2">Filter by bid status</p>
+        <div className="space-y-1">
+          {BID_STATES.map((state) => (
+            <label
+              key={state}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-muted"
+            >
+              <Checkbox
+                checked={draft.includes(state)}
+                onCheckedChange={() => toggle(state)}
+                aria-label={BID_STATE_LABELS[state]}
+              />
+              {BID_STATE_LABELS[state]}
+            </label>
+          ))}
+        </div>
+        <div className="mt-3 flex justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" className="h-8" onClick={clear}>
+            Clear
+          </Button>
+          <Button type="button" size="sm" className="h-8" onClick={apply}>
+            Apply
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** The Bid column: where the Auto-bid runner left this row, for queued and registered rows alike. */
+function BidStateCell({ row }: { row: ResumeDbRow }) {
+  const state = (row.bidState ?? "none") as BidState;
+  if (state === "none") return <span className="text-xs text-muted-foreground">—</span>;
+
+  const tone =
+    state === "submitted"
+      ? "text-emerald-700 dark:text-emerald-400"
+      : state === "bidding"
+        ? "text-primary"
+        : state === "needs_you"
+          ? "text-amber-700 dark:text-amber-400"
+          : state === "failed"
+            ? "text-destructive"
+            : "text-muted-foreground";
+
+  return (
+    <span
+      className={cn("inline-flex items-center gap-1 text-xs font-medium", tone)}
+      title={row.bidError || BID_STATE_LABELS[state]}
+    >
+      {state === "bidding" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+      {BID_STATE_LABELS[state]}
+    </span>
+  );
+}
+
 export function ResumeDBPageClient() {
   const router = useRouter();
   const pathname = usePathname();
@@ -973,6 +1102,15 @@ export function ResumeDBPageClient() {
   const candidateFilter = searchParams.get("candidateFilter") ?? "";
   const statusFilter = searchParams.get("statusFilter") ?? "__all__";
   const atsFilter = searchParams.get("atsFilter") ?? "";
+  const bidFilterParam = searchParams.get("bidFilter") ?? "";
+  const bidFilter = useMemo(
+    () =>
+      bidFilterParam
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter((s): s is BidState => (BID_STATES as readonly string[]).includes(s)),
+    [bidFilterParam],
+  );
   const sortKeyRaw = searchParams.get("sortKey") ?? "";
   const sortKey: SortKey =
     sortKeyRaw === "company" || sortKeyRaw === "jobTitle" || sortKeyRaw === "pipeline"
@@ -1052,6 +1190,7 @@ export function ResumeDBPageClient() {
         params.set("includeOrphans", "1");
       }
       if (atsFilter) params.set("atsFilter", atsFilter);
+      if (bidFilter.length > 0) params.set("bidFilter", bidFilter.join(","));
       if (!atsPlatformsLoaded) params.set("includeAtsPlatforms", "1");
       if (sortKey) params.set("sortKey", sortKey);
       params.set("sortDir", sortDir);
@@ -1106,6 +1245,7 @@ export function ResumeDBPageClient() {
     candidateFilter,
     statusFilter,
     atsFilter,
+    bidFilter,
     sortKey,
     sortDir,
     orphanCandidateNamesLoaded,
@@ -1131,7 +1271,7 @@ export function ResumeDBPageClient() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [search, dateFrom, dateTo, candidateFilter, statusFilter, atsFilter]);
+  }, [search, dateFrom, dateTo, candidateFilter, statusFilter, atsFilter, bidFilterParam]);
 
   const candidateFilterOptions = useMemo(
     () =>
@@ -1164,6 +1304,7 @@ export function ResumeDBPageClient() {
       dateTo ||
       candidateFilter ||
       atsFilter ||
+      bidFilter.length > 0 ||
       (statusFilter && statusFilter !== "__all__"),
   );
 
@@ -1412,6 +1553,25 @@ export function ResumeDBPageClient() {
     }
   };
 
+  /**
+   * The selected rows the runner will actually take back, matching retryBids'
+   * own guards so the button never offers a retry the server will drop.
+   * Expired and submitted rows are never eligible.
+   */
+  const retryableSelectedIds = useMemo(
+    () =>
+      rows
+        .filter(
+          (row) =>
+            selectedIds.has(row.rowIndex) &&
+            row.apply === QUEUED_APPLY &&
+            (row.bidState === "needs_you" || row.bidState === "failed") &&
+            !row.bidSubmitClicked,
+        )
+        .map((row) => row.rowIndex),
+    [rows, selectedIds],
+  );
+
   /** Needs-you jobs go back to the Auto-bid runner. */
   const retryAutoBid = async (ids: number[]) => {
     if (ids.length === 0) return;
@@ -1553,6 +1713,19 @@ export function ResumeDBPageClient() {
             }}
           />
 
+          <BidStatusFilter
+            value={bidFilter}
+            onApply={(next) => {
+              updateParams({
+                bidFilter: next.length > 0 ? next.join(",") : null,
+                page: "1",
+              });
+            }}
+            onClear={() => {
+              updateParams({ bidFilter: null, page: "1" });
+            }}
+          />
+
           <AtsFilter
             value={atsFilter}
             options={atsPlatforms}
@@ -1596,6 +1769,7 @@ export function ResumeDBPageClient() {
                   candidateFilter: null,
                   statusFilter: null,
                   atsFilter: null,
+                  bidFilter: null,
                   page: "1",
                 });
               }}
@@ -1700,6 +1874,24 @@ export function ResumeDBPageClient() {
               )}
               Generate resume
             </Button>
+            {retryableSelectedIds.length > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg"
+                title="Give the selected Needs you / Failed jobs back to the Auto-bid runner"
+                disabled={retryingBids.size > 0}
+                onClick={() => void retryAutoBid(retryableSelectedIds)}
+              >
+                {retryingBids.size > 0 ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Retry bid ({retryableSelectedIds.length})
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
@@ -1830,6 +2022,12 @@ export function ResumeDBPageClient() {
                         onSort={() => handleSort("pipeline")}
                         align="center"
                       />
+                      <ResizableTableHead
+                        {...columnResizeProps("bid")}
+                        align="center"
+                      >
+                        Bid
+                      </ResizableTableHead>
                       <ResizableTableHead {...columnResizeProps("applied")}>
                         Applied
                       </ResizableTableHead>
@@ -2000,6 +2198,13 @@ export function ResumeDBPageClient() {
                             ) : null}
                           </div>
                           )}
+                        </ResizableTableCell>
+                        <ResizableTableCell
+                          widthPercent={percents.bid}
+                          align="center"
+                          className="overflow-hidden"
+                        >
+                          <BidStateCell row={row} />
                         </ResizableTableCell>
                         <ResizableTableCell
                           widthPercent={percents.applied}

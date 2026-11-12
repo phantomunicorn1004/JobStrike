@@ -15,6 +15,7 @@ export const RESUME_DB_COLUMN_DEFAULTS = {
   resume: 92,
   coverLetter: 112,
   pipeline: 120,
+  bid: 116,
   applied: 156,
   actions: 108,
 } as const;
@@ -33,11 +34,14 @@ const RESUME_DB_COLUMN_MIN_PERCENT: Record<ResumeDBColumnId, number> = {
   resume: 5.5,
   coverLetter: 6.5,
   pipeline: 7,
+  bid: 6.5,
   applied: 8,
-  actions: 7,
+  // 6.5, not 7: the last column takes whatever is left, and with the Bid column
+  // added a 7 floor would push the table's widths to 100.5% of its container.
+  actions: 6.5,
 };
 
-const STORAGE_KEY = "resume-db-column-widths-v6";
+const STORAGE_KEY = "resume-db-column-widths-v7";
 
 function fillMissingColumnPercents(
   raw: Partial<Record<ResumeDBColumnId, number>>,
