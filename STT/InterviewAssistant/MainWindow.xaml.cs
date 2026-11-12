@@ -1524,14 +1524,12 @@ public partial class MainWindow : Window
 
     void UpdateHistoryNav()
     {
-        int total = _history.Count + 1;
+        int total = _history.Count + (_lastAnswer != null ? 1 : 0);
         int position = _viewingPast < 0 ? total : _viewingPast + 1;
-        // On hover, and always while an earlier answer is shown (the way back).
-        HistoryNav.Visibility = _history.Count > 0 && (_readerHover || _viewingPast >= 0) ? Visibility.Visible : Visibility.Collapsed;
+        HistoryNav.Visibility = total > 0 ? Visibility.Visible : Visibility.Collapsed;
         HistoryText.Text = $"{position} / {total}";
         HistoryPrev.IsEnabled = position > 1;
         HistoryNext.IsEnabled = _viewingPast >= 0;
-        HistoryLatest.Visibility = _viewingPast >= 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     void ShowPast(int index)

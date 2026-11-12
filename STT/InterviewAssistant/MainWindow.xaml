@@ -270,17 +270,14 @@
                             <DockPanel>
                                 <StackPanel x:Name="HistoryNav" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
                                             Visibility="Collapsed">
-                                    <Button x:Name="HistoryLatest" Content="Latest" Style="{StaticResource SmallButton}" Padding="8,1"
-                                            Margin="6,0,4,0" Click="OnHistoryLatestClick" Visibility="Collapsed"
-                                            ToolTip="Back to the newest answer" />
                                     <Button x:Name="HistoryPrev" Content="&#xE76B;" Style="{StaticResource IconButton}" Width="26" Height="24"
                                             FontSize="11" Margin="0" Click="OnHistoryPrevClick"
-                                            AutomationProperties.Name="Earlier answer" ToolTip="Earlier answer" />
+                                            AutomationProperties.Name="Previous answer" ToolTip="Previous answer" />
                                     <TextBlock x:Name="HistoryText" FontSize="11.5" Foreground="{DynamicResource Muted}"
                                                VerticalAlignment="Center" Margin="4,0" />
                                     <Button x:Name="HistoryNext" Content="&#xE76C;" Style="{StaticResource IconButton}" Width="26" Height="24"
                                             FontSize="11" Margin="0" Click="OnHistoryNextClick"
-                                            AutomationProperties.Name="Later answer" ToolTip="Later answer" />
+                                            AutomationProperties.Name="Next answer" ToolTip="Next answer" />
                                 </StackPanel>
                                 <StackPanel x:Name="ReaderHoverTools" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
                                             Margin="8,0,4,0" Visibility="Collapsed">
