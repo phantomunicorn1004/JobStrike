@@ -7501,7 +7501,11 @@
     return { success: true };
   }
 
-  function fillSelect(select, value, threshold) {
+  function fillSelect(select, value, threshold, category) {
+    if (category === 'state') {
+      const stateResult = fillStateSelect(select, value);
+      if (stateResult) return stateResult;
+    }
     const cutoff = typeof threshold === 'number' ? threshold : 0.5;
     const options = Array.from(select.options || []);
     let best = null;
@@ -8737,7 +8741,7 @@
 
       case 'dropdown':
       case 'multi-select':
-        if (tag === 'SELECT') return fillSelect(el, value, thresholds?.selectMatchThreshold);
+        if (tag === 'SELECT') return fillSelect(el, value, thresholds?.selectMatchThreshold, fieldCategory);
         return fillCombobox(el, value, thresholds?.selectMatchThreshold, fieldCategory);
 
       case 'combobox':
@@ -8748,7 +8752,7 @@
         if (isAshbyYesNoField(el)) {
           return fillAshbyYesNo(el, value, fieldCategory, thresholds?.radioMatchThreshold);
         }
-        if (tag === 'SELECT') return fillSelect(el, value, thresholds?.selectMatchThreshold);
+        if (tag === 'SELECT') return fillSelect(el, value, thresholds?.selectMatchThreshold, fieldCategory);
         if (inputType === 'radio' || inputType === 'checkbox') {
           const opts = fillPayload?.options || getRadioOrCheckboxOptions(el);
           return fillRadioOrCheckbox(el, value, fieldCategory, thresholds?.radioMatchThreshold, opts);
@@ -8863,7 +8867,7 @@
       if (dispatched) return dispatched;
     }
 
-    if (tag === 'SELECT') return fillSelect(el, value, thresholds?.selectMatchThreshold);
+    if (tag === 'SELECT') return fillSelect(el, value, thresholds?.selectMatchThreshold, payload.fieldCategory);
     if (type === 'radio' || type === 'checkbox') {
       const opts = payload.options || getRadioOrCheckboxOptions(el);
       return fillRadioOrCheckbox(el, value, payload.fieldCategory, thresholds?.radioMatchThreshold, opts);

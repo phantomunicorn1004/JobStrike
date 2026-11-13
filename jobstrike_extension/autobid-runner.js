@@ -319,7 +319,13 @@
     );
     const stepLabels = [...progressItems].map((el) => (el.textContent || '').trim());
 
-    const nextBtn = document.querySelector('button[data-automation-id="bottom-navigation-next-button"]');
+    const nextBtn = document.querySelector(
+      'button[data-automation-id="bottom-navigation-next-button"], ' +
+      'button[data-automation-id="nextButton"], ' +
+      'button[data-automation-id="continueButton"]'
+    ) || [...document.querySelectorAll('button')].find(
+      (b) => /^(next|continue|next step|save and continue)$/i.test((b.textContent || '').trim())
+    );
     const submitBtn = document.querySelector(
       'button[data-automation-id="bottom-navigation-next-button"][aria-label*="Submit" i], ' +
       'button[data-automation-id="submitButton"]'
@@ -361,7 +367,13 @@
 
   /** Runs in page: clicks Workday Next button. */
   function clickWorkdayNext() {
-    const btn = document.querySelector('button[data-automation-id="bottom-navigation-next-button"]');
+    const btn = document.querySelector(
+      'button[data-automation-id="bottom-navigation-next-button"], ' +
+      'button[data-automation-id="nextButton"], ' +
+      'button[data-automation-id="continueButton"]'
+    ) || [...document.querySelectorAll('button')].find(
+      (b) => /^(next|continue|next step|save and continue)$/i.test((b.textContent || '').trim())
+    );
     if (!btn || btn.disabled) return { clicked: false, reason: btn ? 'disabled' : 'not found' };
     btn.scrollIntoView({ block: 'center' });
     const rect = btn.getBoundingClientRect();
@@ -1337,6 +1349,10 @@
     if (before.formPresent && !after.formPresent && added.length > 0 && sameSite && !NOT_CONFIRMATION_RE.test(text)) {
       return { ...base, verdict: 'confirmed', by: 'form_replaced' };
     }
+    // Some sites (Workable) hide the form without adding visible text.
+    if (before.formPresent && !after.formPresent && sameSite && !(after.errors || []).length && !NOT_CONFIRMATION_RE.test(text)) {
+      return { ...base, verdict: 'confirmed', by: 'form_gone' };
+    }
     return { ...base, verdict: 'wait' };
   }
 
@@ -1646,7 +1662,8 @@
       }
       let formFound = typeof scanFoundApplicationForm === 'function' ? scanFoundApplicationForm() : currentFields.length > 0;
       if (!formFound) {
-        // Many Greenhouse pages show an "Apply" button before the form.
+        // Many sites show an "Apply" button before the form. SmartRecruiters
+        // navigates to a oneclick-ui page; others overlay it in place.
         try {
           const [clicked] = await chrome.scripting.executeScript({
             target: { tabId, frameIds: [0] },
@@ -1654,7 +1671,10 @@
           });
           if (clicked?.result) {
             setStep('Clicked Apply — waiting for the form…');
-            await sleep(3000);
+            await sleep(1500);
+            await bid().waitForTabLoaded(tabId, PAGE_LOAD_MS);
+            await waitForPanelBind(tabId);
+            await sleep(2000);
             await autofillThisPage({ useAi: true });
             formFound = typeof scanFoundApplicationForm === 'function' ? scanFoundApplicationForm() : currentFields.length > 0;
           }
@@ -1792,8 +1812,14 @@
       checkStop();
 
       const useFullSequence = FULL_CLICK_HOST_RE.test(meta.formHost);
-      // Lever triggers CAPTCHAs on fast submissions: pause 3–8s to look human.
-      if (/lever\.co$/i.test(meta.formHost || '')) {
+      // reCAPTCHA Enterprise scores session timing: pause before Submit to look human.
+      // Ashby's threshold is more aggressive than Lever's, so it gets a longer window.
+      if (/ashbyhq\.com$/i.test(meta.formHost || '')) {
+        const pauseMs = 5000 + Math.random() * 7000;
+        setStep(`Pausing ${(pauseMs / 1000).toFixed(0)}s before Submit…`);
+        await sleep(pauseMs);
+        checkStop();
+      } else if (/lever\.co$/i.test(meta.formHost || '')) {
         const pauseMs = 3000 + Math.random() * 5000;
         setStep(`Pausing ${(pauseMs / 1000).toFixed(0)}s before Submit…`);
         await sleep(pauseMs);

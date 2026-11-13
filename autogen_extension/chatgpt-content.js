@@ -288,10 +288,21 @@ async function autogenInsertAndSend(prompt) {
   autogenPruneOldTurns();
   await autogenInsertPromptText(box, prompt);
 
-  const sendBtn = await autogenWaitForEnabledSend(box, 20000);
+  let sendBtn = await autogenWaitForEnabledSend(box, 20000);
   if (!autogenIsSendButtonEnabled(sendBtn)) {
-    // A synthetic Enter key is not a trusted user action in Chrome, so it can
-    // be ignored by ChatGPT. Never declare a prompt sent unless Send is ready.
+    // Retry: clear the composer and re-paste — ChatGPT sometimes gets stuck
+    // processing the first paste (attachment conversion) and never enables Send.
+    const retryBox = await autogenWaitForPromptBox(5000);
+    if (retryBox) {
+      retryBox.focus();
+      document.execCommand("selectAll", false, undefined);
+      document.execCommand("delete", false, undefined);
+      await autogenDelay(1000);
+      await autogenInsertPromptText(retryBox, prompt);
+      sendBtn = await autogenWaitForEnabledSend(retryBox, 20000);
+    }
+  }
+  if (!autogenIsSendButtonEnabled(sendBtn)) {
     throw new Error("ChatGPT Send button stayed disabled; prompt was not sent.");
   }
   sendBtn.click();

@@ -3,7 +3,7 @@ import "server-only";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { QUEUED_APPLY } from "@/lib/resume-db/types";
 import { STAGE_GROUP, stageOf, toAutobidJob, type AutobidGroup, type AutobidJob, type AutobidRowInput } from "@/lib/autobid/stages";
-import { freshCutoffIso } from "@/lib/autobid/queue-rules";
+import { FRESH_HOURS, freshCutoffIso } from "@/lib/autobid/queue-rules";
 import { jobAnswers, type JobAnswers } from "@/lib/autobid/job-answers";
 import { missingFieldsOf } from "@/lib/autobid/saved-answers";
 import { livesInUs, nonUsLocation, siteOf } from "@/lib/autobid/screen";
@@ -212,7 +212,7 @@ async function tryClaimBid(userId: string, id: number): Promise<BidJob | null> {
 export async function expireStaleQueued(userId: string): Promise<number> {
   const { data, error } = await getSupabaseAdminClient()
     .from(TABLE)
-    .update({ bid_state: "expired", bid_error: "Not sent within 24 h of posting." } as never)
+    .update({ bid_state: "expired", bid_error: `Not sent within ${FRESH_HOURS} h of posting.` } as never)
     .eq("user_id", userId)
     .eq("apply", QUEUED_APPLY)
     .eq("bid_state", "none")
@@ -221,7 +221,19 @@ export async function expireStaleQueued(userId: string): Promise<number> {
     .or(ON_AUTOBID_SITE)
     .select("id");
   if (error) rethrow(error.message);
-  return (data ?? []).length;
+
+  // Fail bids stuck in "bidding" longer than BID_STALE_MS (runner crashed or extension reloaded).
+  const stuckCutoff = new Date(Date.now() - BID_STALE_MS).toISOString();
+  const { data: stuck, error: stuckErr } = await getSupabaseAdminClient()
+    .from(TABLE)
+    .update({ bid_state: "failed", bid_error: "Timed out (stuck in bidding state)." } as never)
+    .eq("user_id", userId)
+    .eq("bid_state", "bidding")
+    .lt("bid_claimed_at", stuckCutoff)
+    .select("id");
+  if (stuckErr) rethrow(stuckErr.message);
+
+  return (data ?? []).length + (stuck ?? []).length;
 }
 
 /** Applications sent (and confirmed) since `sinceIso`. */
@@ -237,15 +249,14 @@ export async function countSentSince(userId: string, sinceIso: string): Promise<
 }
 
 /**
- * Claims the freshest ready row (newest posting first; rows queued by hand,
- * which have no posting time, after them, newest first), then the oldest
- * abandoned claim; null when there is none.
+ * Claims the oldest ready row (oldest posting first so nothing expires while
+ * newer jobs keep jumping the queue), then the oldest abandoned claim.
  */
 export async function claimNextBid(userId: string): Promise<BidJob | null> {
   await expireStaleQueued(userId);
   const { data: ready, error } = await readyRows(userId)
-    .order("posted_at", { ascending: false, nullsFirst: false })
-    .order("id", { ascending: false })
+    .order("posted_at", { ascending: true, nullsFirst: false })
+    .order("id", { ascending: true })
     .limit(10);
   if (error) rethrow(error.message);
   const { data: stale, error: staleError } = await getSupabaseAdminClient()
