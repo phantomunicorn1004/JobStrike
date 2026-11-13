@@ -4682,6 +4682,31 @@ textarea.js-input {
   border-color: var(--brand);
   color: var(--brand);
 }
+.ab-need-summary {
+  padding: 4px 0 2px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ab-need-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: #e5e7eb;
+  color: #374151;
+}
+.ab-need-tag--captcha       { background: #fee2e2; color: #991b1b; }
+.ab-need-tag--verification  { background: #fef3c7; color: #92400e; }
+.ab-need-tag--missing_field { background: #dbeafe; color: #1e40af; }
+.ab-need-tag--login_wall    { background: #fce7f3; color: #9d174d; }
+.ab-need-tag--manual_submit { background: #e0e7ff; color: #3730a3; }
+.ab-need-tag--spam_block    { background: #fee2e2; color: #991b1b; }
+.ab-need-tag--form_error    { background: #fed7aa; color: #9a3412; }
+.ab-need-tag--own_words     { background: #fef3c7; color: #92400e; }
+.ab-need-tag--other         { background: #e5e7eb; color: #374151; }
 .ab-log {
   max-height: 160px;
   overflow: auto;

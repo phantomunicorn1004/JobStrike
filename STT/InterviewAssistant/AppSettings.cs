@@ -31,6 +31,15 @@ public sealed class AppSettings
         My resume:
         {resume}
 
+        My stories (use these real examples when relevant — use my words and numbers, and bold the story title so I know which one to tell):
+        {stories}
+
+        Interviewer I am talking to right now:
+        {interviewer}
+
+        Extra notes about the company (product, recent news, tech stack, culture):
+        {company_notes}
+
         Reply only "Ready." to this message.
         """;
 
@@ -39,6 +48,10 @@ public sealed class AppSettings
     public string JobDescription { get; set; } = "";
     public string Resume { get; set; } = "";
     public string CallPromptTemplate { get; set; } = DefaultCallPrompt;
+    public List<StoryEntry> Stories { get; set; } = [];
+    public string PreparedAnswers { get; set; } = "";
+    public InterviewerInfo Interviewer { get; set; } = new();
+    public string CompanyNotes { get; set; } = "";
 
     /// <summary>JobStrike connection: the site, who signed in, and the API key it issued, encrypted
     /// for this Windows account (DPAPI). The password is never stored.</summary>
@@ -138,7 +151,28 @@ public sealed class AppSettings
             .Replace("{company}", Value(Company))
             .Replace("{job_description}", Value(JobDescription))
             .Replace("{resume}", Value(Resume))
+            .Replace("{stories}", FormatStories())
+            .Replace("{interviewer}", Interviewer?.Format() ?? "(not provided)")
+            .Replace("{company_notes}", Value(CompanyNotes))
             .Trim();
+    }
+
+    string FormatStories()
+    {
+        var parts = new List<string>();
+        var real = Stories?.Where(s => !s.IsEmpty).ToList() ?? [];
+        if (real.Count > 0)
+        {
+            for (int i = 0; i < real.Count; i++)
+                parts.Add(real[i].Format(i + 1));
+        }
+        if (!string.IsNullOrWhiteSpace(PreparedAnswers))
+        {
+            if (parts.Count > 0) parts.Add("");
+            parts.Add("Prepared answers (use these as-is when the question matches):");
+            parts.Add(PreparedAnswers.Trim());
+        }
+        return parts.Count > 0 ? string.Join("\n", parts) : "(not provided)";
     }
 
     /// <summary>Settings, log and browser profile. INTERVIEW_ASSISTANT_DATA points a second copy elsewhere.</summary>
@@ -229,6 +263,19 @@ public sealed class AppSettings
         Company ??= "";
         JobDescription ??= "";
         Resume ??= "";
+        Stories ??= [];
+        Stories.RemoveAll(s => s == null!);
+        foreach (var s in Stories)
+        {
+            s.Title ??= "";
+            s.Competency ??= "";
+            s.Action ??= "";
+            s.Result ??= "";
+        }
+        PreparedAnswers ??= "";
+        Interviewer ??= new();
+        Interviewer.Normalize();
+        CompanyNotes ??= "";
         JobStrikeUser ??= "";
         JobStrikeKeyProtected ??= "";
         VoiceId ??= "";

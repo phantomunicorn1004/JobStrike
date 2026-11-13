@@ -262,75 +262,85 @@
                 <Border x:Name="ReaderPanel" Background="{DynamicResource WindowBg}" Visibility="Collapsed"
                         MouseEnter="OnReaderMouseEnter" MouseLeave="OnReaderMouseLeave">
                     <DockPanel>
-                        <!-- One slim bar, so the answer starts near the top of the window (near the camera):
-                             what is happening, the round and the question's kind, earlier answers. Copy,
-                             Listen and text size appear only while the mouse is over the answer. -->
-                        <Border x:Name="ReaderHeader" DockPanel.Dock="Top" Background="Transparent"
-                                BorderBrush="{DynamicResource Border}" BorderThickness="0" Padding="14,3,8,3">
+                        <!-- Slim header: status + round on the left, tools + history on the right.
+                             Tools are always visible (no hover gating). -->
+                        <Border x:Name="ReaderHeader" DockPanel.Dock="Top" Background="{DynamicResource PanelBg}"
+                                Padding="12,5,8,5">
                             <DockPanel>
+                                <!-- Right side: history nav, then tools -->
                                 <StackPanel x:Name="HistoryNav" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
-                                            Visibility="Collapsed">
-                                    <Button x:Name="HistoryPrev" Content="&#xE76B;" Style="{StaticResource IconButton}" Width="26" Height="24"
-                                            FontSize="11" Margin="0" Click="OnHistoryPrevClick"
+                                            Margin="6,0,0,0" Visibility="Collapsed">
+                                    <Border Width="1" Height="16" Background="{DynamicResource Border}" Margin="0,0,6,0" />
+                                    <Button x:Name="HistoryPrev" Content="&#xE76B;" Style="{StaticResource IconButton}" Width="24" Height="24"
+                                            FontSize="10" Margin="0" Click="OnHistoryPrevClick"
                                             AutomationProperties.Name="Previous answer" ToolTip="Previous answer" />
-                                    <TextBlock x:Name="HistoryText" FontSize="11.5" Foreground="{DynamicResource Muted}"
-                                               VerticalAlignment="Center" Margin="4,0" />
-                                    <Button x:Name="HistoryNext" Content="&#xE76C;" Style="{StaticResource IconButton}" Width="26" Height="24"
-                                            FontSize="11" Margin="0" Click="OnHistoryNextClick"
+                                    <TextBlock x:Name="HistoryText" FontSize="10.5" Foreground="{DynamicResource Faint}"
+                                               VerticalAlignment="Center" Margin="2,0" />
+                                    <Button x:Name="HistoryNext" Content="&#xE76C;" Style="{StaticResource IconButton}" Width="24" Height="24"
+                                            FontSize="10" Margin="0" Click="OnHistoryNextClick"
                                             AutomationProperties.Name="Next answer" ToolTip="Next answer" />
                                 </StackPanel>
                                 <StackPanel x:Name="ReaderHoverTools" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
-                                            Margin="8,0,4,0" Visibility="Collapsed">
-                                    <!-- Copy: the selected text, or else the whole answer (label kept for the Copied state) -->
+                                            Margin="4,0,0,0" Visibility="Collapsed">
                                     <Button x:Name="CopyButton" AutomationProperties.Name="Copy answer" Style="{StaticResource IconButton}"
-                                            Width="28" Height="26" Click="OnCopyAnswerClick" ToolTip="Copy the answer, or the selected text">
+                                            Width="26" Height="24" Click="OnCopyAnswerClick" ToolTip="Copy the answer, or the selected text">
                                         <Grid>
-                                            <TextBlock x:Name="CopyGlyph" Text="&#xE8C8;" FontSize="13" Foreground="{DynamicResource Accent}" />
+                                            <TextBlock x:Name="CopyGlyph" Text="&#xE8C8;" FontSize="12" Foreground="{DynamicResource Faint}" />
                                             <TextBlock x:Name="CopyText" Text="Copy" Visibility="Collapsed" />
                                         </Grid>
                                     </Button>
-                                    <!-- Listen / Stop, like Google Translate's speaker button (glyph and tooltip set in code) -->
                                     <Button x:Name="ListenButton" AutomationProperties.Name="Listen" Style="{StaticResource IconButton}"
-                                            Width="28" Height="26" Click="OnListenClick">
+                                            Width="26" Height="24" Click="OnListenClick">
                                         <Grid>
-                                            <TextBlock x:Name="ListenGlyph" Text="&#xE767;" FontSize="13" Foreground="{DynamicResource Accent}" />
+                                            <TextBlock x:Name="ListenGlyph" Text="&#xE767;" FontSize="12" Foreground="{DynamicResource Faint}" />
                                             <TextBlock x:Name="ListenText" Text="Listen" Visibility="Collapsed" />
                                         </Grid>
                                     </Button>
-                                    <Button AutomationProperties.Name="Smaller answer text" Content="A−" Style="{StaticResource IconButton}" Width="28" Height="26" FontFamily="{StaticResource UiFont}" FontSize="12.5" Click="OnAnswerFontSmaller" ToolTip="Smaller answer text" />
-                                    <Button AutomationProperties.Name="Larger answer text" Content="A+" Style="{StaticResource IconButton}" Width="28" Height="26" FontFamily="{StaticResource UiFont}" FontSize="12.5" Margin="0" Click="OnAnswerFontLarger" ToolTip="Larger answer text" />
+                                    <Button x:Name="ThankYouButton" AutomationProperties.Name="Draft thank-you email"
+                                            Style="{StaticResource IconButton}" Height="24" Padding="5,0" Margin="0"
+                                            Click="OnThankYouClick" Visibility="Collapsed"
+                                            ToolTip="Generate a thank-you email draft from this interview's conversation">
+                                        <TextBlock Text="&#xE715;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource Faint}" />
+                                    </Button>
+                                    <Button AutomationProperties.Name="Smaller answer text" Content="A−" Style="{StaticResource IconButton}" Width="26" Height="24" FontFamily="{StaticResource UiFont}" FontSize="11" Click="OnAnswerFontSmaller" ToolTip="Smaller answer text" />
+                                    <Button AutomationProperties.Name="Larger answer text" Content="A+" Style="{StaticResource IconButton}" Width="26" Height="24" FontFamily="{StaticResource UiFont}" FontSize="11" Margin="0" Click="OnAnswerFontLarger" ToolTip="Larger answer text" />
                                 </StackPanel>
+                                <!-- Left side: status dot, round type, interviewer, nudge -->
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Border x:Name="AnswerStatePill" Style="{StaticResource Pill}" Padding="8,2" VerticalAlignment="Center" Margin="0,0,6,0"
-                                            ToolTip="What is happening: listening, thinking, writing, reading aloud, or ready">
-                                        <TextBlock x:Name="AnswerState" Text="Waiting" FontSize="11.5" FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource Muted}" />
-                                    </Border>
-                                    <Border x:Name="QuestionTypeChip" Style="{StaticResource Pill}" Padding="7,1" Margin="0,0,6,0"
-                                            VerticalAlignment="Center" Visibility="Collapsed"
-                                            ToolTip="The kind of question this answer is for; the answer's format follows it">
-                                        <TextBlock x:Name="QuestionTypeText" FontSize="11" Foreground="{DynamicResource Accent}" />
-                                    </Border>
-                                    <Button x:Name="InterviewTypeButton" Style="{StaticResource SmallButton}" Padding="8,1" Click="OnInterviewTypeClick"
-                                            AutomationProperties.Name="Interview round"
+                                    <TextBlock x:Name="AnswerState" Text="Waiting" FontSize="11" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0"
+                                               ToolTip="What is happening: listening, thinking, writing, reading aloud, or ready" />
+                                    <Border x:Name="AnswerStatePill" Visibility="Collapsed" />
+                                    <Button x:Name="InterviewTypeButton" Style="{StaticResource SmallButton}" Padding="7,2" Margin="0,0,4,0"
+                                            Click="OnInterviewTypeClick" AutomationProperties.Name="Interview round"
                                             ToolTip="The kind of interview round: it sets what the answers focus on and which buy-time phrases appear">
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock x:Name="InterviewTypeText" VerticalAlignment="Center" />
-                                            <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="6,1,0,0"
-                                                       VerticalAlignment="Center" Foreground="{DynamicResource Muted}" />
+                                            <TextBlock x:Name="InterviewTypeText" FontSize="11.5" VerticalAlignment="Center" />
+                                            <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="8" Margin="5,1,0,0"
+                                                       VerticalAlignment="Center" Foreground="{DynamicResource Faint}" />
                                         </StackPanel>
                                     </Button>
+                                    <Border x:Name="QuestionTypeChip" Background="{DynamicResource Surface}" CornerRadius="4"
+                                            Padding="6,2" Margin="0,0,4,0" VerticalAlignment="Center" Visibility="Collapsed"
+                                            ToolTip="The kind of question this answer is for; the answer's format follows it">
+                                        <TextBlock x:Name="QuestionTypeText" FontSize="10.5" Foreground="{DynamicResource Accent}" />
+                                    </Border>
+                                    <TextBlock x:Name="InterviewerNameChip" FontSize="10.5" Foreground="{DynamicResource Faint}"
+                                               VerticalAlignment="Center" Margin="4,0,0,0" Visibility="Collapsed" />
+                                    <TextBlock x:Name="ReadingNudge" Text="speak, don't read" FontSize="10.5" FontStyle="Italic"
+                                               Foreground="{DynamicResource Warning}" Visibility="Collapsed" VerticalAlignment="Center" Margin="8,0,0,0"
+                                               Opacity="0.8" />
                                 </StackPanel>
                             </DockPanel>
                         </Border>
                         <!-- Moving bar while the AI is thinking or writing (brush animated in code) -->
                         <Border x:Name="LoadingBar" DockPanel.Dock="Top" Height="3" Visibility="Hidden" />
-                        <!-- The question this answer is for: its end (where the question is), two lines at most -->
-                        <DockPanel x:Name="QuestionRow" DockPanel.Dock="Top" Margin="16,8,16,0" Visibility="Collapsed">
-                            <TextBlock DockPanel.Dock="Left" Text="Q" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource Accent}"
-                                       Margin="0,1,8,0" />
-                            <TextBlock x:Name="QuestionText" FontSize="12.5" Foreground="{DynamicResource Muted}" TextWrapping="Wrap"
-                                       TextTrimming="CharacterEllipsis" MaxHeight="38" LineHeight="18" />
+                        <!-- The question this answer is for -->
+                        <DockPanel x:Name="QuestionRow" DockPanel.Dock="Top" Margin="16,6,16,0" Visibility="Collapsed">
+                            <TextBlock DockPanel.Dock="Left" Text="Q" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource AccentDim}"
+                                       Margin="0,1,6,0" />
+                            <TextBlock x:Name="QuestionText" FontSize="12" Foreground="{DynamicResource Faint}" TextWrapping="Wrap"
+                                       TextTrimming="CharacterEllipsis" MaxHeight="36" LineHeight="17" />
                         </DockPanel>
                         <!-- Interview view: the message box, opened with the pencil to type your own message
                              (the same text as in full view); it takes room from the answer, not the captions -->
@@ -357,11 +367,11 @@
                         </DockPanel>
                         <!-- Under the answer, when it has details: unfold them -->
                         <Button x:Name="DetailToggle" DockPanel.Dock="Bottom" HorizontalAlignment="Left" Style="{StaticResource SmallButton}"
-                                Padding="12,5" FontSize="12.5" Margin="12,6,12,6" Click="OnDetailToggleClick"
+                                Padding="10,4" FontSize="12" Margin="14,4,14,6" Click="OnDetailToggleClick"
                                 Visibility="Collapsed" ToolTip="The full story, design or code behind the talking points">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock x:Name="DetailToggleGlyph" Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="10"
-                                           VerticalAlignment="Center" Margin="0,1,7,0" Foreground="{DynamicResource Accent}" />
+                                <TextBlock x:Name="DetailToggleGlyph" Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9"
+                                           VerticalAlignment="Center" Margin="0,1,6,0" Foreground="{DynamicResource Accent}" />
                                 <TextBlock x:Name="DetailToggleText" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
@@ -370,9 +380,9 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <!-- Key terms strip: bold phrases from the answer as glanceable chips -->
-                            <Border x:Name="KeyTermsBar" Grid.Row="0" Visibility="Collapsed" Padding="16,5,10,5"
-                                    Background="{DynamicResource WindowBg}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
+                            <!-- Key terms strip: bold phrases from the answer as subtle inline chips -->
+                            <Border x:Name="KeyTermsBar" Grid.Row="0" Visibility="Collapsed" Padding="14,4,10,2"
+                                    Background="Transparent">
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                                               Padding="0" Focusable="False">
                                     <WrapPanel x:Name="KeyTermsPanel" Orientation="Horizontal" />
@@ -393,8 +403,8 @@
                             <!-- The selection stays visible while another app is in front, so the Listen
                                  hotkey can read it from there. -->
                             <RichTextBox x:Name="AnswerBox" Grid.Row="1" IsReadOnly="True" IsReadOnlyCaretVisible="False"
-                                         BorderThickness="0" Background="Transparent" Foreground="{DynamicResource Text}"
-                                         Padding="16,6,10,20" VerticalScrollBarVisibility="Auto"
+                                         BorderThickness="0" Background="{DynamicResource WindowBg}" Foreground="{DynamicResource Text}"
+                                         Padding="16,8,14,24" VerticalScrollBarVisibility="Auto"
                                          FontFamily="{StaticResource UiFont}" SelectionBrush="{DynamicResource Accent}"
                                          IsInactiveSelectionHighlightEnabled="True"
                                          PreviewMouseLeftButtonUp="OnAnswerMouseUp" SelectionChanged="OnAnswerSelectionChanged"
@@ -412,13 +422,13 @@
                                 </Rectangle.OpacityMask>
                             </Rectangle>
                             <!-- Only when the answer goes on below the window: scrolls down to the rest -->
-                            <Button x:Name="AnswerMoreButton" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"
-                                    Style="{StaticResource SmallButton}" Padding="14,4" FontSize="12" Visibility="Collapsed"
+                            <Button x:Name="AnswerMoreButton" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10"
+                                    Style="{StaticResource SmallButton}" Padding="12,4" FontSize="11.5" Visibility="Collapsed"
                                     Click="OnAnswerMoreClick" AutomationProperties.Name="More of the answer"
                                     ToolTip="The answer continues below">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="More" VerticalAlignment="Center" />
-                                    <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="10" Margin="7,1,0,0"
+                                    <TextBlock Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Margin="6,1,0,0"
                                                VerticalAlignment="Center" Foreground="{DynamicResource Accent}" />
                                 </StackPanel>
                             </Button>
@@ -446,18 +456,15 @@
                                     </Button>
                                 </StackPanel>
                             </Popup>
-                            <StackPanel x:Name="ReaderEmptyPanel" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="28"
-                                        MaxWidth="380" IsHitTestVisible="False">
-                                <Border Width="44" Height="44" CornerRadius="10" Background="{DynamicResource HoverBg}"
-                                        HorizontalAlignment="Center">
-                                    <TextBlock Text="&#xE8BD;" FontFamily="{StaticResource IconFont}" FontSize="19"
-                                               Foreground="{DynamicResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                                <TextBlock Text="Waiting for the first question" FontFamily="{StaticResource DisplayFont}" FontSize="16"
-                                           FontWeight="SemiBold" Foreground="{DynamicResource Strong}" HorizontalAlignment="Center"
-                                           Margin="0,12,0,6" />
-                                <TextBlock x:Name="ReaderEmpty" Foreground="{DynamicResource Muted}" FontSize="12.5"
-                                           TextWrapping="Wrap" TextAlignment="Center" LineHeight="20" />
+                            <StackPanel x:Name="ReaderEmptyPanel" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="32"
+                                        MaxWidth="340" IsHitTestVisible="False" Opacity="0.7">
+                                <TextBlock Text="&#xE8BD;" FontFamily="{StaticResource IconFont}" FontSize="24"
+                                           Foreground="{DynamicResource Faint}" HorizontalAlignment="Center" Margin="0,0,0,12" />
+                                <TextBlock Text="Waiting for the first question" FontFamily="{StaticResource DisplayFont}" FontSize="15"
+                                           FontWeight="SemiBold" Foreground="{DynamicResource Muted}" HorizontalAlignment="Center"
+                                           Margin="0,0,0,6" />
+                                <TextBlock x:Name="ReaderEmpty" Foreground="{DynamicResource Faint}" FontSize="12"
+                                           TextWrapping="Wrap" TextAlignment="Center" LineHeight="19" />
                             </StackPanel>
 
                             <!-- Start interview: the job, the round, where answers come from and a ready check, then one button -->
@@ -493,6 +500,61 @@
 
                                         <TextBlock Text="ROUND" Style="{StaticResource SectionLabel}" Margin="0,16,0,6" />
                                         <WrapPanel x:Name="SessionRounds" Margin="0,0,0,-6" />
+
+                                        <Border x:Name="PreviousRoundPanel" Visibility="Collapsed" Margin="0,16,0,0" Padding="14,10"
+                                                CornerRadius="10" Background="{DynamicResource PendingBg}"
+                                                BorderBrush="{DynamicResource AccentBorder}" BorderThickness="1">
+                                            <StackPanel>
+                                                <TextBlock Text="PREVIOUS ROUND" Style="{StaticResource SectionLabel}" Margin="0,0,0,4" />
+                                                <TextBlock x:Name="PreviousRoundText" FontSize="12" Foreground="{DynamicResource Text}"
+                                                           TextWrapping="Wrap" LineHeight="18" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="INTERVIEWER" Style="{StaticResource SectionLabel}" Margin="0,16,0,6" />
+                                        <Border Background="{DynamicResource InputBg}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                                                CornerRadius="10" Padding="12,10">
+                                            <StackPanel>
+                                                <DockPanel Margin="0,0,0,6">
+                                                    <TextBlock Text="Name" Width="50" FontSize="11.5" Foreground="{DynamicResource Muted}"
+                                                               VerticalAlignment="Center" />
+                                                    <TextBox x:Name="SessionInterviewerName" FontSize="13" Padding="8,5" />
+                                                </DockPanel>
+                                                <DockPanel Margin="0,0,0,6">
+                                                    <TextBlock Text="Role" Width="50" FontSize="11.5" Foreground="{DynamicResource Muted}"
+                                                               VerticalAlignment="Center" />
+                                                    <TextBox x:Name="SessionInterviewerRole" FontSize="13" Padding="8,5" />
+                                                </DockPanel>
+                                                <DockPanel Margin="0,0,0,6">
+                                                    <TextBlock Text="Team" Width="50" FontSize="11.5" Foreground="{DynamicResource Muted}"
+                                                               VerticalAlignment="Center" />
+                                                    <TextBox x:Name="SessionInterviewerTeam" FontSize="13" Padding="8,5" />
+                                                </DockPanel>
+                                                <DockPanel>
+                                                    <TextBlock Text="Notes" Width="50" FontSize="11.5" Foreground="{DynamicResource Muted}"
+                                                               VerticalAlignment="Top" Margin="0,6,0,0" />
+                                                    <TextBox x:Name="SessionInterviewerNotes" FontSize="12" Padding="8,5"
+                                                             AcceptsReturn="True" TextWrapping="Wrap" Height="52"
+                                                             VerticalScrollBarVisibility="Auto" />
+                                                </DockPanel>
+                                                <Button x:Name="SessionPasteEmailButton" Content="Paste scheduling email" HorizontalAlignment="Left"
+                                                        Margin="0,8,0,0" Padding="10,4" Style="{StaticResource SmallButton}"
+                                                        Click="OnPasteEmailClick"
+                                                        ToolTip="Paste a scheduling email from clipboard — the AI extracts the interviewer's name and role" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="COMPANY NOTES" Style="{StaticResource SectionLabel}" Margin="0,16,0,6" />
+                                        <Border Background="{DynamicResource InputBg}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                                                CornerRadius="10" Padding="12,10">
+                                            <StackPanel>
+                                                <TextBox x:Name="SessionCompanyNotes" FontSize="12" Padding="8,5"
+                                                         AcceptsReturn="True" TextWrapping="Wrap" Height="64"
+                                                         VerticalScrollBarVisibility="Auto" />
+                                                <TextBlock Text="Product, recent news, tech stack, culture — the AI uses these for specific answers."
+                                                           FontSize="11" Foreground="{DynamicResource Muted}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
 
                                         <TextBlock Text="ANSWERS FROM" Style="{StaticResource SectionLabel}" Margin="0,16,0,6" />
                                         <Border Background="{DynamicResource InputBg}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
@@ -540,8 +602,113 @@
                                                 <TextBlock Text="Start interview" VerticalAlignment="Center" />
                                             </StackPanel>
                                         </Button>
+                                        <Button x:Name="SessionPracticeButton" Padding="0,9" Margin="0,8,0,0"
+                                                FontSize="13" Click="OnPracticeStartClick" AutomationProperties.Name="Practice mode">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE7BE;" FontFamily="{StaticResource IconFont}" FontSize="12"
+                                                           VerticalAlignment="Center" Margin="0,1,8,0" Foreground="{DynamicResource Accent}" />
+                                                <TextBlock Text="Practice this round" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
                                         <TextBlock x:Name="SessionHint" FontSize="11.5" Foreground="{DynamicResource Muted}"
                                                    TextWrapping="Wrap" TextAlignment="Center" Margin="0,10,0,0" />
+                                    </StackPanel>
+                                </ContentControl>
+                            </ScrollViewer>
+                            <!-- Practice mode panel -->
+                            <ScrollViewer x:Name="PracticePanel" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                          Focusable="False" Visibility="Collapsed">
+                                <ContentControl Style="{StaticResource Card}" MaxWidth="560" Margin="16,20" Padding="24,20,24,22"
+                                                VerticalAlignment="Center">
+                                    <StackPanel>
+                                        <DockPanel Margin="0,0,0,12">
+                                            <Button x:Name="PracticeExitButton" DockPanel.Dock="Right" Content="Exit practice"
+                                                    Style="{StaticResource SmallButton}" Padding="10,4" Click="OnPracticeExitClick" />
+                                            <TextBlock x:Name="PracticeTitle" FontFamily="{StaticResource DisplayFont}" FontSize="19"
+                                                       FontWeight="SemiBold" Foreground="{DynamicResource Strong}" VerticalAlignment="Center" />
+                                        </DockPanel>
+                                        <TextBlock x:Name="PracticeProgress" FontSize="12" Foreground="{DynamicResource Muted}" Margin="0,0,0,16" />
+
+                                        <!-- Current question -->
+                                        <Border x:Name="PracticeQuestionCard" Background="{DynamicResource PendingBg}"
+                                                BorderBrush="{DynamicResource AccentBorder}" BorderThickness="1"
+                                                CornerRadius="10" Padding="16,14" Margin="0,0,0,12">
+                                            <StackPanel>
+                                                <TextBlock x:Name="PracticeQuestionCategory" FontSize="11" Foreground="{DynamicResource Accent}"
+                                                           FontWeight="SemiBold" Margin="0,0,0,4" />
+                                                <TextBlock x:Name="PracticeQuestionText" FontSize="15" FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource Strong}" TextWrapping="Wrap" LineHeight="22" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <!-- Voice read button -->
+                                        <Button x:Name="PracticeListenButton" Padding="8,5" Margin="0,0,0,12" HorizontalAlignment="Left"
+                                                Style="{StaticResource SmallButton}" Click="OnPracticeListenClick">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE767;" FontFamily="{StaticResource IconFont}" FontSize="11"
+                                                           VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource Accent}" />
+                                                <TextBlock Text="Read aloud" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <!-- Answer input -->
+                                        <TextBlock Text="YOUR ANSWER" Style="{StaticResource SectionLabel}" Margin="0,0,0,6" />
+                                        <TextBox x:Name="PracticeAnswerBox" FontSize="13" Padding="10,8" AcceptsReturn="True"
+                                                 TextWrapping="Wrap" Height="120" VerticalScrollBarVisibility="Auto"
+                                                 KeyDown="OnPracticeAnswerKeyDown" />
+                                        <TextBlock Text="Type your answer, then press Submit. Speak it out loud as you type for full practice."
+                                                   FontSize="11" Foreground="{DynamicResource Muted}" Margin="0,4,0,0" TextWrapping="Wrap" />
+
+                                        <Button x:Name="PracticeSubmitButton" Style="{StaticResource PrimaryButton}" Padding="0,9" Margin="0,12,0,0"
+                                                FontSize="13" Click="OnPracticeSubmitClick" AutomationProperties.Name="Submit answer">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="Submit answer" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <!-- Feedback section -->
+                                        <Border x:Name="PracticeFeedbackCard" Visibility="Collapsed" Margin="0,16,0,0" Padding="14,12"
+                                                CornerRadius="10" Background="{DynamicResource Surface}"
+                                                BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                                            <StackPanel>
+                                                <DockPanel Margin="0,0,0,8">
+                                                    <TextBlock x:Name="PracticeScoreText" DockPanel.Dock="Right" FontSize="18" FontWeight="Bold"
+                                                               VerticalAlignment="Center" />
+                                                    <TextBlock Text="FEEDBACK" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" />
+                                                </DockPanel>
+                                                <TextBlock x:Name="PracticeFeedbackText" FontSize="13" TextWrapping="Wrap" LineHeight="20"
+                                                           Foreground="{DynamicResource Text}" />
+                                                <Border x:Name="PracticeFollowUpCard" Visibility="Collapsed" Margin="0,12,0,0" Padding="12,10"
+                                                        CornerRadius="8" Background="{DynamicResource InputBg}">
+                                                    <StackPanel>
+                                                        <TextBlock Text="FOLLOW-UP QUESTION" Style="{StaticResource SectionLabel}" Margin="0,0,0,4" />
+                                                        <TextBlock x:Name="PracticeFollowUpText" FontSize="13" FontWeight="SemiBold"
+                                                                   TextWrapping="Wrap" Foreground="{DynamicResource Strong}" />
+                                                    </StackPanel>
+                                                </Border>
+                                                <Button x:Name="PracticeNextButton" Style="{StaticResource PrimaryButton}" Padding="0,9" Margin="0,12,0,0"
+                                                        FontSize="13" Click="OnPracticeNextClick">
+                                                    <TextBlock x:Name="PracticeNextText" Text="Next question" VerticalAlignment="Center" />
+                                                </Button>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <!-- Summary section (shown at the end) -->
+                                        <Border x:Name="PracticeSummaryCard" Visibility="Collapsed" Margin="0,16,0,0" Padding="16,14"
+                                                CornerRadius="10" Background="{DynamicResource Surface}"
+                                                BorderBrush="{DynamicResource AccentBorder}" BorderThickness="1">
+                                            <StackPanel>
+                                                <TextBlock Text="PRACTICE COMPLETE" Style="{StaticResource SectionLabel}" Margin="0,0,0,8" />
+                                                <TextBlock x:Name="PracticeSummaryScore" FontSize="22" FontWeight="Bold"
+                                                           Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" Margin="0,0,0,4" />
+                                                <TextBlock x:Name="PracticeSummaryText" FontSize="13" TextWrapping="Wrap" LineHeight="20"
+                                                           Foreground="{DynamicResource Text}" />
+                                                <Button Content="Practice again" Margin="0,12,0,0" Padding="0,9"
+                                                        Style="{StaticResource PrimaryButton}" FontSize="13" Click="OnPracticeStartClick" />
+                                                <Button Content="Back to interview" Margin="0,8,0,0" Padding="0,7"
+                                                        FontSize="13" Click="OnPracticeExitClick" />
+                                            </StackPanel>
+                                        </Border>
                                     </StackPanel>
                                 </ContentControl>
                             </ScrollViewer>

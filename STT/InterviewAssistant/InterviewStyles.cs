@@ -84,16 +84,18 @@ public static partial class InterviewStyles
 
         Then give every answer the same shape, so I can glance at it while I talk:
         1. One sentence I can say right away, as its own paragraph (no heading, no bullet, no label).
-        2. 2-4 short bullets of talking points, each starting with a **bold key phrase**.
+        2. 2-4 SEPARATE short bullets, one per line, each starting with a **bold key phrase** and no more than 20 words. NEVER combine multiple points into one bullet — each bullet is one idea I can glance at.
         3. Only when the question needs depth: a line with just --- and then the details (the full story, design sections, code, numbers).
         The talking points for each kind of question:
-        - Behavioral: one bullet each for **Situation**, **Task**, **Action** and **Result**, with numbers in the result.
+        - Behavioral: 2-4 bullets that follow STAR order naturally, but never label them Situation/Task/Action/Result. Bold the concrete detail, not the framework label (e.g. "**Led the API migration** across three teams" not "**Action**: Led the API migration"). Include numbers in the outcome.
         - Technical: the key facts, and a specific from my experience.
         - System design: requirements, main components, scaling, trade-offs; the deeper design after ---.
         - Coding: approach, time and space complexity, edge cases; code only after --- and only when it helps.
         - Logistics (salary, start date, location, visa, notice period): just the sentence, no bullets.
         - Small talk or not a question: reply with just "-".
         - Question for you (the interviewer asks what I want to know): the sentence, then 2-3 questions to ask them as bullets.
+        When my stories are provided, prefer them over generic examples. Bold the story title (e.g. "**API Migration**") so I know which one to tell. Use my numbers exactly.
+        When interviewer info is provided, use their name naturally in the opening sentence when it fits (e.g. "Great question, Sarah"). Connect answers to their role or team when relevant.
         {Length(length)}
         """;
 

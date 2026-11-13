@@ -2321,7 +2321,9 @@
     for (const selector of selectors) {
       try {
         const node = document.querySelector(selector);
-        if (node && node.tagName === 'INPUT' && isVisible(node)) return node;
+        if (!node || node.tagName !== 'INPUT') continue;
+        // File inputs are often hidden (replaced by a styled drop zone) — still valid.
+        if (isVisible(node) || (node.getAttribute('type') || '').toLowerCase() === 'file') return node;
       } catch (_) {}
     }
     return null;
@@ -2329,7 +2331,17 @@
 
   function findRipplingInputForCategory(category) {
     const token = RIPPLING_CATEGORY_INPUT_TOKEN[category];
-    return token ? findRipplingInputEl(token) : null;
+    const el = token ? findRipplingInputEl(token) : null;
+    if (el) return el;
+    // Rippling phone fields use a compound input (country code + tel number).
+    if (category === 'phone') {
+      const container = document.querySelector('[data-testid="phone_number"], [data-testid="input-phone_number"]')?.closest('[data-testid="field"], [class*="phone"]');
+      if (container) {
+        const tel = container.querySelector('input[type="tel"]:not([data-testid*="code"])') || container.querySelector('input:not([type="hidden"]):not([role="combobox"])');
+        if (tel && isVisible(tel)) return tel;
+      }
+    }
+    return null;
   }
 
   function ripplingInputValueMatches(el, expected) {
@@ -2494,6 +2506,7 @@
   function classifyEligibilityQuestion(text) {
     const t = String(text || '').toLowerCase();
     if (/which countr|list.*countr|name.*countr|countries you are authori[sz]ed/.test(t)) return null;
+    if (/expir|expiration date|valid until|when does your/.test(t) && /authori[sz]ation|visa|work permit/.test(t)) return null;
     const sponsor = /sponsor/.test(t);
     const authorized =
       /authori[sz]ed to work|legally authori[sz]ed|eligible to work|work authori[sz]ation|right to work|legally (?:able|permitted|entitled) to work/.test(t);
@@ -4943,6 +4956,8 @@
 
     if (type === 'file' && has('cover letter', 'coverletter')) return { category: 'cover_letter_upload', confidence: 0.95 };
     if (type === 'file' && has('resume', 'cv', 'curriculum vitae')) return { category: 'resume_upload', confidence: 0.95 };
+    // A file input with no clear label (e.g. "file-input") on an application form is almost always a resume upload.
+    if (type === 'file' && !has('cover letter', 'coverletter') && text.length < 30) return { category: 'resume_upload', confidence: 0.7 };
     if (has('cover letter', 'coverletter')) return { category: 'cover_letter_upload', confidence: 0.9 };
     if (has('resume', 'curriculum vitae') || hasWord('cv')) return { category: 'resume_upload', confidence: 0.9 };
 
@@ -4952,6 +4967,11 @@
     }
     if (has('how did you hear', 'how you heard', 'hear about', 'how did you find', 'how did you connect', 'how did you learn about')) {
       return { category: 'how_heard', confidence: 0.9 };
+    }
+    // "Legal First and Last Name" contains both "first" and "last" with "name" —
+    // it asks for the full name, not one part.
+    if (/\bfirst\b.*\blast\b.*\bname\b/i.test(text) || /\blast\b.*\bfirst\b.*\bname\b/i.test(text)) {
+      return { category: 'full_name', confidence: 0.93 };
     }
     // Otherwise the bare word "name" makes this a full-name field.
     if (has('middle name', 'middle initial')) return { category: 'middle_name', confidence: 0.92 };
@@ -4980,8 +5000,14 @@
     const contactSentence = asksQuestion || choiceControl || text.length > 60;
     if (type === 'email' || (!contactSentence && has('email', 'e mail'))) return { category: 'email', confidence: 0.96 };
     if (type === 'tel' || (!contactSentence && has('phone', 'mobile', 'cell'))) return { category: 'phone', confidence: 0.92 };
-    if (!asksQuestion && (has('street address', 'address line', 'mailing address') || (hasWord('street') && !has('wall street', 'email address')))) {
+    if (!asksQuestion && (has('full mailing address', 'full address') || (has('address') && has('city') && has('state')))) {
+      return { category: 'full_address', confidence: 0.93 };
+    }
+    if (!asksQuestion && (has('street address', 'address line') || (hasWord('street') && !has('wall street', 'email address')))) {
       return { category: 'address', confidence: 0.92 };
+    }
+    if (!asksQuestion && has('mailing address')) {
+      return { category: 'full_address', confidence: 0.9 };
     }
     if (!asksQuestion && hasWord('address') && !has('email address', 'company address', 'ip address')) {
       return { category: 'address', confidence: 0.84 };
@@ -5154,6 +5180,7 @@
       employmentSlot,
       employmentKey,
       suggestedDefault: classification.suggestedDefault || '',
+      maxLength: el.maxLength > 0 && el.maxLength < 100000 ? el.maxLength : 0,
       elementPath: getElementPath(el),
       signature: getElementSignature(el, scanRoot)
     };
@@ -7823,9 +7850,15 @@
     if (!best || bestScore < cutoff) {
       const filterEl = findRipplingComboboxInput(el) || el;
       if (filterEl.tagName === 'INPUT') {
-        const filterText = isDemographicCategory(fieldCategory)
-          ? (getDemographicCandidates(fieldCategory, pickValue).find((c) => c && c.length >= 3) || pickValue)
-          : pickValue;
+        let filterText;
+        if (isDemographicCategory(fieldCategory)) {
+          filterText = getDemographicCandidates(fieldCategory, pickValue).find((c) => c && c.length >= 3) || pickValue;
+        } else if (fieldCategory === 'state') {
+          const sf = usStateForms(pickValue);
+          filterText = sf ? sf.name.replace(/\b[a-z]/g, (c) => c.toUpperCase()) : pickValue;
+        } else {
+          filterText = pickValue;
+        }
         await typeIntoComboboxFilter(filterEl, filterText.slice(0, 24));
         listbox = await waitForListboxToOpen(el, knownListboxId, 20, 25) || listbox;
         optionEls = Array.from(listbox.querySelectorAll('[role="option"], option'));

@@ -42,6 +42,9 @@ public partial class SetupWindow : Window
     public event Action<bool, bool>? TestVoiceChanged;
     string? _savedGoogleKey;
 
+    // Stories: each entry is a group of text boxes.
+    readonly List<(Border Panel, TextBox Title, TextBox Competency, TextBox Action, TextBox Result)> _storyRows = [];
+
     // Answers: the key typed for each API (kept while switching between them), and the saved ones.
     readonly Dictionary<AnswerEngine, string> _typedApiKeys = [];
     AnswerEngine _shownEngine = AnswerEngine.ChatPage;
@@ -65,6 +68,10 @@ public partial class SetupWindow : Window
         JobDescriptionBox.Text = settings.JobDescription;
         ResumeBox.Text = settings.Resume;
         CallPromptBox.Text = settings.CallPromptTemplate;
+        foreach (var story in settings.Stories)
+            AddStoryRow(story);
+        PreparedAnswersBox.Text = settings.PreparedAnswers;
+        CompanyNotesBox.Text = settings.CompanyNotes;
 
         // Sending: one choice instead of two switches
         (settings.AutoSend ? SendModeAuto : settings.SubmitAutomatically ? SendModeSubmit : SendModeManual).IsChecked = true;
@@ -462,6 +469,18 @@ public partial class SetupWindow : Window
         _settings.CallPromptTemplate = string.IsNullOrWhiteSpace(CallPromptBox.Text)
             ? AppSettings.DefaultCallPrompt
             : CallPromptBox.Text.Trim();
+        _settings.Stories = _storyRows
+            .Select(r => new StoryEntry
+            {
+                Title = r.Title.Text.Trim(),
+                Competency = r.Competency.Text.Trim(),
+                Action = r.Action.Text.Trim(),
+                Result = r.Result.Text.Trim(),
+            })
+            .Where(s => !s.IsEmpty)
+            .ToList();
+        _settings.PreparedAnswers = PreparedAnswersBox.Text.Trim();
+        _settings.CompanyNotes = CompanyNotesBox.Text.Trim();
         _settings.PauseSeconds = pause;
         _settings.MinWords = minWords;
         _settings.Hotkeys = new HotkeySettings
@@ -534,6 +553,76 @@ public partial class SetupWindow : Window
         tab.IsChecked = true;
         MessageBox.Show(this, message, Title);
         field?.Focus();
+    }
+
+    void OnAddStoryClick(object sender, RoutedEventArgs e) => AddStoryRow(new StoryEntry());
+
+    void AddStoryRow(StoryEntry story)
+    {
+        var titleBox = new TextBox { Text = story.Title, Margin = new Thickness(0, 0, 6, 0) };
+        var competencyBox = new TextBox { Text = story.Competency, Width = 160, Margin = new Thickness(0, 0, 6, 0) };
+        var removeBtn = new Button { Content = "×", Padding = new Thickness(8, 2, 8, 2), VerticalAlignment = VerticalAlignment.Center };
+        removeBtn.SetResourceReference(StyleProperty, "SmallButton");
+
+        var row1 = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+        DockPanel.SetDock(removeBtn, Dock.Right);
+        DockPanel.SetDock(competencyBox, Dock.Right);
+        row1.Children.Add(removeBtn);
+        row1.Children.Add(competencyBox);
+        row1.Children.Add(titleBox);
+
+        var actionBox = new TextBox { Text = story.Action, Margin = new Thickness(0, 0, 0, 4) };
+        var resultBox = new TextBox { Text = story.Result };
+
+        var labels = new Grid { Margin = new Thickness(0, 0, 0, 2) };
+        labels.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        labels.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
+        labels.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var titleLabel = new TextBlock { Text = "Title", FontSize = 11, Margin = new Thickness(2, 0, 0, 0) };
+        titleLabel.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
+        var compLabel = new TextBlock { Text = "Competency", FontSize = 11, Margin = new Thickness(2, 0, 0, 0) };
+        compLabel.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
+        Grid.SetColumn(titleLabel, 0);
+        Grid.SetColumn(compLabel, 1);
+        labels.Children.Add(titleLabel);
+        labels.Children.Add(compLabel);
+
+        var actionLabel = new TextBlock { Text = "What I did", FontSize = 11, Margin = new Thickness(2, 0, 0, 0) };
+        actionLabel.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
+        var resultLabel = new TextBlock { Text = "Result (before → after)", FontSize = 11, Margin = new Thickness(2, 0, 0, 0) };
+        resultLabel.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
+
+        var stack = new StackPanel();
+        stack.Children.Add(labels);
+        stack.Children.Add(row1);
+        stack.Children.Add(actionLabel);
+        stack.Children.Add(actionBox);
+        stack.Children.Add(resultLabel);
+        stack.Children.Add(resultBox);
+
+        var panel = new Border
+        {
+            Padding = new Thickness(12, 8, 12, 10),
+            Margin = new Thickness(0, 0, 0, 8),
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1),
+            Child = stack,
+        };
+        panel.SetResourceReference(Border.BackgroundProperty, "WindowBg");
+        panel.SetResourceReference(Border.BorderBrushProperty, "Border");
+
+        var entry = (panel, titleBox, competencyBox, actionBox, resultBox);
+        _storyRows.Add(entry);
+        StoriesPanel.Children.Add(panel);
+
+        removeBtn.Click += (_, _) =>
+        {
+            _storyRows.Remove(entry);
+            StoriesPanel.Children.Remove(panel);
+        };
+
+        if (story.IsEmpty)
+            titleBox.Focus();
     }
 
     void OnResetPromptClick(object sender, RoutedEventArgs e) => CallPromptBox.Text = AppSettings.DefaultCallPrompt;

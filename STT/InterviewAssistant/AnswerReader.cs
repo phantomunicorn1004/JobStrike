@@ -220,8 +220,8 @@ public static partial class AnswerRenderer
         Paragraph paragraph = new()
         {
             FontSize = fontSize,
-            LineHeight = Math.Round(fontSize * 1.6),
-            Margin = new Thickness(0, 0, 0, fontSize * 0.6),
+            LineHeight = Math.Round(fontSize * 1.55),
+            Margin = new Thickness(0, 0, 0, fontSize * 0.5),
         };
         switch (block.Kind)
         {
@@ -234,13 +234,10 @@ public static partial class AnswerRenderer
                 paragraph.Margin = new Thickness(0, fontSize * 0.6, 0, fontSize * 0.4);
                 break;
             case "li":
-                double indent = 4 + Math.Max(0, block.Level - 1) * fontSize * 1.3;
-                // The marker sits in a box of fixed width and the first line is pulled back by exactly
-                // that width, so wrapped lines start precisely under the text. Numbers get one width
-                // for the whole list (up to "999.") and are right-aligned, so 9. and 10. line up.
+                double indent = 6 + Math.Max(0, block.Level - 1) * fontSize * 1.3;
                 bool numbered = block.Marker?.EndsWith('.') == true;
                 double markerWidth = fontSize * (numbered ? 2.4 : 1.3);
-                paragraph.Margin = new Thickness(indent + markerWidth, 0, 0, fontSize * 0.3);
+                paragraph.Margin = new Thickness(indent + markerWidth, 0, 0, fontSize * 0.35);
                 paragraph.TextIndent = -markerWidth;
                 paragraph.Inlines.Add(new InlineUIContainer(new System.Windows.Controls.TextBlock
                 {
@@ -275,12 +272,12 @@ public static partial class AnswerRenderer
             default:
                 if (lead)
                 {
-                    paragraph.FontSize = fontSize * 1.1;
+                    paragraph.FontSize = fontSize * 1.08;
                     paragraph.LineHeight = Math.Round(paragraph.FontSize * 1.5);
-                    paragraph.Margin = new Thickness(0, 0, 0, fontSize * 0.85);
-                    paragraph.Padding = new Thickness(fontSize * 0.6, 0, 0, 0);
+                    paragraph.Margin = new Thickness(0, 0, 0, fontSize * 0.75);
+                    paragraph.Padding = new Thickness(fontSize * 0.55, 0, 0, 0);
                     paragraph.BorderBrush = accent;
-                    paragraph.BorderThickness = new Thickness(3, 0, 0, 0);
+                    paragraph.BorderThickness = new Thickness(2.5, 0, 0, 0);
                     text = strong;
                 }
                 else if (block.Level == 0)

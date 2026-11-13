@@ -87,6 +87,15 @@ public partial class MainWindow : Window
     bool _startingNewChat;
     bool _initializing = true;
     bool _buyTimeShown;
+    RoundRecord? _currentRound;
+    RoundHistory? _roundHistory;
+    readonly HashSet<string> _sessionStoriesUsed = new(StringComparer.OrdinalIgnoreCase);
+    DateTime _answerReadySince;
+    DateTime _lastInteraction;
+    bool _readingNudgeShown;
+    PracticeSession? _practiceSession;
+    CancellationTokenSource? _practiceEvalCts;
+    bool _practiceActive;
 
     public MainWindow()
     {
@@ -228,6 +237,7 @@ public partial class MainWindow : Window
         _tick.Stop();
         _answerTimer.Stop();
         _closingApp = true;
+        SaveCurrentRound();
         SaveForExit();
         _overlay?.Close(); // not owned by this window, so it would otherwise keep the app alive
         _hotkeys?.Dispose();
@@ -745,6 +755,8 @@ public partial class MainWindow : Window
         {
             _ = SendPendingAsync();
         }
+
+        UpdateReadingNudge();
     }
 
     /// <summary>The end of <paramref name="text"/>, about as much as fits on the status line (with room for the countdown).</summary>
@@ -783,6 +795,7 @@ public partial class MainWindow : Window
             return;
         }
         _lastSentQuestion = text;
+        ResetReadingNudge();
         int take = _tracker.TakeCount;
         var result = await SendTextAsync(text, "interviewer", SendSubmits);
         if (!result.Success && !result.WasCancelled)
@@ -1059,6 +1072,8 @@ public partial class MainWindow : Window
             return false;
         }
 
+        SaveCurrentRound();
+        StartNewRound();
         _sessionStarted = true;
         ClearAnswerHistory();
         _lastAnswer = null;
@@ -1489,23 +1504,22 @@ public partial class MainWindow : Window
         }
         KeyTermsBar.Visibility = Visibility.Visible;
         KeyTermsPanel.Children.Clear();
-        double fontSize = Math.Max(11, _settings.AnswerFontSize * 0.65);
+        double fontSize = Math.Max(10, _settings.AnswerFontSize * 0.6);
         foreach (string term in terms)
         {
             var chip = new System.Windows.Controls.Border
             {
-                Background = (Brush)FindResource("Surface"),
-                BorderBrush = (Brush)FindResource("Border"),
-                BorderThickness = new Thickness(1),
+                Background = (Brush)FindResource("HoverBg"),
+                BorderThickness = new Thickness(0),
                 CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(8, 3, 8, 3),
-                Margin = new Thickness(0, 0, 5, 4),
+                Padding = new Thickness(7, 2, 7, 2),
+                Margin = new Thickness(0, 0, 4, 3),
                 Child = new TextBlock
                 {
                     Text = term,
                     FontSize = fontSize,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = (Brush)FindResource("Highlight"),
+                    FontWeight = FontWeights.Medium,
+                    Foreground = (Brush)FindResource("Accent"),
                 },
             };
             KeyTermsPanel.Children.Add(chip);
@@ -1566,6 +1580,87 @@ public partial class MainWindow : Window
             _history.RemoveAt(0);
         }
         UpdateHistoryNav();
+        TrackStoriesInAnswer(answer);
+        _answerReadySince = DateTime.UtcNow;
+        _readingNudgeShown = false;
+        ReadingNudge.Visibility = Visibility.Collapsed;
+    }
+
+    string RoundApplicationKey()
+    {
+        string company = _settings.Company.Trim();
+        string title = _settings.JobDescription.Split('\n', 2)[0].Trim();
+        return $"{company}-{title}".Replace(" ", "-");
+    }
+
+    void StartNewRound()
+    {
+        string key = RoundApplicationKey();
+        _roundHistory = RoundHistory.Load(key);
+        _currentRound = new RoundRecord
+        {
+            Date = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+            InterviewType = _settings.InterviewType,
+            InterviewerName = _settings.Interviewer.Name.Trim(),
+            InterviewerRole = _settings.Interviewer.Role.Trim(),
+        };
+        _sessionStoriesUsed.Clear();
+    }
+
+    void SaveCurrentRound()
+    {
+        if (_currentRound == null || _roundHistory == null) return;
+        if (_currentRound.StoriesUsed.Count == 0 && _history.Count == 0) return;
+        _roundHistory.AddRound(_currentRound);
+        _currentRound = null;
+    }
+
+    void TrackStoriesInAnswer(AnswerSnapshot answer)
+    {
+        if (_currentRound == null) return;
+        string text = PlainText(answer);
+        var reused = new List<string>();
+        foreach (var story in _settings.Stories)
+        {
+            if (story.IsEmpty || story.Title.Trim().Length == 0) continue;
+            if (text.Contains(story.Title.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                string title = story.Title.Trim();
+                bool alreadyUsed = _sessionStoriesUsed.Contains(title);
+                if (_currentRound.StoriesUsed.All(s => !s.Equals(title, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _currentRound.StoriesUsed.Add(title);
+                }
+                if (alreadyUsed) reused.Add(title);
+                _sessionStoriesUsed.Add(title);
+            }
+        }
+        if (reused.Count > 0)
+        {
+            ShowStoryReuseWarning(reused);
+        }
+    }
+
+    void ShowStoryReuseWarning(List<string> titles)
+    {
+        var chip = new System.Windows.Controls.Border
+        {
+            Background = (Brush)FindResource("PendingBg"),
+            BorderBrush = (Brush)FindResource("AccentBorder"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(8, 3, 8, 3),
+            Margin = new Thickness(0, 0, 5, 4),
+            Child = new TextBlock
+            {
+                Text = $"{string.Join(", ", titles)} used earlier",
+                FontSize = Math.Max(11, _settings.AnswerFontSize * 0.6),
+                FontWeight = FontWeights.SemiBold,
+                Foreground = (Brush)FindResource("Warning"),
+            },
+        };
+        KeyTermsBar.Visibility = Visibility.Visible;
+        KeyTermsPanel.Children.Add(chip);
     }
 
     void ClearAnswerHistory()
@@ -1704,7 +1799,7 @@ public partial class MainWindow : Window
         AnswerState.SetResourceReference(TextBlock.ForegroundProperty, brush);
         // Before the interview starts the start card fills the reader; after that, a short hint.
         bool idle = !hasAnswer && !_awaitingAnswer;
-        bool showStart = idle && !_sessionStarted;
+        bool showStart = idle && !_sessionStarted && !_practiceActive;
         if (showStart && SessionCard.Visibility != Visibility.Visible)
         {
             SessionCard.Visibility = Visibility.Visible;
@@ -1736,6 +1831,8 @@ public partial class MainWindow : Window
         _answerTimedOut = false;
         _awaitingAfterId = answerIdBefore ?? _answerId;
         _awaitingSince = DateTime.UtcNow;
+        _answerReadySince = default;
+        ResetReadingNudge();
         if (ReaderVisible)
         {
             ShowAnswerState(hasAnswer: _renderedAnswerKeys.Count > 0, writing: false);
@@ -2598,6 +2695,23 @@ public partial class MainWindow : Window
         AddSessionCheck(HasInterviewDetails(), HasInterviewDetails() ? "Your details are ready" : "Add your profile or the job description",
             "Add", () => OpenSettings("interview"));
 
+        SessionInterviewerName.Text = _settings.Interviewer.Name;
+        SessionInterviewerRole.Text = _settings.Interviewer.Role;
+        SessionInterviewerTeam.Text = _settings.Interviewer.Team;
+        SessionInterviewerNotes.Text = _settings.Interviewer.Notes;
+        SessionCompanyNotes.Text = _settings.CompanyNotes;
+
+        var history = RoundHistory.Load(RoundApplicationKey());
+        if (history.LastRound is { } last)
+        {
+            PreviousRoundPanel.Visibility = Visibility.Visible;
+            PreviousRoundText.Text = last.DetailSummary();
+        }
+        else
+        {
+            PreviousRoundPanel.Visibility = Visibility.Collapsed;
+        }
+
         SessionSpeak.IsChecked = _settings.SpeakAnswers;
         SessionHint.Text = $"You can also send a question yourself with {HotkeyOr(_settings.Hotkeys.Send, "the Send button")}.";
     }
@@ -2638,6 +2752,30 @@ public partial class MainWindow : Window
     void OnSessionChangeEngineClick(object sender, RoutedEventArgs e) => OpenSettings("answers");
 
     void OnSessionSpeakClick(object sender, RoutedEventArgs e) => SetSpeakAnswers(SessionSpeak.IsChecked == true);
+
+    void OnPasteEmailClick(object sender, RoutedEventArgs e)
+    {
+        string text;
+        try { text = Clipboard.GetText().Trim(); }
+        catch { text = ""; }
+        if (text.Length == 0)
+        {
+            SetStatus("Copy the scheduling email first, then press Paste.", error: true);
+            return;
+        }
+        var extracted = EmailExtractor.Extract(text);
+        if (extracted.Name.Length > 0) SessionInterviewerName.Text = extracted.Name;
+        if (extracted.Role.Length > 0) SessionInterviewerRole.Text = extracted.Role;
+        if (extracted.Team.Length > 0) SessionInterviewerTeam.Text = extracted.Team;
+        if (extracted.Notes.Length > 0)
+        {
+            SessionInterviewerNotes.Text = string.IsNullOrWhiteSpace(SessionInterviewerNotes.Text)
+                ? extracted.Notes : SessionInterviewerNotes.Text + "\n" + extracted.Notes;
+        }
+        SetStatus(extracted.Name.Length > 0
+            ? $"Extracted: {extracted.Name}{(extracted.Role.Length > 0 ? ", " + extracted.Role : "")}. Check the fields."
+            : "Could not find an interviewer name. Try pasting the full email.", error: extracted.Name.Length == 0);
+    }
 
     /// <summary>Loads the job, description and resume of a JobStrike application straight into the settings.</summary>
     void OnSessionJobStrikeClick(object sender, RoutedEventArgs e)
@@ -2685,6 +2823,12 @@ public partial class MainWindow : Window
             OpenSettings("answers");
             return;
         }
+        _settings.Interviewer.Name = SessionInterviewerName.Text.Trim();
+        _settings.Interviewer.Role = SessionInterviewerRole.Text.Trim();
+        _settings.Interviewer.Team = SessionInterviewerTeam.Text.Trim();
+        _settings.Interviewer.Notes = SessionInterviewerNotes.Text.Trim();
+        _settings.CompanyNotes = SessionCompanyNotes.Text.Trim();
+        _settings.Save();
         bool auto = SessionAutoSend.IsChecked == true;
         if (auto != _settings.AutoSend)
         {
@@ -2954,6 +3098,10 @@ public partial class MainWindow : Window
             ? "Start a fresh conversation (your details and the interview round go with every question)"
             : "Open a fresh chat and send your call prompt (profile, company, job description, resume)";
         InterviewTypeText.Text = InterviewStyles.Name(_settings.InterviewType);
+        string iName = _settings.Interviewer.Name.Trim();
+        InterviewerNameChip.Text = iName.Length > 0 ? $"with {iName}" : "";
+        InterviewerNameChip.Visibility = iName.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ThankYouButton.Visibility = api && _sessionStarted ? Visibility.Visible : Visibility.Collapsed;
         UpdateSessionCard();
     }
 
@@ -3139,6 +3287,77 @@ public partial class MainWindow : Window
     DispatcherTimer? _copiedTimer;
 
     void OnCopyAnswerClick(object sender, RoutedEventArgs e) => CopyAnswer();
+
+    async void OnThankYouClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentRound == null && _roundHistory?.LastRound == null)
+        {
+            SetStatus("No interview round to draft a thank-you for.", error: true);
+            return;
+        }
+        if (!ApiMode)
+        {
+            SetStatus("Thank-you drafts need an API key (Settings > Answers).", error: true);
+            return;
+        }
+        var round = _currentRound ?? _roundHistory!.LastRound!;
+        SetStatus("Drafting thank-you email…");
+        ThankYouButton.IsEnabled = false;
+        try
+        {
+            string draft = await ThankYouDraft.GenerateAsync(_settings, round, CancellationToken.None);
+            if (NativeMethods.SetClipboardText(new System.Windows.Interop.WindowInteropHelper(this).Handle, draft))
+            {
+                SetStatus("Thank-you email copied to clipboard — paste it into your email.");
+            }
+            else
+            {
+                SetStatus("Draft generated but could not copy to clipboard. Try copying manually.", error: true);
+            }
+        }
+        catch (Exception ex) when (ex is DirectChatException or System.Net.Http.HttpRequestException)
+        {
+            SetStatus($"Could not generate draft: {ex.Message}", error: true);
+        }
+        finally
+        {
+            ThankYouButton.IsEnabled = true;
+        }
+    }
+
+    void UpdateReadingNudge()
+    {
+        if (_answerReadySince == default || _awaitingAnswer || !_sessionStarted)
+        {
+            if (_readingNudgeShown)
+            {
+                ReadingNudge.Visibility = Visibility.Collapsed;
+                _readingNudgeShown = false;
+            }
+            return;
+        }
+        double idleSeconds = (DateTime.UtcNow - (_lastInteraction > _answerReadySince ? _lastInteraction : _answerReadySince)).TotalSeconds;
+        if (!_readingNudgeShown && idleSeconds >= 20)
+        {
+            ReadingNudge.Visibility = Visibility.Visible;
+            _readingNudgeShown = true;
+        }
+        else if (_readingNudgeShown && idleSeconds < 3)
+        {
+            ReadingNudge.Visibility = Visibility.Collapsed;
+            _readingNudgeShown = false;
+        }
+    }
+
+    void ResetReadingNudge()
+    {
+        _lastInteraction = DateTime.UtcNow;
+        if (_readingNudgeShown)
+        {
+            ReadingNudge.Visibility = Visibility.Collapsed;
+            _readingNudgeShown = false;
+        }
+    }
 
     /// <summary>Copies the selected text, or else the whole answer as plain text with its bullets.</summary>
     void CopyAnswer()
@@ -3341,5 +3560,164 @@ public partial class MainWindow : Window
     {
         string flat = CaptionTracker.CleanForSending(text);
         return flat.Length <= 90 ? flat : flat[..87] + "…";
+    }
+
+    // ---------------------------------------------------------------- practice mode
+
+    void OnPracticeStartClick(object sender, RoutedEventArgs e)
+    {
+        _practiceSession = PracticeSession.Create(_settings.InterviewType, count: 5);
+        _practiceActive = true;
+        SessionCard.Visibility = Visibility.Collapsed;
+        PracticePanel.Visibility = Visibility.Visible;
+        PracticeTitle.Text = $"Practice: {InterviewStyles.Name(_settings.InterviewType)}";
+        ShowPracticeQuestion();
+    }
+
+    void OnPracticeExitClick(object sender, RoutedEventArgs e)
+    {
+        _practiceEvalCts?.Cancel();
+        _practiceActive = false;
+        _speaker.Stop();
+        PracticePanel.Visibility = Visibility.Collapsed;
+        _practiceSession = null;
+        if (!_sessionStarted)
+        {
+            SessionCard.Visibility = Visibility.Visible;
+            UpdateSessionCard();
+        }
+    }
+
+    void ShowPracticeQuestion()
+    {
+        if (_practiceSession == null) return;
+        var q = _practiceSession.Current;
+        if (q == null || _practiceSession.IsComplete)
+        {
+            ShowPracticeSummary();
+            return;
+        }
+        PracticeProgress.Text = $"Question {_practiceSession.CurrentIndex + 1} of {_practiceSession.TotalQuestions}";
+        PracticeQuestionCategory.Text = q.Category.ToUpperInvariant();
+        PracticeQuestionText.Text = q.Text;
+        PracticeAnswerBox.Text = "";
+        PracticeAnswerBox.Visibility = Visibility.Visible;
+        PracticeAnswerBox.IsEnabled = true;
+        PracticeSubmitButton.IsEnabled = true;
+        PracticeSubmitButton.Visibility = Visibility.Visible;
+        PracticeFeedbackCard.Visibility = Visibility.Collapsed;
+        PracticeSummaryCard.Visibility = Visibility.Collapsed;
+        PracticeQuestionCard.Visibility = Visibility.Visible;
+        PracticeAnswerBox.Focus();
+    }
+
+    void OnPracticeListenClick(object sender, RoutedEventArgs e)
+    {
+        if (_practiceSession?.Current is { } q)
+            _speaker.Speak(q.Text, slowly: false);
+    }
+
+    void OnPracticeAnswerKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter &&
+            (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0)
+        {
+            OnPracticeSubmitClick(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    async void OnPracticeSubmitClick(object sender, RoutedEventArgs e)
+    {
+        if (_practiceSession?.Current is not { } question) return;
+        string answer = PracticeAnswerBox.Text.Trim();
+        if (answer.Length == 0)
+        {
+            SetStatus("Type your answer first.");
+            return;
+        }
+
+        PracticeSubmitButton.IsEnabled = false;
+        PracticeAnswerBox.IsEnabled = false;
+        PracticeSubmitButton.Content = "Evaluating…";
+
+        _practiceEvalCts?.Cancel();
+        _practiceEvalCts = new CancellationTokenSource();
+        try
+        {
+            var eval = await PracticeEngine.EvaluateAsync(_settings, question, answer, _practiceEvalCts.Token);
+
+            _practiceSession.Results.Add(new PracticeResult
+            {
+                Question = question.Text,
+                UserAnswer = answer,
+                Feedback = eval.Feedback,
+                FollowUp = eval.FollowUp,
+                Score = eval.Score,
+            });
+
+            PracticeScoreText.Text = $"{eval.Score}/10";
+            PracticeScoreText.SetResourceReference(TextBlock.ForegroundProperty,
+                eval.Score >= 7 ? "Success" : eval.Score >= 5 ? "Warning" : "Danger");
+            PracticeFeedbackText.Text = eval.Feedback;
+
+            if (eval.FollowUp.Length > 0)
+            {
+                PracticeFollowUpText.Text = eval.FollowUp;
+                PracticeFollowUpCard.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                PracticeFollowUpCard.Visibility = Visibility.Collapsed;
+            }
+
+            PracticeNextText.Text = _practiceSession.CurrentIndex + 1 >= _practiceSession.TotalQuestions
+                ? "See results" : "Next question";
+            PracticeFeedbackCard.Visibility = Visibility.Visible;
+            PracticeSubmitButton.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception ex) when (ex is DirectChatException or System.Net.Http.HttpRequestException or OperationCanceledException)
+        {
+            if (ex is not OperationCanceledException)
+                SetStatus($"Could not evaluate: {ex.Message}", error: true);
+            PracticeSubmitButton.IsEnabled = true;
+            PracticeAnswerBox.IsEnabled = true;
+        }
+        finally
+        {
+            PracticeSubmitButton.Content = "Submit answer";
+        }
+    }
+
+    void OnPracticeNextClick(object sender, RoutedEventArgs e)
+    {
+        if (_practiceSession == null) return;
+        _practiceSession.CurrentIndex++;
+        ShowPracticeQuestion();
+    }
+
+    void ShowPracticeSummary()
+    {
+        if (_practiceSession == null) return;
+        PracticeQuestionCard.Visibility = Visibility.Collapsed;
+        PracticeSubmitButton.Visibility = Visibility.Collapsed;
+        PracticeFeedbackCard.Visibility = Visibility.Collapsed;
+        PracticeAnswerBox.Visibility = Visibility.Collapsed;
+
+        double avg = _practiceSession.AverageScore;
+        PracticeSummaryScore.Text = $"Average: {avg:F1}/10";
+        PracticeSummaryScore.SetResourceReference(TextBlock.ForegroundProperty,
+            avg >= 7 ? "Success" : avg >= 5 ? "Warning" : "Danger");
+
+        var lines = new List<string>();
+        foreach (var r in _practiceSession.Results)
+        {
+            lines.Add($"Q: {r.Question}");
+            lines.Add($"   Score: {r.Score}/10 — {r.Feedback}");
+            lines.Add("");
+        }
+        PracticeSummaryText.Text = string.Join("\n", lines).TrimEnd();
+        PracticeSummaryCard.Visibility = Visibility.Visible;
+        PracticeProgress.Text = "Complete!";
     }
 }

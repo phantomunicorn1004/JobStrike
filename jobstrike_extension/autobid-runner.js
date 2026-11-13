@@ -141,24 +141,36 @@
     if (needs) {
       const rows = state.summary?.needsYou || [];
       needs.hidden = rows.length === 0;
+      function reasonOf(row) { return row.needsYouReason || classifyNeedsYouReason(row.reason); }
+      const reasonSummary = {};
+      for (const row of rows) {
+        const r = reasonOf(row);
+        reasonSummary[r] = (reasonSummary[r] || 0) + 1;
+      }
+      const summaryBar = Object.entries(reasonSummary)
+        .sort((a, b) => b[1] - a[1])
+        .map(([r, n]) => `<span class="ab-need-tag ab-need-tag--${r}">${NEEDS_YOU_REASON_LABELS[r] || r}: ${n}</span>`)
+        .join(' ');
       needs.innerHTML = rows.length
         ? `<summary>Needs you (${rows.length})</summary>
+          <div class="ab-need-summary">${summaryBar}</div>
           <div class="ab-need-toolbar">
             <button type="button" class="ab-need-btn" data-ab-action="dismiss-all" title="Remove every job from this list">Dismiss all</button>
           </div>${rows
             .slice(0, 20)
             .map(
-              (row) => `
+              (row) => {
+              const r = reasonOf(row);
+              return `
           <div class="ab-need" data-ab-id="${row.id}">
             <div class="ab-need-main">
               <div class="ab-need-title" title="${escapeHtml(row.jobTitle)}">${escapeHtml(row.company || 'Job')} · ${escapeHtml(row.jobTitle)}</div>
-              <div class="ab-need-reason" title="${escapeHtml(row.reason)}">${escapeHtml(row.reason)}</div>
+              <div class="ab-need-reason" title="${escapeHtml(row.reason)}"><span class="ab-need-tag ab-need-tag--${r}">${escapeHtml(NEEDS_YOU_REASON_LABELS[r] || '')}</span> ${escapeHtml(row.reason)}</div>
             </div>
             <button type="button" class="ab-need-btn" data-ab-action="open" title="Open the job">Open</button>
             <button type="button" class="ab-need-btn" data-ab-action="retry" title="Give it back to Auto-bid">Retry</button>
             <button type="button" class="ab-need-btn" data-ab-action="dismiss" title="Remove from this list (moves to Finished)">Dismiss</button>
-          </div>`
-            )
+          </div>`; })
             .join('')}`
         : '';
     }
@@ -187,7 +199,7 @@
 
   // ───────────────────────────── Page helpers ─────────────────────────────
 
-  /** Lever and Ashby keep the form on its own page: open that page directly. */
+  /** Lever, Ashby, SmartRecruiters keep the form on its own page: open that page directly. */
   function applicationFormUrl(link) {
     try {
       const url = new URL(link);
@@ -201,6 +213,15 @@
       if (host === 'jobs.ashbyhq.com' && uuidPage.test(path)) {
         url.pathname = `${path}/application`;
         return url.toString();
+      }
+      // SmartRecruiters: /CompanyName/UUID → /oneclick-ui/company/CompanyName/publication/UUID
+      if (host === 'jobs.smartrecruiters.com' && uuidPage.test(path) && !path.includes('/oneclick-ui/')) {
+        const parts = path.split('/').filter(Boolean);
+        if (parts.length === 2) {
+          url.pathname = `/oneclick-ui/company/${parts[0]}/publication/${parts[1]}`;
+          url.searchParams.set('oga', 'true');
+          return url.toString();
+        }
       }
     } catch (_) {
       /* not a URL: opened as it is */
@@ -1251,10 +1272,13 @@
       .filter(visible)
       .map((el) => String(el.innerText || el.getAttribute('aria-label') || el.getAttribute('name') || '').replace(/\s+/g, ' ').trim())
       .filter((t) => t && t.length < 500);
+    const visibleFields = [...document.querySelectorAll('form input:not([type="hidden"]), form textarea, form select')].filter(visible);
+    const formDisabled = visibleFields.length >= 2 && visibleFields.every((el) => el.disabled || el.readOnly);
     return {
       href: location.href,
       lines,
       formPresent: submitButton || fields >= 2,
+      formDisabled,
       captcha,
       errors: [...new Set(errors)].slice(0, 6),
     };
@@ -1268,6 +1292,7 @@
         hrefs: frames.map((f) => f.href),
         lines: frames.flatMap((f) => f.lines || []),
         formPresent: frames.some((f) => f.formPresent),
+        formDisabled: frames.some((f) => f.formDisabled),
         captcha: frames.some((f) => f.captcha),
         errors: frames.flatMap((f) => f.errors || []).slice(0, 6),
       };
@@ -1279,7 +1304,7 @@
 
   const CONFIRM_TEXT_RE =
     /thank(s| you)( so much)? for (applying|your application|submitting|your interest|your submission|taking the time)|application (has been |was )?(successfully )?(submitted|received|sent|complete|recorded)|we('ve| have) received your application|successfully (applied|submitted)|you('ve| have) (successfully )?applied|submission (received|successful|complete)|your (application|submission) (is|has been) (received|submitted|complete|recorded)|we (will|('ll)) (review|be in touch|get back)/i;
-  const CONFIRM_PATH_RE = /\/(confirmation|thanks|thank-you|thank_you|submitted|success|applied|complete)(\/|$|\?)/i;
+  const CONFIRM_PATH_RE = /\/(confirmation|thanks|thankyou|thank-you|thank_you|submitted|success|applied|complete)(\/|$|\?)/i;
   /** A refusal of the whole application (not one field): it was not sent. */
   /**
    * Greenhouse's "A verification code was sent to … enter the 8-character code to
@@ -1352,6 +1377,10 @@
     // Some sites (Workable) hide the form without adding visible text.
     if (before.formPresent && !after.formPresent && sameSite && !(after.errors || []).length && !NOT_CONFIRMATION_RE.test(text)) {
       return { ...base, verdict: 'confirmed', by: 'form_gone' };
+    }
+    // Workable and similar SPAs disable all fields on submit without removing them.
+    if (before.formPresent && after.formPresent && after.formDisabled && sameSite && !NOT_CONFIRMATION_RE.test(text)) {
+      return { ...base, verdict: 'confirmed', by: 'form_disabled' };
     }
     return { ...base, verdict: 'wait' };
   }
@@ -1431,6 +1460,37 @@
   }
 
   // ───────────────────────────── One job ─────────────────────────────
+
+  /**
+   * Classify WHY a job landed in needs_you from its error message.
+   * Used for notifications, UI grouping, and retry eligibility.
+   */
+  function classifyNeedsYouReason(detail) {
+    const d = String(detail || '').toLowerCase();
+    if (/captcha/i.test(d)) return 'captcha';
+    if (/verification code|verify your email|enter.*code/i.test(d)) return 'verification';
+    if (/in my own words|own words/i.test(d)) return 'own_words';
+    if (/not filled|needs your input|not enough facts|missing.*profile|empty on page/i.test(d)) return 'missing_field';
+    if (/sign.?in|log.?in|login|password|cannot sign|sign in manually/i.test(d)) return 'login_wall';
+    if (/no application form|needs? a login|apply click/i.test(d)) return 'login_wall';
+    if (/no submit button|auto-submit does not cover|submit it by hand|dry run/i.test(d)) return 'manual_submit';
+    if (/refused.*spam|possible spam|not (?:a )?bot|real human/i.test(d)) return 'spam_block';
+    if (/error|rejected|could not advance|errors not resolved/i.test(d)) return 'form_error';
+    if (/workday/i.test(d)) return 'form_error';
+    return 'other';
+  }
+
+  const NEEDS_YOU_REASON_LABELS = {
+    captcha: 'CAPTCHA',
+    verification: 'Verification code',
+    own_words: 'Needs your own words',
+    missing_field: 'Missing field answer',
+    login_wall: 'Needs login',
+    manual_submit: 'Submit manually',
+    spam_block: 'Spam detection',
+    form_error: 'Form error',
+    other: 'Other',
+  };
 
   class Stop extends Error {
     constructor(outcome, detail, meta = {}) {
@@ -1813,9 +1873,10 @@
 
       const useFullSequence = FULL_CLICK_HOST_RE.test(meta.formHost);
       // reCAPTCHA Enterprise scores session timing: pause before Submit to look human.
-      // Ashby's threshold is more aggressive than Lever's, so it gets a longer window.
+      // Ashby's threshold is very aggressive — extend the session lifetime so the
+      // total time on page exceeds ~25s, which is typical for a real applicant.
       if (/ashbyhq\.com$/i.test(meta.formHost || '')) {
-        const pauseMs = 5000 + Math.random() * 7000;
+        const pauseMs = 12000 + Math.random() * 10000;
         setStep(`Pausing ${(pauseMs / 1000).toFixed(0)}s before Submit…`);
         await sleep(pauseMs);
         checkStop();
@@ -2146,7 +2207,7 @@
       if (stop.outcome === 'release' || stop.outcome === 'pause') {
         // Nothing was sent: the job waits for the next run, untouched.
         if (submitClicked) {
-          await finish(job, 'needs_you', `Stopped after Submit was clicked: ${detail}`, { ...meta, submitClicked: true });
+          await finish(job, 'needs_you', `Stopped after Submit was clicked: ${detail}`, { ...meta, submitClicked: true, needsYouReason: 'manual_submit' });
         } else {
           await release(job);
           if (tabId) await chrome.tabs.remove(tabId).catch(() => {});
@@ -2159,10 +2220,12 @@
         }
         return stop.outcome;
       }
-      await finish(job, stop.outcome, detail, { ...meta, ...stop.meta, submitClicked: submitClicked || undefined });
-      logLine(`Needs you — ${job.company} · ${job.job_title} (#${job.id}): ${detail}`);
+      const needsYouReason = stop.outcome === 'needs_you' ? classifyNeedsYouReason(detail) : undefined;
+      await finish(job, stop.outcome, detail, { ...meta, ...stop.meta, submitClicked: submitClicked || undefined, needsYouReason });
+      logLine(`Needs you — ${job.company} · ${job.job_title} (#${job.id}): [${NEEDS_YOU_REASON_LABELS[needsYouReason] || stop.outcome}] ${detail}`);
       // Left open for the user (a failed one too: it shows what happened).
-      const isPerson = PERSON_CHECK_RE.test(detail);
+      const watchableReasons = new Set(['captcha', 'verification', 'manual_submit', 'missing_field', 'login_wall', 'own_words']);
+      const isPerson = PERSON_CHECK_RE.test(detail) || watchableReasons.has(needsYouReason);
       if (tabId) keepTabOpen(tabId, isPerson);
       if (tabId && isPerson && stop.outcome === 'needs_you') {
         const before = await probeOutcome(tabId).catch(() => ({ hrefs: [], lines: [], formPresent: false, captcha: false, errors: [] }));
@@ -2308,7 +2371,7 @@
   // failing, and a once-a-day summary of the day before.
 
   const ALERTS_KEY = 'autobid_alerts';
-  const NEEDS_YOU_ALERT_STEP = 10;
+  const NEEDS_YOU_ALERT_STEP = 3;
   const DIGEST_HOUR = 8;
   const NOT_READY_ALERT_STREAK = 3;
   const NOT_READY_ALERT_MS = 60 * 60 * 1000;
@@ -2374,7 +2437,17 @@
     if (step > 0 && (store.needsDay !== day || step > (store.needsStep || 0))) {
       store.needsDay = day;
       store.needsStep = step;
-      notify('needs', `${needs} jobs need you`, 'Answer, retry or dismiss them under Needs you.');
+      const reasonCounts = {};
+      for (const row of summary.needsYou || []) {
+        const reason = row.needsYouReason || classifyNeedsYouReason(row.reason);
+        const label = NEEDS_YOU_REASON_LABELS[reason] || reason;
+        reasonCounts[label] = (reasonCounts[label] || 0) + 1;
+      }
+      const breakdown = Object.entries(reasonCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([label, count]) => `${count} ${label}`)
+        .join(', ');
+      notify('needs', `${needs} jobs need you`, breakdown ? `${breakdown}. Check Needs you.` : 'Answer, retry or dismiss them under Needs you.');
     } else if (step === 0) {
       store.needsStep = 0;
     }

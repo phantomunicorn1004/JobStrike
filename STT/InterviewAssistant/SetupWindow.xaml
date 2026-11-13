@@ -170,6 +170,49 @@
                     <ContentControl Style="{StaticResource Card}">
                         <StackPanel>
                             <DockPanel>
+                                <Border DockPanel.Dock="Left" Style="{StaticResource IconChip}" Background="{DynamicResource MintBg}">
+                                    <TextBlock Text="&#xE716;" Style="{StaticResource ChipGlyph}" Foreground="{DynamicResource MintFg}" />
+                                </Border>
+                                <StackPanel>
+                                    <TextBlock Text="My stories" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Style="{StaticResource CardSubtitle}"
+                                               Text="Real examples from your experience. The AI uses these instead of generic answers, and bolds the title so you know which story to tell." />
+                                </StackPanel>
+                            </DockPanel>
+                            <StackPanel x:Name="StoriesPanel" />
+                            <Button x:Name="AddStoryButton" Content="+ Add story" HorizontalAlignment="Left" Margin="0,6,0,0"
+                                    Padding="14,5" Style="{StaticResource SmallButton}" Click="OnAddStoryClick" />
+                            <TextBlock Style="{StaticResource Hint}"
+                                       Text="6–10 stories cover most interviews. Each needs a title, what you did, and a number in the result." />
+
+                            <TextBlock Text="Prepared answers" Style="{StaticResource Label}" Margin="0,18,0,6" />
+                            <TextBox x:Name="PreparedAnswersBox" Style="{StaticResource MultiLine}" Height="120" />
+                            <TextBlock Style="{StaticResource Hint}"
+                                       Text="Your scripted answers for common screening questions (salary, why leaving, why this company…). The AI uses these word-for-word when the question matches." />
+                        </StackPanel>
+                    </ContentControl>
+
+                    <ContentControl Style="{StaticResource Card}">
+                        <StackPanel>
+                            <DockPanel>
+                                <Border DockPanel.Dock="Left" Style="{StaticResource IconChip}" Background="{DynamicResource PeachBg}">
+                                    <TextBlock Text="&#xE909;" Style="{StaticResource ChipGlyph}" Foreground="{DynamicResource PeachFg}" />
+                                </Border>
+                                <StackPanel>
+                                    <TextBlock Text="Company notes" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Style="{StaticResource CardSubtitle}"
+                                               Text="What you know about the company beyond the job description: product, tech stack, recent news, culture. The AI uses these for specific answers." />
+                                </StackPanel>
+                            </DockPanel>
+                            <TextBox x:Name="CompanyNotesBox" Style="{StaticResource MultiLine}" Height="100" />
+                            <TextBlock Style="{StaticResource Hint}"
+                                       Text="Paste from the company's About page, a news article, or Glassdoor. You can also fill this per-call on the Start screen." />
+                        </StackPanel>
+                    </ContentControl>
+
+                    <ContentControl Style="{StaticResource Card}">
+                        <StackPanel>
+                            <DockPanel>
                                 <Button DockPanel.Dock="Right" Content="Reset to default" Style="{StaticResource SmallButton}"
                                         Margin="0" Padding="10,3" Click="OnResetPromptClick" VerticalAlignment="Top" />
                                 <Border DockPanel.Dock="Left" Style="{StaticResource IconChip}" Background="{DynamicResource SkyBg}">
@@ -178,7 +221,7 @@
                                 <StackPanel>
                                     <TextBlock Text="Call prompt" Style="{StaticResource CardTitle}" />
                                     <TextBlock Style="{StaticResource CardSubtitle}"
-                                               Text="The instructions sent with your details. The default works well; edit it only if you want different answers. {profile} {company} {job_description} {resume} are filled in for you." />
+                                               Text="The instructions sent with your details. The default works well; edit it only if you want different answers. {profile} {company} {job_description} {resume} {stories} {interviewer} {company_notes} are filled in for you." />
                                 </StackPanel>
                             </DockPanel>
                             <TextBox x:Name="CallPromptBox" Style="{StaticResource MultiLine}" Height="220"

@@ -442,6 +442,7 @@ const categoryToProfileKey = {
   email: 'email',
   phone: 'phone',
   address: 'address',
+  full_address: 'address',
   city: 'city',
   state: 'state',
   zip: 'zip',
@@ -3831,7 +3832,11 @@ function createPlanRow(field) {
     category = 'custom_question';
   }
   const profileKey = categoryToProfileKey[category];
-  const profileValue = profileKey ? (currentProfile[profileKey] || '') : '';
+  let profileValue = profileKey ? (currentProfile[profileKey] || '') : '';
+  if (category === 'full_address') {
+    profileValue = [currentProfile.address, currentProfile.city, currentProfile.state, currentProfile.zip]
+      .filter(Boolean).join(', ').trim();
+  }
 
   // What the user answered by hand on an earlier form outranks everything
   // derived — except a value in the profile, which is where the user changes it.
@@ -4681,14 +4686,14 @@ function recordUsedExample(value) {
 }
 
 const AI_FALLBACK_CATEGORIES = new Set([
-  'how_heard', 'notice_period', 'salary', 'relocation', 'experience_years',
+  'how_heard', 'notice_period', 'relocation', 'experience_years',
   'current_company', 'education', 'school', 'degree', 'graduation_year'
 ]);
 
 /** Categories that should never invent values — use profile (or skip) instead of AI prose. */
 const DETERMINISTIC_PROFILE_CATEGORIES = new Set([
   'first_name', 'middle_name', 'last_name', 'preferred_name', 'suffix_name', 'full_name',
-  'date_of_birth', 'email', 'phone', 'address', 'address_line_2', 'address_line_3',
+  'date_of_birth', 'email', 'phone', 'address', 'full_address', 'address_line_2', 'address_line_3',
   'city', 'state', 'zip', 'postal_code', 'country',
   'linkedin', 'github', 'portfolio',
   'current_company', 'experience_years',
@@ -4772,6 +4777,10 @@ function resolveDeterministicValueForRow(row) {
     let profileValue = String(currentProfile[profileKey] || '').trim();
     if (cat === 'full_name' && !profileValue) {
       profileValue = [currentProfile.firstName, currentProfile.lastName].filter(Boolean).join(' ').trim();
+    }
+    if (cat === 'full_address') {
+      profileValue = [currentProfile.address, currentProfile.city, currentProfile.state, currentProfile.zip]
+        .filter(Boolean).join(', ').trim();
     }
     if (PROFILE_LINK_CATEGORIES.has(cat) && !isUsableProfileLinkValue(profileValue)) {
       profileValue = '';
@@ -4870,6 +4879,10 @@ async function generateAiValueForRow(row, { closestTo = '' } = {}) {
 
   if (needsInput || !value) {
     throw new Error('Needs your input — not enough facts in profile/resume to answer safely.');
+  }
+  const maxLen = row.field?.maxLength;
+  if (maxLen > 0 && value.length > maxLen) {
+    throw new Error(`Needs your input — AI answer (${value.length} chars) exceeds the field limit of ${maxLen}.`);
   }
   recordUsedExample(value);
   return { value, source: 'ai', status: 'Ready (AI)' };

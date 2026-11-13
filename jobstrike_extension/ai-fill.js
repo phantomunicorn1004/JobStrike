@@ -335,6 +335,11 @@
       currentValue ? `Current draft value in panel: ${currentValue}` : 'Current draft value: (empty)'
     ];
 
+    const maxLen = field.maxLength > 0 ? field.maxLength : 0;
+    if (maxLen > 0) {
+      parts.push(`Maximum character limit: ${maxLen}. Your answer MUST be at most ${maxLen} characters.`);
+    }
+
     if (options.length) {
       parts.push(`Allowed options (pick exactly one when applicable):\n${options.map((o) => `- ${o}`).join('\n')}`);
     } else if (field.isCombobox || /combobox|dropdown|select|yes-no|radio|checkbox/.test(fieldType)) {
@@ -444,9 +449,10 @@
       'Questions about government officials in the family or politically exposed persons: answer "No".',
       'Questions about non-compete, non-solicitation, or confidentiality/NDA agreements: answer "No" (or the negative option).',
       'Questions about sanctioned/embargoed countries or territories (Cuba, Iran, North Korea, Syria, Crimea, Donetsk, Luhansk, Kherson, Zaporizhzhia, etc.), such as "Are you located in or a national of [country]?" or "indicate which territories": answer "No" or select "None" / "N/A". The candidate is NOT located in or a national of any sanctioned territory. Never select a territory name from the options.',
+      'Salary, compensation, pay range, or pay expectation questions: use the Desired salary from the profile EXACTLY as written. If the profile has no Desired salary value, return {"value":"","needs_input":true}. Never write a sentence or paragraph for a salary field.',
       'Questions about willingness to undergo a background check or drug test: answer "Yes" (or the affirmative option).',
       '"How did you hear about us/this role/this company?" or referral source: answer "Job Board" or "LinkedIn" (pick whichever option is closest).',
-      'Referral name fields ("If you were referred by an employee, provide their name", "Referrer name", "Who referred you?"): leave empty — the candidate was not referred. Return "" (empty string), never the candidate\'s own name.',
+      'Referral name fields ("If you were referred by an employee, provide their name", "Referrer name", "Who referred you?"): answer "N/A" — the candidate was not referred by an employee. If the field is a text input, return "N/A". Never return the candidate\'s own name.',
       '"Have you been a customer/user of [company]?" or "Have you used [product]?": answer "No" unless the profile or saved answers say otherwise.',
       '"What pronouns do you use?": answer "Prefer not to say" if that option exists, otherwise "They/Them". Never guess pronouns from the candidate\'s name.',
       '"Are you currently employed?" or "Are you currently working?": answer "Yes" when a Current Company or current role exists in the profile, "No" only when Work experience is empty or every role has an end date.',
@@ -459,6 +465,7 @@
       '"What experience do you have with [specific product/tool]?" when the product is NOT in the resume: answer "I have not used [product] before, but I am a quick learner with strong technical aptitude." Do not return needs_input.',
       '"Do you have experience in [industry]?" or "experience in fintech/healthcare/etc.": check Work experience for related roles; answer honestly from what is shown.',
       'For U.S. citizenship, work authorization, or "Are you legally authorized to work in the US?" questions: answer from the profile\'s citizenship and authorization fields. If those fields exist and contain a value, use it. Only return needs_input when the profile has no citizenship or authorization data at all.',
+      '"What is the expiration date of your work authorization?" or questions asking when work authorization expires: if the candidate is a US citizen, answer "N/A" (not applicable — US citizens have permanent work authorization). Never answer "Yes" or "No" to a date/expiration question.',
       '"Which countries are you authorized to work in?" or "Confirm which countries you are authorized to work in without sponsorship": answer "United States" (the candidate\'s country of authorization). Do not answer "Yes" — the question asks for country names, not yes/no.',
       '"Tell us about your relationship with [topic]" or other open-ended opinion questions: give a brief, genuine, first-person answer drawing on general professional experience. Do not return needs_input for these.',
       'Work arrangement, work environment, or office preference questions ("[Company] offers remote/hybrid/in-office", "Where would you prefer to work?", "Select your preferred work arrangement"): pick the option that best matches the job posting\'s stated arrangement (remote/hybrid/on-site). If the posting doesn\'t specify, pick "Remote" if listed, otherwise the most flexible option. Do not return needs_input.',

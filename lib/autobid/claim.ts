@@ -563,8 +563,10 @@ export async function autoRetryBids(
     .filter((row) => {
       const err = row.bid_error ?? "";
       if (PERMANENT_BID_ERROR_RE.test(err)) return false;
+      const reason = String(row.bid_meta?.needsYouReason ?? "");
+      const limit = reason === "missing_field" ? maxRetries + 1 : maxRetries;
       const count = Number(row.bid_meta?.autoRetryCount ?? 0);
-      if (count >= maxRetries) return false;
+      if (count >= limit) return false;
       const lastVersion = String(row.bid_meta?.lastRunVersion ?? "");
       if (lastVersion === extensionVersion && count > 0) return false;
       return true;
@@ -602,6 +604,7 @@ export type BidSummary = {
     company: string;
     jobLink: string;
     reason: string;
+    needsYouReason: string;
     missingFields: string[];
   }>;
 };
@@ -621,7 +624,7 @@ export async function bidSummary(userId: string, sinceIso: string): Promise<BidS
     countSentSince(userId, sinceIso),
     supabase
       .from(TABLE)
-      .select("id, candidate_name, job_title, company, job_link, bid_error, bid_meta->openFields")
+      .select("id, candidate_name, job_title, company, job_link, bid_error, bid_meta->openFields, bid_meta->needsYouReason")
       .eq("user_id", userId)
       .eq("bid_state", "needs_you")
       .eq("apply", QUEUED_APPLY)
@@ -640,6 +643,7 @@ export async function bidSummary(userId: string, sinceIso: string): Promise<BidS
       company: String(row.company ?? ""),
       jobLink: String(row.job_link ?? ""),
       reason: String(row.bid_error ?? ""),
+      needsYouReason: String(row.needsYouReason ?? ""),
       missingFields: missingFieldsOf(String(row.bid_error ?? ""), { openFields: row.openFields }),
     })),
   };

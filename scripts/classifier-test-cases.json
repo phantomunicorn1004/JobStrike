@@ -1,0 +1,212 @@
+[
+  {
+    "label": "First Name",
+    "expected": "first_name",
+    "description": "basic first name"
+  },
+  {
+    "label": "Last Name",
+    "expected": "last_name",
+    "description": "basic last name"
+  },
+  {
+    "label": "Legal First and Last Name",
+    "expected": "full_name",
+    "description": "compound label with both first+last"
+  },
+  {
+    "label": "Full name",
+    "expected": "full_name",
+    "description": "explicit full name"
+  },
+  {
+    "label": "Preferred First Name",
+    "expected": "first_name",
+    "description": "preferred name variant"
+  },
+  {
+    "label": "What is your Legal First Name?",
+    "expected": "first_name",
+    "description": "legal first only"
+  },
+  {
+    "label": "What is your Legal Last Name?",
+    "expected": "last_name",
+    "description": "legal last only"
+  },
+  {
+    "label": "Middle Name",
+    "expected": "middle_name",
+    "description": "middle name"
+  },
+  {
+    "label": "First and Last Name",
+    "expected": "full_name",
+    "description": "first and last compound"
+  },
+  {
+    "label": "Legal Name",
+    "expected": "full_name",
+    "description": "legal name = full name"
+  },
+  {
+    "label": "Email",
+    "expected": "email",
+    "description": "basic email"
+  },
+  {
+    "label": "Phone",
+    "expected": "phone",
+    "description": "basic phone"
+  },
+  {
+    "label": "Please enter your full mailing address in the box below. (Street Address, City, State, Zip)",
+    "expected": "full_address",
+    "description": "explicit full mailing address"
+  },
+  {
+    "label": "Please share your full address including city, state and zip code:",
+    "expected": "full_address",
+    "description": "full address with city/state/zip"
+  },
+  {
+    "label": "We require the current physical/mailing address for all candidates. Please enter your complete address.",
+    "expected": "full_address",
+    "description": "mailing address request"
+  },
+  {
+    "label": "Street Address",
+    "expected": "address",
+    "description": "street only"
+  },
+  {
+    "label": "Address Line 1",
+    "expected": "address",
+    "description": "address line 1"
+  },
+  {
+    "label": "Home address (123 Streetname Boulevard, City, State 12345)",
+    "expected": "full_address",
+    "description": "address with format example"
+  },
+  {
+    "label": "Are you legally authorized to work in the United States?",
+    "expected": "work_authorization_us",
+    "description": "US work auth yes/no"
+  },
+  {
+    "label": "Are you authorized to work in the US?",
+    "expected": "work_authorization_us",
+    "description": "short US work auth"
+  },
+  {
+    "label": "What is the expiration date of your current work authorization (if applicable)?",
+    "expected": "custom_question",
+    "description": "auth expiration date — NOT a yes/no"
+  },
+  {
+    "label": "When does your visa expire?",
+    "expected": "custom_question",
+    "description": "visa expiration — date question"
+  },
+  {
+    "label": "Will you now or in the future require sponsorship?",
+    "expected": "sponsorship",
+    "description": "sponsorship question"
+  },
+  {
+    "label": "Are you authorized to work for any US employer?",
+    "expected": "work_authorization",
+    "description": "generic work auth"
+  },
+  {
+    "label": "What are your salary expectations for this role?",
+    "expected": "salary",
+    "description": "salary expectation"
+  },
+  {
+    "label": "What is your target base salary range?",
+    "expected": "salary",
+    "description": "target salary"
+  },
+  {
+    "label": "Desired compensation",
+    "expected": "salary",
+    "description": "compensation"
+  },
+  {
+    "label": "Gender",
+    "expected": "gender",
+    "description": "gender"
+  },
+  {
+    "label": "Are you Hispanic/Latino?",
+    "expected": "hispanic_latino",
+    "description": "hispanic/latino"
+  },
+  {
+    "label": "Veteran Status",
+    "expected": "veteran_status",
+    "description": "veteran"
+  },
+  {
+    "label": "Do you have a disability?",
+    "expected": "disability_status",
+    "description": "disability"
+  },
+  {
+    "label": "Please identify your race",
+    "expected": "race",
+    "description": "race"
+  },
+  {
+    "label": "How did you hear about us?",
+    "expected": "how_heard",
+    "description": "how heard"
+  },
+  {
+    "label": "LinkedIn Profile",
+    "expected": "linkedin",
+    "description": "linkedin"
+  },
+  {
+    "label": "GitHub URL",
+    "expected": "github",
+    "description": "github"
+  },
+  {
+    "label": "Location (City)",
+    "expected": "city",
+    "description": "city"
+  },
+  {
+    "label": "Do you now or will you in the future need an employer to sponsor you for a visa?",
+    "expected": "sponsorship",
+    "description": "sponsorship long form"
+  },
+  {
+    "label": "Are you located in or a national of Cuba, Iran, North Korea, Syria, or Crimea?",
+    "expected": "custom_question",
+    "description": "sanctions question"
+  },
+  {
+    "label": "By providing your phone number you may receive text messages. Do you consent?",
+    "expected": "custom_question",
+    "description": "consent about phone — NOT a phone field"
+  },
+  {
+    "label": "Have you ever worked for State Farm?",
+    "expected": "custom_question",
+    "description": "question containing 'state' — NOT a state field"
+  },
+  {
+    "label": "What city do you currently live in?",
+    "expected": "city",
+    "description": "city question form"
+  },
+  {
+    "label": "This position requires US Citizenship. Do you meet this requirement?",
+    "expected": "custom_question",
+    "description": "citizenship requirement — yes/no question"
+  }
+]
