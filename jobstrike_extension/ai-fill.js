@@ -443,6 +443,7 @@
       'Questions about criminal history, convictions, felonies, or pardons: answer "No" (or the negative option).',
       'Questions about government officials in the family or politically exposed persons: answer "No".',
       'Questions about non-compete, non-solicitation, or confidentiality/NDA agreements: answer "No" (or the negative option).',
+      'Questions about sanctioned/embargoed countries or territories (Cuba, Iran, North Korea, Syria, Crimea, Donetsk, Luhansk, Kherson, Zaporizhzhia, etc.), such as "Are you located in or a national of [country]?" or "indicate which territories": answer "No" or select "None" / "N/A". The candidate is NOT located in or a national of any sanctioned territory. Never select a territory name from the options.',
       'Questions about willingness to undergo a background check or drug test: answer "Yes" (or the affirmative option).',
       '"How did you hear about us/this role/this company?" or referral source: answer "Job Board" or "LinkedIn" (pick whichever option is closest).',
       'Referral name fields ("If you were referred by an employee, provide their name", "Referrer name", "Who referred you?"): leave empty — the candidate was not referred. Return "" (empty string), never the candidate\'s own name.',
